@@ -17,7 +17,13 @@
         <Grid Grid.Row="0" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
             <StackPanel Grid.Column="0" Spacing="2">
                 <TextBlock Text="Benchmarks" FontSize="22" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding Status}" FontSize="12" Opacity="0.55" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ProgressBar Width="72" Height="4" IsIndeterminate="True" IsVisible="{Binding IsRunning}"
+                                 VerticalAlignment="Center" />
+                    <TextBlock Text="Benchmark active" FontSize="12" FontWeight="SemiBold"
+                               IsVisible="{Binding IsRunning}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Status}" FontSize="12" Opacity="0.55" TextWrapping="Wrap" />
+                </StackPanel>
             </StackPanel>
             <Button Grid.Column="1" Content="Refresh" Command="{Binding RefreshCommand}" />
             <Button Grid.Column="2" Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsRunning}" />
@@ -315,7 +321,13 @@
                         <Border Padding="14" MaxWidth="1000" HorizontalAlignment="Center">
                             <StackPanel Spacing="14">
                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                    <TextBlock Grid.Column="0" Text="{Binding InsightsHeader}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding InsightsHeader}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+                                        <ProgressBar Width="72" Height="4" IsIndeterminate="True"
+                                                     IsVisible="{Binding IsLoadingInsights}" VerticalAlignment="Center" />
+                                        <TextBlock Text="Updating insights..." FontSize="11" Opacity="0.55"
+                                                   IsVisible="{Binding IsLoadingInsights}" VerticalAlignment="Center" />
+                                    </StackPanel>
                                     <Button Grid.Column="1" Content="Load insights" Command="{Binding LoadInsightsCommand}" IsEnabled="{Binding !IsLoadingInsights}" />
                                 </Grid>
 

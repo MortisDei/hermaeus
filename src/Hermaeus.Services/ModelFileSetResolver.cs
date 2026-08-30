@@ -11,10 +11,10 @@ public enum ModelFileRole
     /// <summary>Another part of the same sharded model. Without every shard, nothing loads.</summary>
     Shard,
 
-    /// <summary>An <c>mmproj-*.gguf</c> vision projector. Without it a multimodal model quietly cannot see.</summary>
+    /// <summary>A source-mapped vision projector companion.</summary>
     Projector,
 
-    /// <summary>An <c>mtp-*.gguf</c> Multi-Token Prediction head, the draft model doc 03 uses.</summary>
+    /// <summary>A source-mapped Multi-Token Prediction head.</summary>
     DraftHead
 }
 
@@ -25,7 +25,8 @@ public sealed record ModelFileSetEntry(
     string? LfsSha256,
     ModelFileRole Role,
     bool Required,
-    bool SelectedByDefault)
+    bool SelectedByDefault,
+    string EvidenceDetail = "")
 {
     public string FileName => Path.GetFileName(RepoPath);
 }
@@ -60,7 +61,11 @@ public static class ModelFileSetResolver
     private static readonly Regex ShardRegex =
         new(@"^(?<base>.+)-(?<part>\d{5})-of-(?<total>\d{5})$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public static ModelFileSet Resolve(string repoId, IReadOnlyList<HfTreeEntry> tree, string selectedPath)
+    public static ModelFileSet Resolve(
+        string repoId,
+        IReadOnlyList<HfTreeEntry> tree,
+        string selectedPath,
+        IReadOnlyList<HfCompanionDeclaration>? companionDeclarations = null)
     {
         var selected = (selectedPath ?? string.Empty).Replace('\\', '/').Trim();
         if (selected.Length == 0)
@@ -72,11 +77,11 @@ public static class ModelFileSetResolver
         var selectedBase = Path.GetFileNameWithoutExtension(selected);
         var shardMatch = ShardRegex.Match(selectedBase);
 
-        void Add(HfTreeEntry entry, ModelFileRole role, bool required, bool byDefault)
+        void Add(HfTreeEntry entry, ModelFileRole role, bool required, bool byDefault, string evidenceDetail = "")
         {
             if (!seen.Add(entry.Path))
                 return;
-            entries.Add(new ModelFileSetEntry(entry.Path, entry.SizeBytes, entry.LfsSha256, role, required, byDefault));
+            entries.Add(new ModelFileSetEntry(entry.Path, entry.SizeBytes, entry.LfsSha256, role, required, byDefault, evidenceDetail));
         }
 
         var selectedEntry = tree.FirstOrDefault(e => string.Equals(Normalize(e.Path), selected, StringComparison.OrdinalIgnoreCase))
@@ -102,13 +107,19 @@ public static class ModelFileSetResolver
             Add(selectedEntry, ModelFileRole.Model, required: true, byDefault: true);
         }
 
-        // Offered, on by default: a projector beside the model, and an MTP head
-        // beside it or in an MTP/ subdirectory.
-        foreach (var entry in tree.Where(e => IsProjector(e.Path, selectedDirectory)).OrderBy(e => e.Path, StringComparer.OrdinalIgnoreCase))
-            Add(entry, ModelFileRole.Projector, required: false, byDefault: true);
+        // Companions are offered only from an explicit or classified source mapping.
+        // A mmproj-/mtp- filename or directory is candidate discovery only.
+        foreach (var declaration in companionDeclarations ?? [])
+        {
+            if (!string.Equals(Normalize(declaration.ModelPath), selected, StringComparison.OrdinalIgnoreCase))
+                continue;
 
-        foreach (var entry in tree.Where(e => IsDraftHead(e.Path, selectedDirectory)).OrderBy(e => e.Path, StringComparer.OrdinalIgnoreCase))
-            Add(entry, ModelFileRole.DraftHead, required: false, byDefault: true);
+            var entry = tree.FirstOrDefault(e => string.Equals(Normalize(e.Path), Normalize(declaration.CompanionPath), StringComparison.OrdinalIgnoreCase));
+            if (entry is null || string.IsNullOrWhiteSpace(entry.LfsSha256))
+                continue;
+
+            Add(entry, declaration.Role, required: false, byDefault: declaration.AutoSelect, declaration.EvidenceDetail);
+        }
 
         return new ModelFileSet(repoId, entries);
     }
@@ -124,31 +135,6 @@ public static class ModelFileSetResolver
             && string.Equals(match.Groups["total"].Value, total, StringComparison.Ordinal);
     }
 
-    private static bool IsProjector(string path, string directory)
-    {
-        var name = Path.GetFileName(Normalize(path));
-        return name.StartsWith("mmproj-", StringComparison.OrdinalIgnoreCase)
-            && name.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(DirectoryOf(path), directory, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsDraftHead(string path, string directory)
-    {
-        var normalized = Normalize(path);
-        var name = Path.GetFileName(normalized);
-        if (!name.StartsWith("mtp-", StringComparison.OrdinalIgnoreCase) || !name.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var pathDirectory = DirectoryOf(normalized);
-        if (string.Equals(pathDirectory, directory, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // unsloth ships the head in an MTP/ subdirectory beside the model.
-        var parent = DirectoryOf(pathDirectory);
-        return string.Equals(parent, directory, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(LastSegment(pathDirectory), "MTP", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string Normalize(string path) => (path ?? string.Empty).Replace('\\', '/').Trim();
 
     private static string DirectoryOf(string path)
@@ -158,10 +144,4 @@ public static class ModelFileSetResolver
         return index < 0 ? string.Empty : normalized[..index];
     }
 
-    private static string LastSegment(string path)
-    {
-        var normalized = Normalize(path);
-        var index = normalized.LastIndexOf('/');
-        return index < 0 ? normalized : normalized[(index + 1)..];
-    }
 }

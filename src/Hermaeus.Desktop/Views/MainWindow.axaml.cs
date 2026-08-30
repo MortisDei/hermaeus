@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
@@ -15,12 +16,17 @@ public partial class MainWindow : Window
     public DesktopIntegrationService? DesktopIntegration { get; set; }
     public IPatchDiffService? PatchDiffService { get; set; }
     private IInputElement? _prePaletteFocus;
+    private bool _closeAfterShutdown;
 
     public MainWindow()
     {
         InitializeComponent();
         Opened += OnOpened;
+        AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
     }
+
+    private static void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e) =>
+        WheelScrollHelper.Handle(e);
 
     private void OnOpened(object? sender, EventArgs e)
     {
@@ -40,10 +46,28 @@ public partial class MainWindow : Window
                     $"Permanently delete \"{item.Title}\"? This cannot be undone.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.Lab.ConfirmRemoval = async experience =>
+            {
+                var dialog = new ConfirmActionDialog(
+                    "Remove empirical evidence",
+                    $"Permanently remove experience {experience.Id}? Its stored context, action and provenance are hard-deleted. Raw source task or Lab evidence is not changed.");
+                return await dialog.ShowDialog<bool>(this);
+            };
+            vm.Lab.ConfirmApply = async review =>
+            {
+                var changes = string.Join(Environment.NewLine,
+                    review.Changes.Select(change => $"{change.Field}: {change.CurrentValue} -> {change.ProposedValue}"));
+                var dialog = new ConfirmActionDialog(
+                    "Apply Lab result to Services",
+                    $"Save these reviewed fields through the normal Settings flow?\n\n{changes}\n\nThe experiment evidence is retained.");
+                return await dialog.ShowDialog<bool>(this);
+            };
             vm.RequestCopyToastDetails = async text =>
             {
-                if (Clipboard is { } clipboard)
-                    await clipboard.SetTextAsync(text);
+                if (Clipboard is not { } clipboard)
+                    return false;
+                try { await clipboard.SetTextAsync(text); return true; }
+                catch { return false; }
             };
             vm.Projects.RequestOpenEditor = () =>
             {
@@ -106,7 +130,7 @@ public partial class MainWindow : Window
         return await modal.ShowDialog<bool>(this);
     }
 
-    private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
+    private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
         if (DesktopIntegration?.ShouldCancelCloseForTray() == true)
         {
@@ -115,7 +139,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (DataContext is MainWindowViewModel vm)
-            vm.Shutdown();
+        if (_closeAfterShutdown || DataContext is not MainWindowViewModel vm)
+            return;
+
+        e.Cancel = true;
+        _closeAfterShutdown = true;
+        try
+        {
+            await vm.ShutdownAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error during shutdown: {ex}");
+        }
+        finally
+        {
+            Close();
+        }
     }
 }

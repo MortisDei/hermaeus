@@ -55,3 +55,85 @@ public sealed record CapabilitiesResponse(
     string Version,
     List<string> Routes,
     List<CapabilityDto> Capabilities);
+
+/// <summary>
+/// R31's reviewed Agent API wire contract. The routes are deliberately not
+/// mapped until Desktop and Local API share one serialized task-mutation owner.
+/// </summary>
+public static class AgentApiContract
+{
+    public const int SchemaVersion = 1;
+    public const bool ExecutionRoutesAvailable = false;
+    public const string ExecutionUnavailableReason =
+        "Agent execution is unavailable because Desktop and Local API do not share a single task-mutation owner.";
+
+    public static IReadOnlyList<string> ConditionalRoutes { get; } =
+    [
+        "POST /v1/agent/tasks",
+        "POST /v1/agent/tasks/{id}/start",
+        "GET /v1/agent/tasks/{id}",
+        "GET /v1/agent/runs/{runId}",
+        "POST /v1/agent/tasks/{id}/steer",
+        "POST /v1/agent/tasks/{id}/continue",
+        "GET /v1/agent/tasks/{id}/output",
+        "GET /v1/agent/tasks/{id}/decisions"
+    ];
+}
+
+public sealed record AgentTaskCreateRequestV1(
+    int SchemaVersion,
+    string Goal,
+    string WorkspaceProfileId,
+    string ModelId,
+    string ProjectId = "");
+
+public sealed record AgentTaskCreateResponseV1(int SchemaVersion, string TaskId, string Status);
+
+public sealed record AgentTaskStartResponseV1(int SchemaVersion, string TaskId, string RunId, string Status);
+
+public sealed record AgentTaskStatusResponseV1(
+    int SchemaVersion,
+    string TaskId,
+    string Status,
+    AgentApiNormalizedOutcomeDto? Outcome,
+    string ActiveStep,
+    AgentPendingDecisionDto? PendingDecision,
+    List<AgentApiLinkDto> Links);
+
+public sealed record AgentRunStatusResponseV1(
+    int SchemaVersion,
+    string RunId,
+    string TaskId,
+    string Status,
+    AgentApiNormalizedOutcomeDto? Outcome);
+
+public sealed record AgentSteerRequestV1(int SchemaVersion, string Instruction);
+
+public sealed record AgentContinueRequestV1(int SchemaVersion, string Instruction = "");
+
+public sealed record AgentTaskOutputResponseV1(
+    int SchemaVersion,
+    string TaskId,
+    string Status,
+    string Report,
+    List<string> Reservations,
+    List<string> ProvenanceReferences,
+    List<AgentArtifactDto> Artifacts);
+
+public sealed record AgentDecisionListResponseV1(
+    int SchemaVersion,
+    string TaskId,
+    List<AgentPendingDecisionDto> Decisions);
+
+public sealed record AgentPendingDecisionDto(
+    string Id,
+    string Fingerprint,
+    string Risk,
+    string Reason,
+    bool DesktopReviewRequired = true);
+
+public sealed record AgentApiNormalizedOutcomeDto(string Outcome, string EvidenceOrigin, string Summary);
+
+public sealed record AgentApiLinkDto(string Rel, string Href);
+
+public sealed record AgentArtifactDto(string Name, string RelativePath, string Sha256, long SizeBytes);

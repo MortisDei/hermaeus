@@ -92,6 +92,31 @@ public sealed class ServicesViewModelTests
     }
 
     [Fact]
+    public async Task Gpu_fit_breakdown_recomputes_for_unsaved_what_if_controls()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var modelPath = WriteLlamaGgufFixture(temp);
+        var hw = new HardwareProfile(64L * 1024 * 1024 * 1024, 8L * 1024 * 1024 * 1024, "Test GPU");
+        var config = new ServerConfig { Name = "Chat", ModelPath = modelPath, ContextSize = 8192, GpuLayers = -1 };
+        var vm = new ServerProcessViewModel(
+            config,
+            settings, new RedactionService(), new TrustService(), new FakeToasts(), new RuntimeLogService(settings),
+            hardwareProfile: hw);
+        await Task.Delay(200);
+
+        Assert.True(vm.HasGpuFitBreakdown);
+        Assert.Contains("KV key cache", vm.GpuFitBreakdown, StringComparison.Ordinal);
+        var before = vm.GpuFitBreakdown;
+
+        vm.ContextSize = 65536;
+
+        Assert.NotEqual(before, vm.GpuFitBreakdown);
+        Assert.Contains("65,536", vm.GpuFitBreakdown, StringComparison.Ordinal);
+        Assert.Equal(8192, config.ContextSize);
+    }
+
+    [Fact]
     public async Task Context_fit_falls_back_to_the_flat_threshold_when_metadata_is_unavailable()
     {
         using var temp = new TempDir();
@@ -153,6 +178,46 @@ public sealed class ServicesViewModelTests
 
         Assert.True(vm.HasContextFitWarning);
         Assert.Contains("32,768", vm.ContextFitNote);
+    }
+
+    [Theory]
+    [InlineData("auto", true)]
+    [InlineData("off", true)]
+    [InlineData("on", false)]
+    public void Quantized_value_cache_warns_until_flash_attention_is_explicit(string flashAttention, bool expected)
+    {
+        using var temp = new TempDir();
+        var server = NewServerVm(temp, 8192);
+
+        server.KvCacheType = "q8_0";
+        server.FlashAttention = flashAttention;
+
+        Assert.Equal(expected, server.NeedsFlashAttentionForQuantizedV);
+    }
+
+    [Fact]
+    public void Missing_configured_draft_is_not_presented_as_a_detected_candidate()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var modelPath = WriteLlamaGgufFixture(temp);
+        var missingDraft = temp.PathFor("missing/mtp-draft.gguf");
+        var config = new ServerConfig
+        {
+            Name = "Chat",
+            ModelPath = modelPath,
+            Speculative = new SpeculativeDecodingConfig { DraftModelPath = missingDraft }
+        };
+        var server = new ServerProcessViewModel(config, settings, new RedactionService(), new TrustService(),
+            new FakeToasts(), new RuntimeLogService(settings));
+
+        Assert.True(server.HasMissingDraftModel);
+        Assert.DoesNotContain(missingDraft, server.DetectedDraftModelPaths);
+        Assert.Contains("stale", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("trusted repository mapping", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("will not substitute", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
+        server.ClearDraftModelCommand.Execute(null);
+        Assert.Empty(server.DraftModelPath);
     }
 
     private static ServicesViewModel NewServicesVm(TempDir temp, out ISettingsService settings)
@@ -218,6 +283,38 @@ public sealed class ServicesViewModelTests
 
         vm.Servers[0].Status = ServerStatus.Stopped;
         Assert.False(vm.AnyServerRunning, "stopping the last running server should clear AnyServerRunning");
+    }
+
+    [Fact]
+    public void Managed_stopped_endpoint_gate_is_loopback_and_status_scoped()
+    {
+        using var temp = new TempDir();
+        var vm = NewServicesVm(temp, out _);
+        var server = vm.Servers.First(s => !s.EmbeddingsMode);
+
+        Assert.True(vm.IsManagedServerStopped($"http://127.0.0.1:{server.Port}"));
+        Assert.False(vm.IsManagedServerStopped($"http://127.0.0.1:{server.Port + 1}"));
+        Assert.False(vm.IsManagedServerStopped($"https://example.invalid:{server.Port}"));
+
+        server.Status = ServerStatus.Starting;
+        Assert.False(vm.IsManagedServerStopped($"http://127.0.0.1:{server.Port}"));
+    }
+
+    [Fact]
+    public void Managed_expected_unavailable_gate_includes_starting_but_not_error_or_running()
+    {
+        using var temp = new TempDir();
+        var vm = NewServicesVm(temp, out _);
+        var server = vm.Servers.First(s => !s.EmbeddingsMode);
+        var endpoint = $"http://127.0.0.1:{server.Port}";
+
+        Assert.True(vm.IsManagedServerExpectedUnavailable(endpoint));
+        server.Status = ServerStatus.Starting;
+        Assert.True(vm.IsManagedServerExpectedUnavailable(endpoint));
+        server.Status = ServerStatus.Error;
+        Assert.False(vm.IsManagedServerExpectedUnavailable(endpoint));
+        server.Status = ServerStatus.Running;
+        Assert.False(vm.IsManagedServerExpectedUnavailable(endpoint));
     }
 
     [Fact]

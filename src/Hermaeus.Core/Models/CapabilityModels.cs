@@ -45,4 +45,5 @@ public sealed record LocalModelCapabilities(
     CapabilityEvidence ReasoningPreservation,
     CapabilityEvidence Vision,
     DateTime ProbedAtUtc,
-    RuntimeCapabilitySurface? RuntimeSurface = null);
+    RuntimeCapabilitySurface? RuntimeSurface = null,
+    IReadOnlyList<RuntimeCapabilityObservation>? Observations = null);

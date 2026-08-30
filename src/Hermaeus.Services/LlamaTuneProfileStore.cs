@@ -52,7 +52,7 @@ public static class LlamaTuneProfileStore
 
         var file = new FileInfo(normalized);
         return settings.LlamaTuneProfiles.FirstOrDefault(profile =>
-            string.Equals(Path.GetFullPath(profile.ModelPath), normalized, StringComparison.OrdinalIgnoreCase)
+            ModelPathSafety.AreSameLocalPath(profile.ModelPath, normalized)
             && profile.ModelSizeBytes == file.Length
             && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
     }

@@ -9,9 +9,8 @@ everything at once, distinct from RAG (which answers questions from
 documents you deliberately ingested) and from Memory (which extracts durable
 facts, rather than indexing raw content).
 
-On by default. A store that holds copies of your own words ships with a
-visible switch, a genuine delete, and honest size reporting from the start -
-see [Settings > Memory](features.md) for the Recall card.
+On by default. The index has a visible switch, a genuine delete, and honest
+size reporting. See [Settings > Memory](features.md) for the Recall card.
 
 ## Getting Started
 
@@ -34,15 +33,17 @@ see [Settings > Memory](features.md) for the Recall card.
   additive only).
 - **Sources**: four federated sources - conversations, agent tasks,
   memories, and RAG document chunks - each queried independently and then
-  fused.
+  fused. Conversation recall includes eligible user and assistant messages;
+  each hit retains an exact conversation/message locator, so a recalled answer
+  is still identified as past message text rather than a durable Memory fact.
 - **Fusion**: reciprocal rank fusion (RRF, k=60 - the same constant
   `HybridRetriever` already uses for RAG's semantic/keyword fusion) merges
   the four ranked lists. No deduplication pass is needed since the four
   sources are disjoint by kind.
 - **Indexing**: a background pass, bounded and never on the chat send path,
   modeled on the existing Memory auto-summary pipeline
-  (`MemoryStore.cs:515-545`). A startup backfill catches anything indexed
-  before Recall existed or while it was off.
+  (`MemoryStore.cs:515-545`). A startup backfill catches records that were not
+  indexed while the feature was disabled.
 
 ## Settings
 

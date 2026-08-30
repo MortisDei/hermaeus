@@ -16,7 +16,30 @@
                       Content="Experimental: speak replies sentence-by-sentence while generating" FontSize="13"
                       ToolTip.Tip="Speaks each sentence as soon as it streams in instead of waiting for the full reply; pacing between sentences can be uneven." />
 
-            <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" Margin="0,4,0,0" />
+            <TextBlock Text="Audio feedback" FontSize="13" FontWeight="SemiBold" Opacity="0.8" Margin="0,4,0,0" />
+            <CheckBox IsChecked="{Binding AudioFeedbackEnabled}" Content="Enable supplementary audio feedback" FontSize="13" />
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                <TextBlock Text="Volume" VerticalAlignment="Center" FontSize="12" />
+                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding AudioFeedbackVolume}" />
+                <TextBlock Grid.Column="2" Text="{Binding AudioFeedbackVolume, StringFormat={}{0}%}" VerticalAlignment="Center" FontSize="12" />
+            </Grid>
+            <CheckBox IsChecked="{Binding AudioFeedbackMuted}" Content="Mute feedback (keeps volume)" FontSize="13" />
+            <CheckBox IsChecked="{Binding SuppressAudioFeedbackWhileTts}" Content="Do not play cues while TTS is speaking" FontSize="13" />
+            <ItemsControl ItemsSource="{Binding AudioFeedbackEvents}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:AudioFeedbackToggleViewModel">
+                        <CheckBox IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="12" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="Refresh known voices" Command="{Binding RefreshTtsVoicesCommand}"
+                        Padding="8,3" FontSize="11" IsEnabled="{Binding !IsRefreshingVoices}"
+                        ToolTip.Tip="Refreshes the active provider's authoritative voice list for these channel selectors." />
+            </Grid>
+            <TextBlock Text="{Binding ChannelVoiceDiscoveryStatus}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
             <ItemsControl ItemsSource="{Binding VoiceChannels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:VoiceChannelSettingViewModel">
@@ -43,6 +66,7 @@
                                                      Text="{Binding VoiceDisplay, Mode=TwoWay}"
                                                      FilterMode="Contains"
                                                      MinimumPrefixLength="0"
+                                                     DropDownOpening="OnChannelVoiceDropDownOpening"
                                                      FontSize="12"
                                                      HorizontalAlignment="Stretch" />
                                     <Button Grid.Column="1"
@@ -65,7 +89,7 @@
             <!-- r29 doc 01 1.2: factual state, not personality (docs/mascot.md).
                  The picker's usual content is the sentinel plus the placeholder
                  "default", which looks like a populated list and is not. -->
-            <TextBlock Text="The voice service has not listed its voices, so these pickers only offer the default. Use Refresh on Services &gt; Voice to list them, or type a voice id the provider knows."
+            <TextBlock Text="The selected provider has not listed named voices yet, so these pickers only offer the default. It will retry when the voice settings load or the provider changes; you can also refresh now or type a verified voice id."
                        FontSize="11" Opacity="0.55" TextWrapping="Wrap"
                        IsVisible="{Binding !ChannelVoiceOptionsAreProviderSupplied}" />
         </StackPanel>

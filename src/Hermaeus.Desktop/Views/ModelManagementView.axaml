@@ -51,17 +51,17 @@
         <TextBlock DockPanel.Dock="Top"
                    Text="{Binding OrganizeStatus}"
                    IsVisible="{Binding OrganizeStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                   FontSize="12" Opacity="0.65" Margin="0,0,0,6" />
+                   FontSize="12" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,6" />
 
         <TextBlock DockPanel.Dock="Top"
                    Text="{Binding UpdateCheckStatus}"
                    IsVisible="{Binding UpdateCheckStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                   FontSize="12" Opacity="0.65" Margin="0,0,0,6" />
+                   FontSize="12" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,6" />
 
         <TextBlock DockPanel.Dock="Top"
                    Text="{Binding AutoTuneAllStatus}"
                    IsVisible="{Binding AutoTuneAllStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                   FontSize="12" Opacity="0.65" Margin="0,0,0,10" />
+                   FontSize="12" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,10" />
 
         <Expander DockPanel.Dock="Top"
                   Header="Get models from Hugging Face"
@@ -73,7 +73,8 @@
                              Text="{Binding HfSearchQuery}"
                              Watermark="Search GGUF repos, e.g. 'llama 3 instruct'"
                              CornerRadius="6"
-                             Padding="10,6" />
+                             Padding="10,6"
+                             KeyDown="OnHfSearchKeyDown" />
                     <Button Grid.Column="1"
                             Content="Search"
                             Command="{Binding SearchHuggingFaceCommand}"
@@ -84,7 +85,10 @@
 
                 <TextBlock Text="{Binding HfBrowserStatus}"
                            IsVisible="{Binding HfBrowserStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                           FontSize="12" Opacity="0.65" />
+                           FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+
+                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsLoadingHfFiles}"
+                             Height="4" ToolTip.Tip="Reading repository metadata and calculating local hardware fit." />
 
                 <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding HfSearchResults}">
@@ -123,11 +127,15 @@
                                                 ToolTip.Tip="{Binding FitReason}">
                                             <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
                                         </Border>
+                                        <TextBlock Grid.Column="2" Text="{Binding CheckingLabel}"
+                                                   IsVisible="{Binding IsChecking}"
+                                                   FontSize="10" Opacity="0.65"
+                                                   VerticalAlignment="Center" />
                                         <Button Grid.Column="3"
                                                 Content="{Binding DownloadStateLabel}"
                                                 Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
                                                 CommandParameter="{Binding}"
-                                                IsEnabled="{Binding DownloadState, Converter={x:Static views:NotDownloadedConverter.Instance}}"
+                                                IsEnabled="{Binding CanDownload}"
                                                 FontSize="12" Padding="10,4" CornerRadius="6"
                                                 ToolTip.Tip="Downloads the whole file set into its own folder under Models\LLM\, each file SHA256-verified against the repo before use." />
                                     </Grid>
@@ -144,15 +152,20 @@
                                     <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding HasCompanions}">
                                         <CheckBox IsChecked="{Binding IncludeProjector}"
                                                   IsVisible="{Binding HasProjector}"
-                                                  Content="Vision projector"
+                                                  Content="{Binding ProjectorSelectionLabel}"
                                                   FontSize="11"
-                                                  ToolTip.Tip="mmproj-*.gguf. Without it, a multimodal model loads but cannot see." />
+                                                  ToolTip.Tip="A vision projector candidate. Explicit mappings or verified GGUF metadata may select it automatically; layout-only candidates require this checkbox as your confirmation." />
                                         <CheckBox IsChecked="{Binding IncludeDraftHead}"
                                                   IsVisible="{Binding HasDraftHead}"
-                                                  Content="MTP draft head"
+                                                  Content="{Binding DraftHeadSelectionLabel}"
                                                   FontSize="11"
-                                                  ToolTip.Tip="mtp-*.gguf. The draft model speculative decoding uses; it shares this model's vocabulary by construction." />
+                                                  ToolTip.Tip="An MTP draft-head candidate. Explicit mappings or matching GGUF metadata may select it automatically; layout-only candidates require this checkbox as your confirmation." />
                                     </StackPanel>
+                                    <TextBlock Text="{Binding CompanionReviewLabel}"
+                                               IsVisible="{Binding HasReviewRequiredCompanions}"
+                                               FontSize="11"
+                                               Opacity="0.7"
+                                               TextWrapping="Wrap" />
                                   </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -282,6 +295,14 @@
                                                FontSize="11" Opacity="0.45"
                                                TextTrimming="CharacterEllipsis" />
 
+                                    <Border IsVisible="{Binding TuneSummary, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                            CornerRadius="4" Padding="6,3"
+                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                            ToolTip.Tip="The shared auto-tune profile currently recorded for this model. It is not applied to a running service until the corresponding Services configuration is saved and started.">
+                                        <TextBlock Text="{Binding TuneSummary, StringFormat='Tuned: {0}'}"
+                                                   FontSize="11" TextWrapping="Wrap" />
+                                    </Border>
+
                                     <!-- Footer row -->
                                     <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2,0,0">
                                         <TextBlock Grid.Column="0"
@@ -310,13 +331,18 @@
                                             <!-- r29 doc 02 2.4: reuses ModelProfileItemViewModel.IsExpanded,
                                                  which had no other consumer once the Expander went. -->
                                             <ToggleButton.Flyout>
-                                                <Flyout Placement="Bottom">
-                                                    <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
-                                                        <StackPanel MinWidth="620" MaxWidth="1100" Spacing="6">
+                                                <Flyout Placement="BottomEdgeAlignedRight"
+                                                        PlacementConstraintAdjustment="SlideX,FlipY,ResizeX,ResizeY">
+                                                    <ScrollViewer Width="680" MaxWidth="720" MaxHeight="520"
+                                                                  VerticalScrollBarVisibility="Auto"
+                                                                  HorizontalScrollBarVisibility="Visible">
+                                                        <StackPanel Width="680" MaxWidth="720" Spacing="6">
                                                             <TextBlock Text="{Binding EffectiveName}"
                                                                        FontSize="14" FontWeight="SemiBold" />
+                                                            <TextBlock Text="Model-specific defaults and metadata"
+                                                                       FontSize="11" Opacity="0.65" />
                                                             <Grid ColumnDefinitions="1.1*,1.2*,0.9*"
-                                                                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                                                                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                                                                   ColumnSpacing="10"
                                                                   RowSpacing="8"
                                                                   Margin="0,4,0,0">
@@ -358,6 +384,31 @@
                                                                     <ComboBox ItemsSource="{Binding KvCacheTypeOptions}"
                                                                               SelectedItem="{Binding DefaultKvCacheType}"
                                                                               ToolTip.Tip="Default KV cache precision applied to both K and V when this model is selected." />
+                                                                    <StackPanel Spacing="3" IsVisible="{Binding HasTuneProfile}">
+                                                                        <TextBlock Text="Saved auto-tune profile" FontSize="11" Opacity="0.65" />
+                                                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                                                            <NumericUpDown Grid.Column="0"
+                                                                                           Value="{Binding TunedGpuLayers}"
+                                                                                           Minimum="-1"
+                                                                                           Maximum="100000"
+                                                                                           Increment="1"
+                                                                                           ToolTip.Tip="Saved llama.cpp GPU layer setting. -1 means all layers. This edits the shared tune profile only." />
+                                                                            <NumericUpDown Grid.Column="1"
+                                                                                           Value="{Binding TunedThreads}"
+                                                                                           Minimum="1"
+                                                                                           Maximum="4096"
+                                                                                           Increment="1"
+                                                                                           ToolTip.Tip="Saved llama.cpp thread setting. This edits the shared tune profile only." />
+                                                                        </Grid>
+                                                                        <NumericUpDown Value="{Binding TunedContextSize}"
+                                                                                       Watermark="{Binding TuneProfileContextWatermark}"
+                                                                                       Minimum="128"
+                                                                                       Maximum="2097152"
+                                                                                       Increment="512"
+                                                                                       ToolTip.Tip="Saved llama.cpp context setting. Save the model profile to persist intentional edits; restart or save the Services configuration before a running service uses it." />
+                                                                        <TextBlock Text="Extra arguments and live process overrides remain on Services, where trust checks and start/stop state are visible."
+                                                                                   FontSize="10" Opacity="0.65" TextWrapping="Wrap" />
+                                                                    </StackPanel>
                                                                 </StackPanel>
                                                                 <NumericUpDown Grid.Row="1" Grid.Column="2"
                                                                                Value="{Binding DefaultMaxTokens}"
@@ -434,17 +485,44 @@
                                                                             Orientation="Horizontal"
                                                                             Spacing="8"
                                                                             HorizontalAlignment="Right">
-                                                                    <Button Content="Save"
+                                                                    <Button Content="Save model profile"
                                                                             Command="{Binding $parent[ItemsControl].DataContext.SaveProfileCommand}"
                                                                             CommandParameter="{Binding}"
-                                                                            ToolTip.Tip="Saves this model's overrides." />
+                                                                            ToolTip.Tip="Saves this model's picker defaults and metadata. Runtime process settings are saved separately on Services." />
                                                                     <Button Content="Reset"
                                                                             Command="{Binding $parent[ItemsControl].DataContext.ResetProfileCommand}"
                                                                             CommandParameter="{Binding}"
-                                                                            ToolTip.Tip="Clears all overrides for this model, reverting to provider/global defaults." />
+                                                                            ToolTip.Tip="Clears this model's picker defaults and metadata. The saved auto-tune runtime profile remains separate and is shown above." />
                                                                 </StackPanel>
 
                                                                 <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3"
+                                                                            Spacing="6"
+                                                                            IsVisible="{Binding HasRepoLink}">
+                                                                    <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="6">
+                                                                        <CheckBox Content="Automatically manage known companions"
+                                                                                  IsChecked="{Binding AutoManageCompanionAssets}"
+                                                                                  FontSize="12"
+                                                                                  ToolTip.Tip="When enabled, model updates may download or replace only explicitly source-mapped, SHA256-verified projector and MTP files for this model. Disabling prompts before removing existing companion files." />
+                                                                        <Button Content="Reacquire known companions"
+                                                                                Command="{Binding $parent[ItemsControl].DataContext.ReacquireCompanionsCommand}"
+                                                                                CommandParameter="{Binding}"
+                                                                                IsVisible="{Binding CanReacquireCompanions}"
+                                                                                FontSize="11" Padding="8,3" CornerRadius="6"
+                                                                                ToolTip.Tip="Reviews and reacquires only hash-verified compatible companions from the linked repository's current revision. It never changes a server's selected draft model; choose any replacement explicitly in Services." />
+                                                                        <Button Content="{Binding ManualCompanionRepairLabel}"
+                                                                                Command="{Binding $parent[ItemsControl].DataContext.OpenServicesCommand}"
+                                                                                IsVisible="{Binding RequiresManualCompanionRepair}"
+                                                                                FontSize="11" Padding="8,3" CornerRadius="6"
+                                                                                ToolTip.Tip="No verified replacement is available. Open Services to browse or clear the affected companion explicitly." />
+                                                                    </WrapPanel>
+                                                                    <TextBlock Text="{Binding CompanionStatus}"
+                                                                               FontSize="11"
+                                                                               Opacity="0.7"
+                                                                               VerticalAlignment="Center"
+                                                                               TextWrapping="Wrap" />
+                                                                </StackPanel>
+
+                                                                <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"
                                                                             Orientation="Horizontal"
                                                                             Spacing="8"
                                                                             IsVisible="{Binding IsLocalGguf}">

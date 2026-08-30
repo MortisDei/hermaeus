@@ -201,6 +201,7 @@
                     </StackPanel>
 
                     <controls:MarkdownViewer Markdown="{Binding AnswerText}"
+                                             RequestCopyToClipboard="{Binding $parent[UserControl].DataContext.RequestCopyToClipboard}"
                                              FontSize="14" />
 
                     <ItemsControl ItemsSource="{Binding VisibleCitationSources}"
@@ -264,7 +265,9 @@
                         <TextBlock Text="Thinking..." FontSize="11" Opacity="0.4"
                                    VerticalAlignment="Center" />
                     </StackPanel>
-                    <controls:MarkdownViewer Markdown="{Binding AnswerText}" FontSize="14" />
+                    <controls:MarkdownViewer Markdown="{Binding AnswerText}"
+                                             RequestCopyToClipboard="{Binding $parent[UserControl].DataContext.RequestCopyToClipboard}"
+                                             FontSize="14" />
                 </StackPanel>
 
                 <!-- Source inspector -->

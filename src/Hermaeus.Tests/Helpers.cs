@@ -21,13 +21,29 @@ namespace Hermaeus.Tests
 {
     internal static class Helpers
     {
-        public static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
+        public static SettingsService NewSettings(TempDir temp, string relativeSettingsPath = "settings/settings.json")
+        {
+            var settings = new SettingsService(temp.PathFor(relativeSettingsPath));
+            // A temporary settings file alone is not enough: an empty
+            // DataRootDirectory makes production resolution fall back to the
+            // user's real LocalApplicationData root.
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            return settings;
+        }
 
         public static TtsSettingsViewModel NewTtsSettingsViewModel(ISettingsService settings) =>
             new(new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
 
-        public static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets, TtsSettingsViewModel? tts = null) =>
-            new(settings, tts ?? NewTtsSettingsViewModel(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
+        public static TtsSettingsViewModel NewTtsSettingsViewModel(ISettingsService settings, ITtsService tts) =>
+            new(tts, new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
+
+        public static SettingsViewModel NewSettingsViewModel(
+            ISettingsService settings,
+            ISecretStore secrets,
+            TtsSettingsViewModel? tts = null,
+            Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null,
+            Action? autoSaveLifecycleCompleted = null) =>
+            new(settings, tts ?? NewTtsSettingsViewModel(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService(), autoSaveDelay: autoSaveDelay, autoSaveLifecycleCompleted: autoSaveLifecycleCompleted);
 
         public static ServicesViewModel NewServicesViewModel(ISettingsService settings, TtsSettingsViewModel? tts = null) =>
             new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings), tts ?? NewTtsSettingsViewModel(settings));
@@ -850,7 +866,11 @@ namespace Hermaeus.Tests
         public string ProviderName => "FakeSequencedAgent";
         public bool IsConfigured => true;
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
-            Task.FromResult(new List<LlmModel> { new() { Id = "fake-sequenced-agent", Name = "Fake Sequenced Agent", Provider = "Test" } });
+            Task.FromResult(new List<LlmModel>
+            {
+                new() { Id = "fake-sequenced-agent", Name = "Fake Sequenced Agent", Provider = "Test" },
+                new() { Id = "test-model", Name = "Scenario Test Model", Provider = "Test" }
+            });
 
         public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
             string modelId,

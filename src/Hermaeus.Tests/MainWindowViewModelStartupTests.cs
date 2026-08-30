@@ -71,6 +71,7 @@ public sealed class MainWindowViewModelStartupTests
         var rag = new RagViewModel(ragQuery, ragPipeline, ragEval, toasts, logs, settings, servicesVm);
 
         var benchmarks = new BenchmarkViewModel(new BenchmarkService(settings, llm, new FakeSystemInfo(), new FakeEvalStore()), llm, new ModelProfileService(settings), settings, toasts);
+        var lab = new LabViewModel(new SqliteEmpiricalExperienceStore(settings, new RedactionService()), toasts);
 
         var traces = new SqliteTraceStore(settings);
         var privacyAudit = new PrivacyAuditService(settings, secrets, logs, new FakeVoiceProviderRegistry(settings), traces);
@@ -96,7 +97,7 @@ public sealed class MainWindowViewModelStartupTests
         var activity = new ActivityViewModel(toasts, new SqliteTraceStore(settings));
 
         var main = new MainWindowViewModel(
-            convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard, projects,
+            convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, lab, systemOverview, doctor, memories, logsVm, wizard, projects,
             commandRegistry, palette, activity, settings, toasts, logs, new ConversationExportService(), recallIndexing);
 
         return new Harness(main, llm, logs, toasts, convStore);
@@ -222,6 +223,29 @@ public sealed class MainWindowViewModelStartupTests
         Assert.Equal("chat", harness.Main.ActivePanel);
         Assert.Single(harness.Main.Chat.AvailableModels);
         Assert.True(harness.Llm.GetModelsCallCount > 0, "chat models must load once the wizard finishes on a first run, not stay empty until a restart");
+    }
+
+    [Fact]
+    public async Task Shutdown_waits_for_a_server_triggered_model_refresh_before_teardown()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Llm.DelayGate = gate;
+
+        var server = harness.Main.Services.Servers.First(s => !s.EmbeddingsMode);
+        server.Port += 100;
+        await server.SaveConfigCommand.ExecuteAsync(null);
+        await WaitForAsync(() => harness.Llm.GetModelsCallCount > 0, "server-triggered model refresh");
+
+        var shutdown = harness.Main.ShutdownAsync();
+        Assert.False(shutdown.IsCompleted, "shutdown must wait for the in-flight refresh before services are disposed");
+
+        gate.TrySetResult();
+        await shutdown;
+
+        Assert.DoesNotContain(harness.Logs.GetEntries(), entry =>
+            entry.Message.Contains("Model refresh failed", StringComparison.Ordinal));
     }
 
     /// <summary>r16 03-workbench-and-desktop.md 3.3: every other destructive action of this weight is confirm-gated; a raw context-menu click was the one exception.</summary>

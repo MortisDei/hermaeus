@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
+using Hermaeus.ViewModels;
 
 namespace Hermaeus.Desktop.Views;
 
@@ -23,5 +24,19 @@ public partial class SettingsVoiceSectionView : UserControl
 
         box.Focus();
         box.IsDropDownOpen = true;
+    }
+
+    private static void OnChannelVoiceDropDownOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (sender is AutoCompleteBox box
+            && string.Equals(box.Text, VoiceChannelSettingViewModel.DefaultVoiceLabel, StringComparison.Ordinal))
+        {
+            // The sentinel is the selected value, not a useful search term.
+            // Leaving it in the AutoCompleteBox filter makes a populated
+            // provider catalogue look empty when the chevron is clicked.
+            // Clearing it maps back to the same empty VoiceId and keeps the
+            // current selection semantically unchanged.
+            box.Text = string.Empty;
+        }
     }
 }

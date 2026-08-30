@@ -245,7 +245,8 @@ internal static class McpTests
         var bridge = new FakeClientMcpToolBridge(settings, client);
 
         var result = await bridge.ExecuteAsync("mcp:srv1:echo", new Dictionary<string, object?> { ["message"] = "hi" });
-        Helpers.Equal("echo: hi", result, "an allowlisted tool the server actually declares should execute normally");
+        Helpers.Equal("echo: hi", result.Content, "an allowlisted tool the server actually declares should execute normally");
+        Helpers.True(result.IsError is null, "the legacy fake response has no structured MCP error status");
 
         await Helpers.ThrowsAsync<InvalidOperationException>(() =>
             bridge.ExecuteAsync("mcp:srv1:phantom_tool", new Dictionary<string, object?>()));
@@ -260,7 +261,7 @@ internal static class McpTests
     {
         public bool CanExecute(string toolName) => toolName.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase);
 
-        public async Task<string> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken ct = default)
+        public async Task<McpToolExecutionResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken ct = default)
         {
             var rest = toolName["mcp:".Length..];
             var separator = rest.IndexOf(':');
@@ -276,7 +277,7 @@ internal static class McpTests
             if (!tools.Any(t => string.Equals(t.Name, remoteToolName, StringComparison.Ordinal)))
                 throw new InvalidOperationException("not declared by server");
 
-            return await client.CallToolAsync(remoteToolName, arguments, ct);
+            return await client.CallToolDetailedAsync(remoteToolName, arguments, ct);
         }
     }
 

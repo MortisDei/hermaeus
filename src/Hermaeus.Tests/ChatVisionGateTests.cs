@@ -74,6 +74,30 @@ public sealed class ChatVisionGateTests
     }
 
     [Fact]
+    public async Task Image_is_skipped_when_the_configured_projector_is_disabled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.ManagedServers.Clear();
+        settings.Settings.ManagedServers.Add(new ServerConfig
+        {
+            Name = "Chat",
+            EmbeddingsMode = false,
+            MmprojPath = "verified-projector.gguf",
+            UseProjector = false
+        });
+        var vm = NewChatViewModel(settings);
+        var path = temp.PathFor("photo.png");
+        await File.WriteAllBytesAsync(path, OnePixelPng);
+
+        await vm.AddContextFilesAsync([path]);
+
+        var attachment = Assert.Single(vm.ContextAttachments);
+        Assert.Equal(ChatContextAttachmentStatus.Skipped, attachment.Status);
+        Assert.Contains("vision projector", attachment.StatusMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Image_attaches_for_an_OpenAI_model_with_no_local_mmproj_configured()
     {
         using var temp = new TempDir();

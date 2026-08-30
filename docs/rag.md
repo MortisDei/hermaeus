@@ -90,6 +90,12 @@ traces, versioned SQLite schema migrations, and native eval support.
   model than the one currently configured is blocked with a message naming
   both models. Use **Reindex** (below) first.
 
+Long ingest progress remains stage- and batch-based rather than ETA-based:
+failure messages and cancellation state are shown directly, and the pipeline
+flushes bounded batches before loading more input. This keeps a slow large
+ingest observable without claiming a completion time that the system cannot
+derive honestly.
+
 ### Dataset Manager
 
 Each dataset card in the manager shows chunk/source counts, missing and stale
@@ -270,22 +276,17 @@ card.
 
 **Above the budget, a dataset is still queried.** It is scanned from storage
 instead of from memory, which is slower, and the retrieval result's planner
-notes say so. Before r27 an over-budget dataset was dropped by the cache without
-being cached, and every subsequent query read that empty entry back, scored
-nothing, and returned no results and no error while re-reading every chunk and
-every embedding out of SQLite. Raising the budget was rejected as the fix: a
-bigger number moves the cliff rather than removing it.
+notes say so. Increasing the budget is not a substitute for this fallback: a
+larger limit only moves the point at which a corpus no longer fits.
 
 ## Keyword candidates
 
-BM25 scoring is unchanged, including its stats and its tuning. What changed in
-r27 is where its candidates come from: an FTS5 index over chunk content, rather
-than tokenising every chunk in the dataset once per query variant. FTS5 finds a
-few hundred candidates and `Bm25Scorer` ranks them exactly as it always has. The
-only chunks that stop being scored are ones that share no query term at all and
-therefore scored essentially zero; a regression test asserts that scoring the
-candidate set produces the same ranked ids, in the same order, as scoring the
-whole corpus.
+BM25 scoring uses an FTS5 index over chunk content rather than tokenising every
+chunk in the dataset once per query variant. FTS5 finds a few hundred candidates
+and `Bm25Scorer` ranks them. The only chunks that stop being scored are ones
+that share no query term at all and therefore score essentially zero; a
+regression test asserts that scoring the candidate set produces the same ranked
+ids, in the same order, as scoring the whole corpus.
 
 The index is maintained inside the same transaction as the chunk rows it
 mirrors, and is backfilled once, lazily, on the first search of an existing

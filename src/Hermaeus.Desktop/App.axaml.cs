@@ -81,7 +81,7 @@ public partial class App : Application
                 {
                     sp.GetRequiredService<AppLifecycleJournalService>().RecordCleanExit();
                     _desktopIntegration?.Dispose();
-                    vm.Shutdown();
+                    vm.ShutdownAsync().GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {
@@ -140,6 +140,17 @@ public partial class App : Application
                 sp.GetRequiredService<BenchmarkService>().InitializeAsync(),
                 sp.GetRequiredService<IEvalStore>().InitializeAsync());
             phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
+
+            phaseTimer.Restart();
+            foreach (var result in await sp.GetRequiredService<ILabRuntimeHost>().RecoverOwnedProcessesAsync())
+            {
+                logs.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    result.Contains("Unknown", StringComparison.Ordinal) ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info,
+                    RuntimeLogCategory.Service,
+                    result));
+            }
+            phases.Add(new StartupPhase("lab-recovery", phaseTimer.ElapsedMilliseconds));
 
             // Probe active voice provider health at startup to detect externally-running services
             phaseTimer.Restart();
@@ -277,6 +288,8 @@ public partial class App : Application
     {
         s.AddHermaeusCoreServices();
         s.AddSingleton<ChatViewModel>();
+        s.AddSingleton<LiveModelTelemetrySampler>();
+        s.AddSingleton<LiveModelTelemetryViewModel>();
         s.AddSingleton<AgentScenarioSuiteViewModel>();
         s.AddSingleton<AgentViewModel>();
         // Shared between SettingsViewModel (Voice orchestration/channels) and
@@ -288,6 +301,7 @@ public partial class App : Application
         s.AddSingleton<RagViewModel>();
         s.AddSingleton<ServicesViewModel>();
         s.AddSingleton<BenchmarkViewModel>();
+        s.AddSingleton<LabViewModel>();
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<MemoriesViewModel>();

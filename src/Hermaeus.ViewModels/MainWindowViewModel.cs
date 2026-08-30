@@ -21,6 +21,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private CancellationTokenSource? _watchedRefreshCts;
     private readonly Dictionary<string, CancellationTokenSource> _pendingMetadataSaves = new();
     private static readonly TimeSpan MetadataSaveDebounce = TimeSpan.FromMilliseconds(500);
+    private readonly object _backgroundTaskGate = new();
+    private readonly List<Task> _backgroundTasks = [];
+    private readonly object _shutdownGate = new();
+    private Task? _shutdownTask;
+    private bool _isShuttingDown;
 
     public ChatViewModel            Chat     { get; }
     public AgentViewModel           Agent    { get; }
@@ -29,6 +34,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public RagViewModel             Rag      { get; }
     public ServicesViewModel        Services { get; }
     public BenchmarkViewModel       Benchmarks { get; }
+    public LabViewModel             Lab { get; }
     public SystemOverviewViewModel  SystemOverview { get; }
     public DoctorViewModel          Doctor { get; }
     public MemoriesViewModel        Memories { get; }
@@ -42,7 +48,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
     public UiBoundCollection<ToastViewModel> ToastHistory { get; } = [];
     public UiBoundCollection<string> FolderFilters { get; } = ["All"];
-    public Action<string>? RequestCopyToastDetails { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToastDetails { get; set; }
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
@@ -62,6 +68,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowRag      => ActivePanel == "rag";
     public bool ShowServices => ActivePanel == "services";
     public bool ShowBenchmarks => ActivePanel == "benchmarks";
+    public bool ShowLab => ActivePanel == "lab";
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowMemories => ActivePanel == "memories";
@@ -78,6 +85,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "rag"      => Rag,
         "services" => Services,
         "benchmarks" => Benchmarks,
+        "lab"       => Lab,
         "system"   => SystemOverview,
         "doctor"   => Doctor,
         "memories" => Memories,
@@ -99,6 +107,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RagViewModel rag,
         ServicesViewModel services,
         BenchmarkViewModel benchmarks,
+        LabViewModel lab,
         SystemOverviewViewModel systemOverview,
         DoctorViewModel doctor,
         MemoriesViewModel memories,
@@ -112,7 +121,8 @@ public partial class MainWindowViewModel : ViewModelBase
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
         ConversationExportService exports,
-        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
+        LlamaCppService? llamaCpp = null)
     {
         _recallIndexing = recallIndexing;
         Palette = palette;
@@ -123,7 +133,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services;
-        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
+        Benchmarks = benchmarks; Lab = lab; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Projects = projects;
         // r24 doc 01 1.6: switching a project only ever changes what NEW work
         // inherits. Existing conversations/tasks/datasets are never rewritten.
@@ -155,6 +165,7 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         };
         Chat.RequestNavigate = panel => ActivePanel = panel;
+        Models.RequestNavigate = panel => ActivePanel = panel;
         // r25 follow-up: Services reports whether the speech model is installed and
         // sends the user to Doctor to install it, rather than carrying a second,
         // independent install button that never learned it had succeeded.
@@ -208,11 +219,18 @@ public partial class MainWindowViewModel : ViewModelBase
         // them to disk, so every edit made there was lost on restart. Route its
         // Save through the one existing save flow rather than adding a second.
         Services.SaveAllSettings = Settings.SaveAsync;
+        // Stopped and still-starting managed servers are expected local states.
+        // Give the provider the live Services status gate so model refreshes do
+        // not turn them into connection warnings. Running, Error, and unmanaged
+        // endpoints remain probeable.
+        if (llamaCpp is not null)
+            llamaCpp.IsBaseUrlExpectedUnavailable = Services.IsManagedServerExpectedUnavailable;
         Chat.PropertyChanged += (s, e) => { if (e.PropertyName == "ConversationTitle") OnPropertyChanged(nameof(WindowTitle)); };
         Chat.ConversationSaved += OnConversationSaved;
         // r27 01 1.3: Chat asks Services what it is waiting on, through a
         // delegate, so the chat view model keeps knowing nothing about Services.
         Chat.WarmingServerProvider = Services.GetWarmingChatServer;
+        Chat.ManagedTelemetryRequestFactory = Services.CreateManagedTelemetryRequestAsync;
         // The RAG panel's Ask has no model picker of its own; it uses whatever
         // Chat has selected rather than an often-unset settings default.
         Rag.ChatModelProvider = () => Chat.SelectedModel?.Id ?? string.Empty;
@@ -259,6 +277,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Nav("nav.models", "Models", "Models", "Ctrl+4", "models");
         Nav("nav.services", "Services", "Services", "Ctrl+5", "services");
         Nav("nav.benchmarks", "Benchmarks", "Benchmarks", "", "benchmarks");
+        Nav("nav.lab", "Lab", "Lab", "", "lab");
         Nav("nav.system", "System overview", "System", "", "system");
         Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
         Nav("nav.memories", "Memories", "Memory", "", "memories");
@@ -449,16 +468,70 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public void Shutdown()
+    public void Shutdown() => _ = ShutdownAsync();
+
+    public Task ShutdownAsync()
     {
+        lock (_shutdownGate)
+            return _shutdownTask ??= ShutdownCoreAsync();
+    }
+
+    private async Task ShutdownCoreAsync()
+    {
+        lock (_backgroundTaskGate)
+            _isShuttingDown = true;
+
         _searchCts?.Cancel();
         _searchCts?.Dispose();
         _searchCts = null;
         _watchedRefreshCts?.Cancel();
         _watchedRefreshCts?.Dispose();
         _watchedRefreshCts = null;
-        Services.StopAll();
-        Settings.Shutdown();
+        await Lab.ShutdownAsync();
+        await Services.StopAllAsync();
+        await AwaitBackgroundTasksAsync();
+        await Settings.ShutdownAsync();
+    }
+
+    private void RunBackgroundTaskAsync(string operation, Func<Task> action)
+    {
+        Task task;
+        lock (_backgroundTaskGate)
+        {
+            if (_isShuttingDown)
+                return;
+
+            task = RunBackgroundTaskCoreAsync(operation, action);
+            _backgroundTasks.Add(task);
+        }
+
+        _ = RemoveBackgroundTaskWhenCompleteAsync(task);
+    }
+
+    private async Task RemoveBackgroundTaskWhenCompleteAsync(Task task)
+    {
+        try { await task; }
+        finally
+        {
+            lock (_backgroundTaskGate)
+                _backgroundTasks.Remove(task);
+        }
+    }
+
+    private async Task AwaitBackgroundTasksAsync()
+    {
+        while (true)
+        {
+            Task[] tasks;
+            lock (_backgroundTaskGate)
+            {
+                if (_backgroundTasks.Count == 0)
+                    return;
+                tasks = _backgroundTasks.ToArray();
+            }
+
+            await Task.WhenAll(tasks);
+        }
     }
 
     private async Task LoadConversationsAsync()
@@ -774,6 +847,7 @@ public partial class MainWindowViewModel : ViewModelBase
     // wizard) would be written back over the real value.
     [RelayCommand] private void ShowServicesPanel()    { ActivePanel = "services"; Settings.Reload(); }
     [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; RunBackgroundTaskAsync("load benchmarks panel", () => Benchmarks.LoadCommand.ExecuteAsync(null)); }
+    [RelayCommand] private void ShowLabPanel()         { ActivePanel = "lab"; RunBackgroundTaskAsync("load lab evidence", Lab.RefreshAsync); }
     [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; RunBackgroundTaskAsync("refresh system panel", () => SystemOverview.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowDoctorPanel()
     {
@@ -843,6 +917,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowRag));
         OnPropertyChanged(nameof(ShowServices));
         OnPropertyChanged(nameof(ShowBenchmarks));
+        OnPropertyChanged(nameof(ShowLab));
         OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ShowDoctor));
         OnPropertyChanged(nameof(ShowMemories));
@@ -1037,10 +1112,21 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task ClearToastHistoryAsync() => await MutateAndSaveHistoryAsync(() => ToastHistory.Clear());
 
     [RelayCommand]
-    private void CopyToastDetails(ToastViewModel? item)
+    private async Task CopyToastDetails(ToastViewModel? item)
     {
         if (item is { CanCopyDetails: true })
-            RequestCopyToastDetails?.Invoke(item.Message);
+        {
+            var copied = false;
+            try
+            {
+                if (RequestCopyToastDetails is not null)
+                    copied = await RequestCopyToastDetails(item.Message);
+            }
+            catch { }
+            _toasts.Show(copied ? "Details copied" : "Could not copy details",
+                copied ? "The diagnostic detail was copied to the clipboard." : "The clipboard was unavailable.",
+                copied ? ToastKind.Success : ToastKind.Warning, 3000);
+        }
     }
 
     private sealed class ToastHistoryEntry
@@ -1061,9 +1147,24 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task RefreshModelsAfterServerChangeAsync()
     {
+        lock (_backgroundTaskGate)
+        {
+            if (_isShuttingDown)
+                return;
+        }
+
         try
         {
-            await RunOnUiAsync(() => Chat.LoadModelsAsync(force: true));
+            await RunOnUiAsync(() =>
+            {
+                lock (_backgroundTaskGate)
+                {
+                    if (_isShuttingDown)
+                        return Task.CompletedTask;
+                }
+
+                return Chat.LoadModelsAsync(force: true);
+            });
         }
         catch (Exception ex)
         {
@@ -1084,11 +1185,6 @@ public partial class MainWindowViewModel : ViewModelBase
         var elapsed = sw.ElapsedMilliseconds;
         lock (into)
             into.Add(new StartupPhase(name, elapsed));
-    }
-
-    private void RunBackgroundTaskAsync(string operation, Func<Task> action)
-    {
-        _ = RunBackgroundTaskCoreAsync(operation, action);
     }
 
     private async Task RunBackgroundTaskCoreAsync(string operation, Func<Task> action)

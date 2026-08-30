@@ -20,4 +20,11 @@ public class ModelProfile
     public string Backend { get; set; } = string.Empty;
     public bool IsVisible { get; set; } = true;
     public string Avatar { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Downloads and updates explicitly mapped projector and MTP companions for
+    /// this model when trusted source metadata is available. This is deliberately
+    /// separate from the one-time download selection.
+    /// </summary>
+    public bool AutoManageCompanionAssets { get; set; } = true;
 }

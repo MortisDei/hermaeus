@@ -10,6 +10,11 @@ public sealed record KvProjection(long WeightsBytes, long KvBytes)
     public long TotalBytes => WeightsBytes + KvBytes;
 }
 
+public sealed record KvAllocationProjection(long KeyBytes, long ValueBytes)
+{
+    public long TotalBytes => KeyBytes + ValueBytes;
+}
+
 /// <summary>
 /// Deterministic KV-cache-cost estimate, pure and next to <see cref="ModelFitEstimator"/>.
 /// Always an estimate, never a measurement: uses GGUF sliding-window metadata when present
@@ -89,6 +94,21 @@ public static class KvCacheMath
         _ => DefaultBytesPerElement
     };
 
+    public static double? TryResolveKnownBytesPerElement(string? cacheType) =>
+        (cacheType ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "f32" => 4.0,
+            "f16" or "bf16" => 2.0,
+            "q8_0" => 1.0625,
+            "q5_0" or "q5_1" => 0.6875,
+            "q4_0" or "q4_1" or "iq4_nl" => 0.5625,
+            _ => null
+        };
+
+    public static bool RequiresRuntimeAdvertisement(string? cacheType) =>
+        (cacheType ?? string.Empty).Trim().StartsWith('q')
+        || string.Equals((cacheType ?? string.Empty).Trim(), "iq4_nl", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Dense-attention bytes of KV cache per token across every layer, at full offload:
     /// block_count * head_count_kv * (key_length * bytesPerElementK + value_length *
     /// bytesPerElementV). Null when the GGUF header lacked the shape facts required
@@ -150,6 +170,27 @@ public static class KvCacheMath
         return new KvProjection(weights, kv);
     }
 
+    public static KvAllocationProjection? ProjectAllocation(
+        GgufModelInfo info,
+        int contextSize,
+        int gpuLayers,
+        double bytesPerElementK,
+        double bytesPerElementV,
+        bool swaFull = false)
+    {
+        if (info.BlockCount is not > 0 || info.HeadCountKv is not > 0
+            || info.KeyLength is not > 0 || info.ValueLength is not > 0)
+            return null;
+
+        var tokenSlots = ProjectTokenSlots(info, contextSize, swaFull);
+        var fraction = OffloadFraction(gpuLayers, info.BlockCount.Value);
+        var keyPerLayerToken = info.HeadCountKv.Value * (double)info.KeyLength.Value * bytesPerElementK;
+        var valuePerLayerToken = info.HeadCountKv.Value * (double)info.ValueLength.Value * bytesPerElementV;
+        return new KvAllocationProjection(
+            (long)(keyPerLayerToken * tokenSlots * fraction),
+            (long)(valuePerLayerToken * tokenSlots * fraction));
+    }
+
     private static double ProjectKvBytes(GgufModelInfo info, double denseKvBytesPerToken, int contextSize, bool swaFull = false)
     {
         var ctx = Math.Max(0, contextSize);
@@ -175,5 +216,22 @@ public static class KvCacheMath
         }
 
         return layerBytesPerToken * tokenSlots;
+    }
+
+    private static double ProjectTokenSlots(GgufModelInfo info, int contextSize, bool swaFull)
+    {
+        var ctx = Math.Max(0, contextSize);
+        if (ctx == 0 || info.BlockCount is not > 0)
+            return 0;
+        if (info.SlidingWindow is not > 0
+            || info.SlidingWindowPattern is not { Count: > 0 } pattern
+            || swaFull)
+            return info.BlockCount.Value * (double)ctx;
+
+        var slidingContext = Math.Min(ctx, info.SlidingWindow.Value);
+        double tokenSlots = 0;
+        for (var layer = 0; layer < info.BlockCount.Value; layer++)
+            tokenSlots += pattern[layer % pattern.Count] ? slidingContext : ctx;
+        return tokenSlots;
     }
 }

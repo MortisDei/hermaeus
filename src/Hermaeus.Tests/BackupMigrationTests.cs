@@ -128,6 +128,72 @@ namespace Hermaeus.Tests
                 "migration should keep a backup copy of Agent state");
         }
 
+        public static async Task CaseDistinctDataRootsUsePlatformFilesystemIdentity()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("HermaeusRoot");
+            var next = temp.PathFor("hermaeusroot");
+            Directory.CreateDirectory(previous);
+            File.WriteAllText(Path.Combine(previous, "conversations.db"), "db");
+
+            var service = NewSettings(temp);
+            var plan = service.PreviewDataRootMigration(previous, next);
+            service.Settings.DataManagement.DataRootDirectory = next;
+            var result = await service.SaveAsync(previous);
+
+            if (OperatingSystem.IsWindows())
+            {
+                Equal(false, plan.WillMove, "Windows should treat case-distinct spellings on the same path as one root");
+                Equal(false, result.DataMigrated, "Windows should not migrate between case-distinct spellings of one root");
+                True(File.Exists(Path.Combine(previous, "conversations.db")), "Windows should leave the shared root file in place");
+            }
+            else
+            {
+                Equal(true, plan.WillMove, "Linux must treat case-distinct directories as distinct migration roots");
+                Equal(true, result.DataMigrated, "Linux should migrate between case-distinct directories");
+                True(File.Exists(Path.Combine(next, "conversations.db")), "Linux should activate the distinct destination root");
+                False(File.Exists(Path.Combine(previous, "conversations.db")), "Linux should remove the migrated source file");
+            }
+        }
+
+        public static async Task DataRootMigrationRollsBackAfterMoveFailure()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            var settingsPath = temp.PathFor("settings/settings.json");
+            Directory.CreateDirectory(previous);
+            File.WriteAllText(Path.Combine(previous, "conversations.db"), "db");
+            File.WriteAllText(Path.Combine(previous, "memories.db"), "memories");
+
+            var moveCount = 0;
+            var service = new SettingsService(settingsPath, (source, destination) =>
+            {
+                if (++moveCount == 2)
+                    throw new IOException("injected migration failure");
+                File.Move(source, destination);
+            });
+            service.Settings.DataManagement.DataRootDirectory = previous;
+            await service.SaveAsync();
+            service.Settings.DataManagement.DataRootDirectory = next;
+
+            await ThrowsAsync<IOException>(() => service.SaveAsync(previous));
+
+            Equal(previous, service.Settings.DataManagement.DataRootDirectory, "failed migration must restore the previous active root");
+            True(File.Exists(Path.Combine(previous, "conversations.db")), "rollback must restore the first moved file");
+            True(File.Exists(Path.Combine(previous, "memories.db")), "rollback must leave the second source file authoritative");
+            False(File.Exists(Path.Combine(next, "conversations.db")), "rollback must not leave a split destination workspace");
+            False(File.Exists(Path.Combine(next, "memories.db")), "rollback must not leave the failed destination file");
+
+            var retry = NewSettings(temp);
+            await retry.LoadAsync();
+            retry.Settings.DataManagement.DataRootDirectory = next;
+            var result = await retry.SaveAsync(previous);
+            Equal(true, result.DataMigrated, "a clean retry should migrate the intact old root");
+            True(File.Exists(Path.Combine(next, "conversations.db")), "retry should move the first file");
+            True(File.Exists(Path.Combine(next, "memories.db")), "retry should move the second file");
+        }
+
         /// <summary>r11 3.1: migration used to move only conversations.db*/memories.db*/benchmarks.db*/agent/, stranding everything else the app writes to the data root. A fixture containing every other known family must move completely.</summary>
         public static async Task DataRootMigrationMovesEveryKnownFileFamily()
         {
@@ -232,7 +298,8 @@ namespace Hermaeus.Tests
             Directory.CreateDirectory(previousRoot);
 
             var settingsPath = Path.Combine(previousRoot, "settings.json");
-            var service = new SettingsService(settingsPath);
+            var service = NewSettings(temp, "previous/settings.json");
+            service.Settings.DataManagement.DataRootDirectory = previousRoot;
             await service.SaveAsync();
             File.WriteAllText(Path.Combine(previousRoot, "conversations.db"), "db");
 

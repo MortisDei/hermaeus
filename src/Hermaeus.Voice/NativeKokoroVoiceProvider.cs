@@ -163,17 +163,46 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
     {
-        var output = await RenderToFileAsync(text, speaker, null, ct);
+        Log(RuntimeLogLevel.Info, "Kokoro native preview synthesis started.");
+        string? output = null;
         try
         {
-            await AudioPlayback.PlayAsync(output, ct);
+            output = await RenderToFileAsync(text, speaker, null, ct);
+            var byteLength = new FileInfo(output).Length;
+            Log(RuntimeLogLevel.Info, $"Kokoro native preview synthesis produced {byteLength} bytes; WAV validation and playback are starting.");
+            await AudioPlayback.PlayAsync(output, ct, backend =>
+                Log(RuntimeLogLevel.Info, $"Kokoro native preview playback backend selected: {backend}."));
+            Log(RuntimeLogLevel.Info, "Kokoro native preview completed.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Log(RuntimeLogLevel.Info, "Kokoro native preview cancelled.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Log(RuntimeLogLevel.Error, $"Kokoro native preview failed: {ex.Message}");
+            throw;
         }
         finally
         {
-            try { File.Delete(output); }
-            catch { }
+            if (output is not null)
+            {
+                try
+                {
+                    File.Delete(output);
+                    Log(RuntimeLogLevel.Debug, "Kokoro native preview temporary WAV cleaned up.");
+                }
+                catch (Exception ex)
+                {
+                    Log(RuntimeLogLevel.Warning, $"Kokoro native preview cleanup failed: {ex.Message}");
+                }
+            }
         }
     }
+
+    private void Log(RuntimeLogLevel level, string message) =>
+        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, level, RuntimeLogCategory.Voice, message));
 
     private async Task<string> RenderToFileAsync(string text, string? speaker, string? outputPath, CancellationToken ct)
     {

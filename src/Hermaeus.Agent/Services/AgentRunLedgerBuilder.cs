@@ -30,7 +30,7 @@ public static class AgentRunLedgerBuilder
         }
 
         var subTasks = task.SubTaskPlan
-            .Select(s => new AgentLedgerSubTaskEntry(s.Goal, s.Status, s.TaskId))
+            .Select(s => new AgentLedgerSubTaskEntry(s.Goal, s.Status, s.TaskId, s.ResolvedModelId, s.ModelDisplayName))
             .ToList();
 
         return new AgentRunLedger(files, commands, approvals, subTasks);

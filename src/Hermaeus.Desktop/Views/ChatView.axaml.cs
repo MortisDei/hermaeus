@@ -23,11 +23,11 @@ public partial class ChatView : UserControl
     // extent growth while pinned, and un-pins the instant the user scrolls
     // away, so their position is never fought mid-stream.
     private bool _pinnedToBottom = true;
-    private const double BottomPinThreshold = 40;
 
     public ChatView()
     {
         InitializeComponent();
+        AttachedToVisualTree += (_, _) => ScheduleInputFocus();
 
         // Ctrl+V (or right-click Paste) with an image on the clipboard attaches it the
         // same way a dragged-in or browsed-for image file would, instead of doing
@@ -92,12 +92,20 @@ public partial class ChatView : UserControl
 
             vm.RequestCopyToClipboard = async text =>
             {
-                if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
-                    await cb.SetTextAsync(text);
+                if (TopLevel.GetTopLevel(this)?.Clipboard is not { } cb)
+                    return false;
+                try { await cb.SetTextAsync(text); return true; }
+                catch { return false; }
             };
 
-            vm.RequestInputFocus = () =>
-                Dispatcher.UIThread.Post(() => this.FindControl<TextBox>("InputBox")?.Focus());
+            vm.RequestInputFocus = ScheduleInputFocus;
+
+            // A ContentControl recreates ChatView on panel navigation. On a
+            // cold start its DataContext can arrive before the input is ready
+            // to receive keyboard focus; returning to Chat creates a second
+            // view and happened to hide that race. Schedule focus after the
+            // layout turn that attached this instance instead.
+            ScheduleInputFocus();
 
             vm.RequestContextFilePicker = async () =>
             {
@@ -227,6 +235,16 @@ public partial class ChatView : UserControl
         };
     }
 
+    private void ScheduleInputFocus()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_vm is not null && DataContext is ChatViewModel
+                && this.FindControl<TextBox>("InputBox") is { IsEnabled: true } input)
+                input.Focus();
+        }, DispatcherPriority.Background);
+    }
+
     /// <summary>
     /// While pinned, any extent growth (new content materializing - a render
     /// batch, the action row, sources, memory pills) snaps the offset to the
@@ -240,13 +258,16 @@ public partial class ChatView : UserControl
     {
         if (sender is not ScrollViewer scroll) return;
 
-        if (e.ExtentDelta.Y != 0 && _pinnedToBottom)
-        {
+        var transition = ChatScrollPinState.Apply(
+            _pinnedToBottom,
+            scroll.Extent.Height,
+            scroll.Viewport.Height,
+            scroll.Offset.Y,
+            e.ExtentDelta.Y,
+            e.OffsetDelta.Y);
+        _pinnedToBottom = transition.IsPinned;
+        if (transition.ShouldSnap)
             SnapToBottomIfPinned(force: true);
-            return;
-        }
-
-        _pinnedToBottom = DistanceFromBottom(scroll) <= BottomPinThreshold;
     }
 
     private void SnapToBottomIfPinned(bool force = false)
@@ -256,9 +277,6 @@ public partial class ChatView : UserControl
         var maxOffsetY = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
         scroll.Offset = new Vector(scroll.Offset.X, maxOffsetY);
     }
-
-    private static double DistanceFromBottom(ScrollViewer scroll) =>
-        Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height - scroll.Offset.Y);
 
     /// <summary>
     /// r29 doc 01 1.4: AcceptsReturn is true always and this handler owns both

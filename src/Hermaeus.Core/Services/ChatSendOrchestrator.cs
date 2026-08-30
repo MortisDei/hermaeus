@@ -10,8 +10,8 @@ public sealed record ChatSendResult(
     string? Error,
     ChatServerTimings? ServerTimings = null,
     // r14 4.1: the first streamed event of any kind (reasoning/tool deltas,
-    // buffering) vs the first visible content token. The gap is time the user
-    // spent staring at a blank bubble that "before first token" used to hide.
+    // buffering) vs the first non-empty content delta. The gap is time before
+    // content reached the client that "before first token" used to hide.
     long FirstEventMs = 0,
     // r19 1.2: "length" means the provider cut generation off at the
     // configured token cap, not that the model finished naturally.
@@ -50,7 +50,7 @@ public static class ChatSendOrchestrator
                 // r14 4.1: stamp the first event of any kind, before the
                 // content check, so a non-content stream prefix (reasoning or
                 // tool deltas, transport buffering) is attributed to the stream
-                // rather than misreported as "before first token".
+                // rather than misreported as "before first content".
                 if (firstEventMs is null)
                 {
                     firstEventMs = clock.ElapsedMilliseconds;

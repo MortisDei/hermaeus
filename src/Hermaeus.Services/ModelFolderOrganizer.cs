@@ -250,8 +250,12 @@ public static class ModelFolderOrganizer
             return;
 
         foreach (var server in settings.ManagedServers)
+        {
             if (pathRewrites.TryGetValue(NormalizeKey(server.ModelPath), out var newPath))
                 server.ModelPath = newPath;
+            if (pathRewrites.TryGetValue(NormalizeKey(server.MmprojPath), out var newMmprojPath))
+                server.MmprojPath = newMmprojPath;
+        }
 
         foreach (var profile in settings.LlamaTuneProfiles)
             if (pathRewrites.TryGetValue(NormalizeKey(profile.ModelPath), out var newPath))
@@ -299,7 +303,9 @@ public static class ModelFolderOrganizer
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
 
-        var sameVolume = string.Equals(Path.GetPathRoot(Path.GetFullPath(source)), Path.GetPathRoot(Path.GetFullPath(destination)), StringComparison.OrdinalIgnoreCase);
+        var sameVolume = ModelPathSafety.AreSameLocalPath(
+            Path.GetPathRoot(Path.GetFullPath(source)),
+            Path.GetPathRoot(Path.GetFullPath(destination)));
         if (sameVolume)
         {
             File.Move(source, destination);
@@ -318,17 +324,19 @@ public static class ModelFolderOrganizer
     }
 
     private static bool IsDirectlyUnder(string path, string directory) =>
-        string.Equals(Path.GetFullPath(Path.GetDirectoryName(path) ?? string.Empty), Path.GetFullPath(directory), StringComparison.OrdinalIgnoreCase);
+        ModelPathSafety.AreSameLocalPath(
+            Path.GetFullPath(Path.GetDirectoryName(path) ?? string.Empty),
+            Path.GetFullPath(directory));
 
     private static string NormalizeKey(string path) =>
         string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFullPath(path.Trim());
 
     /// <summary>Groups <c>*-00001-of-00003.gguf</c>-style parts (matched by directory + base
-    /// name + total-part count, case-insensitively) so they move together or not at all;
+    /// name + total-part count, using the host filesystem case policy) so they move together or not at all;
     /// everything else is its own single-file group.</summary>
     private static List<List<string>> GroupMultiPartSets(IEnumerable<string> paths)
     {
-        var groups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var groups = new Dictionary<string, List<string>>(ModelPathSafety.LocalPathComparer);
         var result = new List<List<string>>();
 
         foreach (var path in paths)
@@ -351,7 +359,7 @@ public static class ModelFolderOrganizer
         }
 
         foreach (var group in groups.Values)
-            result.Add(group.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList());
+            result.Add(group.OrderBy(p => p, ModelPathSafety.LocalPathComparer).ToList());
 
         return result;
     }

@@ -2,12 +2,16 @@ using Hermaeus.Composition;
 using Hermaeus.Core.Services;
 using Hermaeus.LocalApi;
 using Hermaeus.Rag.Storage;
+using Hermaeus.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHermaeusCoreServices();
+var settingsPath = ReadSettingsPath(args);
+if (settingsPath is not null)
+    builder.Services.AddSingleton<ISettingsService>(new SettingsService(settingsPath));
 
 var app = builder.Build();
 
@@ -32,6 +36,17 @@ app.UseLocalApiTokenAuth();
 app.MapLocalApiEndpoints();
 
 await app.RunAsync();
+
+static string? ReadSettingsPath(string[] args)
+{
+    for (var i = 0; i < args.Length - 1; i++)
+    {
+        if (string.Equals(args[i], "--settings-path", StringComparison.Ordinal))
+            return Path.GetFullPath(args[i + 1]);
+    }
+
+    return null;
+}
 
 // Exposed for WebApplicationFactory<Program>-based integration tests.
 public partial class Program;

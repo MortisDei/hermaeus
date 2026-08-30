@@ -1,8 +1,25 @@
 using System.Net.Http.Json;
 using System.Reflection;
+using System.Text.Json;
 using Hermaeus.Core.Models;
 
 namespace Hermaeus.Services;
+
+internal enum GitHubReleaseFetchStatus
+{
+    Success,
+    NetworkUnavailable,
+    RepositoryNotFound,
+    RateLimited,
+    GitHubRejected,
+    ResponseInvalid
+}
+
+internal sealed record GitHubReleaseFetchResult(
+    GitHubRelease? Release,
+    GitHubReleaseFetchStatus Status,
+    string Detail,
+    int? HttpStatusCode = null);
 
 public sealed partial class DoctorService
 {
@@ -35,21 +52,23 @@ public sealed partial class DoctorService
                 "System");
         }
 
-        var latest = await TryGetLatestHermaeusReleaseAsync(ct);
-        if (latest is null)
+        var fetch = await TryGetLatestHermaeusReleaseAsync(ct);
+        if (fetch.Status != GitHubReleaseFetchStatus.Success || fetch.Release is null)
         {
             return BuildCheck(
                 "app-update",
                 "Hermaeus update check",
-                DoctorCheckStatus.Info,
+                fetch.Status is GitHubReleaseFetchStatus.RepositoryNotFound or GitHubReleaseFetchStatus.GitHubRejected
+                    or GitHubReleaseFetchStatus.ResponseInvalid ? DoctorCheckStatus.Warning : DoctorCheckStatus.Info,
                 $"Running {currentRaw}",
-                "Could not reach GitHub releases to check for an update. This is expected while the repository is private; it will work once the repository is public.",
+                fetch.Detail,
                 "Open Releases",
                 true,
-                $"Checked {UpdateReleasesApiUrl}",
+                $"Checked {UpdateReleasesApiUrl}; result {fetch.Status}{(fetch.HttpStatusCode is int status ? $" (HTTP {status})" : string.Empty)}",
                 "System");
         }
 
+        var latest = fetch.Release;
         if (!TryParseCoreVersion(latest.TagName, out var latestVersion) || latestVersion is null)
         {
             return BuildCheck(
@@ -95,24 +114,56 @@ public sealed partial class DoctorService
         ?? typeof(DoctorService).Assembly.GetName().Version?.ToString()
         ?? "unknown";
 
-    private Task<GitHubRelease?> TryGetLatestHermaeusReleaseAsync(CancellationToken ct) =>
+    private Task<GitHubReleaseFetchResult> TryGetLatestHermaeusReleaseAsync(CancellationToken ct) =>
         GetCachedGitHubReleaseAsync("hermaeus-latest-release", FetchLatestHermaeusReleaseAsync, ct);
 
-    private static async Task<GitHubRelease?> FetchLatestHermaeusReleaseAsync(CancellationToken ct)
+    private Task<GitHubReleaseFetchResult> FetchLatestHermaeusReleaseAsync(CancellationToken ct) =>
+        FetchLatestHermaeusReleaseAsync(_updateHttp, ct);
+
+    internal static async Task<GitHubReleaseFetchResult> FetchLatestHermaeusReleaseAsync(
+        HttpClient http, CancellationToken ct)
     {
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(4));
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("Hermaeus-Doctor/1.0");
-            var releases = await http.GetFromJsonAsync<List<GitHubRelease>>(UpdateReleasesApiUrl, timeout.Token);
+            using var request = new HttpRequestMessage(HttpMethod.Get, UpdateReleasesApiUrl);
+            request.Headers.UserAgent.ParseAdd("Hermaeus-Doctor/1.0");
+            request.Headers.Accept.ParseAdd("application/vnd.github+json");
+            request.Headers.Accept.ParseAdd("application/json");
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            var statusCode = (int)response.StatusCode;
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return new(null, GitHubReleaseFetchStatus.RepositoryNotFound,
+                    $"GitHub returned 404 for the Hermaeus repository {UpdateRepoSlug}.", statusCode);
+            if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests)
+                return new(null, GitHubReleaseFetchStatus.RateLimited,
+                    "GitHub rate-limited or rejected the anonymous releases request. Try again later.", statusCode);
+            if (!response.IsSuccessStatusCode)
+                return new(null, GitHubReleaseFetchStatus.GitHubRejected,
+                    $"GitHub rejected the releases request with HTTP {statusCode}.", statusCode);
+
+            var releases = await response.Content.ReadFromJsonAsync<List<GitHubRelease>>(timeout.Token);
             var latest = releases?.FirstOrDefault();
-            return string.IsNullOrWhiteSpace(latest?.TagName) ? null : latest;
+            return string.IsNullOrWhiteSpace(latest?.TagName)
+                ? new(null, GitHubReleaseFetchStatus.ResponseInvalid,
+                    "GitHub returned no release with a usable tag.", statusCode)
+                : new(latest, GitHubReleaseFetchStatus.Success, "Release metadata loaded.", statusCode);
         }
-        catch
+        catch (JsonException)
         {
-            return null;
+            return new(null, GitHubReleaseFetchStatus.ResponseInvalid,
+                "GitHub returned release data that Hermaeus could not parse.");
+        }
+        catch (HttpRequestException ex)
+        {
+            return new(null, GitHubReleaseFetchStatus.NetworkUnavailable,
+                $"GitHub releases were unavailable: {ex.Message}");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return new(null, GitHubReleaseFetchStatus.NetworkUnavailable,
+                "The GitHub releases request timed out.");
         }
     }
 

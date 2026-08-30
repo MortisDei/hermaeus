@@ -72,6 +72,21 @@ public sealed class RecallIndexingServiceTests
     }
 
     [Fact]
+    public async Task Re_indexing_removes_messages_that_no_longer_qualify()
+    {
+        using var temp = new TempDir();
+        var (indexing, store, _) = New(temp);
+        var conv = Conv("c1", ("user", "a message that starts long enough"));
+
+        await indexing.IndexConversationAsync(conv);
+        conv.Messages[0].Content = "short";
+        await indexing.IndexConversationAsync(conv);
+
+        var (count, _) = await store.GetSizeAsync();
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
     public async Task Excluding_a_conversation_removes_its_entries_immediately_and_blocks_reindexing()
     {
         using var temp = new TempDir();

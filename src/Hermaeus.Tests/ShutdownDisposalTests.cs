@@ -1,6 +1,8 @@
 using Hermaeus.Composition;
 using Hermaeus.Desktop;
 using Hermaeus.Mcp;
+using Hermaeus.Services;
+using Hermaeus.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -23,7 +25,11 @@ public sealed class ShutdownDisposalTests
     /// </summary>
     private static readonly Type[] KnownAsyncOnlyDisposableSingletons =
     [
-        typeof(McpToolBridge)
+        typeof(McpToolBridge),
+        typeof(LabExperimentService),
+        typeof(AudioFeedbackService),
+        typeof(LiveModelTelemetrySampler),
+        typeof(LiveModelTelemetryViewModel)
     ];
 
     private static ServiceCollection BuildFullServiceCollection()

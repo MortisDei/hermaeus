@@ -40,6 +40,60 @@ public sealed class ArchiveExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_zip_can_strip_one_known_upstream_wrapper_directory()
+    {
+        using var temp = new TempDir();
+        var archivePath = temp.PathFor("wrapped.zip");
+        BuildZip(archivePath, archive =>
+        {
+            AddZipEntry(archive, "llama-b10679/llama-server", "stub-binary");
+            AddZipEntry(archive, "llama-b10679/libggml.so", "sibling-library");
+        });
+
+        var destination = temp.PathFor("out");
+        await ArchiveExtractor.ExtractAsync(archivePath, destination, "llama-b10679");
+
+        Assert.True(File.Exists(Path.Combine(destination, "llama-server")));
+        Assert.False(Directory.Exists(Path.Combine(destination, "llama-b10679")));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_zip_accepts_flat_entries_when_a_known_wrapper_is_expected()
+    {
+        using var temp = new TempDir();
+        var archivePath = temp.PathFor("flat.zip");
+        BuildZip(archivePath, archive =>
+        {
+            AddZipEntry(archive, "llama-server.exe", "stub-binary");
+            AddZipEntry(archive, "ggml-cuda.dll", "cuda-library");
+        });
+
+        var destination = temp.PathFor("out");
+        await ArchiveExtractor.ExtractAsync(archivePath, destination, "llama-b10690");
+
+        Assert.Equal("stub-binary", await File.ReadAllTextAsync(Path.Combine(destination, "llama-server.exe")));
+        Assert.Equal("cuda-library", await File.ReadAllTextAsync(Path.Combine(destination, "ggml-cuda.dll")));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_rejects_mixed_wrapper_layout_before_writing()
+    {
+        using var temp = new TempDir();
+        var archivePath = temp.PathFor("mixed.zip");
+        BuildZip(archivePath, archive =>
+        {
+            AddZipEntry(archive, "llama-b10690/llama-server.exe", "stub-binary");
+            AddZipEntry(archive, "ggml-cuda.dll", "cuda-library");
+        });
+
+        var destination = temp.PathFor("out");
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ArchiveExtractor.ExtractAsync(archivePath, destination, "llama-b10690"));
+
+        Assert.Empty(Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public async Task ExtractAsync_targz_places_nested_entries_under_the_destination()
     {
         using var temp = new TempDir();
@@ -54,6 +108,24 @@ public sealed class ArchiveExtractorTests
         await ArchiveExtractor.ExtractAsync(archivePath, destination);
 
         Assert.Equal("stub-binary", await File.ReadAllTextAsync(Path.Combine(destination, "build", "bin", "llama-server")));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_targz_accepts_flat_entries_when_a_known_wrapper_is_expected()
+    {
+        using var temp = new TempDir();
+        var archivePath = temp.PathFor("flat.tar.gz");
+        await BuildTarGzAsync(archivePath, async writer =>
+        {
+            await AddTarEntryAsync(writer, "llama-server", "stub-binary");
+            await AddTarEntryAsync(writer, "libllama.so", "runtime-library");
+        });
+
+        var destination = temp.PathFor("out");
+        await ArchiveExtractor.ExtractAsync(archivePath, destination, "llama-b10690");
+
+        Assert.Equal("stub-binary", await File.ReadAllTextAsync(Path.Combine(destination, "llama-server")));
+        Assert.Equal("runtime-library", await File.ReadAllTextAsync(Path.Combine(destination, "libllama.so")));
     }
 
     [Fact]

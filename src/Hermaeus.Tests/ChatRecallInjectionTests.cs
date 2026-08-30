@@ -22,8 +22,8 @@ public sealed class ChatRecallInjectionTests
             Task.FromResult(_hits);
     }
 
-    private static RecallService NewRecallService(IReadOnlyList<RecallHit> hits) =>
-        new([new FakeRecallSourceOnly(hits)], new FakeEmbeddingService());
+    private static RecallService NewRecallService(IReadOnlyList<RecallHit> hits, bool withEmbeddings = true) =>
+        new([new FakeRecallSourceOnly(hits)], withEmbeddings ? new FakeEmbeddingService() : null);
 
     private static ChatViewModel BuildChatViewModel(ISettingsService settings, CapturingLlm llm, RecallService recall) =>
         new(
@@ -66,6 +66,11 @@ public sealed class ChatRecallInjectionTests
         True(assistant.HasContext, "a Recall hit must appear in the turn's context receipt");
         True(assistant.ContextSections.Any(s => s.Kind == ProvenanceKind.Recall),
             "the hit must be tagged with ProvenanceKind.Recall, not Memory, so it can never be targeted by a [MEMORY_UPDATE]/[MEMORY_FORGET] marker");
+        var recalledSource = Assert.Single(assistant.ContextSections.Single(s => s.Kind == ProvenanceKind.Recall).Items);
+        Equal("conversation:c-old:message:3", recalledSource.Locator,
+            "the context receipt must retain the precise Recall target rather than only a title and excerpt");
+        Equal(EvidenceOrigin.Extracted, recalledSource.EvidenceOrigin,
+            "a recall receipt is extracted from local history, not a fresh direct observation");
         // r25 doc 02: it lands in its own receipt section rather than the old
         // always-visible citation strip, which used to sit above the collapsed
         // memory pill and defeat the collapse entirely.
@@ -96,6 +101,28 @@ public sealed class ChatRecallInjectionTests
             "no hits means nothing should be injected");
         var trace = Assert.Single(vm.ChatTraces);
         Equal(0, trace.RecallContextItems, "no recall items should have been injected");
+    }
+
+    [Fact]
+    public async Task Keyword_only_recall_is_labelled_as_degraded_in_the_trace()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Memory.RecallInjectionEnabled = true;
+        var hit = new RecallHit(RecallKind.Message, "Keyword match", "a lexical result",
+            DateTime.UtcNow, "", 0.02, new RecallTarget(ConversationId: "c-old", MessageIndex: 1));
+        var recall = NewRecallService([hit], withEmbeddings: false);
+        var llm = new CapturingLlm();
+        var vm = BuildChatViewModel(settings, llm, recall);
+        await vm.LoadModelsAsync(force: true);
+        vm.SelectedModel = new LlmModel { Id = "capture", Name = "Capture", ProviderTag = "test" };
+
+        vm.InputText = "Find the lexical result";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        var trace = Assert.Single(vm.ChatTraces);
+        Assert.Equal("keyword-only (no embedding model)", trace.RecallNote);
+        Assert.True(trace.RecallContextItems > 0);
     }
 
     [Fact]

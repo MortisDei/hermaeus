@@ -36,7 +36,7 @@ public sealed class AgentService : IAgentService
         set_plan (steps: array of {description, status: pending|in_progress|done})
         to keep a visible checklist for multi-step goals; it replaces the
         whole plan each time. Use plan_subtasks (subtasks: array of 2 to 6
-        {goal, profile, success_criteria}, profile one of general|correctness|
+        {goal, profile, success_criteria, model_id?}, profile one of general|correctness|
         security|tests|performance|docs) only for a broad, multi-domain goal
         that should be split into focused sub-tasks each run through this
         same loop; never for a goal that fits a normal plan (set_plan is the
@@ -173,8 +173,8 @@ public sealed class AgentService : IAgentService
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"},"content":{"type":"string"}},"required":["relative_path","content"]}""")),
             new("set_plan", "Replace the task's visible plan checklist. Executes immediately, never requires approval.",
                 Schema("""{"type":"object","properties":{"steps":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["description"]}}},"required":["steps"]}""")),
-            new("plan_subtasks", "Propose splitting the current goal into 2 to 6 focused sub-tasks, each with a goal, a profile from the fixed list (general, correctness, security, tests, performance, docs), and success criteria. Always requires approval; only useful for broad, multi-domain goals, never for goals that fit a normal plan (use set_plan for that).",
-                Schema("""{"type":"object","properties":{"subtasks":{"type":"array","minItems":2,"maxItems":6,"items":{"type":"object","properties":{"goal":{"type":"string"},"profile":{"type":"string","enum":["general","correctness","security","tests","performance","docs"]},"success_criteria":{"type":"string"}},"required":["goal","profile","success_criteria"]}}},"required":["subtasks"]}""")),
+            new("plan_subtasks", "Propose splitting the current goal into 2 to 6 focused sub-tasks, each with a goal, fixed profile, success criteria, and optional model_id chosen exactly from EligibleModels. Omit model_id to inherit the parent model. Always requires approval.",
+                Schema("""{"type":"object","properties":{"subtasks":{"type":"array","minItems":2,"maxItems":6,"items":{"type":"object","properties":{"goal":{"type":"string"},"profile":{"type":"string","enum":["general","correctness","security","tests","performance","docs"]},"success_criteria":{"type":"string"},"model_id":{"type":"string"}},"required":["goal","profile","success_criteria"]}}},"required":["subtasks"]}""")),
             new("run_command", "Run one of the workspace's own pre-declared safe recipes (e.g. \"dotnet build\"). Requires user approval.",
                 Schema("""{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""))
         ];
@@ -190,6 +190,7 @@ public sealed class AgentService : IAgentService
     private readonly ISettingsService? _settings;
     private readonly ILessonStore? _lessons;
     private readonly IAgentWorkspaceTools? _workspaceTools;
+    private readonly IEmpiricalExperienceStore? _experiences;
 
     /// <summary>
     /// r29 doc 03 3.4: one interrupt source per running task, held for the
@@ -224,7 +225,8 @@ public sealed class AgentService : IAgentService
         IWorkspaceManifestStore? manifests = null,
         ISettingsService? settings = null,
         ILessonStore? lessons = null,
-        IAgentWorkspaceTools? workspaceTools = null)
+        IAgentWorkspaceTools? workspaceTools = null,
+        IEmpiricalExperienceStore? experiences = null)
     {
         _store = store;
         _contextBuilder = contextBuilder;
@@ -236,6 +238,7 @@ public sealed class AgentService : IAgentService
         _lessons = lessons;
         _settings = settings;
         _workspaceTools = workspaceTools;
+        _experiences = experiences;
     }
 
     private static readonly IReadOnlyList<string> BaseTaskConstraints =
@@ -288,6 +291,11 @@ public sealed class AgentService : IAgentService
         var constraints = BaseTaskConstraints.Concat(AgentSpecialistProfiles.Resolve(spec.ProfileName)).ToList();
         var state = NewTaskState(goal, constraints, parent.TaskId);
         state.WorkspaceRoot = parent.WorkspaceRoot;
+        state.ProjectId = parent.ProjectId;
+        state.ModelId = string.IsNullOrWhiteSpace(spec.ResolvedModelId)
+            ? (string.IsNullOrWhiteSpace(parent.ModelId) ? options.ModelId : parent.ModelId)
+            : spec.ResolvedModelId;
+        state.ModelDisplayName = string.IsNullOrWhiteSpace(spec.ModelDisplayName) ? state.ModelId : spec.ModelDisplayName;
 
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(state.TaskId, $"created sub-task (parent {parent.TaskId}): {state.Goal}", ct);
@@ -312,6 +320,7 @@ public sealed class AgentService : IAgentService
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+        var firstNewToolResult = state.ToolResults.Count;
         if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
             throw new InvalidOperationException("Agent task is already finished.");
         if (state.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
@@ -328,6 +337,15 @@ public sealed class AgentService : IAgentService
                 "This task has an unfinished sub-task plan; call RunAsync to advance orchestration instead of stepping the parent directly.");
         }
 
+        var modelWasFrozen = !string.IsNullOrWhiteSpace(state.ModelId);
+        var visibleModels = await GetVisibleModelsAsync(ct);
+        if (!modelWasFrozen)
+            state.ModelId = options.ModelId.Trim();
+        var selectedModel = visibleModels.FirstOrDefault(model => string.Equals(model.Id, state.ModelId, StringComparison.Ordinal));
+        if (modelWasFrozen && selectedModel is null)
+            return await PauseForUnavailableModelAsync(state, ct);
+        state.ModelDisplayName = selectedModel?.DisplayName ?? (string.IsNullOrWhiteSpace(state.ModelDisplayName) ? state.ModelId : state.ModelDisplayName);
+
         state.Status = AgentTaskStatus.Running;
         await _store.SaveAsync(state, ct);
 
@@ -337,6 +355,7 @@ public sealed class AgentService : IAgentService
         await DrainPendingInstructionsAsync(state, ct);
 
         var context = await _contextBuilder.BuildAsync(state, options, ct);
+        PopulateModelContext(context, state, visibleModels);
         // Tracked across the whole task so a successful completion can
         // confirm (bump evidence on) every lesson that actually informed
         // it, not just the ones from the final step.
@@ -346,7 +365,7 @@ public sealed class AgentService : IAgentService
                 state.InjectedLessonIds.Add(id);
         }
         var prompt = BuildPrompt(context);
-        var modelId = options.ModelId;
+        var modelId = state.ModelId;
         // r28 doc 05 5.2: the text protocol is what runs when the provider
         // returns no native tool calls, and it is the only path to an MCP tool
         // for any provider. Constraining it costs nothing where the provider
@@ -554,7 +573,10 @@ public sealed class AgentService : IAgentService
                     {
                         Tool = nextTool,
                         Arguments = response.NextAction.Arguments,
-                        ResultSummary = "The tool required approval, but no local executor is registered for it."
+                        ResultSummary = "The tool required approval, but no local executor is registered for it.",
+                        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(nextTool,
+                            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Unavailable,
+                                Detail: "No registered executor exists for the requested tool."))
                     });
                 }
             }
@@ -570,7 +592,19 @@ public sealed class AgentService : IAgentService
                     ["disposition"] = decision.Disposition.ToString(),
                     ["risk_level"] = decision.RiskLevel.ToString()
                 },
-                ResultSummary = decision.Reason
+                ResultSummary = decision.Reason,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("safety_gate",
+                    new AgentToolOutcomeEvidence(decision.Disposition switch
+                    {
+                        AgentToolDisposition.Allowed => AgentToolOutcomeSignal.Completed,
+                        AgentToolDisposition.RequiresApproval => AgentToolOutcomeSignal.ApprovalRequired,
+                        _ => AgentToolOutcomeSignal.PolicyBlocked
+                    }, Detail: decision.Disposition switch
+                    {
+                        AgentToolDisposition.Allowed => "The deterministic safety gate allowed the requested action.",
+                        AgentToolDisposition.RequiresApproval => "The deterministic safety gate requires user approval before execution.",
+                        _ => "The deterministic safety gate refused the requested action."
+                    }))
             });
 
             if (decision.Disposition == AgentToolDisposition.Allowed)
@@ -598,7 +632,7 @@ public sealed class AgentService : IAgentService
                         var revisionNote = $"plan revised: {previousPlanCount} items -> {state.Plan.Count} items";
                         await _store.AppendLogAsync(taskId, revisionNote, ct);
                         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-                            currentStep, "tool", "set_plan", revisionNote, DateTime.UtcNow), ct);
+                            currentStep, "tool", "set_plan", revisionNote, DateTime.UtcNow, ModelId: state.ModelId), ct);
                     }
 
                     // r23 2.1: opt-in pause after the FIRST set_plan of a
@@ -642,9 +676,19 @@ public sealed class AgentService : IAgentService
                     state.FileReadCount = toolOptions.ReadBudget!.UsedReads;
                     state.ToolResults.Add(toolResult);
                     executedToolResult = toolResult;
+                    if (toolResult.NormalizedOutcome.Outcome == NormalizedOutcome.Cancelled && ct.IsCancellationRequested)
+                    {
+                        state.Status = AgentTaskStatus.WaitingForUser;
+                        await _store.AppendTranscriptEntryAsync(taskId,
+                            AgentTranscriptCompactor.FromToolResult(state.StepCount, toolResult, DateTime.UtcNow) with { ModelId = state.ModelId }, CancellationToken.None);
+                        await _store.SaveAsync(state, CancellationToken.None);
+                        await RecordExperiencesAsync(state, options, firstNewToolResult, CancellationToken.None);
+                        ct.ThrowIfCancellationRequested();
+                    }
                     state.Status = AgentTaskStatus.Running;
                     response.UserMessage = $"Executed {nextTool}.";
-                    await RecordLessonEvidenceForToolAsync(state, options, nextTool, response.NextAction.Arguments, toolResult.ResultSummary, success: true, ct, toolResult.ExitCode, toolResult.TimedOut);
+                    await RecordLessonEvidenceForToolAsync(state, options, nextTool, response.NextAction.Arguments,
+                        toolResult.ResultSummary, IsSuccessfulOutcome(toolResult), ct, toolResult.ExitCode, toolResult.TimedOut);
                 }
                 else
                 {
@@ -653,7 +697,10 @@ public sealed class AgentService : IAgentService
                     {
                         Tool = nextTool,
                         Arguments = response.NextAction.Arguments,
-                        ResultSummary = "Supported policy allowed the tool, but no local executor is registered for it."
+                        ResultSummary = "Supported policy allowed the tool, but no local executor is registered for it.",
+                        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(nextTool,
+                            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Unavailable,
+                                Detail: "No registered executor exists for the requested tool."))
                     });
                 }
             }
@@ -706,7 +753,7 @@ public sealed class AgentService : IAgentService
                 "Your last response could not be parsed. Reply with ONLY the JSON object described in the system "
                 + "prompt: no prose around it, and next_action.type must be exactly one of none, tool, ask_user or "
                 + "final, with the tool's name in next_action.tool_name.",
-                DateTime.UtcNow), ct);
+                DateTime.UtcNow, ModelId: state.ModelId), ct);
         }
 
         if (parseFailed && state.ConsecutiveStepErrors >= 3)
@@ -742,6 +789,7 @@ public sealed class AgentService : IAgentService
                 task_id = taskId,
                 step = state.StepCount,
                 state.Status,
+                model_id = modelId,
                 context,
                 response,
                 // r28 doc 05 5.6: one boolean per run, so "did constraining
@@ -757,6 +805,7 @@ public sealed class AgentService : IAgentService
                 task_id = taskId,
                 step = state.StepCount,
                 state.Status,
+                model_id = modelId,
                 action = response.NextAction.Type.ToString(),
                 tool = response.NextAction.ToolName,
                 thought_summary = response.ThoughtSummary,
@@ -770,14 +819,16 @@ public sealed class AgentService : IAgentService
             "assistant",
             null,
             string.IsNullOrWhiteSpace(response.ThoughtSummary) ? logEntry : response.ThoughtSummary,
-            DateTime.UtcNow), ct);
+            DateTime.UtcNow,
+            ModelId: modelId), ct);
         if (executedToolResult is not null)
         {
             await _store.AppendTranscriptEntryAsync(taskId,
-                AgentTranscriptCompactor.FromToolResult(state.StepCount, executedToolResult, DateTime.UtcNow), ct);
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, executedToolResult, DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
         }
 
         await _store.SaveAsync(state, ct);
+        await RecordExperiencesAsync(state, options, firstNewToolResult, ct);
 
         if (_traces is not null)
         {
@@ -791,6 +842,7 @@ public sealed class AgentService : IAgentService
                     Kind = TraceKind.Agent,
                     SourceId = taskId,
                     Operation = "agent-step",
+                    ModelId = modelId,
                     DetailJson = JsonSerializer.Serialize(new
                     {
                         status = state.Status.ToString(),
@@ -844,14 +896,20 @@ public sealed class AgentService : IAgentService
             // active task to the workbench; hand it back to the user
             // explicitly instead of leaving it silently stalled.
             var note = $"step budget exhausted after {steps} step(s)";
-            result.State.Status = AgentTaskStatus.WaitingForUser;
+            result.State.Status = AgentTaskStatus.Blocked;
+            result.State.StepBudgetExhausted = true;
             // This pause has its own reason, and it is not whatever the model
             // last asked. Saying so here stops a stale question standing in for
             // it in the workbench.
-            result.State.LastUserMessage = note;
+            result.State.LastUserMessage = string.Empty;
+            result.State.ActiveStep = note;
+            result.State.Decisions.Add(new AgentDecision(
+                "Step budget exhausted",
+                $"MaxAutoSteps ({maxSteps}) reached after {steps} step(s).",
+                DateTime.UtcNow));
             await _store.AppendLogAsync(taskId, note, ct);
             await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-                result.State.StepCount, "assistant", null, note, DateTime.UtcNow), ct);
+                result.State.StepCount, "assistant", null, note, DateTime.UtcNow, ModelId: result.State.ModelId), ct);
             await _store.SaveAsync(result.State, ct);
         }
 
@@ -887,7 +945,7 @@ public sealed class AgentService : IAgentService
 
             var next = parent.SubTaskPlan.FirstOrDefault(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
             if (next is null)
-                return await RunSynthesisAsync(parent, options, budgetTruncated: false, ct);
+                return await RunSynthesisAsync(parent, options with { ModelId = parent.ModelId }, budgetTruncated: false, ct);
 
             if (parent.OrchestrationStepsUsed >= maxOrchestrationSteps)
             {
@@ -899,7 +957,7 @@ public sealed class AgentService : IAgentService
                     DateTime.UtcNow));
                 await _store.SaveAsync(parent, ct);
                 await _store.AppendLogAsync(parent.TaskId, "orchestration step budget exhausted; remaining sub-tasks skipped", ct);
-                return await RunSynthesisAsync(parent, options, budgetTruncated: true, ct);
+                return await RunSynthesisAsync(parent, options with { ModelId = parent.ModelId }, budgetTruncated: true, ct);
             }
 
             if (next.Status == AgentSubTaskStatus.Pending)
@@ -911,8 +969,11 @@ public sealed class AgentService : IAgentService
             }
 
             var childTaskId = next.TaskId!;
+            var persistedChild = await _store.LoadAsync(childTaskId, ct)
+                ?? throw new InvalidOperationException($"Sub-task '{childTaskId}' was not found.");
+            var childOptions = options with { ModelId = persistedChild.ModelId };
             var childStepsUsed = 0;
-            var childResult = await RunAsync(childTaskId, options, onStep: r =>
+            var childResult = await RunAsync(childTaskId, childOptions, onStep: r =>
             {
                 childStepsUsed++;
                 onStep?.Invoke(r);
@@ -1005,6 +1066,9 @@ public sealed class AgentService : IAgentService
             && !string.IsNullOrWhiteSpace(stepResult.PlannerResponse.UserMessage);
 
         var report = synthesisSucceeded ? stepResult!.PlannerResponse.UserMessage : BuildFallbackSynthesisReport(state);
+        var modelRoster = "## Models\n" + string.Join("\n", state.SubTaskPlan.Select(spec =>
+            $"- {spec.Goal}: {DescribeSubTaskModel(spec)}"));
+        report = modelRoster + "\n\n" + report;
         if (budgetTruncated && !report.Contains("budget", StringComparison.OrdinalIgnoreCase))
             report += "\n\nNote: this run was truncated by the orchestration step budget; some sub-tasks were skipped.";
 
@@ -1020,7 +1084,7 @@ public sealed class AgentService : IAgentService
         state.Summary = report;
         await _store.SaveAsync(state, ct);
         await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-            state.StepCount, "assistant", null, report, DateTime.UtcNow), ct);
+            state.StepCount, "assistant", null, report, DateTime.UtcNow, ModelId: state.ModelId), ct);
         await WriteReportFileAsync(state, report, ct);
 
         if (!synthesisSucceeded)
@@ -1059,11 +1123,15 @@ public sealed class AgentService : IAgentService
         foreach (var spec in state.SubTaskPlan)
         {
             var summary = string.IsNullOrWhiteSpace(spec.ResultSummary) ? "no result recorded." : spec.ResultSummary;
-            lines.Add($"- [{spec.Status}] ({spec.ProfileName}) {spec.Goal}: {summary}");
+            lines.Add($"- [{spec.Status}] ({spec.ProfileName}, {DescribeSubTaskModel(spec)}) {spec.Goal}: {summary}");
         }
 
         return string.Join("\n", lines);
     }
+
+    private static string DescribeSubTaskModel(AgentSubTaskSpec spec) => string.IsNullOrWhiteSpace(spec.ResolvedModelId)
+        ? "model not recorded (legacy task)"
+        : $"{(string.IsNullOrWhiteSpace(spec.ModelDisplayName) ? spec.ResolvedModelId : spec.ModelDisplayName)} ({spec.ResolvedModelId})";
 
     private async Task WriteReportFileAsync(AgentTaskState state, string report, CancellationToken ct)
     {
@@ -1075,10 +1143,42 @@ public sealed class AgentService : IAgentService
     public Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default) =>
         _store.ListRecentAsync(25, ct);
 
+    public async Task<AgentTaskState> ChangeTaskModelAsync(string taskId, string modelId, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
+        if (state.Status == AgentTaskStatus.Running)
+            throw new InvalidOperationException("Stop or pause the task before changing its model.");
+        if (state.PendingToolAction is not null)
+            throw new InvalidOperationException("Review the pending action before changing this task's model.");
+        var model = (await GetVisibleModelsAsync(ct)).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, modelId, StringComparison.Ordinal));
+        if (model is null)
+            throw new InvalidOperationException($"Model '{modelId}' is not currently visible and available.");
+
+        var previous = state.ModelId;
+        state.ModelId = model.Id;
+        state.ModelDisplayName = model.DisplayName;
+        if (state.Status == AgentTaskStatus.Blocked
+            && state.Decisions.LastOrDefault()?.Decision == "Selected model unavailable")
+        {
+            state.Status = AgentTaskStatus.WaitingForUser;
+            state.ActiveStep = "Task model changed. Continue when ready.";
+            state.LastUserMessage = "The task model changed. Review the task and continue when ready.";
+        }
+        var note = $"User changed task model from '{previous}' to '{model.Id}'.";
+        state.Decisions.Add(new AgentDecision("Task model changed", note, DateTime.UtcNow));
+        await _store.AppendTranscriptEntryAsync(taskId,
+            new AgentTranscriptEntry(state.StepCount, "user", null, note, DateTime.UtcNow, ModelId: model.Id), ct);
+        await _store.AppendLogAsync(taskId, note, ct);
+        await _store.SaveAsync(state, ct);
+        return state;
+    }
+
     public async Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+        var firstNewToolResult = state.ToolResults.Count;
 
         // A task with nothing pending has no decision to record (r26 01 1.2).
         // Before this, an approval here appended a history record and set the
@@ -1121,14 +1221,18 @@ public sealed class AgentService : IAgentService
             // stays waiting_for_review. Rejections do not need this refusal
             // (rejecting the wrong thing executes nothing) - only the trace
             // event above, already written.
-            await _store.AppendLogAsync(taskId, $"approval refused: pending action changed since it was displayed ({pendingAtStart!.ToolName})", ct);
+            state.ToolResults.Add(BuildApprovalToolResult(pendingAtStart!.ToolName, approved: true, fingerprintBlocked: true));
+            await _store.SaveAsync(state, ct);
+            await RecordExperiencesAsync(state, options ?? new AgentWorkspaceOptions(state.WorkspaceRoot), firstNewToolResult, ct);
+            await _store.AppendLogAsync(taskId, $"approval refused: pending action changed since it was displayed ({pendingAtStart.ToolName})", ct);
             return new AgentApprovalResult(false, "The pending action changed since it was displayed. Review it again.");
         }
 
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
+        state.ToolResults.Add(BuildApprovalToolResult(state.PendingToolAction!.ToolName, approved, fingerprintBlocked: false));
         if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
         {
-            await ApplyPlanSubtasksApprovalAsync(state, state.PendingToolAction, ct);
+            await ApplyPlanSubtasksApprovalAsync(state, state.PendingToolAction, options, ct);
         }
         else if (approved && state.PendingToolAction is not null)
         {
@@ -1177,15 +1281,25 @@ public sealed class AgentService : IAgentService
             }
 
             state.ToolResults.Add(result);
+            if (result.NormalizedOutcome.Outcome == NormalizedOutcome.Cancelled && ct.IsCancellationRequested)
+            {
+                state.Status = AgentTaskStatus.WaitingForUser;
+                await _store.AppendTranscriptEntryAsync(taskId,
+                    AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow) with { ModelId = state.ModelId }, CancellationToken.None);
+                await _store.SaveAsync(state, CancellationToken.None);
+                await RecordExperiencesAsync(state, effectiveOptions, firstNewToolResult, CancellationToken.None);
+                ct.ThrowIfCancellationRequested();
+            }
             RememberCommandApprovalIfApplicable(state, pending);
-            await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments, result.ResultSummary, success: true, ct, result.ExitCode, result.TimedOut);
+            await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments,
+                result.ResultSummary, IsSuccessfulOutcome(result), ct, result.ExitCode, result.TimedOut);
             await RecordApprovalApprovedCounterEvidenceAsync(state, effectiveOptions, pending.ToolName, ct);
             // The approved tool's result is what the model most needs to see
             // next (it is why the step paused), so it belongs in the
             // transcript alongside every other executed tool result, not
             // just in ToolResults' last-five window.
             await _store.AppendTranscriptEntryAsync(taskId,
-                AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow), ct);
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
 
             if (mutatesFile && _workspaceTools is not null)
             {
@@ -1216,6 +1330,7 @@ public sealed class AgentService : IAgentService
             state.PendingToolAction = null;
         }
         await _store.SaveAsync(state, ct);
+        await RecordExperiencesAsync(state, options ?? new AgentWorkspaceOptions(state.WorkspaceRoot), firstNewToolResult, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
         return new AgentApprovalResult(true, string.Empty);
     }
@@ -1275,7 +1390,7 @@ public sealed class AgentService : IAgentService
             throw new InvalidOperationException("A tool approval is pending; approve or reject it instead of replying.");
 
         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-            state.StepCount, "user", null, trimmed, DateTime.UtcNow), ct);
+            state.StepCount, "user", null, trimmed, DateTime.UtcNow, ModelId: state.ModelId), ct);
         state.Status = AgentTaskStatus.Running;
         // The question has been answered, so it stops being the task's open
         // question. Leaving it set meant a later pause that sets no message of
@@ -1335,7 +1450,7 @@ public sealed class AgentService : IAgentService
         state.PendingInstructions.Add(note);
         await _store.SaveAsync(state, ct);
         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-            state.StepCount, "user", null, $"steer: {trimmed}", DateTime.UtcNow), ct);
+            state.StepCount, "user", null, $"steer: {trimmed}", DateTime.UtcNow, ModelId: state.ModelId), ct);
         await _store.AppendLogAsync(taskId, $"steered: {trimmed}", ct);
 
         SignalSteerInterrupt(taskId);
@@ -1395,7 +1510,7 @@ public sealed class AgentService : IAgentService
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(state.TaskId, note, ct);
         await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-            state.StepCount, "assistant", null, note, DateTime.UtcNow), ct);
+            state.StepCount, "assistant", null, note, DateTime.UtcNow, ModelId: state.ModelId), ct);
 
         var response = new AgentPlannerResponse
         {
@@ -1490,7 +1605,7 @@ public sealed class AgentService : IAgentService
         var trimmedInstruction = string.IsNullOrWhiteSpace(instruction) ? DefaultContinueInstruction : instruction.Trim();
 
         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-            state.StepCount, "user", null, $"continue: {trimmedInstruction}", DateTime.UtcNow), ct);
+            state.StepCount, "user", null, $"continue: {trimmedInstruction}", DateTime.UtcNow, ModelId: state.ModelId), ct);
 
         // Reconcile child statuses first (r16 01-orchestration-hardening.md
         // 1.1) so a resumed orchestration parent advances the next PENDING
@@ -1504,6 +1619,7 @@ public sealed class AgentService : IAgentService
 
         state.Status = AgentTaskStatus.Running;
         state.ConsecutiveStepErrors = 0;
+        state.StepBudgetExhausted = false;
         state.PlanApprovalPending = false;
         // Reopening the task settles whatever it was last asking; the
         // instruction just given is the answer.
@@ -1866,6 +1982,65 @@ public sealed class AgentService : IAgentService
         return $"Use this compact context pack for the next decision.\n\n{json}";
     }
 
+    private async Task<List<LlmModel>> GetVisibleModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            return (await _llm.GetModelsAsync(ct))
+                .Where(model => model.IsVisible && !string.IsNullOrWhiteSpace(model.Id))
+                .GroupBy(model => model.Id, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .Take(24)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return [];
+        }
+    }
+
+    private static void PopulateModelContext(AgentContextPack context, AgentTaskState state, IReadOnlyList<LlmModel> visibleModels)
+    {
+        if (!string.IsNullOrWhiteSpace(state.ModelId))
+        {
+            context.ModelIdentity.Add(new AgentRetrievedItem(
+                "task-model", state.ModelDisplayName, state.ModelId, 1.0, Locator: state.ModelId));
+        }
+        if (string.IsNullOrWhiteSpace(state.ParentTaskId) && state.SubTaskPlan.Count == 0)
+        {
+            foreach (var model in visibleModels)
+                context.EligibleModels.Add(new AgentRetrievedItem(
+                    "eligible-model", model.DisplayName, model.Id, 1.0, Locator: model.Id));
+        }
+    }
+
+    private async Task<AgentStepResult> PauseForUnavailableModelAsync(AgentTaskState state, CancellationToken ct)
+    {
+        var label = string.IsNullOrWhiteSpace(state.ModelDisplayName) ? state.ModelId : state.ModelDisplayName;
+        var message = $"Model '{label}' ({state.ModelId}) is not currently available. Start or restore that exact model, or explicitly review a model change before continuing; Hermaeus did not fall back.";
+        state.Status = AgentTaskStatus.Blocked;
+        state.ActiveStep = "Waiting for the task's selected model to become available.";
+        state.LastUserMessage = message;
+        state.Decisions.Add(new AgentDecision("Selected model unavailable", message, DateTime.UtcNow));
+        await _store.SaveAsync(state, ct);
+        await _store.AppendLogAsync(state.TaskId, message, ct);
+        await _store.AppendTraceAsync(state.TaskId, new
+        {
+            task_id = state.TaskId,
+            @event = "task_model_unavailable",
+            model_id = state.ModelId,
+            logged_at = DateTime.UtcNow
+        }, ct);
+        var response = new AgentPlannerResponse
+        {
+            ThoughtSummary = "The persisted task model is unavailable; no fallback was attempted.",
+            CurrentStep = state.ActiveStep,
+            NextAction = new AgentNextAction { Type = AgentActionKind.AskUser },
+            UserMessage = message
+        };
+        return new AgentStepResult(state, new AgentContextPack(), response, message);
+    }
+
     internal static AgentPlannerResponse ParseResponse(string raw)
     {
         var json = ExtractJson(raw);
@@ -2214,7 +2389,11 @@ public sealed class AgentService : IAgentService
     /// WaitingForUser with an explanatory result, exactly as if the tool had
     /// failed to run.
     /// </summary>
-    private async Task ApplyPlanSubtasksApprovalAsync(AgentTaskState state, AgentPendingToolAction pending, CancellationToken ct)
+    private async Task ApplyPlanSubtasksApprovalAsync(
+        AgentTaskState state,
+        AgentPendingToolAction pending,
+        AgentWorkspaceOptions? options,
+        CancellationToken ct)
     {
         var argumentsCopy = new Dictionary<string, object?>(pending.Arguments, StringComparer.OrdinalIgnoreCase);
         state.PendingToolAction = null;
@@ -2227,27 +2406,87 @@ public sealed class AgentService : IAgentService
             // RunStepAsync closes the common case, this closes the race.
             const string duplicatePlanError = "This task already has a sub-task plan; the proposed plan was rejected.";
             state.Status = AgentTaskStatus.WaitingForUser;
-            state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = duplicatePlanError });
-            await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-                state.StepCount, "tool", "plan_subtasks", duplicatePlanError, DateTime.UtcNow), ct);
+            state.ToolResults.Add(new AgentToolResult
+            {
+                Tool = "plan_subtasks",
+                Arguments = argumentsCopy,
+                ResultSummary = duplicatePlanError,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "A deterministic duplicate-plan guard refused the proposed plan."))
+            });
+            await _store.AppendTranscriptEntryAsync(state.TaskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
             return;
         }
 
         if (!TryParsePlanSubtasks(pending.Arguments, out var specs, out var error))
         {
             state.Status = AgentTaskStatus.WaitingForUser;
-            state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = error });
-            await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-                state.StepCount, "tool", "plan_subtasks", error, DateTime.UtcNow), ct);
+            state.ToolResults.Add(new AgentToolResult
+            {
+                Tool = "plan_subtasks",
+                Arguments = argumentsCopy,
+                ResultSummary = error,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "The proposed plan failed deterministic validation."))
+            });
+            await _store.AppendTranscriptEntryAsync(state.TaskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
             return;
+        }
+
+        var visibleModels = await GetVisibleModelsAsync(ct);
+        var parentModelId = string.IsNullOrWhiteSpace(state.ModelId) ? options?.ModelId ?? string.Empty : state.ModelId;
+        var parentModel = visibleModels.FirstOrDefault(model => string.Equals(model.Id, parentModelId, StringComparison.Ordinal));
+        foreach (var spec in specs)
+        {
+            if (!string.IsNullOrWhiteSpace(spec.ModelId))
+            {
+                var selected = visibleModels.FirstOrDefault(model => string.Equals(model.Id, spec.ModelId, StringComparison.Ordinal));
+                if (selected is null)
+                {
+                    error = $"Proposed sub-task plan references unknown, hidden, or unavailable model '{spec.ModelId}'.";
+                    state.Status = AgentTaskStatus.WaitingForUser;
+                    state.ToolResults.Add(new AgentToolResult
+                    {
+                        Tool = "plan_subtasks",
+                        Arguments = argumentsCopy,
+                        ResultSummary = error,
+                        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                                Detail: "The proposed child model was not in the configured visible model list."))
+                    });
+                    await _store.AppendTranscriptEntryAsync(state.TaskId,
+                        AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
+                    return;
+                }
+                spec.ResolvedModelId = selected.Id;
+                spec.ModelDisplayName = selected.DisplayName;
+            }
+            else
+            {
+                spec.ResolvedModelId = parentModelId;
+                spec.ModelDisplayName = parentModel?.DisplayName ?? state.ModelDisplayName;
+            }
         }
 
         state.SubTaskPlan = specs;
         state.Status = AgentTaskStatus.Running;
-        var summary = $"Approved sub-task plan ({specs.Count}): " + string.Join("; ", specs.Select(s => $"[{s.ProfileName}] {s.Goal}"));
-        state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = summary });
-        await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-            state.StepCount, "tool", "plan_subtasks", summary, DateTime.UtcNow), ct);
+        var summary = $"Approved sub-task plan ({specs.Count}): "
+            + string.Join("; ", specs.Select(s => $"[{s.ProfileName}, {s.ModelLabel}] {s.Goal}"));
+        state.ToolResults.Add(new AgentToolResult
+        {
+            Tool = "plan_subtasks",
+            Arguments = argumentsCopy,
+            ResultSummary = summary,
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Completed,
+                    Detail: "The approved sub-task plan was persisted."))
+        });
+        await _store.AppendTranscriptEntryAsync(state.TaskId,
+            AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
     }
 
     /// <summary>
@@ -2275,7 +2514,11 @@ public sealed class AgentService : IAgentService
             var goal = item.TryGetProperty("goal", out var g) ? g.GetString() ?? string.Empty : string.Empty;
             var profile = item.TryGetProperty("profile", out var p) ? p.GetString() ?? string.Empty : string.Empty;
             var successCriteria = item.TryGetProperty("success_criteria", out var s) ? s.GetString() ?? string.Empty : string.Empty;
-            specs.Add(new AgentSubTaskSpec { Goal = goal.Trim(), ProfileName = profile.Trim(), SuccessCriteria = successCriteria.Trim() });
+            var modelId = item.TryGetProperty("model_id", out var m) ? m.GetString() ?? string.Empty : string.Empty;
+            specs.Add(new AgentSubTaskSpec
+            {
+                Goal = goal.Trim(), ProfileName = profile.Trim(), SuccessCriteria = successCriteria.Trim(), ModelId = modelId.Trim()
+            });
         }
 
         if (specs.Count is < 2 or > 6)
@@ -2328,6 +2571,11 @@ public sealed class AgentService : IAgentService
             }
         }
 
+        var changed = state.Plan.Count != plan.Count
+            || state.Plan.Where((current, index) =>
+                    !string.Equals(current.Description, plan[index].Description, StringComparison.Ordinal)
+                    || current.Status != plan[index].Status)
+                .Any();
         state.Plan = plan;
         return new AgentToolResult
         {
@@ -2336,7 +2584,93 @@ public sealed class AgentService : IAgentService
             ResultSummary = plan.Count == 0
                 ? "Plan cleared."
                 : string.Join("; ", plan.Select(p => $"[{p.Status}] {p.Description}")),
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("set_plan",
+                new AgentToolOutcomeEvidence(changed ? AgentToolOutcomeSignal.Completed : AgentToolOutcomeSignal.NoEffect,
+                    Detail: changed ? "The task plan was replaced." : "The submitted plan matched the persisted plan."))
         };
+    }
+
+    private static AgentToolResult BuildApprovalToolResult(string toolName, bool approved, bool fingerprintBlocked)
+    {
+        var signal = fingerprintBlocked
+            ? AgentToolOutcomeSignal.PolicyBlocked
+            : approved
+                ? AgentToolOutcomeSignal.Completed
+                : AgentToolOutcomeSignal.UserDenied;
+        return new AgentToolResult
+        {
+            Tool = "approval",
+            Arguments = new Dictionary<string, object?> { ["tool_name"] = toolName },
+            ResultSummary = fingerprintBlocked
+                ? "Approval was refused because the pending action fingerprint changed."
+                : approved
+                    ? $"User approved {toolName}; execution outcome is recorded separately."
+                    : $"User rejected {toolName}.",
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("approval",
+                new AgentToolOutcomeEvidence(signal, Detail: fingerprintBlocked
+                    ? "The approval fingerprint guard refused the stale decision."
+                    : approved
+                        ? "The user approval decision was recorded; it does not claim execution success."
+                        : "The user explicitly rejected the requested action."))
+        };
+    }
+
+    private static bool IsSuccessfulOutcome(AgentToolResult result) =>
+        result.NormalizedOutcome.Outcome is NormalizedOutcome.Succeeded or NormalizedOutcome.NoEffect;
+
+    private async Task RecordExperiencesAsync(
+        AgentTaskState state,
+        AgentWorkspaceOptions options,
+        int firstResultIndex,
+        CancellationToken ct)
+    {
+        if (_experiences is null || firstResultIndex >= state.ToolResults.Count) return;
+        var workspaceFingerprint = OpaqueFingerprint("workspace", state.WorkspaceRoot);
+        var modelFingerprint = OpaqueFingerprint("model",
+            string.IsNullOrWhiteSpace(state.ModelId) ? options.ModelId : state.ModelId);
+        for (var index = firstResultIndex; index < state.ToolResults.Count; index++)
+        {
+            var result = state.ToolResults[index];
+            try
+            {
+                var arguments = result.Arguments.ToDictionary(
+                    pair => pair.Key,
+                    pair => string.Equals(pair.Key, "command", StringComparison.OrdinalIgnoreCase)
+                        ? (object?)"[command retained in source task only]"
+                        : pair.Value,
+                    StringComparer.OrdinalIgnoreCase);
+                var codec = new AgentToolExperienceCodec();
+                await _experiences.AddAsync(new EmpiricalExperienceDraft
+                {
+                    Domain = codec.Domain,
+                    ProjectId = string.IsNullOrWhiteSpace(state.ProjectId) ? null : state.ProjectId,
+                    WorkspaceFingerprint = workspaceFingerprint,
+                    ContextJson = codec.EncodeContext(new AgentToolExperienceContext(state.TaskId, state.StepCount, index, result.Tool)),
+                    ActionJson = codec.EncodeAction(new AgentToolExperienceAction(
+                        JsonSerializer.Serialize(arguments), result.NormalizedOutcome.DerivationVersion)),
+                    Outcome = result.NormalizedOutcome,
+                    Provenance =
+                    [
+                        new EmpiricalExperienceProvenance($"{state.TaskId}:tool-result:{index}", new SourceReference(
+                            ProvenanceKind.AgentTool, $"{result.Tool} result", state.TaskId,
+                            Timestamp: result.Timestamp, EvidenceOrigin: EvidenceOrigin.DirectObservation))
+                    ],
+                    ModelFingerprint = modelFingerprint
+                }, ct);
+            }
+            catch
+            {
+                // Experience is a secondary index. The task file and transcript
+                // remain authoritative and must not fail because indexing did.
+            }
+        }
+    }
+
+    private static string? OpaqueFingerprint(string prefix, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim()));
+        return $"{prefix}-{Convert.ToHexString(hash).ToLowerInvariant()}";
     }
 
     private static string BuildSummary(AgentTaskState state, AgentPlannerResponse response)

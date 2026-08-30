@@ -118,9 +118,9 @@ public sealed class LlamaServerSetupService
 
     /// <summary>
     /// Gets the expected path to the llama-server executable directly inside
-    /// installPath. The archive may actually extract it into a nested
-    /// subdirectory; use <see cref="ResolveInstalledExecutable"/> after install
-    /// to get the real, possibly-nested, location.
+    /// installPath. Managed release extraction strips the archive's known
+    /// top-level directory, while <see cref="ResolveInstalledExecutable"/>
+    /// remains compatible with older nested installs.
     /// </summary>
     public string GetExecutablePath(string installPath)
     {
@@ -232,14 +232,26 @@ public sealed class LlamaServerSetupService
         string installPath,
         LlamaRuntimeVariant variant,
         IProgress<string>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool allowAutoAcceleratedFallback = false)
     {
         try
         {
             progress?.Report("Checking latest llama.cpp release...");
-            var release = await GetLatestDownloadInfoAsync(variant, ct);
+            var release = await GetLatestDownloadInfoAsync(variant, ct, allowAutoAcceleratedFallback);
             var versionedInstallPath = Path.Combine(installPath, release.TagName);
             Directory.CreateDirectory(versionedInstallPath);
+
+            var existing = ResolveInstalledExecutable(versionedInstallPath);
+            if (existing is not null)
+            {
+                progress?.Report($"llama-server {release.TagName} is already installed at {existing}");
+                return new LocalAiSetupResult(
+                    true,
+                    $"llama-server {release.TagName} is already installed at {existing}",
+                    existing,
+                    release.Variant);
+            }
 
             // CUDA builds link against the toolkit runtime shipped separately
             // (r14 1.2): extract it into the same versioned directory first so
@@ -270,9 +282,10 @@ public sealed class LlamaServerSetupService
                 }
             }
 
-            return await DownloadExtractAndLocateAsync(
+            var result = await DownloadExtractAndLocateAsync(
                 versionedInstallPath, release.Url, release.AssetName, release.Sha256,
                 $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
+            return result with { SelectedVariant = release.Variant };
         }
         catch (OperationCanceledException)
         {
@@ -323,7 +336,11 @@ public sealed class LlamaServerSetupService
         try
         {
             progress?.Report("Extracting archive...");
-            await ArchiveExtractor.ExtractAsync(archivePath, installPath, ct);
+            await ArchiveExtractor.ExtractAsync(
+                archivePath,
+                installPath,
+                stripTopLevelDirectory: TopLevelDirectoryFor(assetName),
+                ct: ct);
         }
         finally
         {
@@ -384,20 +401,26 @@ public sealed class LlamaServerSetupService
 
     /// <summary>
     /// From a set of sibling directory paths, selects the tag-pattern
-    /// directories that are safe to prune: everything named "bNNNNN" except the
-    /// tags to keep (the newly installed and the previously configured
-    /// versions). Non-tag directories are always ignored (r14 3.2). Pure.
+    /// directories that are safe to prune: everything named "bNNNNN" except
+    /// the build identities to keep (the newly installed and the previously
+    /// configured versions). The archive can add another tag-named directory
+    /// below the version directory, so raw tag strings are deliberately not
+    /// compared (for example, b10679 and llama-b10679 are one identity).
+    /// Non-tag directories are always ignored (r14 3.2). Pure.
     /// </summary>
     public static IReadOnlyList<string> SelectPrunableVersionDirectories(IEnumerable<string> siblingDirectoryPaths, params string?[] keepTags)
     {
-        var keep = new HashSet<string>(
-            keepTags.Where(t => !string.IsNullOrWhiteSpace(t))!,
-            StringComparer.OrdinalIgnoreCase);
+        var keep = keepTags
+            .Select(TryParseBuildTag)
+            .Where(build => build is not null)
+            .Select(build => build!.Value)
+            .ToHashSet();
         return siblingDirectoryPaths
             .Where(dir =>
             {
                 var leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(dir));
-                return TagDirectoryPattern.IsMatch(leaf) && !keep.Contains(leaf);
+                var build = TryParseBuildTag(leaf);
+                return build is not null && !keep.Contains(build.Value);
             })
             .ToList();
     }
@@ -411,27 +434,55 @@ public sealed class LlamaServerSetupService
     {
         if (string.IsNullOrWhiteSpace(installRoot) || !Directory.Exists(installRoot))
             return [];
-        var siblings = Directory.EnumerateDirectories(installRoot);
-        return SelectPrunableVersionDirectories(
-            siblings,
-            NearestTagDirectoryName(newExecutablePath),
-            NearestTagDirectoryName(previousExecutablePath));
+        var keepBuilds = new[] { newExecutablePath, previousExecutablePath }
+            .Select(NearestTagDirectoryName)
+            .Select(TryParseBuildTag)
+            .Where(build => build is not null)
+            .Select(build => build!.Value)
+            .ToHashSet();
+
+        // Only direct, non-symlink children of the managed root that contain a
+        // llama-server whose nearest tag has the same build identity are owned
+        // version directories. A tag-looking user directory without that
+        // proof is not a deletion candidate.
+        return Directory.EnumerateDirectories(installRoot)
+            .Where(dir => IsOwnedVersionDirectory(installRoot, dir, out var build)
+                          && !keepBuilds.Contains(build))
+            .ToList();
     }
 
     /// <summary>
     /// Deletes the given version directories, returning bytes reclaimed. A
     /// directory whose files are still held open by a running server aborts
     /// only its own deletion (r14 3.2); it is offered again next time. Only
-    /// ever call with paths from <see cref="SelectPrunableVersionDirectories"/>.
+    /// direct, owned children of <paramref name="managedInstallRoot"/> are
+    /// accepted, and protected executable paths are checked again immediately
+    /// before deletion. This makes the deletion set inspectable and safe even
+    /// if settings or the filesystem changed after candidate computation.
     /// </summary>
-    public static long PruneVersionDirectories(IEnumerable<string> directories)
+    public static long PruneVersionDirectories(
+        string managedInstallRoot,
+        IEnumerable<string> directories,
+        params string?[] protectedExecutablePaths)
     {
+        if (string.IsNullOrWhiteSpace(managedInstallRoot) || !Directory.Exists(managedInstallRoot))
+            return 0;
+
+        var protectedBuilds = protectedExecutablePaths
+            .Select(NearestTagDirectoryName)
+            .Select(TryParseBuildTag)
+            .Where(build => build is not null)
+            .Select(build => build!.Value)
+            .ToHashSet();
+        var root = Path.GetFullPath(Path.TrimEndingDirectorySeparator(managedInstallRoot));
         long reclaimed = 0;
         foreach (var dir in directories)
         {
             try
             {
-                if (!Directory.Exists(dir))
+                if (!Directory.Exists(dir)
+                    || !IsOwnedVersionDirectory(root, dir, out var build)
+                    || protectedBuilds.Contains(build))
                     continue;
                 var size = DirectorySizeBytes(dir);
                 Directory.Delete(dir, recursive: true);
@@ -481,6 +532,12 @@ public sealed class LlamaServerSetupService
         => GetLatestDownloadInfoAsync(LlamaRuntimeVariant.Cpu, ct);
 
     public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(LlamaRuntimeVariant variant, CancellationToken ct = default)
+        => await GetLatestDownloadInfoAsync(variant, ct, allowAutoAcceleratedFallback: false);
+
+    private async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(
+        LlamaRuntimeVariant variant,
+        CancellationToken ct,
+        bool allowAutoAcceleratedFallback)
     {
         List<GitHubRelease>? releases;
         try
@@ -497,7 +554,7 @@ public sealed class LlamaServerSetupService
         if (releases is null)
             throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
         var platform = CurrentPlatform();
-        var selection = SelectLatestCompatibleRelease(releases, platform, variant)
+        var selection = SelectLatestCompatibleRelease(releases, platform, variant, allowAutoAcceleratedFallback)
             ?? throw new InvalidOperationException("No b-numbered llama.cpp release contained a supported llama-server asset for this platform.");
         var release = selection.Release;
         var asset = selection.Asset;
@@ -527,7 +584,8 @@ public sealed class LlamaServerSetupService
             companionName,
             companionUrl,
             release.PublishedAt,
-            companionSha256);
+            companionSha256,
+            effectiveVariant);
     }
 
     internal static string RequireSha256Digest(GitHubReleaseAsset asset)
@@ -555,7 +613,8 @@ public sealed class LlamaServerSetupService
     public static LlamaReleaseSelection? SelectLatestCompatibleRelease(
         IReadOnlyList<GitHubRelease> releases,
         LlamaPlatform? platform,
-        LlamaRuntimeVariant variant)
+        LlamaRuntimeVariant variant,
+        bool allowAutoAcceleratedFallback = false)
     {
         foreach (var release in releases
                      .Select(release => (Release: release, Build: TryParseBuildTag(release.TagName)))
@@ -563,30 +622,46 @@ public sealed class LlamaServerSetupService
                      .OrderByDescending(candidate => candidate.Build))
         {
             var assets = release.Release.Assets ?? [];
-            var asset = SelectDownloadAsset(assets, platform, variant);
-            var effectiveVariant = variant;
-            if (asset is null && variant != LlamaRuntimeVariant.Cpu)
+            IReadOnlyList<LlamaRuntimeVariant> candidates = allowAutoAcceleratedFallback
+                ? AutoAcceleratedCandidates(variant)
+                : [variant];
+            foreach (var candidate in candidates)
             {
-                asset = SelectDownloadAsset(assets, platform, LlamaRuntimeVariant.Cpu);
-                effectiveVariant = LlamaRuntimeVariant.Cpu;
+                var asset = SelectDownloadAsset(assets, platform, candidate);
+                if (asset is not null)
+                    return new LlamaReleaseSelection(release.Release, asset, candidate, release.Build!.Value);
             }
 
-            if (asset is not null)
-                return new LlamaReleaseSelection(release.Release, asset, effectiveVariant, release.Build!.Value);
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<LlamaRuntimeVariant> AutoAcceleratedCandidates(LlamaRuntimeVariant preferred)
+    {
+        // These are the accelerated llama.cpp variants Hermaeus currently
+        // models. Vulkan is the cross-vendor alternative; CPU is deliberately
+        // excluded so an unavailable accelerated asset cannot become a silent
+        // downgrade. Future supported accelerated variants belong in this
+        // ordered capability list rather than in backend-specific exceptions.
+        return preferred switch
+        {
+            LlamaRuntimeVariant.Cpu => [LlamaRuntimeVariant.Cpu],
+            LlamaRuntimeVariant.Cuda => [LlamaRuntimeVariant.Cuda, LlamaRuntimeVariant.Vulkan],
+            LlamaRuntimeVariant.Vulkan => [LlamaRuntimeVariant.Vulkan],
+            _ => []
+        };
     }
 
     public static int? TryParseBuildTag(string? tag)
     {
         if (string.IsNullOrWhiteSpace(tag))
             return null;
-        var match = Regex.Match(tag, @"^b(?<build>\d{3,7})$", RegexOptions.IgnoreCase);
+        var match = Regex.Match(tag, @"^(?:llama-)?b(?<build>\d{3,7})$", RegexOptions.IgnoreCase);
         return match.Success && int.TryParse(match.Groups["build"].Value, out var build) ? build : null;
     }
 
-    private static readonly Regex TagDirectoryPattern = new(@"^b\d+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex TagDirectoryPattern = new(@"^(?:llama-)?b\d+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex CudaVersionPattern = new(@"-cuda-(?<ver>\d+(?:\.\d+)?)-", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
@@ -632,6 +707,26 @@ public sealed class LlamaServerSetupService
     }
 
     /// <summary>
+    /// Resolves the backend for an install or update. An explicit user choice
+    /// wins. Auto is resolved from the current hardware every time an install
+    /// is required; the installed variant is history and must not turn Auto
+    /// into an implicit backend pin across machines or hardware changes.
+    /// </summary>
+    public static LlamaRuntimeVariant ResolveUpdateVariant(
+        LlamaRuntimeVariant configured,
+        LlamaRuntimeVariant installed,
+        HardwareProfile? profile)
+    {
+        if (configured != LlamaRuntimeVariant.Auto)
+            return configured;
+
+        // Keep the parameter for compatibility with the existing update
+        // boundary. It records the last selected backend, but it is not a
+        // user preference and must not override Auto's current resolution.
+        return ResolveVariant(configured, profile);
+    }
+
+    /// <summary>
     /// Walks up from a llama-server executable's directory to the install root
     /// (r14 3.1). Each successful update extracts into a new "bNNNNN" tag
     /// subdirectory, so the executable's own directory is usually a version
@@ -662,14 +757,45 @@ public sealed class LlamaServerSetupService
         return current;
     }
 
+    private static bool IsOwnedVersionDirectory(string managedInstallRoot, string directory, out int build)
+    {
+        build = 0;
+        try
+        {
+            var root = Path.GetFullPath(Path.TrimEndingDirectorySeparator(managedInstallRoot));
+            var candidate = Path.GetFullPath(Path.TrimEndingDirectorySeparator(directory));
+            if (!string.Equals(Path.GetDirectoryName(candidate), root, StringComparison.OrdinalIgnoreCase)
+                || File.GetAttributes(candidate).HasFlag(FileAttributes.ReparsePoint))
+                return false;
+
+            var directoryBuild = TryParseBuildTag(Path.GetFileName(candidate));
+            if (directoryBuild is null)
+                return false;
+
+            var executable = ResolveInstalledExecutable(candidate);
+            if (executable is null
+                || File.GetAttributes(executable).HasFlag(FileAttributes.ReparsePoint)
+                || TryParseBuildTag(NearestTagDirectoryName(executable)) != directoryBuild)
+                return false;
+
+            build = directoryBuild.Value;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Selects the download asset for a platform and build variant (r14 1.1).
-    /// Non-Windows platforms keep the r11 default-build selection untouched
-    /// (exact os/arch suffix, no accelerator token). Windows matches by
-    /// os/arch plus the variant token ("-cpu-", "-cuda-", "-vulkan-"); when a
-    /// release ships more than one CUDA build (e.g. 12.4 and 13.3) the lowest
-    /// version is chosen for the broadest driver compatibility. Returns null
-    /// when no asset matches, letting the caller fall back to Cpu.
+    /// CPU matches the exact platform suffix. Accelerator variants match their
+    /// platform-specific upstream asset names. When a release ships more than
+    /// one CUDA build (e.g. 12.4 and 13.3) the lowest version is chosen for the
+    /// broadest driver compatibility. Returns null when the requested backend
+    /// is absent. When the caller has resolved an Auto request, the optional
+    /// fallback policy tries the ordered accelerated candidates for that
+    /// request; CPU is never added to that fallback chain.
     /// </summary>
     public static GitHubReleaseAsset? SelectDownloadAsset(
         IReadOnlyList<GitHubReleaseAsset> assets,
@@ -681,7 +807,7 @@ public sealed class LlamaServerSetupService
             return null;
 
         var p = resolvedPlatform.Value;
-        if (!IsWindows(p) || variant is LlamaRuntimeVariant.Auto or LlamaRuntimeVariant.Cpu)
+        if (variant is LlamaRuntimeVariant.Auto or LlamaRuntimeVariant.Cpu)
         {
             var suffix = SuffixFor(p);
             return assets.FirstOrDefault(asset =>
@@ -689,21 +815,11 @@ public sealed class LlamaServerSetupService
                 asset.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
         }
 
-        var arch = ArchToken(p);
-        var token = variant switch
-        {
-            LlamaRuntimeVariant.Cuda => "-cuda-",
-            LlamaRuntimeVariant.Vulkan => "-vulkan-",
-            _ => "-cpu-"
-        };
-
         var matches = assets.Where(asset =>
         {
             var name = asset.Name.ToLowerInvariant();
             return name.StartsWith("llama-", StringComparison.Ordinal)
-                && name.EndsWith($"-{arch}.zip", StringComparison.Ordinal)
-                && name.Contains("-bin-win-", StringComparison.Ordinal)
-                && name.Contains(token, StringComparison.Ordinal);
+                && IsVariantAsset(name, p, variant);
         }).ToList();
 
         if (matches.Count == 0)
@@ -711,6 +827,25 @@ public sealed class LlamaServerSetupService
         if (variant == LlamaRuntimeVariant.Cuda && matches.Count > 1)
             return matches.OrderBy(a => ParseCudaVersion(a.Name)).First();
         return matches[0];
+    }
+
+    private static bool IsVariantAsset(string name, LlamaPlatform platform, LlamaRuntimeVariant variant)
+    {
+        var arch = ArchToken(platform);
+        if (IsWindows(platform))
+        {
+            var token = variant == LlamaRuntimeVariant.Cuda ? "-cuda-" : "-vulkan-";
+            return name.Contains("-bin-win-", StringComparison.Ordinal)
+                && name.Contains(token, StringComparison.Ordinal)
+                && name.EndsWith($"-{arch}.zip", StringComparison.Ordinal);
+        }
+
+        if (platform is not (LlamaPlatform.LinuxX64 or LlamaPlatform.LinuxArm64))
+            return false;
+
+        var linuxToken = variant == LlamaRuntimeVariant.Cuda ? "-bin-ubuntu-cuda-" : "-bin-ubuntu-vulkan-";
+        return name.Contains(linuxToken, StringComparison.Ordinal)
+            && name.EndsWith($"-{arch}.tar.gz", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -751,6 +886,12 @@ public sealed class LlamaServerSetupService
     }
 
     private static string AssetNameFor(LlamaPlatform platform, string tag) => $"llama-{tag}{SuffixFor(platform)}";
+
+    private static string? TopLevelDirectoryFor(string assetName)
+    {
+        var match = Regex.Match(assetName, @"^(?<root>llama-b\d+)-bin-", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups["root"].Value : null;
+    }
 
     internal static string PinnedSha256For(LlamaPlatform platform) => platform switch
     {
@@ -841,7 +982,8 @@ public sealed record LlamaServerLatestDownload(
     string? CompanionAssetName = null,
     string? CompanionUrl = null,
     DateTimeOffset? PublishedAt = null,
-    string? CompanionSha256 = null);
+    string? CompanionSha256 = null,
+    LlamaRuntimeVariant Variant = LlamaRuntimeVariant.Cpu);
 public sealed record GitHubRelease(
     [property: JsonPropertyName("tag_name")] string TagName,
     [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets,

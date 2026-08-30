@@ -19,6 +19,46 @@ public sealed class LocalApiTokenEntry
     public string SecretRef { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Versioned, deny-by-default Agent authority proposed for this token.
+    /// The R31 Local API process does not expose Agent execution routes because
+    /// it is not the single owner of Desktop's task state, so this scope is
+    /// currently inert and retained as the reviewed future contract.
+    /// </summary>
+    public LocalApiAgentScope AgentScope { get; set; } = new();
+}
+
+public enum LocalApiAgentOperation
+{
+    CreateTask,
+    StartTask,
+    ReadTask,
+    ReadRun,
+    SteerTask,
+    ContinueTask,
+    ReadOutput,
+    ReadDecisions
+}
+
+/// <summary>
+/// Explicit Agent authority for one named Local API token. Deserializing an
+/// older token produces this disabled empty scope, so a settings migration can
+/// never grant Agent access. An empty model allowlist means any currently
+/// visible model; workspace and optional project allowlists are always exact.
+/// </summary>
+public sealed class LocalApiAgentScope
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public bool Enabled { get; set; }
+    public List<LocalApiAgentOperation> AllowedOperations { get; set; } = [];
+    public List<string> AllowedWorkspaceProfileIds { get; set; } = [];
+    public List<string> AllowedModelIds { get; set; } = [];
+    public List<string> AllowedProjectIds { get; set; } = [];
+    public bool AllowReadOtherOwnedTasks { get; set; }
+    public int MaxConcurrentRuns { get; set; } = 1;
 }
 
 /// <summary>

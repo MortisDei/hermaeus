@@ -44,7 +44,8 @@ public static class ChatContextReceipt
         (ProvenanceKind.Recall,    "Recall",             "recall hit",        "recall hits"),
         (ProvenanceKind.Rag,       "Knowledge excerpts", "knowledge excerpt", "knowledge excerpts"),
         (ProvenanceKind.Workspace, "Workspace files",    "workspace file",    "workspace files"),
-        (ProvenanceKind.AgentTool, "Tool results",       "tool result",       "tool results")
+        (ProvenanceKind.AgentTool, "Tool results",       "tool result",       "tool results"),
+        (ProvenanceKind.ProjectState, "Project State",   "Project State item", "Project State items")
     ];
 
     public static IReadOnlyList<ChatContextReceiptSection> Build(IReadOnlyList<SourceReference>? sources)

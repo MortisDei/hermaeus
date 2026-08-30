@@ -65,7 +65,7 @@ public sealed class LlamaModelsFetchTests
         var handler = new AlwaysFailsHandler();
         var service = new LlamaCppService(settings, logs, new HttpClient(handler))
         {
-            IsBaseUrlKnownStopped = _ => true
+            IsBaseUrlExpectedUnavailable = _ => true
         };
 
         Assert.Empty(await service.GetModelsAsync());

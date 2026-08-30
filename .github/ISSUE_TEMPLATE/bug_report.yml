@@ -15,7 +15,7 @@ body:
     attributes:
       label: Hermaeus version
       description: Current Status section in the README, or Help/About if present.
-      placeholder: 0.24.0-alpha
+      placeholder: 0.38.0-beta
     validations:
       required: true
 

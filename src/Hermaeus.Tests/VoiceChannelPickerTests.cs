@@ -1,3 +1,4 @@
+using Hermaeus.Core.Services;
 using Hermaeus.ViewModels;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
@@ -40,6 +41,41 @@ public sealed class VoiceChannelPickerTests
         vm.TtsVoices.Add("af_heart");
 
         Assert.True(vm.ChannelVoiceOptionsAreProviderSupplied);
+        Assert.Equal("1 named voice(s) reported by Kokoro (native).", vm.ChannelVoiceDiscoveryStatus);
+    }
+
+    [Fact]
+    public void Discovery_status_names_the_selected_provider_when_voices_are_unavailable()
+    {
+        using var temp = new TempDir();
+        var vm = NewTtsSettingsViewModel(NewSettings(temp));
+
+        Assert.Equal("Kokoro (native) has not reported named voices yet. Retrying is safe; you can also enter a verified voice id.", vm.ChannelVoiceDiscoveryStatus);
+    }
+
+    [Fact]
+    public async Task A_late_superseded_provider_refresh_cannot_replace_the_current_provider_catalogue()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var voices = new DelayedVoiceService();
+        var vm = NewTtsSettingsViewModel(settings, voices);
+
+        vm.ReloadFrom(settings.Settings);
+        await voices.WaitForCallAsync(0);
+
+        vm.SelectedVoiceProvider = "F5-TTS";
+        await voices.WaitForCallAsync(1);
+
+        voices.Complete(1, ["b_voice"]);
+        await WaitForAsync(() => vm.TtsVoices.Contains("b_voice"), "provider B voice catalogue");
+
+        voices.Complete(0, ["a_voice"]);
+        await Task.Yield();
+
+        Assert.Equal(["b_voice"], vm.TtsVoices);
+        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel, "b_voice"], vm.ChannelVoiceOptions);
+        Assert.Equal("1 named voice(s) reported by F5-TTS.", vm.ChannelVoiceDiscoveryStatus);
     }
 
     [Fact]
@@ -54,5 +90,35 @@ public sealed class VoiceChannelPickerTests
 
         channel.VoiceDisplay = VoiceChannelSettingViewModel.DefaultVoiceLabel;
         Assert.Equal(string.Empty, channel.VoiceId);
+    }
+
+    [Fact]
+    public void Channel_picker_clears_the_default_sentinel_before_filtering_a_named_catalogue()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var view = File.ReadAllText(Path.Combine(repoRoot, "src", "Hermaeus.Desktop", "Views", "SettingsVoiceSectionView.axaml"));
+
+        Assert.Contains("DropDownOpening=\"OnChannelVoiceDropDownOpening\"", view, StringComparison.Ordinal);
+    }
+
+    private sealed class DelayedVoiceService : ITtsService
+    {
+        private readonly List<TaskCompletionSource<IReadOnlyList<string>>> _requests = [];
+
+        public Task SpeakAsync(string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default) => Task.FromResult(displayName);
+
+        public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
+        {
+            var request = new TaskCompletionSource<IReadOnlyList<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _requests.Add(request);
+            return request.Task;
+        }
+
+        public async Task WaitForCallAsync(int index) =>
+            await WaitForAsync(() => _requests.Count > index, $"voice refresh {index}");
+
+        public void Complete(int index, IReadOnlyList<string> voices) => _requests[index].SetResult(voices);
     }
 }

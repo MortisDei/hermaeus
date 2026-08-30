@@ -100,6 +100,23 @@ public sealed class ServerLaunchArgumentTests
     }
 
     [Fact]
+    public void New_load_mode_and_loopback_cors_forms_are_used_only_after_runtime_proof()
+    {
+        var cfg = new ServerConfig { MemoryLock = true, NoMemoryMap = false };
+        var args = ServerProcessManager.BuildLaunchArguments(cfg, supportsLoadMode: true, supportsCorsOrigins: true).ToList();
+
+        Assert.Equal("mlock", ArgValue(args, "--load-mode"));
+        Assert.DoesNotContain("--mlock", args);
+        Assert.DoesNotContain("--no-mmap", args);
+        Assert.Equal("http://localhost,http://127.0.0.1", ArgValue(args, "--cors-origins"));
+
+        var noMap = ServerProcessManager.BuildLaunchArguments(
+            new ServerConfig { NoMemoryMap = true }, supportsLoadMode: true).ToList();
+        Assert.Equal("none", ArgValue(noMap, "--load-mode"));
+        Assert.DoesNotContain("--no-mmap", noMap);
+    }
+
+    [Fact]
     public void Speculative_types_emit_spec_type_only_when_configured()
     {
         // r27 03 3.1 replaced r18 4.4's NgramSpeculative bool with a composable

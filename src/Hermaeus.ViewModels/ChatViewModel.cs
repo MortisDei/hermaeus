@@ -106,6 +106,7 @@ public sealed class ChatTraceViewModel
     public int RecallContextItems { get; init; }
     public long RecallInjectionMs { get; init; }
     public string RecallNote { get; init; } = string.Empty;
+    public bool HasRecallNote => !string.IsNullOrWhiteSpace(RecallNote);
     public bool HasRecallContext => RecallContextItems > 0;
     public int EstimatedTokens { get; init; }
     public ChatTokenUsage? ProviderUsage { get; init; }
@@ -188,6 +189,9 @@ public partial class ChatViewModel : ViewModelBase
     private readonly RagQueryService? _rag;
     private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private readonly Hermaeus.Services.Recall.RecallService? _recallSearch;
+    private readonly IProjectStateStore? _projectState;
+    public LiveModelTelemetryViewModel? Telemetry { get; }
+    public Func<string, CancellationToken, Task<RuntimeTelemetryRequest?>>? ManagedTelemetryRequestFactory { get; set; }
     private bool _suppressRagDatasetWrite;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
@@ -195,6 +199,33 @@ public partial class ChatViewModel : ViewModelBase
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
     private Task? _loadModelsTask;
     private bool _suppressModelProfileDefaults;
+
+    [RelayCommand]
+    private async Task OpenTelemetryAsync()
+    {
+        if (Telemetry is null)
+            return;
+        if (ManagedTelemetryRequestFactory is null)
+        {
+            Telemetry.Status = "Telemetry is unavailable until a managed local server is running.";
+            return;
+        }
+
+        try
+        {
+            var request = await ManagedTelemetryRequestFactory(SelectedModel?.Id ?? string.Empty, CancellationToken.None);
+            if (request is null)
+            {
+                Telemetry.Status = "No matching managed local Chat process is running.";
+                return;
+            }
+            await Telemetry.OpenAsync(request);
+        }
+        catch (Exception ex)
+        {
+            Telemetry.Status = $"Telemetry unavailable: {ex.Message}";
+        }
+    }
 
     /// <summary>
     /// Every message across every branch, flat (r25 doc 01). The tree lives in
@@ -411,7 +442,7 @@ public partial class ChatViewModel : ViewModelBase
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
-    public Action<string>?            RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>?   RequestCopyToClipboard { get; set; }
     public Action?                    RequestInputFocus { get; set; }
     public Action?                    RequestContextFilePicker { get; set; }
     public Func<ConversationExportFormat, Task<string?>>? RequestConversationExportPath { get; set; }
@@ -758,12 +789,16 @@ public partial class ChatViewModel : ViewModelBase
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
         Hermaeus.Services.Recall.RecallService? recallSearch = null,
         IAudioCapture? audioCapture = null,
-        ISpeechRecognitionProviderRegistry? sttProviders = null)
+        ISpeechRecognitionProviderRegistry? sttProviders = null,
+         IProjectStateStore? projectState = null,
+         LiveModelTelemetryViewModel? telemetry = null)
     {
         _artifacts = artifacts;
         _rag = rag;
         _recallIndexing = recallIndexing;
         _recallSearch = recallSearch;
+        _projectState = projectState;
+        Telemetry = telemetry;
         ChatMic = new MicButtonViewModel(audioCapture, sttProviders, settings);
         SaveCodeBlockAction = (lang, code, markdown) => _ = SaveCodeBlockAsync(lang, code, markdown);
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
@@ -1265,17 +1300,19 @@ public partial class ChatViewModel : ViewModelBase
             var memoryTask = BuildMemoryInjectionAsync(text, _cts.Token);
             var ragTask = BuildRagInjectionAsync(text, _cts.Token);
             var recallTask = BuildRecallInjectionAsync(text, _cts.Token);
+            var projectStateTask = BuildProjectStateInjectionAsync(_cts.Token);
 
             // Let all three settle before observing any of them: one throwing
             // must not leave the other two unobserved or cancelled. The awaits
             // below then surface a failure in exactly the order it surfaced when
             // this was a sequence.
-            try { await Task.WhenAll(memoryTask, ragTask, recallTask); }
+            try { await Task.WhenAll(memoryTask, ragTask, recallTask, projectStateTask); }
             catch { /* observed individually below, in the original order */ }
 
             var (memoryContext, memorySources, injectedMemoryIds, recallMs, selectMs, lessonMs) = await memoryTask;
             var (ragContext, ragSources, ragMs, ragContextItems, ragNote) = await ragTask;
             var (recallContext, recallSources, recallInjectionMs, recallItems, recallNote) = await recallTask;
+            var projectStateContext = await projectStateTask;
 
             // The order sources appear in is memory, then RAG, then recall,
             // regardless of which finished first. Concurrency is an
@@ -1286,7 +1323,9 @@ public partial class ChatViewModel : ViewModelBase
                 asst.Sources.Add(source);
             foreach (var source in recallSources)
                 asst.Sources.Add(source);
-            var ragAndRecallContext = ragContext + recallContext;
+            foreach (var source in projectStateContext.Sources)
+                asst.Sources.Add(source);
+            var ragAndRecallContext = ragContext + recallContext + projectStateContext.Text;
 
             var promptBuildSw = Stopwatch.StartNew();
             var composedSystemPrompt = ComposeSystemPrompt(memoryContext, ragAndRecallContext) ?? string.Empty;
@@ -1334,7 +1373,6 @@ public partial class ChatViewModel : ViewModelBase
                     if (accumulator.TryAppend(token, force: false, out var flushed))
                     {
                         asst.Content += flushed;
-                        ScrollToBottom?.Invoke(this, EventArgs.Empty);
                     }
 
                     if (chunker is not null)
@@ -1347,7 +1385,6 @@ public partial class ChatViewModel : ViewModelBase
                 {
                     asst.ReasoningContent += reasoning;
                     asst.IsReasoningStreaming = true;
-                    ScrollToBottom?.Invoke(this, EventArgs.Empty);
                 });
 
             phaseCts.Cancel();
@@ -1357,10 +1394,10 @@ public partial class ChatViewModel : ViewModelBase
             if (accumulator.TryAppend(string.Empty, force: true, out var remainder))
             {
                 asst.Content += remainder;
-                ScrollToBottom?.Invoke(this, EventArgs.Empty);
             }
 
             var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs);
+            Telemetry?.RecordRequest(selectedModelId, SelectedModel.ProviderTag, result.ServerTimings, result.Usage, result.FirstTokenMs, result.TotalLatencyMs);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"
@@ -1373,7 +1410,7 @@ public partial class ChatViewModel : ViewModelBase
                 var hint = ChatSendTiming.SlowSendBottleneckHint(
                     timing.PromptTokensPerSecond,
                     await IsGpuPresentButCpuInferenceAsync(_cts.Token));
-                var warning = $"Slow chat send ({timing.PreFirstTokenMs} ms before first token): {timing.Format()}";
+                var warning = $"Slow chat send ({timing.PreFirstTokenMs} ms before first content): {timing.Format()}";
                 if (hint is not null)
                     warning += $" - {hint}";
                 _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, warning));
@@ -1594,7 +1631,7 @@ public partial class ChatViewModel : ViewModelBase
 
         var chatServer = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
             ?? _settings.Settings.ManagedServers.FirstOrDefault();
-        return !string.IsNullOrWhiteSpace(chatServer?.MmprojPath);
+        return chatServer?.UseProjector == true && !string.IsNullOrWhiteSpace(chatServer.MmprojPath);
     }
 
     [RelayCommand]
@@ -1634,16 +1671,30 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void CopyMessage(MessageViewModel? msg)
+    private async Task CopyMessage(MessageViewModel? msg)
     {
-        if (msg is not null) RequestCopyToClipboard?.Invoke(msg.Content);
+        if (msg is not null)
+            await CopyTextAsync(msg.Content, "Message");
     }
 
     [RelayCommand]
-    private void CopyReasoning(MessageViewModel? msg)
+    private async Task CopyReasoning(MessageViewModel? msg)
     {
         if (msg is not null && !string.IsNullOrWhiteSpace(msg.ReasoningContent))
-            RequestCopyToClipboard?.Invoke(msg.ReasoningContent);
+            await CopyTextAsync(msg.ReasoningContent, "Reasoning");
+    }
+
+    private async Task CopyTextAsync(string text, string label)
+    {
+        if (RequestCopyToClipboard is null)
+            return;
+
+        var copied = false;
+        try { copied = await RequestCopyToClipboard(text); }
+        catch { }
+        _toasts.Show(copied ? $"{label} copied" : $"Could not copy {label.ToLowerInvariant()}",
+            copied ? $"{label} text copied to the clipboard." : "The clipboard was unavailable.",
+            copied ? ToastKind.Success : ToastKind.Warning, 3000);
     }
 
     [RelayCommand]
@@ -2029,6 +2080,26 @@ public partial class ChatViewModel : ViewModelBase
             _settings.Settings.Memory.RecallInjectionEnabled && _recallSearch is not null));
     }
 
+    private async Task<ProjectStateContext> BuildProjectStateInjectionAsync(CancellationToken ct)
+    {
+        if (_projectState is null || string.IsNullOrWhiteSpace(_currentProjectId))
+            return ProjectStateContext.Empty;
+        try
+        {
+            var state = await _projectState.GetStateAsync(_currentProjectId, ct);
+            var context = ProjectStateContextBuilder.Build(state);
+            return string.IsNullOrEmpty(context.Text)
+                ? context
+                : context with { Text = $"\n\n{context.Text}" };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service, $"Project State context unavailable: {ex.Message}"));
+            return ProjectStateContext.Empty;
+        }
+    }
+
     private bool CurrentModelHasConfirmedVisionCapability()
     {
         // OpenAI-compatible transports accept image_url parts, but the model
@@ -2199,7 +2270,12 @@ public partial class ChatViewModel : ViewModelBase
         {
             var result = await _recallSearch.SearchAsync(question, _currentProjectId, ct);
             if (result.Hits.Count == 0)
-                return (string.Empty, [], sw.ElapsedMilliseconds, 0, "no relevant recall hits");
+            {
+                var emptyNote = result.KeywordOnly
+                    ? "keyword-only (no embedding model); no relevant recall hits"
+                    : "no relevant recall hits";
+                return (string.Empty, [], sw.ElapsedMilliseconds, 0, emptyNote);
+            }
 
             var budget = _settings.Settings.Memory.RecallInjectionTokenBudget;
             var used = 0;
@@ -2226,9 +2302,11 @@ public partial class ChatViewModel : ViewModelBase
             var sources = selected.Select(h => new SourceReference(
                 ProvenanceKind.Recall,
                 h.Title,
+                Locator: RecallLocator(h),
                 Snippet: h.Snippet,
                 Score: h.Score,
-                Timestamp: h.Timestamp)).ToList();
+                Timestamp: h.Timestamp,
+                EvidenceOrigin: EvidenceOrigin.Extracted)).ToList();
 
             var note = result.OmittedSources.Count > 0
                 ? $"omitted: {string.Join(", ", result.OmittedSources)}"
@@ -2247,6 +2325,15 @@ public partial class ChatViewModel : ViewModelBase
             return (string.Empty, [], sw.ElapsedMilliseconds, 0, string.Empty);
         }
     }
+
+    private static string RecallLocator(RecallHit hit) => hit.Kind switch
+    {
+        RecallKind.Message => $"conversation:{hit.Target.ConversationId}:message:{hit.Target.MessageIndex}",
+        RecallKind.Task => $"task:{hit.Target.TaskId}",
+        RecallKind.Memory => $"memory:{hit.Target.MemoryId}",
+        RecallKind.Document => $"dataset:{hit.Target.DatasetId}:chunk:{hit.Target.ChunkId}",
+        _ => throw new ArgumentOutOfRangeException(nameof(hit))
+    };
 
     /// <summary>
     /// Global-scope agent lessons formatted as their own markdown block, in

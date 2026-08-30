@@ -85,6 +85,9 @@ public class TtsSettings
     /// </summary>
     public bool StreamingChatSpeech { get; set; } = false;
 
+    /// <summary>Supplementary, restrained cues for important state changes.</summary>
+    public AudioFeedbackSettings AudioFeedback { get; set; } = new();
+
     /// <summary>
     /// Legacy (pre-r24) named voice/speed combinations. The Settings > Voice
     /// UI no longer creates or edits these; kept only so

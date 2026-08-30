@@ -259,7 +259,7 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private string      _datasetManagerStatus = string.Empty;
 
     public event EventHandler? ScrollToBottom;
-    public Action<string>? RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestDeleteDatasetConfirmation { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestRemoveMissingSourcesConfirmation { get; set; }
 
@@ -925,38 +925,57 @@ public partial class RagViewModel : ObservableObject
             // copy above never touched the live dataset, so this is the only
             // thing that can bring the UI's view of the model/ReindexRequired
             // back in sync with whatever the pipeline actually committed.
-            await LoadDatasetsAsync();
-            await RefreshDatasetManagerAsync();
-            if (restoreServices is not null)
+            try
             {
-                var restoreErrors = await restoreServices();
-                foreach (var error in restoreErrors)
-                    _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                        $"RAG service restore failed: {error}"));
+                await LoadDatasetsAsync();
+                await RefreshDatasetManagerAsync();
+            }
+            finally
+            {
+                if (restoreServices is not null)
+                {
+                    var restoreErrors = await restoreServices();
+                    foreach (var error in restoreErrors)
+                        _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                            $"RAG service restore failed: {error}"));
+                }
             }
         }
     }
 
     [RelayCommand]
-    private void CopyAnswer()
+    private async Task CopyAnswer()
     {
         if (!string.IsNullOrEmpty(AnswerText))
-            RequestCopyToClipboard?.Invoke(AnswerText);
+            await CopyTextAsync(AnswerText, "Answer");
     }
 
     [RelayCommand]
-    private void CopySource()
+    private async Task CopySource()
     {
         if (SelectedSource is not null)
-            RequestCopyToClipboard?.Invoke(SelectedSource.Content);
+            await CopyTextAsync(SelectedSource.Content, "Source");
     }
 
     [RelayCommand]
-    private void CopySourcePath()
+    private async Task CopySourcePath()
     {
         var path = SelectedSource?.Path;
         if (!string.IsNullOrWhiteSpace(path))
-            RequestCopyToClipboard?.Invoke(path);
+            await CopyTextAsync(path, "Source path");
+    }
+
+    private async Task CopyTextAsync(string text, string label)
+    {
+        if (RequestCopyToClipboard is null)
+            return;
+
+        var copied = false;
+        try { copied = await RequestCopyToClipboard(text); }
+        catch { }
+        _toasts.Show(copied ? $"{label} copied" : $"Could not copy {label.ToLowerInvariant()}",
+            copied ? $"{label} text copied to the clipboard." : "The clipboard was unavailable.",
+            copied ? ToastKind.Success : ToastKind.Warning, 3000);
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>

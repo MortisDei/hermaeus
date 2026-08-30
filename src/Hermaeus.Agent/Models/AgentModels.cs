@@ -134,6 +134,14 @@ public sealed class AgentTaskState
     /// </summary>
     public string LastUserMessage { get; set; } = string.Empty;
 
+    /// <summary>
+    /// True when an autonomous run stopped because it reached MaxAutoSteps.
+    /// This is distinct from an ask_user wait, so the workbench cannot render
+    /// a reply box for a pause that has no question. JSON-additive for older
+    /// task files.
+    /// </summary>
+    public bool StepBudgetExhausted { get; set; }
+
     public int StepCount { get; set; }
     /// <summary>
     /// Consecutive steps in a row whose model response could not be parsed
@@ -211,6 +219,10 @@ public sealed class AgentTaskState
     /// task state files (JSON-additive).
     /// </summary>
     public string ProjectId { get; set; } = string.Empty;
+    /// <summary>The model frozen for this task at its first planner boundary.
+    /// Empty on legacy tasks until they next run.</summary>
+    public string ModelId { get; set; } = string.Empty;
+    public string ModelDisplayName { get; set; } = string.Empty;
     /// <summary>
     /// Populated only on a parent task, only by an approved <c>plan_subtasks</c>
     /// action. Empty for every ordinary task and for every child task.
@@ -265,6 +277,16 @@ public sealed class AgentSubTaskSpec
     /// <summary>Key into the fixed <see cref="Hermaeus.Agent.Services.AgentSpecialistProfiles"/> catalog.</summary>
     public string ProfileName { get; set; } = string.Empty;
     public string SuccessCriteria { get; set; } = string.Empty;
+    /// <summary>Explicit proposed/user-selected child model. Empty means inherit parent.</summary>
+    public string ModelId { get; set; } = string.Empty;
+    /// <summary>Actual model resolved when the plan is approved.</summary>
+    public string ResolvedModelId { get; set; } = string.Empty;
+    public string ModelDisplayName { get; set; } = string.Empty;
+    public string ModelLabel => string.IsNullOrWhiteSpace(ResolvedModelId)
+        ? "inherit parent (legacy unresolved)"
+        : string.IsNullOrWhiteSpace(ModelId)
+            ? $"inherit {(string.IsNullOrWhiteSpace(ModelDisplayName) ? ResolvedModelId : ModelDisplayName)} ({ResolvedModelId})"
+            : $"{(string.IsNullOrWhiteSpace(ModelDisplayName) ? ResolvedModelId : ModelDisplayName)} ({ResolvedModelId})";
     public AgentSubTaskStatus Status { get; set; } = AgentSubTaskStatus.Pending;
     /// <summary>Set when the child task is actually created (lazily, at execution time - not at plan-approval time).</summary>
     public string? TaskId { get; set; }
@@ -450,10 +472,16 @@ public sealed class AgentDraftPatch
 }
 
 /// <summary>Outcome of attempting to revert an applied patch.</summary>
-public sealed record AgentRevertResult(bool Reverted, string Message);
+public sealed record AgentRevertResult(bool Reverted, string Message)
+{
+    public NormalizedToolOutcome NormalizedOutcome { get; init; } = new();
+}
 
 /// <summary>One file's outcome within a whole-run Task Rewind (r23 1.3).</summary>
-public sealed record AgentTaskRevertFileOutcome(string RelativePath, bool Reverted, string Message);
+public sealed record AgentTaskRevertFileOutcome(string RelativePath, bool Reverted, string Message)
+{
+    public NormalizedToolOutcome NormalizedOutcome { get; init; } = new();
+}
 
 /// <summary>
 /// Outcome of AgentPatchReviewService.RevertTaskAsync: a truthful partial-success
@@ -464,6 +492,7 @@ public sealed record AgentTaskRevertResult(IReadOnlyList<AgentTaskRevertFileOutc
 {
     public int RevertedCount => Files.Count(f => f.Reverted);
     public int TotalCount => Files.Count;
+    public NormalizedToolOutcome NormalizedOutcome { get; init; } = new();
 }
 
 /// <summary>
@@ -518,7 +547,9 @@ public sealed record AgentLedgerApprovalEntry(
 public sealed record AgentLedgerSubTaskEntry(
     string Goal,
     AgentSubTaskStatus Status,
-    string? TaskId);
+    string? TaskId,
+    string ModelId = "",
+    string ModelDisplayName = "");
 
 /// <summary>A run's total footprint: every file, command, and approval it produced (r23 1.1, the Run Ledger).</summary>
 public sealed record AgentRunLedger(
@@ -540,6 +571,13 @@ public sealed class AgentContextPack
     public List<AgentRetrievedItem> RetrievedMemory { get; set; } = [];
     public List<AgentRetrievedItem> RetrievedFiles { get; set; } = [];
     public List<AgentRetrievedItem> ProjectInstructions { get; set; } = [];
+    /// <summary>Accepted, bounded, user-owned Project State. Empty when the task
+    /// is not project-bound or the project has no accepted state.</summary>
+    public List<AgentRetrievedItem> ProjectState { get; set; } = [];
+    /// <summary>The frozen model producing this planner step.</summary>
+    public List<AgentRetrievedItem> ModelIdentity { get; set; } = [];
+    /// <summary>Bounded visible models a parent may name in a plan_subtasks proposal.</summary>
+    public List<AgentRetrievedItem> EligibleModels { get; set; } = [];
     public List<AgentToolResult> ToolResults { get; set; } = [];
     /// <summary>
     /// Budgeted replay of the task's persisted step transcript (assistant
@@ -605,6 +643,13 @@ public sealed class AgentToolResult
     public int? ExitCode { get; set; }
     /// <summary>True only when run_command hit its 5-minute timeout and was killed; ExitCode is meaningless then.</summary>
     public bool TimedOut { get; set; }
+
+    /// <summary>
+    /// Deterministic semantic interpretation of the raw fields above. Missing
+    /// pre-R31 JSON keeps the legacy Unknown default and is never guessed from
+    /// ResultSummary text.
+    /// </summary>
+    public NormalizedToolOutcome NormalizedOutcome { get; set; } = new();
 
 }
 
@@ -717,7 +762,9 @@ public sealed record AgentTranscriptEntry(
     string Content,
     DateTime Timestamp,
     string? ArgumentsCanonical = null,
-    bool? ReplaySafe = null);
+    bool? ReplaySafe = null,
+    NormalizedToolOutcome? NormalizedOutcome = null,
+    string ModelId = "");
 
 public sealed record AgentStepResult(
     AgentTaskState State,
@@ -738,7 +785,9 @@ public sealed record AgentTaskListItem(
     /// <summary>r23 2.3: true when the task completed with a non-empty Reservations list, so the recent-tasks list can show "Completed with reservations" without loading the full state.</summary>
     bool HasReservations = false,
     /// <summary>r24 doc 01: the project this task was created under, if any.</summary>
-    string ProjectId = "");
+    string ProjectId = "",
+    string ModelId = "",
+    string ModelDisplayName = "");
 
 public sealed record AgentFileSearchResult(
     string RelativePath,
@@ -757,7 +806,9 @@ public sealed record AgentFileReadResult(
     /// Lines returned in this result. With <see cref="LineOffset"/> this is
     /// exactly what the model needs to ask for the next slice.
     /// </summary>
-    int? LineCount = null)
+    int? LineCount = null,
+    /// <summary>Meaningful only for mutation tools; reads leave the default.</summary>
+    bool Changed = true)
 {
     /// <summary>
     /// What to do about a truncated read, in the result itself. A bare

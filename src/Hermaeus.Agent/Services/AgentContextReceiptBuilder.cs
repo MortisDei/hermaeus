@@ -23,6 +23,9 @@ public static class AgentContextReceiptBuilder
         AddSection(sections, "RAG", pack.RetrievedMemory.Where(i => i.Source == "rag"));
         AddSection(sections, "Workspace files", pack.RetrievedFiles);
         AddSection(sections, "Project instructions", pack.ProjectInstructions);
+        AddSection(sections, "Project State", pack.ProjectState);
+        AddSection(sections, "Task model", pack.ModelIdentity);
+        AddSection(sections, "Eligible sub-task models", pack.EligibleModels);
         AddSection(sections, "Transcript replay", pack.TranscriptHistory);
         AddStringSection(sections, "Transcript diagnostics", pack.TranscriptDiagnostics);
         AddSection(sections, "Lessons", pack.Lessons);

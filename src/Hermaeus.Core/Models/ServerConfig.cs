@@ -95,11 +95,20 @@ public class ServerConfig
 
     /// <summary>
     /// r19 5.3: path to a vision projector (mmproj-*.gguf) companion file,
-    /// enabling llama-server's multimodal chat mode. Empty (default) means
-    /// text-only, byte-identical to today's launch command; set means
-    /// <c>--mmproj &lt;path&gt;</c> is appended.
+    /// enabling llama-server's multimodal chat mode. The path is retained as
+    /// provenance even when <see cref="UseProjector"/> is false. Empty (default)
+    /// means text-only, byte-identical to today's launch command; a configured
+    /// and enabled path means <c>--mmproj &lt;path&gt;</c> is appended.
     /// </summary>
     public string MmprojPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the configured <see cref="MmprojPath"/> is used for this server.
+    /// This is a launch preference only; it never owns or changes projector
+    /// identity. Existing configurations with a projector remain enabled when
+    /// this additive property is absent from settings.json.
+    /// </summary>
+    public bool UseProjector { get; set; } = true;
 
     /// <summary>
     /// Runtime facts are populated immediately before launch. They are not
@@ -113,4 +122,10 @@ public class ServerConfig
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool RuntimeSupportsPromptThreads { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsLoadMode { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsCorsOrigins { get; set; }
 }

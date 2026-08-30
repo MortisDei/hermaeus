@@ -1,6 +1,10 @@
 # Hermaeus
 
 [![CI](https://github.com/MortisDei/hermaeus/actions/workflows/ci.yml/badge.svg)](https://github.com/MortisDei/hermaeus/actions/workflows/ci.yml)
+[![Latest version](https://img.shields.io/github/v/tag/MortisDei/hermaeus)](https://github.com/MortisDei/hermaeus/releases)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-6f42c1)](LICENSE.md)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![Platforms: Windows and Linux](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4)](docs/packaging.md)
 
 Hermaeus is a native, local-first AI workspace for developers and power users.
 
@@ -329,9 +333,15 @@ treated as build errors.
 
 ---
 
-# Known Issues / Alpha Status
+# Known Issues / Beta Status
 
-Hermaeus is alpha software, developed and tested primarily on Windows. Linux (Pop!_OS, Wayland) has been run and works, but is less exercised than Windows and more likely to surface rough edges. Prebuilt binaries are not code-signed; Windows SmartScreen will warn on first run (verify the published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the pace of fixes and new features.
+Hermaeus is beta software, developed and tested primarily on Windows. The
+bounded R31 owner-validation gate passed on Windows and Pop!_OS with COSMIC.
+Other Linux environments and untested runtime or hardware combinations remain
+less exercised and more likely to surface rough edges. Prebuilt binaries are
+not code-signed; Windows SmartScreen will warn on first run (verify the
+published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the
+pace of fixes and new features.
 
 Hermaeus has one maintainer. Issues get a best-effort response; pull requests must follow `CONTRIBUTING.md`.
 
@@ -339,31 +349,22 @@ Hermaeus has one maintainer. Issues get a best-effort response; pull requests mu
 
 # Documentation
 
-## User Features
+Start with the [documentation map](docs/index.md). It explains which document
+is authoritative for current product behavior, where subsystem references live,
+how the active R31 material differs from historical review records, and where
+deferred work is tracked.
 
+- [Current feature catalogue](docs/features.md), including Chat, Agent, RAG,
+  Models, Services, Benchmarks, Lab, System, Doctor, Memories, Logs, Activity,
+  and Settings
 - [User guide](docs/user-guide.md)
 - [Packaging and installation](docs/packaging.md)
-- Chat & Context
-- Model Management
-- Local AI Setup
-- System Integration
+- [Current security review](docs/security-review.md)
+- [Active deferred ledger](docs/review/deferred.md)
+- [Development and contribution guidance](CONTRIBUTING.md)
 
-See:
-
-`docs/features.md`
-
-## Core Components
-
-- `docs/rag.md`
-- `docs/agent.md`
-- `docs/voice.md`
-- `docs/projects.md`
-- `docs/recall.md`
-- `docs/benchmarks.md`
-- `docs/security-review.md` (current controls and threat model)
-- `docs/security-history.md` (per-round security history)
-- `docs/security-roadmap.md` (open security hardening work)
-- `docs/review/deferred.md` (work a review round postponed, and why)
+Detailed subsystem references, the security roadmap, historical security
+records, and the immutable review archive are linked from the documentation map.
 
 ---
 
@@ -429,7 +430,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.37.0-alpha**
+**0.38.0-beta**
 
 Major systems currently implemented include:
 
@@ -440,6 +441,7 @@ Major systems currently implemented include:
 - Long-term memory
 - Voice providers
 - Benchmark suites
+- Controlled, isolated Lab experiments and evidence inspection
 - Local AI setup
 - Doctor diagnostics
 - Reasoning-aware local chat with capability evidence and preserved reasoning
@@ -447,4 +449,4 @@ Major systems currently implemented include:
 - Safe model adoption, progress, and deletion workflows
 - Security review and threat model
 
-Hermaeus is alpha software. See [Known Issues](#known-issues--alpha-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.
+Hermaeus is beta software. See [Known Issues](#known-issues--beta-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.

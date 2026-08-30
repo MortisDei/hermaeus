@@ -22,6 +22,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
     private readonly IAgentTaskStateStore _taskStateStore;
     private readonly ISettingsService _settings;
     private readonly ILessonStore? _lessons;
+    private readonly IProjectStateStore? _projectState;
 
     public AgentContextBuilder(
         IAgentWorkspaceTools workspaceTools,
@@ -30,7 +31,8 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         IWorkspaceActivationService activation,
         IAgentTaskStateStore taskStateStore,
         ISettingsService settings,
-        ILessonStore? lessons = null)
+        ILessonStore? lessons = null,
+        IProjectStateStore? projectState = null)
     {
         _workspaceTools = workspaceTools;
         _retrieval = retrieval;
@@ -39,6 +41,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         _taskStateStore = taskStateStore;
         _settings = settings;
         _lessons = lessons;
+        _projectState = projectState;
     }
 
     public async Task<AgentContextPack> BuildAsync(
@@ -78,10 +81,33 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         await AddWorkspaceMemoryAsync(pack, options, ct);
         await AddRagContextAsync(pack, state, options, ct);
         await AddProjectInstructionsAsync(pack, options, ct);
+        await AddProjectStateAsync(pack, state, ct);
         await AddTranscriptHistoryAsync(pack, state, ct);
         await AddLessonsAsync(pack, options, ct);
         AddSubTaskReports(pack, state);
         return pack;
+    }
+
+    private async Task AddProjectStateAsync(AgentContextPack pack, AgentTaskState task, CancellationToken ct)
+    {
+        if (_projectState is null || string.IsNullOrWhiteSpace(task.ProjectId)) return;
+        try
+        {
+            var accepted = await _projectState.GetStateAsync(task.ProjectId, ct);
+            var context = ProjectStateContextBuilder.Build(accepted);
+            if (string.IsNullOrEmpty(context.Text)) return;
+            pack.ProjectState.Add(new AgentRetrievedItem(
+                "project-state",
+                $"Project State revision {context.Revision}",
+                context.Text,
+                1.0,
+                accepted.UpdatedAtUtc,
+                $"project:{task.ProjectId}:state:{context.Revision}"));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            pack.KnownRisks.Add($"Project State unavailable: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -98,7 +124,9 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             .Select(spec => new ContextPart(
                 "subtask",
                 spec.Goal,
-                $"[{spec.Status}, profile {spec.ProfileName}] {spec.Goal}"
+                $"[{spec.Status}, profile {spec.ProfileName}"
+                    + (string.IsNullOrWhiteSpace(spec.ResolvedModelId) ? string.Empty : $", model {spec.ModelDisplayName} ({spec.ResolvedModelId})")
+                    + $"] {spec.Goal}"
                     + (string.IsNullOrWhiteSpace(spec.ResultSummary) ? string.Empty : $" -> {spec.ResultSummary}"),
                 Data: spec))
             .Reverse() // most recent children favored if the budget can't fit all of them

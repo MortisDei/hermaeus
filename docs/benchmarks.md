@@ -1,5 +1,9 @@
 # Benchmarks & System Overview
 
+This is the current reference for the Benchmarks and System Overview panels.
+The historical Speed Check record near the end is retained as a labelled
+measurement appendix; it is not a current performance claim or release note.
+
 ## Benchmarks
 
 The **Benchmarks** workspace runs local prompt suites against selected models and
@@ -9,6 +13,12 @@ not need to paste each local model path by hand.
 
 Benchmarks are intended for practical local model comparison, not lab-grade
 hardware benchmarking.
+
+Entering the Benchmarks workspace loads Insights automatically when the service
+is available. After Insights has been opened once, completed runs, reruns,
+deletions, history clears, and normal reloads refresh the report. While a run
+is active, the page header shows an explicit activity indicator and the status
+line reports the current suite, case, phase, and iteration when known.
 
 ### Benchmark Runs
 
@@ -30,10 +40,13 @@ Runs record the following metrics and metadata:
   layers, generation and prompt thread counts, model path, quantization, KV
   cache K/V types, and Flash Attention (all sourced from the managed server
   actually serving a local GGUF model, not app-process values)
-- A persistent empirical profile fingerprint over the material model and
+- Persistent empirical profile fingerprints over the material model and
   inference configuration, plus a shared direct-observation source reference.
-  This associates the run with what was actually measured. It is not a generic
-  capability score or an automatic model recommendation.
+  The historical v1 fingerprint remains readable. New runs also carry a v2
+  composition of runtime, model, hardware, and configuration identity whose
+  stable id excludes local paths. These associate the run with what was
+  actually measured. They are not a generic capability score or an automatic
+  model recommendation.
 - Suite version, case version, scoring profile, and run mode
 - Cold-only single-iteration runs, or cold and warm phase attempts when suites
 	use repeated iterations per case
@@ -54,7 +67,8 @@ without appearing here.
 `KvCacheTypeK`, `KvCacheTypeV`, `FlashAttention`, `OS`, `CPU`, `RAM`, `GPU`,
 `SpeculativeTypes`, `SpeculativeDraftModel`,
 `SpeculativeNMax`, `SpeculativeNMin`, `SpeculativePMin`,
-`SpeculativeDraftGpuLayers`, `ProfileFingerprint`, `ObservationSource`.
+`SpeculativeDraftGpuLayers`, `ProfileFingerprint`, `ProfileFingerprintV2`,
+`ObservationSource`.
 
 KV cache and Flash Attention are configuration provenance, not a score or a
 recommendation. New local-GGUF runs record the managed server values in their
@@ -62,13 +76,16 @@ saved record, run details, and JSON, Markdown, and CSV exports. Historical
 runs and runs that do not resolve to a managed llama-server show the settings
 as not recorded; Hermaeus does not infer a default after the fact.
 
-New runs also save a profile fingerprint covering the known material inference
-fields, including prompt threads, KV cache types, Flash Attention, and
-speculative configuration. The fingerprint changes when a recorded field
-changes and leaves unknown fields unknown. The associated observation source is
-local direct evidence for that one run, not a claim that the model behaves the
-same way on another machine or workload. Historical runs keep no fingerprint or
-observation source rather than being reconstructed from presumed defaults.
+New runs save both the compatibility v1 fingerprint and a v2 fingerprint over
+runtime, model, hardware, and configuration sub-identities. The v2 runtime uses
+the selected executable hash where a managed runtime is available. The model
+uses verified hash or manifest identity when already known, with file metadata
+explicitly marked as a weaker fallback. Unknown extra runtime arguments make
+the configuration incomplete and are not persisted verbatim. The associated
+observation source is local direct evidence for that one run, not a claim that
+the model behaves the same way on another machine or workload. Historical runs
+keep their absent or v1 identity rather than being reconstructed from presumed
+defaults.
 
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off
@@ -130,12 +147,12 @@ Hermaeus includes starter suites covering:
 
 ### Suite Versioning
 
-The 0.37.0-alpha deterministic scorer is versioned separately from stored run
-data. It accepts multiline structural regexes, normalizes grouping separators
-only inside digit runs, recognizes explicit inability phrases, and supports
-additive all-required keyword alternative groups. Historical `run_json` rows are
-not rescored. A reasoning-only response still fails cases that score the final
-answer, because an explanation is not an answer.
+The deterministic scorer used by current suites is versioned separately from
+stored run data. It accepts multiline structural regexes, normalizes grouping
+separators only inside digit runs, recognizes explicit inability phrases, and
+supports additive all-required keyword alternative groups. Historical
+`run_json` rows are not rescored. A reasoning-only response still fails cases
+that score the final answer, because an explanation is not an answer.
 
 Suites and cases carry version identifiers so historical runs remain meaningful
 after prompts, scoring profiles, or evaluation rules change.
@@ -224,10 +241,9 @@ The Insights tab's **Best overall** card ranks models only on the cases every
 ranked model has actually run, keyed on both case id and case version, and says
 what that basis was ("across 24 case(s) run by all 3 ranked model(s)").
 
-This matters because a per-model average is not a comparison. Before r25 each
-model was averaged over whatever cases it happened to have run, gated only by a
-volume floor of 2 runs and 10 cases, so a model that ran one short easy suite
-could outrank a model that ran everything.
+This matters because a per-model average is not a comparison. A model that ran
+one short, easy suite must not outrank a model that ran the complete comparable
+case set merely because the averages used different inputs.
 
 Consequences worth knowing:
 
@@ -293,6 +309,27 @@ Example:
 
 ### Resource Sampling Notes
 
+GPU Fit and Lab use one shared runtime telemetry contract. A sample records its
+metric, value or `Unknown`, source, trust state, timestamp, runtime identity,
+and process-instance boundary. The current platform source provides the
+matching runtime process working set. Per-process GPU memory remains `Unknown`
+unless a trustworthy runtime or platform counter is available. On Windows WDDM,
+`nvidia-smi` may report `[N/A]` for the PID-scoped process field even while a
+device total is available; that total is never attributed to the model.
+Windows also exposes a PID-named `GPU Process Memory\...\Dedicated Usage`
+counter, but its documented incorrect-value failure mode means R31 does not use
+it as trustworthy process VRAM.
+Optional
+whole-device GPU readings are labelled `DeviceTotal` and are never subtracted
+or attributed to the model.
+
+High-frequency series are bounded. Persisted GPU Fit experience keeps
+min/max/mean/current/count summaries plus exact early, current, and extrema
+samples. Prediction and observation remain separate. Signed discrepancies are
+calculated only for exact v2 fingerprint matches and comparable process-scoped
+or runtime-reported values; incompatible observations are listed separately and
+never rewrite the deterministic formula.
+
 Resource deltas are sampled before, during, and after a run and shown for
 reference. They are best-effort and may miss short-lived spikes on some
 platforms. The model itself runs in a separate process (`llama-server`) or on
@@ -301,6 +338,13 @@ model's actual resource use; the resource term in the weighted ranking score
 is therefore always neutral rather than computed from that delta. The before/
 after memory and VRAM snapshots are still recorded and exported for manual
 inspection.
+
+Lab recipes keep performance evidence separate from quality evidence. A recipe
+may require an explicit `quality.score` observation or reference an existing
+benchmark run identifier; it does not copy benchmark history into Lab evidence.
+The initial low-bit KV-cache recipe records `quality.score` as Missing and
+therefore refuses Apply. A successful load or an exact short output hash is not
+a substitute for a benchmarked quality result.
 
 For GPU-capable systems, record:
 
@@ -392,12 +436,14 @@ three separate answers, because they are three separate facts:
 expected pattern, or a refusal expectation, because a throughput number should
 not quietly become a pass or a fail.
 
-**Prompt cache boundaries.** Cold and warm phases report externally observable
-prompt throughput and time to first token. They can show whether the workflow
-changed, but they do not claim how many prompt tokens llama-server reused:
-this runtime integration has no stable reuse-token counter. A timing difference
-is not fabricated into a reuse count. Shared-prefix cache measurement remains a
-future controlled workload, not a normal-chat inference.
+**Prompt cache boundaries.** Cold and warm benchmark phases report externally
+observable prompt throughput and time to first token. Lab now owns the separate
+controlled shared-prefix protocol: identical reconstructed prompts run with
+request caching disabled and enabled, preserving prompt timing, throughput, and
+output correctness. Neither surface claims how many tokens were reused unless
+the exact runtime proves a reviewed machine-readable counter field. A timing
+difference is not fabricated into a reuse count, and normal Chat is not sampled
+to infer one.
 
 **Comparing two runs.** Two Speed Check runs of the same suite against the same
 model can be shown side by side, with the difference in tokens per second,
@@ -427,7 +473,7 @@ rate together. A higher tokens-per-second result with no drafted tokens, poor
 acceptance, or worse TTFT is a trade-off to inspect, not a "best" verdict.
 Hermaeus deliberately does not collapse those facts into a magic score.
 
-### First recorded result (r27, 0.34.0-alpha)
+### Historical record: first recorded Speed Check
 
 `gemma-4-E4B-it-qat-UD-Q4_K_XL` at 64512 context, 999 GPU layers, q8_0 KV
 cache, one cold iteration per case, on the maintainer's desktop under ordinary
@@ -461,13 +507,13 @@ different as these is consistent with decode being memory-bandwidth-bound, and
 equally consistent with drafting never having engaged at all, in which case
 both columns measured the same configuration.
 
-### What r28 changed about repeating it
+### Historical note: repeating the Speed Check
 
 The entry above stands as written; it is an honest record of what was known
 when it was taken. What has changed is that the ambiguity it ends on is now
 answerable without reading a server log.
 
-- **Draft acceptance is recorded** (r28 doc 02 2.1 and 2.4). llama-server
+- **Draft acceptance is recorded.** llama-server
 	reports `draft_n` and `draft_n_accepted` in its timings whenever
 	speculative decoding is active, and a run's results now carry both. A
 	result showing `0 drafted` means drafting never engaged and the two columns
@@ -475,7 +521,7 @@ answerable without reading a server log.
 	beside a flat tok/s means the bottleneck is somewhere else. A run where the
 	server reported no counters at all shows nothing rather than a zero, because
 	a missing measurement is not a measured zero.
-- **The Speed Check runs five iterations per case** (r28 doc 02 2.2), and a
+- **The Speed Check runs five iterations per case**, and a
 	comparison reports the median with the range observed across them, in the
 	form `70.2 tok/s (66.8 to 71.9 over 5 runs)`. That is a description of what
 	was seen. It is not a confidence interval and no significance is claimed.
@@ -511,7 +557,13 @@ keeps the highest candidate that starts and reaches `/health`, with CPU fallback
 as the final candidate. Successful tune results are saved per GGUF model file
 with model size and modified-time metadata. When that model is selected again,
 Hermaeus reapplies the saved GPU layer, thread, context, and extra-argument
-profile before starting the managed server.
+profile before starting the managed server. The Models card shows the current
+profile directly, while the model configuration editor hydrates the same saved
+GPU layer, thread, and context values for intentional review or editing.
+**Save model profile** remains separate from Services **Save Config**, and
+extra arguments remain a Services concern. Auto-tune probes are temporary owned
+processes and require the target managed server to be stopped; they do not
+silently stop and replace a running Chat process.
 
 Doctor alerts when local GGUF models do not have matching tuned profiles. It
 also checks the configured `llama-server` binary version and, when GitHub

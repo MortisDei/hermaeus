@@ -10,17 +10,15 @@
                   VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled">
         <StackPanel MaxWidth="960" Spacing="20">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10" Margin="0,0,0,8">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="0,0,0,8">
                 <StackPanel Grid.Column="0" Spacing="4">
                     <TextBlock Text="Settings" Classes="page-title" />
                     <TextBlock Text="Tune models, storage, voice and interface defaults for a local-first workspace."
                                Classes="page-subtitle" />
                 </StackPanel>
-                <Button Grid.Column="1" Command="{Binding SaveCommand}" Content="Save"
+                <Button Grid.Column="1" Command="{Binding ResetCommand}" Content="Reset"
                         FontSize="13" Padding="16,8" CornerRadius="8" />
-                <Button Grid.Column="2" Command="{Binding ResetCommand}" Content="Reset"
-                        FontSize="13" Padding="16,8" CornerRadius="8" />
-                <Button Grid.Column="3" Command="{Binding ReRunSetupWizardCommand}" Content="Rerun wizard"
+                <Button Grid.Column="2" Command="{Binding ReRunSetupWizardCommand}" Content="Rerun wizard"
                         FontSize="13" Padding="12,8" CornerRadius="8" />
             </Grid>
 
@@ -28,20 +26,21 @@
                   RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="16"
                   RowSpacing="16">
-                <views:SettingsLlmSectionView Grid.Row="0" Grid.Column="0" DataContext="{Binding Llm}" />
-                <views:SettingsRagSectionView Grid.Row="0" Grid.Column="1" DataContext="{Binding Rag}" />
-                <views:SettingsVoiceSectionView Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Tts}" />
-                <views:SettingsDataSectionView Grid.Row="2" Grid.Column="0" DataContext="{Binding Data}" />
-                <views:SettingsLocalAiSetupSectionView Grid.Row="2" Grid.Column="1" DataContext="{Binding LocalAiSetup}" />
-                <views:SettingsUiSectionView Grid.Row="3" Grid.Column="0" DataContext="{Binding Ui}" />
-                <views:SettingsMemorySectionView Grid.Row="3" Grid.Column="1" DataContext="{Binding Memory}" />
-                <views:SettingsMcpSectionView Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Mcp}" />
-                <views:SettingsLocalApiSectionView Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding LocalApi}" />
-                <views:SettingsTrustSectionView Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Trust}" />
+                <views:SettingsLlmSectionView Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Llm}" />
+                <views:SettingsRagSectionView Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Rag}" />
+                <views:SettingsVoiceSectionView Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Tts}" />
+                <views:SettingsDataSectionView Grid.Row="3" Grid.Column="0" DataContext="{Binding Data}" />
+                <views:SettingsLocalAiSetupSectionView Grid.Row="3" Grid.Column="1" DataContext="{Binding LocalAiSetup}" />
+                <views:SettingsUiSectionView Grid.Row="4" Grid.Column="0" DataContext="{Binding Ui}" />
+                <views:SettingsMemorySectionView Grid.Row="4" Grid.Column="1" DataContext="{Binding Memory}" />
+                <views:SettingsMcpSectionView Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Mcp}" />
+                <views:SettingsLocalApiSectionView Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding LocalApi}" />
+                <views:SettingsTrustSectionView Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Trust}" />
             </Grid>
 
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <TextBlock Text="Saved" IsVisible="{Binding IsSaved}"
+                <TextBlock Text="{Binding PersistenceStatus}"
+                           IsVisible="{Binding PersistenceStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
                            VerticalAlignment="Center" FontSize="13"
                            Foreground="{DynamicResource AccentFillColorDefaultBrush}" />
                 <TextBlock Text="{Binding SettingsError}"

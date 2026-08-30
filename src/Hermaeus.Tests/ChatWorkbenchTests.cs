@@ -12,6 +12,34 @@ namespace Hermaeus.Tests;
 public sealed class ChatWorkbenchTests
 {
     [Fact]
+    public async Task Copy_message_awaits_clipboard_and_reports_both_outcomes()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var toasts = new FakeToasts();
+        var vm = new ChatViewModel(
+            new UsageLlm(), new InMemoryConversationStore(), new EmptyMemoryStore(), settings,
+            new FakeTts(), new ModelProfileService(settings), toasts,
+            new NoOpConversationMemoryService(), new RuntimeLogService(settings), new ConversationExportService());
+        var message = new MessageViewModel { Role = "assistant", Content = "copy this after the clipboard completes" };
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        vm.RequestCopyToClipboard = _ => gate.Task;
+
+        var pending = vm.CopyMessageCommand.ExecuteAsync(message);
+        Assert.False(pending.IsCompleted);
+        gate.SetResult(true);
+        await pending;
+        Assert.Equal("Message copied", toasts.LastShown?.Title);
+
+        gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failed = vm.CopyMessageCommand.ExecuteAsync(message);
+        Assert.False(failed.IsCompleted);
+        gate.SetResult(false);
+        await failed;
+        Assert.Equal("Could not copy message", toasts.LastShown?.Title);
+    }
+
+    [Fact]
     public void TruncateHistoryKeepsNewestMessages()
     {
         var messages = Enumerable.Range(1, 20)
@@ -225,6 +253,40 @@ public sealed class ChatWorkbenchTests
         Assert.False(assistantMessage.IsContextExpanded);
         var memorySection = Assert.Single(assistantMessage.ContextSections, s => s.Kind == ProvenanceKind.Memory);
         Assert.Contains(memorySection.Items, s => s.Locator == "conv-1");
+    }
+
+    [Fact]
+    public async Task SendAsyncInjectsAcceptedProjectStateAndLabelsItsReceipt()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var projects = new ProjectStore(settings);
+        var project = new Project { Id = "p-state", Name = "Stateful" };
+        await projects.SaveAsync(project);
+        await projects.SaveStateAsync(new ProjectState
+        {
+            ProjectId = project.Id,
+            CurrentObjective = "Verify project context",
+            Items = [new ProjectStateItem { Kind = ProjectStateItemKind.Constraint, Text = "Accepted only" }]
+        }, 0);
+        var capturing = new CapturingLlm();
+        var vm = new ChatViewModel(
+            capturing, new InMemoryConversationStore(), new EmptyMemoryStore(), settings,
+            new FakeTts(), new ModelProfileService(settings), new FakeToasts(),
+            new NoOpConversationMemoryService(), new RuntimeLogService(settings),
+            new ConversationExportService(), projectState: projects);
+        vm.ActiveProjectProvider = () => project;
+        vm.NewConversation();
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "What is next?";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Contains("Verify project context", capturing.LastOptions!.SystemPrompt, StringComparison.Ordinal);
+        var assistant = vm.Messages.Last(message => message.IsAssistant);
+        var section = Assert.Single(assistant.ContextSections, item => item.Kind == ProvenanceKind.ProjectState);
+        Assert.Equal("Project State", section.Label);
+        Assert.Contains(":state:1:", Assert.Single(section.Items).Locator, StringComparison.Ordinal);
     }
 
     [Fact]

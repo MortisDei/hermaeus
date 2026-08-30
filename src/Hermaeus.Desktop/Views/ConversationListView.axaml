@@ -62,7 +62,8 @@
                 </ListBox.ItemContainerTheme>
 
                 <ListBox.ContextMenu>
-                    <ContextMenu>
+                    <ContextMenu MaxHeight="480"
+                                 PlacementConstraintAdjustment="FlipX,FlipY,ResizeX,ResizeY">
                         <MenuItem Header="Pin" Click="OnContextMenuPinClick" />
                         <MenuItem Header="Archive" Click="OnContextMenuArchiveClick" />
                         <MenuItem Header="Exclude from Recall" Click="OnContextMenuRecallExclusionClick" />

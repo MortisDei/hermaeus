@@ -51,6 +51,19 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
     partial void OnVoiceIdChanged(string value) => OnPropertyChanged(nameof(VoiceDisplay));
 }
 
+public partial class AudioFeedbackToggleViewModel : ObservableObject
+{
+    public AudioFeedbackEventKind Kind { get; }
+    public string DisplayName { get; }
+    [ObservableProperty] private bool _enabled;
+
+    public AudioFeedbackToggleViewModel(AudioFeedbackEventKind kind)
+    {
+        Kind = kind;
+        DisplayName = kind.ToString();
+    }
+}
+
 public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 {
     private readonly ITtsService _tts;
@@ -62,8 +75,11 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     private readonly IVoiceOrchestrator? _voice;
     private bool _externalServiceRunning;
     private bool _isReloading;
+    private long _voiceRefreshGeneration;
+    private CancellationTokenSource? _voiceRefreshCancellation;
 
     public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
+    public UiBoundCollection<AudioFeedbackToggleViewModel> AudioFeedbackEvents { get; } = [];
 
     /// <summary>r24: the channel voice picker's suggestion list - the default-voice sentinel
     /// followed by the active provider's own voices, kept live as <see cref="TtsVoices"/> refreshes.</summary>
@@ -71,6 +87,10 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
     [ObservableProperty] private bool _streamingChatSpeech;
+    [ObservableProperty] private bool _audioFeedbackEnabled = true;
+    [ObservableProperty] private int _audioFeedbackVolume = 50;
+    [ObservableProperty] private bool _audioFeedbackMuted;
+    [ObservableProperty] private bool _suppressAudioFeedbackWhileTts = true;
 
     public bool IsVoiceMuted
     {
@@ -99,6 +119,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _ttsCloneDisplayName = string.Empty;
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _selectedVoiceProvider = "Kokoro (native)";
+    [ObservableProperty] private bool _isRefreshingVoices;
 
     public Func<Task>? RequestTtsVoiceSamplePicker { get; set; }
     public Action? RequestTtsPythonPicker { get; set; }
@@ -196,9 +217,15 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         _kokoroProcess = kokoroProcess;
         _settings = settings;
         _voice = voiceOrchestrator;
+        foreach (var kind in Enum.GetValues<AudioFeedbackEventKind>())
+            AudioFeedbackEvents.Add(new AudioFeedbackToggleViewModel(kind));
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         _kokoroProcess.StatusChanged += OnXttsStatusChanged;
-        TtsVoices.CollectionChanged += (_, _) => RefreshChannelVoiceOptions();
+        TtsVoices.CollectionChanged += (_, _) =>
+        {
+            RefreshChannelVoiceOptions();
+            OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
+        };
         RefreshChannelVoiceOptions();
     }
 
@@ -211,6 +238,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         foreach (var voice in TtsVoices)
             ChannelVoiceOptions.Add(voice);
         OnPropertyChanged(nameof(ChannelVoiceOptionsAreProviderSupplied));
+        OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
     }
 
     /// <summary>
@@ -225,6 +253,12 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         ChannelVoiceOptions.Any(o =>
             o != VoiceChannelSettingViewModel.DefaultVoiceLabel &&
             !string.Equals(o, "default", StringComparison.OrdinalIgnoreCase));
+
+    public string ChannelVoiceDiscoveryStatus => IsRefreshingVoices
+        ? $"Loading voices from {SelectedVoiceProvider}..."
+        : ChannelVoiceOptionsAreProviderSupplied
+            ? $"{ChannelVoiceOptions.Count(o => o != VoiceChannelSettingViewModel.DefaultVoiceLabel && !string.Equals(o, "default", StringComparison.OrdinalIgnoreCase))} named voice(s) reported by {SelectedVoiceProvider}."
+            : $"{SelectedVoiceProvider} has not reported named voices yet. Retrying is safe; you can also enter a verified voice id.";
 
     private static readonly VoiceChannel[] AllChannels =
     [
@@ -242,6 +276,11 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     {
         tts.AutoSpeakChatReplies = AutoSpeakChatReplies;
         tts.StreamingChatSpeech = StreamingChatSpeech;
+        tts.AudioFeedback.Enabled = AudioFeedbackEnabled;
+        tts.AudioFeedback.Volume = Math.Clamp(AudioFeedbackVolume, 0, 100);
+        tts.AudioFeedback.Muted = AudioFeedbackMuted;
+        tts.AudioFeedback.SuppressWhileTtsSpeaking = SuppressAudioFeedbackWhileTts;
+        tts.AudioFeedback.EventEnabled = AudioFeedbackEvents.ToDictionary(item => item.Kind.ToString(), item => item.Enabled);
         tts.Channels = VoiceChannels.ToDictionary(
             c => c.Channel.ToString(),
             c => new VoiceChannelConfig { Enabled = c.Enabled, VoiceId = c.VoiceId.Trim() });
@@ -274,6 +313,12 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
         AutoSpeakChatReplies = tts.AutoSpeakChatReplies;
         StreamingChatSpeech = tts.StreamingChatSpeech;
+        AudioFeedbackEnabled = tts.AudioFeedback.Enabled;
+        AudioFeedbackVolume = Math.Clamp(tts.AudioFeedback.Volume, 0, 100);
+        AudioFeedbackMuted = tts.AudioFeedback.Muted;
+        SuppressAudioFeedbackWhileTts = tts.AudioFeedback.SuppressWhileTtsSpeaking;
+        foreach (var item in AudioFeedbackEvents)
+            item.Enabled = tts.AudioFeedback.IsEnabled(item.Kind);
         OnPropertyChanged(nameof(IsVoiceMuted));
 
         var remote = IsSelectedProviderRemote;
@@ -298,6 +343,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        SupersedeVoiceRefresh();
         _xttsProcess.StatusChanged -= OnXttsStatusChanged;
         _kokoroProcess.StatusChanged -= OnXttsStatusChanged;
     }
@@ -428,9 +474,18 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task RefreshTtsVoicesAsync()
     {
+        var providerName = SelectedVoiceProvider;
+        var generation = Interlocked.Increment(ref _voiceRefreshGeneration);
+        var cancellation = new CancellationTokenSource();
+        var prior = Interlocked.Exchange(ref _voiceRefreshCancellation, cancellation);
+        CancelVoiceRefresh(prior);
+        IsRefreshingVoices = true;
         try
         {
-            var voices = await _tts.GetVoicesAsync();
+            var voices = await _tts.GetVoicesAsync(cancellation.Token);
+            if (!OwnsVoiceRefresh(providerName, generation, cancellation))
+                return;
+
             TtsVoices.Clear();
             foreach (var voice in voices)
                 TtsVoices.Add(voice);
@@ -440,10 +495,47 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
             else if (!string.IsNullOrWhiteSpace(TtsSpeaker) && !TtsVoices.Contains(TtsSpeaker))
                 TtsVoices.Add(TtsSpeaker);
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A newer provider selection or explicit retry owns the catalogue now.
+        }
         catch (Exception ex)
         {
-            _toasts.Show("Voice list unavailable", ex.Message, ToastKind.Warning);
+            if (OwnsVoiceRefresh(providerName, generation, cancellation))
+                _toasts.Show("Voice list unavailable", ex.Message, ToastKind.Warning);
         }
+        finally
+        {
+            if (OwnsVoiceRefresh(providerName, generation, cancellation))
+            {
+                IsRefreshingVoices = false;
+                Interlocked.CompareExchange(ref _voiceRefreshCancellation, null, cancellation);
+                OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private bool OwnsVoiceRefresh(string providerName, long generation, CancellationTokenSource cancellation) =>
+        generation == Volatile.Read(ref _voiceRefreshGeneration)
+        && ReferenceEquals(cancellation, Volatile.Read(ref _voiceRefreshCancellation))
+        && string.Equals(providerName, SelectedVoiceProvider, StringComparison.Ordinal);
+
+    private void SupersedeVoiceRefresh()
+    {
+        Interlocked.Increment(ref _voiceRefreshGeneration);
+        CancelVoiceRefresh(Interlocked.Exchange(ref _voiceRefreshCancellation, null));
+        IsRefreshingVoices = false;
+        OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
+    }
+
+    private static void CancelVoiceRefresh(CancellationTokenSource? cancellation)
+    {
+        if (cancellation is null)
+            return;
+
+        cancellation.Cancel();
     }
 
     [RelayCommand]
@@ -516,6 +608,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     partial void OnSelectedVoiceProviderChanged(string value)
     {
+        SupersedeVoiceRefresh();
+        OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
         NotifyProviderDependentProperties();
         ApplyXttsStatus();
         if (_isReloading)

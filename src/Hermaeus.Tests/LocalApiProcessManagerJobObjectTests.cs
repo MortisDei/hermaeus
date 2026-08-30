@@ -42,7 +42,7 @@ public sealed class LocalApiProcessManagerJobObjectTests
 
         cts.Cancel();
         try { await task; }
-        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException) { }
         finally { manager.Stop(); }
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using Avalonia;
 
 namespace Hermaeus.Desktop;
@@ -6,6 +7,9 @@ namespace Hermaeus.Desktop;
 class Program
 {
     internal static PackageIntegrationLaunch? PackageIntegrationLaunch { get; private set; }
+    private const long MaxCrashLogBytes = 512 * 1024;
+    private const int MaxCrashEntryCharacters = 128 * 1024;
+    private static readonly object CrashLogLock = new();
 
     // r19 1.3: crash logs must land where the user's other logs and data
     // live, not next to the executable (unwritable in a packaged install,
@@ -21,6 +25,28 @@ class Program
         var dir = Path.Combine(root, "logs");
         try { Directory.CreateDirectory(dir); } catch { }
         return Path.Combine(dir, fileName);
+    }
+
+    private static void AppendCrashLog(string fileName, string marker, string message)
+        => AppendCrashLogAtPath(CrashLogPath(fileName), marker, message);
+
+    internal static void AppendCrashLogAtPath(string path, string marker, string message)
+    {
+        try
+        {
+            var bounded = message.Length <= MaxCrashEntryCharacters
+                ? message : message[..MaxCrashEntryCharacters] + "\n[crash detail truncated]";
+            var bytes = Encoding.UTF8.GetBytes($"{DateTime.UtcNow}: {marker}: {bounded}\n");
+            lock (CrashLogLock)
+            {
+                if (File.Exists(path) && new FileInfo(path).Length + bytes.Length > MaxCrashLogBytes)
+                    File.Move(path, path + ".previous", overwrite: true);
+                using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush(true);
+            }
+        }
+        catch { }
     }
 
     private static string ResolveDataRootForCrashLog()
@@ -70,21 +96,13 @@ class Program
             // Global unhandled exception handlers to capture unexpected crashes.
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
-                try
-                {
-                    var ex = e.ExceptionObject as Exception;
-                    var msg = ex?.ToString() ?? e.ExceptionObject?.ToString();
-                    File.AppendAllText(CrashLogPath("hermaeus_unhandled.log"), $"{DateTime.UtcNow}: UNHANDLED: {msg}\n");
-                }
-                catch { }
+                var ex = e.ExceptionObject as Exception;
+                var msg = ex?.ToString() ?? e.ExceptionObject?.ToString() ?? "Unknown unhandled exception";
+                AppendCrashLog("hermaeus_unhandled.log", "UNHANDLED", msg);
             };
             TaskScheduler.UnobservedTaskException += (s, e) =>
             {
-                try
-                {
-                    File.AppendAllText(CrashLogPath("hermaeus_unobserved.log"), $"{DateTime.UtcNow}: UNOBSERVED: {e.Exception}\n");
-                }
-                catch { }
+                AppendCrashLog("hermaeus_unobserved.log", "UNOBSERVED", e.Exception.ToString());
             };
 
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);

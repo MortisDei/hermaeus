@@ -25,7 +25,25 @@ public sealed class ModelManifestEntry
     public DateTime? LastCheckedAtUtc { get; set; }
     public bool NoLongerPublished { get; set; }
 
+    /// <summary>Known companions mapped by trusted source metadata for this primary model.</summary>
+    public List<ModelCompanionManifestEntry> Companions { get; set; } = [];
+
+    /// <summary>Set on a companion entry so recovery and safe removal can find its owner.</summary>
+    public string ParentModelPath { get; set; } = string.Empty;
+    public string CompanionRole { get; set; } = string.Empty;
+
     public bool HasPendingUpdate => !string.IsNullOrWhiteSpace(PendingSha256);
+}
+
+public sealed class ModelCompanionManifestEntry
+{
+    public string LocalFilePath { get; set; } = string.Empty;
+    public string RepoFile { get; set; } = string.Empty;
+    public string RevisionSha { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+    public string Sha256 { get; set; } = string.Empty;
+    public long? SizeBytes { get; set; }
+    public bool RequiresUserConfirmation { get; set; }
 }
 
 /// <summary>
@@ -64,10 +82,10 @@ public sealed class ModelManifestStore
     {
         var normalized = NormalizeKey(filePath);
         var entries = await LoadAsync(ct);
-        return entries.FirstOrDefault(e => string.Equals(NormalizeKey(e.FilePath), normalized, StringComparison.OrdinalIgnoreCase));
+        return entries.FirstOrDefault(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
     }
 
-    /// <summary>Find-or-replace by file path (case-insensitive on Windows via NormalizeKey).</summary>
+    /// <summary>Find-or-replace by canonical local file path using the host filesystem case policy.</summary>
     public async Task UpsertAsync(ModelManifestEntry entry, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct);
@@ -75,7 +93,7 @@ public sealed class ModelManifestStore
         {
             var entries = await LoadUnlockedAsync(ct);
             var normalized = NormalizeKey(entry.FilePath);
-            entries.RemoveAll(e => string.Equals(NormalizeKey(e.FilePath), normalized, StringComparison.OrdinalIgnoreCase));
+            entries.RemoveAll(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
             entries.Add(entry);
             await SaveUnlockedAsync(entries, ct);
         }
@@ -89,7 +107,7 @@ public sealed class ModelManifestStore
         {
             var entries = await LoadUnlockedAsync(ct);
             var normalized = NormalizeKey(filePath);
-            entries.RemoveAll(e => string.Equals(NormalizeKey(e.FilePath), normalized, StringComparison.OrdinalIgnoreCase));
+            entries.RemoveAll(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
             await SaveUnlockedAsync(entries, ct);
         }
         finally { _gate.Release(); }

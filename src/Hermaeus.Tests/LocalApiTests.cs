@@ -486,6 +486,11 @@ internal static class LocalApiTests
             True(!string.IsNullOrWhiteSpace(body!.Version), "capabilities should report the app version.");
             True(body.Routes.Contains("GET /v1/capabilities"), "capabilities should list itself among the routes.");
             True(body.Routes.Contains("POST /v1/chat/completions"), "capabilities should list the chat route.");
+            True(!body.Routes.Any(route => route.Contains("/v1/agent/", StringComparison.Ordinal)),
+                "conditional Agent routes must not be advertised before the single-owner gate is satisfied.");
+            var agent = body.Capabilities.Single(capability => capability.Name == "agent");
+            True(!agent.Usable && agent.Reason == AgentApiContract.ExecutionUnavailableReason,
+                "capabilities should report Agent execution unavailable with the reviewed ownership reason.");
             True(body.Capabilities.Count > 0, "capabilities should report at least one feature.");
         }
     }

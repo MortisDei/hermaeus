@@ -46,6 +46,7 @@ public sealed class LlamaRuntimeVariantTests
         new("llama-b10066-bin-macos-x64.tar.gz", "u/macos-x64"),
         new("llama-b10066-bin-ubuntu-arm64.tar.gz", "u/ubuntu-arm64"),
         new("llama-b10066-bin-ubuntu-vulkan-x64.tar.gz", "u/ubuntu-vulkan-x64"),
+        new("llama-b10066-bin-ubuntu-cuda-12.4-x64.tar.gz", "u/ubuntu-cuda-12.4"),
         new("llama-b10066-bin-ubuntu-x64.tar.gz", "u/ubuntu-x64"),
         new("llama-b10066-bin-win-cpu-arm64.zip", "u/win-cpu-arm64"),
         new("llama-b10066-bin-win-cpu-x64.zip", "u/win-cpu-x64"),
@@ -83,6 +84,38 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
+    public void ResolveUpdateVariant_re_evaluates_auto_without_pinning_to_installed_backend()
+    {
+        var nvidia = new HardwareProfile(0, 8L * 1024 * 1024 * 1024, "NVIDIA GeForce GTX 1660");
+
+        Assert.Equal(
+            LlamaRuntimeVariant.Cuda,
+            LlamaServerSetupService.ResolveUpdateVariant(LlamaRuntimeVariant.Auto, LlamaRuntimeVariant.Cuda, nvidia));
+        Assert.Equal(
+            LlamaRuntimeVariant.Cuda,
+            LlamaServerSetupService.ResolveUpdateVariant(LlamaRuntimeVariant.Auto, LlamaRuntimeVariant.Cpu, nvidia));
+        Assert.Equal(
+            LlamaRuntimeVariant.Cuda,
+            LlamaServerSetupService.ResolveUpdateVariant(LlamaRuntimeVariant.Auto, LlamaRuntimeVariant.Auto, nvidia));
+    }
+
+    [Fact]
+    public async Task Configured_and_installed_variants_round_trip_independently_through_settings()
+    {
+        using var temp = new TempDir();
+        var writer = Helpers.NewSettings(temp);
+        writer.Settings.DataManagement.LlamaRuntimeVariant = LlamaRuntimeVariant.Auto;
+        writer.Settings.DataManagement.InstalledLlamaRuntimeVariant = LlamaRuntimeVariant.Vulkan;
+        await writer.SaveAsync();
+
+        var reader = Helpers.NewSettings(temp);
+        await reader.LoadAsync();
+
+        Assert.Equal(LlamaRuntimeVariant.Auto, reader.Settings.DataManagement.LlamaRuntimeVariant);
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, reader.Settings.DataManagement.InstalledLlamaRuntimeVariant);
+    }
+
+    [Fact]
     public void SelectDownloadAsset_windows_matches_variant_token()
     {
         Assert.Equal("u/win-cpu-x64", Select(LlamaPlatform.WinX64, LlamaRuntimeVariant.Cpu));
@@ -101,17 +134,29 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
-    public void SelectDownloadAsset_non_windows_ignores_variant()
+    public void SelectDownloadAsset_linux_matches_gpu_variant_and_does_not_alias_cuda_to_cpu()
     {
-        // Linux keeps the r11 default-build selection regardless of variant.
-        Assert.Equal("u/ubuntu-x64", Select(LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Cuda));
-        Assert.Equal("u/ubuntu-x64", Select(LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Vulkan));
+        Assert.Equal("u/ubuntu-cuda-12.4", Select(LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Cuda));
+        Assert.Equal("u/ubuntu-vulkan-x64", Select(LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Vulkan));
+    }
+
+    [Fact]
+    public void SelectDownloadAsset_returns_null_for_a_linux_cuda_request_when_release_has_no_cuda_asset()
+    {
+        var currentB10679Assets = new[]
+        {
+            new GitHubReleaseAsset("llama-b10679-bin-ubuntu-x64.tar.gz", "u/ubuntu-cpu"),
+            new GitHubReleaseAsset("llama-b10679-bin-ubuntu-vulkan-x64.tar.gz", "u/ubuntu-vulkan")
+        };
+
+        Assert.Null(LlamaServerSetupService.SelectDownloadAsset(
+            currentB10679Assets, LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Cuda));
     }
 
     [Fact]
     public void SelectDownloadAsset_returns_null_when_variant_absent()
     {
-        // Windows ARM64 ships no CUDA or Vulkan build in this release.
+        // Windows ARM64 ships no CUDA or Vulkan build in this fixture.
         Assert.Null(LlamaServerSetupService.SelectDownloadAsset(B10066Assets, LlamaPlatform.WinArm64, LlamaRuntimeVariant.Cuda));
     }
 
@@ -144,6 +189,73 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
+    public void Latest_compatible_release_does_not_fall_back_to_cpu_for_a_missing_gpu_backend()
+    {
+        var releases = new[]
+        {
+            new GitHubRelease("b10679", [new("llama-b10679-bin-ubuntu-x64.tar.gz", "u/cpu")]),
+            new GitHubRelease("b10678", [new("llama-b10678-bin-ubuntu-vulkan-x64.tar.gz", "u/vulkan")])
+        };
+
+        var selected = LlamaServerSetupService.SelectLatestCompatibleRelease(
+            releases, LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Cuda);
+
+        Assert.Null(selected);
+    }
+
+    [Fact]
+    public void Auto_nvidia_selection_uses_vulkan_when_linux_cuda_asset_is_unavailable()
+    {
+        var nvidia = new HardwareProfile(0, 8L * 1024 * 1024 * 1024, "NVIDIA GeForce GTX 1660");
+        var preferred = LlamaServerSetupService.ResolveVariant(LlamaRuntimeVariant.Auto, nvidia);
+        var releases = new[]
+        {
+            new GitHubRelease("b10679",
+            [
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-x64.tar.gz", "u/ubuntu-cpu"),
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-vulkan-x64.tar.gz", "u/ubuntu-vulkan")
+            ])
+        };
+
+        var selected = LlamaServerSetupService.SelectLatestCompatibleRelease(
+            releases,
+            LlamaPlatform.LinuxX64,
+            preferred,
+            allowAutoAcceleratedFallback: true);
+
+        Assert.Equal(LlamaRuntimeVariant.Cuda, preferred);
+        Assert.NotNull(selected);
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, selected.Variant);
+        Assert.Equal("u/ubuntu-vulkan", selected.Asset.BrowserDownloadUrl);
+    }
+
+    [Fact]
+    public void Auto_amd_selection_keeps_vulkan_as_the_accelerated_backend()
+    {
+        var amd = new HardwareProfile(0, 8L * 1024 * 1024 * 1024, "AMD Radeon RX 7900");
+        var preferred = LlamaServerSetupService.ResolveVariant(LlamaRuntimeVariant.Auto, amd);
+        var releases = new[]
+        {
+            new GitHubRelease("b10679",
+            [
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-x64.tar.gz", "u/ubuntu-cpu"),
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-vulkan-x64.tar.gz", "u/ubuntu-vulkan")
+            ])
+        };
+
+        var selected = LlamaServerSetupService.SelectLatestCompatibleRelease(
+            releases,
+            LlamaPlatform.LinuxX64,
+            preferred,
+            allowAutoAcceleratedFallback: true);
+
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, preferred);
+        Assert.NotNull(selected);
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, selected.Variant);
+        Assert.Equal("u/ubuntu-vulkan", selected.Asset.BrowserDownloadUrl);
+    }
+
+    [Fact]
     public void Managed_discovery_selects_the_highest_installed_b_build()
     {
         using var temp = new TempDir();
@@ -162,10 +274,33 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
+    public void Managed_llama_install_path_is_derived_from_the_configured_AI_assets_root()
+    {
+        var setup = new LlamaServerSetupService();
+
+        Assert.Equal(
+            Path.Combine("/mnt/Gaming/AI", "llama-server"),
+            setup.GetDefaultInstallPath("/mnt/Gaming/AI"));
+        Assert.DoesNotContain("Data", setup.GetDefaultInstallPath("/mnt/Gaming/AI"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ResolveInstallRoot_walks_up_nested_tag_directories()
         => Assert.Equal(
             NormPath(@"C:\AI\llama.cpp"),
             NormPath(LlamaServerSetupService.ResolveInstallRoot(NormPath(@"C:\AI\llama.cpp\b10064\b10066"))));
+
+    [Fact]
+    public void ResolveInstallRoot_walks_up_legacy_llama_tag_directories()
+        => Assert.Equal(
+            NormPath(@"/opt/hermaeus/llama-server"),
+            NormPath(LlamaServerSetupService.ResolveInstallRoot(NormPath(@"/opt/hermaeus/llama-server/llama-b10669/b10679/llama-b10679"))));
+
+    [Theory]
+    [InlineData("b10679", 10679)]
+    [InlineData("llama-b10679", 10679)]
+    public void TryParseBuildTag_accepts_managed_directory_names(string tag, int expected)
+        => Assert.Equal(expected, LlamaServerSetupService.TryParseBuildTag(tag));
 
     [Fact]
     public void ResolveInstallRoot_keeps_unversioned_layout()
@@ -206,6 +341,73 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
+    public void Nested_archive_layout_keeps_current_build_and_ignores_unowned_tag_directories()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("llama-server");
+        var oldPath = CreateNestedRuntime(root, "b10660");
+        CreateNestedRuntime(root, "b10650");
+        var currentPath = CreateNestedRuntime(root, "llama-b10679");
+        var sameBuildLegacyPath = Path.Combine(root, "llama-b10679", "llama-b10679", OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server");
+        Directory.CreateDirectory(Path.GetDirectoryName(sameBuildLegacyPath)!);
+        File.WriteAllText(sameBuildLegacyPath, "same-build legacy layout");
+        Directory.CreateDirectory(Path.Combine(root, "b99999"));
+
+        var candidates = LlamaServerSetupService.SelectPrunableVersionDirectories(root, currentPath, oldPath);
+
+        Assert.Contains(Path.Combine(root, "b10650"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "b10660"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "b10679"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "llama-b10679"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "b99999"), candidates);
+
+        var reclaimed = LlamaServerSetupService.PruneVersionDirectories(
+            root, candidates.Append(Path.Combine(root, "b10679")), currentPath, oldPath);
+
+        Assert.True(reclaimed > 0);
+        Assert.True(File.Exists(currentPath));
+        Assert.True(File.Exists(sameBuildLegacyPath));
+        Assert.True(File.Exists(oldPath));
+        Assert.False(Directory.Exists(Path.Combine(root, "b10650")));
+        Assert.True(Directory.Exists(Path.Combine(root, "b99999")));
+    }
+
+    [Fact]
+    public void Recovery_install_with_no_previous_runtime_survives_prune()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("llama-server");
+        var recoveredPath = CreateNestedRuntime(root, "b10679");
+
+        var candidates = LlamaServerSetupService.SelectPrunableVersionDirectories(root, recoveredPath, null);
+
+        Assert.Empty(candidates);
+        LlamaServerSetupService.PruneVersionDirectories(root, candidates, recoveredPath);
+        Assert.True(File.Exists(recoveredPath));
+    }
+
+    [Fact]
+    public void Sequential_updates_keep_C_remove_only_genuinely_superseded_A()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("llama-server");
+        var a = CreateNestedRuntime(root, "b10650");
+        var b = CreateNestedRuntime(root, "b10660");
+
+        var afterB = LlamaServerSetupService.SelectPrunableVersionDirectories(root, b, a);
+        LlamaServerSetupService.PruneVersionDirectories(root, afterB, b, a);
+        Assert.True(File.Exists(b));
+
+        var c = CreateNestedRuntime(root, "b10679");
+        var afterC = LlamaServerSetupService.SelectPrunableVersionDirectories(root, c, b);
+        LlamaServerSetupService.PruneVersionDirectories(root, afterC, c, b);
+
+        Assert.True(File.Exists(c));
+        Assert.True(File.Exists(b));
+        Assert.False(Directory.Exists(Path.Combine(root, "b10650")));
+    }
+
+    [Fact]
     public void NearestTagDirectoryName_finds_the_version_dir()
     {
         Assert.Equal("b10066", LlamaServerSetupService.NearestTagDirectoryName(NormPath(@"C:\AI\llama.cpp\b10064\b10066\llama-server.exe")));
@@ -213,11 +415,11 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Theory]
-    [InlineData(LlamaRuntimeVariant.Cuda, false, true)]  // GPU build did not launch -> fall back
+    [InlineData(LlamaRuntimeVariant.Cuda, false, true)]  // GPU build did not launch -> reject
     [InlineData(LlamaRuntimeVariant.Cuda, true, false)]  // GPU build launched -> keep
-    [InlineData(LlamaRuntimeVariant.Cpu, false, false)]  // CPU is terminal, never falls back
-    public void ShouldFallbackToCpu_is_terminal_at_cpu(LlamaRuntimeVariant variant, bool probeOk, bool expected)
-        => Assert.Equal(expected, DoctorService.ShouldFallbackToCpu(variant, probeOk));
+    [InlineData(LlamaRuntimeVariant.Cpu, false, false)]  // CPU is terminal
+    public void ShouldRejectGpuRuntime_is_terminal_at_cpu(LlamaRuntimeVariant variant, bool probeOk, bool expected)
+        => Assert.Equal(expected, DoctorService.ShouldRejectGpuRuntime(variant, probeOk));
 
     [Theory]
     [InlineData(true, true, 999, true)]   // GPU + CPU build -> advise
@@ -229,6 +431,16 @@ public sealed class LlamaRuntimeVariantTests
 
     private static string? Select(LlamaPlatform platform, LlamaRuntimeVariant variant)
         => LlamaServerSetupService.SelectDownloadAsset(B10066Assets, platform, variant)?.BrowserDownloadUrl;
+
+    private static string CreateNestedRuntime(string root, string tag)
+    {
+        var versionTag = tag.StartsWith("llama-", StringComparison.OrdinalIgnoreCase) ? tag[6..] : tag;
+        var versionDirectory = Path.Combine(root, versionTag);
+        var executable = Path.Combine(versionDirectory, $"llama-{versionTag}", OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, tag);
+        return executable;
+    }
 
     private static string NormPath(string p) => p.Replace('\\', '/').TrimEnd('/');
 }

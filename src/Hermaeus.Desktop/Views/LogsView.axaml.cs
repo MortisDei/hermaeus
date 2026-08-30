@@ -18,8 +18,9 @@ public partial class LogsView : UserControl
         vm.RequestCopyToClipboard = async text =>
         {
             var top = TopLevel.GetTopLevel(this);
-            if (top?.Clipboard is not null)
-                await top.Clipboard.SetTextAsync(text);
+            if (top?.Clipboard is null) return false;
+            try { await top.Clipboard.SetTextAsync(text); return true; }
+            catch { return false; }
         };
         vm.RequestOpenFolder = path =>
         {

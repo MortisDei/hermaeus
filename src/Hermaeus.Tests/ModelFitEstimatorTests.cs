@@ -10,6 +10,26 @@ public sealed class ModelFitEstimatorTests
     private const long OneGb = 1024L * 1024 * 1024;
 
     [Fact]
+    public void Estimate_returns_unknown_when_model_size_is_missing()
+    {
+        var result = ModelFitEstimator.Estimate(0, new HardwareProfile(32 * OneGb, 8 * OneGb, "Test GPU"));
+
+        Assert.Equal(ModelFitTier.Unknown, result.Tier);
+        Assert.Contains("unavailable", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("0.0 GB", result.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Estimate_returns_unknown_when_model_size_is_missing_with_metadata()
+    {
+        var result = ModelFitEstimator.Estimate(0, new HardwareProfile(32 * OneGb, 8 * OneGb, "Test GPU"), Shape(), 8192);
+
+        Assert.Equal(ModelFitTier.Unknown, result.Tier);
+        Assert.Contains("unavailable", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("0.0 GB", result.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Estimate_returns_unknown_when_hardware_has_no_data()
     {
         var result = ModelFitEstimator.Estimate(4 * OneGb, new HardwareProfile(0, 0, null));

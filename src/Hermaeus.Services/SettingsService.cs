@@ -8,27 +8,105 @@ public sealed class SettingsService : ISettingsService
 {
     private sealed record MigrationFile(string SourcePath, string RelativePath);
 
+    private sealed class DataRootMigration
+    {
+        private readonly string _previous;
+        private readonly IReadOnlyList<(string SourcePath, string TargetPath)> _moved;
+        private readonly IReadOnlyList<string> _createdDirectories;
+
+        public DataRootMigration(string previous,
+            IReadOnlyList<(string SourcePath, string TargetPath)> moved,
+            IReadOnlyList<string> createdDirectories, SettingsSaveResult result)
+        {
+            _previous = previous;
+            _moved = moved;
+            _createdDirectories = createdDirectories;
+            Result = result;
+        }
+
+        public SettingsSaveResult Result { get; }
+
+        public void Commit()
+        {
+            if (!ModelPathSafety.AreSameLocalPath(_previous, DefaultDir) && Directory.Exists(_previous))
+            {
+                PruneEmptyDirectories(_previous);
+                try
+                {
+                    if (!Directory.EnumerateFileSystemEntries(_previous).Any())
+                        Directory.Delete(_previous);
+                }
+                catch
+                {
+                    // The new root is already complete and active. An old
+                    // duplicate root is safer than turning a successful save
+                    // into an active-root mismatch because cleanup was denied.
+                }
+            }
+        }
+
+        public void Rollback()
+        {
+            var failures = new List<Exception>();
+            for (var i = _moved.Count - 1; i >= 0; i--)
+            {
+                var (sourcePath, targetPath) = _moved[i];
+                try
+                {
+                    var sourceExists = File.Exists(sourcePath);
+                    var targetExists = File.Exists(targetPath);
+                    if (sourceExists && targetExists)
+                        throw new IOException($"Both migration paths exist for '{Path.GetRelativePath(_previous, sourcePath)}'.");
+                    if (!sourceExists && !targetExists)
+                        throw new IOException($"Neither migration path exists for '{Path.GetRelativePath(_previous, sourcePath)}'.");
+                    if (targetExists)
+                        File.Move(targetPath, sourcePath);
+                }
+                catch (Exception ex)
+                {
+                    failures.Add(ex);
+                }
+            }
+
+            foreach (var directory in _createdDirectories.OrderByDescending(path => path.Length))
+            {
+                try
+                {
+                    if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+                        Directory.Delete(directory);
+                }
+                catch (Exception ex)
+                {
+                    failures.Add(ex);
+                }
+            }
+
+            if (failures.Count > 0)
+                throw new IOException("Data-root migration rollback failed; the old and new roots require manual reconciliation.", new AggregateException(failures));
+        }
+    }
+
     private const int MaxPerConversationMemoryOverrides = 1000;
     private static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
     private static readonly string DefaultDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Hermaeus");
     private readonly string _path;
+    private readonly Action<string, string> _moveFile;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public AppSettings Settings { get; private set; } = new();
     public event EventHandler? SettingsChanged;
     public event Action<string>? NormalizationWarning;
 
-    public SettingsService()
-    {
-        Directory.CreateDirectory(DefaultDir);
-        _path = Path.Combine(DefaultDir, "settings.json");
-    }
+    public SettingsService() : this(Path.Combine(DefaultDir, "settings.json"), null) { }
 
-    public SettingsService(string settingsPath)
+    public SettingsService(string settingsPath) : this(settingsPath, null) { }
+
+    internal SettingsService(string settingsPath, Action<string, string>? moveFile)
     {
         _path = Path.GetFullPath(settingsPath);
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        _moveFile = moveFile ?? File.Move;
     }
 
     public static string ResolveDataRoot(AppSettings settings)
@@ -155,20 +233,41 @@ public sealed class SettingsService : ISettingsService
 
     public async Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
     {
-        SettingsSaveResult migration;
+        DataRootMigration? migration = null;
+        var currentDataRoot = string.Empty;
         await _gate.WaitAsync();
         try
         {
             NormalizeSettings(Settings);
-            var currentDataRoot = ResolveDataRoot(Settings);
+            currentDataRoot = ResolveDataRoot(Settings);
             ValidateDataRoot(currentDataRoot);
 
             migration = previousDataRootDirectory is null
-                ? new SettingsSaveResult(false, null, currentDataRoot, null, 0)
+                ? null
                 : MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
 
             Directory.CreateDirectory(currentDataRoot);
             await WriteTextAtomicAsync(_path, JsonSerializer.Serialize(Settings, Opts));
+            migration?.Commit();
+        }
+        catch (Exception ex)
+        {
+            if (migration is not null)
+            {
+                try
+                {
+                    migration.Rollback();
+                }
+                catch (Exception rollbackException)
+                {
+                    throw new IOException("Data-root migration failed and automatic rollback also failed.",
+                        new AggregateException(ex, rollbackException));
+                }
+            }
+
+            if (previousDataRootDirectory is not null)
+                Settings.DataManagement.DataRootDirectory = previousDataRootDirectory;
+            throw;
         }
         finally
         {
@@ -176,7 +275,7 @@ public sealed class SettingsService : ISettingsService
         }
 
         SettingsChanged?.Invoke(this, EventArgs.Empty);
-        return migration;
+        return migration?.Result ?? new SettingsSaveResult(false, null, currentDataRoot, null, 0);
     }
 
     public async Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
@@ -198,7 +297,7 @@ public sealed class SettingsService : ISettingsService
     {
         var previous = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = previousDataRootDirectory ?? string.Empty } });
         var next = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = nextDataRootDirectory ?? string.Empty } });
-        if (string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
+        if (ModelPathSafety.AreSameLocalPath(previous, next))
             return new DataMigrationPlan(false, previous, next, 0, []);
 
         if (!Directory.Exists(previous))
@@ -220,21 +319,21 @@ public sealed class SettingsService : ISettingsService
         return new DataMigrationPlan(files.Count > 0 && conflicts.Count == 0, previous, next, files.Count, conflicts);
     }
 
-    private static SettingsSaveResult MigrateDataRoot(string? previousDataRootDirectory, string? nextDataRootDirectory)
+    private DataRootMigration MigrateDataRoot(string? previousDataRootDirectory, string? nextDataRootDirectory)
     {
         var previous = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = previousDataRootDirectory ?? string.Empty } });
         var next = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = nextDataRootDirectory ?? string.Empty } });
         ValidateDataRoot(next);
-        if (string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
-            return new SettingsSaveResult(false, previous, next, null, 0);
+        if (ModelPathSafety.AreSameLocalPath(previous, next))
+            return NoMigration(previous, next);
 
         Directory.CreateDirectory(next);
         if (!Directory.Exists(previous))
-            return new SettingsSaveResult(false, previous, next, null, 0);
+            return NoMigration(previous, next);
 
         var files = EnumerateMigrationFiles(previous).ToList();
         if (files.Count == 0)
-            return new SettingsSaveResult(false, previous, next, null, 0);
+            return NoMigration(previous, next);
 
         var conflicts = files.Where(file => File.Exists(Path.Combine(next, file.RelativePath))).ToList();
         if (conflicts.Count == files.Count)
@@ -246,7 +345,7 @@ public sealed class SettingsService : ISettingsService
             // Treating that as a hard conflict used to throw here, which
             // left the settings save failed and the data root reverted to
             // blank with no way to just repoint without an unwanted move.
-            return new SettingsSaveResult(false, previous, next, null, 0);
+            return NoMigration(previous, next);
         }
 
         if (conflicts.Count > 0)
@@ -255,7 +354,8 @@ public sealed class SettingsService : ISettingsService
             throw new IOException($"Cannot move Hermaeus data because '{target}' already exists.");
         }
 
-        var backupDir = Path.Combine(next, ".hermaeus-backups", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+        var backupDir = Path.Combine(next, ".hermaeus-backups",
+            $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(backupDir);
         foreach (var file in files)
         {
@@ -264,27 +364,49 @@ public sealed class SettingsService : ISettingsService
             File.Copy(file.SourcePath, backupTarget);
         }
 
-        foreach (var file in files)
+        var moved = new List<(string SourcePath, string TargetPath)>();
+        var createdDirectories = new HashSet<string>(ModelPathSafety.LocalPathComparer);
+        try
         {
-            var target = Path.Combine(next, file.RelativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Move(file.SourcePath, target);
-            if (IsSecretsFile(target))
-                TryRestrictSecretsPermissions(target);
+            foreach (var file in files)
+            {
+                var target = Path.Combine(next, file.RelativePath);
+                var targetDirectory = Path.GetDirectoryName(target)!;
+                CreateMigrationDirectory(targetDirectory, createdDirectories);
+                _moveFile(file.SourcePath, target);
+                moved.Add((file.SourcePath, target));
+                if (IsSecretsFile(target))
+                    TryRestrictSecretsPermissions(target);
+            }
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                new DataRootMigration(previous, moved, createdDirectories.ToArray(),
+                    new SettingsSaveResult(true, previous, next, backupDir, moved.Count)).Rollback();
+            }
+            catch (Exception rollbackException)
+            {
+                throw new IOException("Data-root migration failed and automatic rollback also failed.",
+                    new AggregateException(ex, rollbackException));
+            }
+            throw;
         }
 
-        // Moving every file (r11 3.1) can leave now-empty subdirectories
-        // (logs/, voice/, agent-scenarios/, ...) behind; prune those before
-        // checking whether the old root itself is empty, or a full migration
-        // never cleans up the old root at all.
-        if (!string.Equals(previous, DefaultDir, StringComparison.OrdinalIgnoreCase) && Directory.Exists(previous))
-        {
-            PruneEmptyDirectories(previous);
-            if (!Directory.EnumerateFileSystemEntries(previous).Any())
-                Directory.Delete(previous);
-        }
+        return new DataRootMigration(previous, moved, createdDirectories.ToArray(),
+            new SettingsSaveResult(true, previous, next, backupDir, files.Count));
+    }
 
-        return new SettingsSaveResult(true, previous, next, backupDir, files.Count);
+    private static DataRootMigration NoMigration(string previous, string next) =>
+        new(previous, [], [], new SettingsSaveResult(false, previous, next, null, 0));
+
+    private static void CreateMigrationDirectory(string directory, ISet<string> createdDirectories)
+    {
+        if (Directory.Exists(directory))
+            return;
+        Directory.CreateDirectory(directory);
+        createdDirectories.Add(directory);
     }
 
     private static void PruneEmptyDirectories(string root)
@@ -437,7 +559,7 @@ public sealed class SettingsService : ISettingsService
             throw new IOException("Data root must be an absolute path.");
 
         var full = Path.GetFullPath(path);
-        if (string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(full, root, ModelPathSafety.LocalPathComparison))
             throw new IOException("Hermaeus data root cannot be the filesystem root.");
     }
 

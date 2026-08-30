@@ -91,6 +91,7 @@ public sealed class ModelProfileService
             existing.Backend = normalized.Backend;
             existing.IsVisible = normalized.IsVisible;
             existing.Avatar = normalized.Avatar;
+            existing.AutoManageCompanionAssets = normalized.AutoManageCompanionAssets;
         }
 
         await _settings.SaveAsync();
@@ -122,7 +123,8 @@ public sealed class ModelProfileService
         DefaultPresencePenalty = profile.DefaultPresencePenalty,
         Backend = profile.Backend.Trim(),
         IsVisible = profile.IsVisible,
-        Avatar = profile.Avatar.Trim()
+        Avatar = profile.Avatar.Trim(),
+        AutoManageCompanionAssets = profile.AutoManageCompanionAssets
     };
 
     private static List<string> NormalizeTags(IEnumerable<string> tags) =>

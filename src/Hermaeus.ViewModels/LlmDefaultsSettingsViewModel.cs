@@ -31,6 +31,9 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
 
     public LlmDefaultsSettingsViewModel(ISecretStore secrets) => _secrets = secrets;
 
+    public bool HasUnmigratedOpenAiApiKey =>
+        !string.IsNullOrWhiteSpace(OpenAiApiKey) && !_secrets.IsReference(OpenAiApiKey);
+
     public void ReloadFrom(AppSettings settings)
     {
         LlamaCppBaseUrl = settings.Llm.LlamaCppBaseUrl;

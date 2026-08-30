@@ -179,8 +179,8 @@ internal static class AgentTests
 
     var preview = AgentApprovalPreview.Describe(step.State.PendingToolAction!, options);
     True(preview.Contains("2 sub-task", StringComparison.Ordinal), "the preview should show the sub-task count");
-    True(preview.Contains("[correctness] Fix the bug", StringComparison.Ordinal), "the preview should show each sub-task's profile and goal");
-    True(preview.Contains("[tests] Add a regression test", StringComparison.Ordinal), "the preview should show each sub-task's profile and goal");
+    True(preview.Contains("[correctness, model inherit parent] Fix the bug", StringComparison.Ordinal), "the preview should show each sub-task's profile, model, and goal");
+    True(preview.Contains("[tests, model inherit parent] Add a regression test", StringComparison.Ordinal), "the preview should show each sub-task's profile, model, and goal");
 
     var malformed = new AgentPendingToolAction { ToolName = "plan_subtasks", Arguments = new Dictionary<string, object?>() };
     Equal("Could not parse the proposed plan.", AgentApprovalPreview.Describe(malformed, options), "a malformed plan payload should degrade to a clear message");
@@ -213,7 +213,7 @@ internal static class AgentTests
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT version FROM hermaeus_schema_versions WHERE scope = 'agent_task_index'";
-        Equal(5L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
+        Equal(6L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
     }
 
     File.Delete(Path.Combine(store.GetTaskDirectory("indexed-task"), "task_state.json"));
@@ -800,8 +800,10 @@ internal static class AgentTests
     var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build" }, options);
     True(result.ResultSummary.Contains("Exit code", StringComparison.Ordinal), "run_command result should report an exit code");
 
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "rm -rf /" }, options));
+    var blocked = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "rm -rf /" }, options);
+    Equal(NormalizedOutcome.Blocked, blocked.NormalizedOutcome.Outcome,
+        "a command outside the fixed templates should return a structured blocked outcome");
     }
 
     public static async Task RunCommandAcceptsAnOptionalPathWithinTheWorkspace()
@@ -824,10 +826,14 @@ internal static class AgentTests
     var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build src/sample.csproj" }, options);
     True(result.ResultSummary.Contains("Exit code", StringComparison.Ordinal), "dotnet build with a workspace-relative project path should run");
 
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build ../outside.csproj" }, options));
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build /etc/passwd" }, options));
+    var traversal = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "dotnet build ../outside.csproj" }, options);
+    Equal(NormalizedOutcome.Blocked, traversal.NormalizedOutcome.Outcome,
+        "a traversal argument should return a structured blocked outcome");
+    var absolute = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "dotnet build /etc/passwd" }, options);
+    Equal(NormalizedOutcome.Blocked, absolute.NormalizedOutcome.Outcome,
+        "an absolute path argument should return a structured blocked outcome");
     }
 
     public static async Task RunCommandNpmRunOnlyAllowsScriptsDeclaredInPackageJson()
@@ -850,8 +856,10 @@ internal static class AgentTests
     // it's exercised without depending on npm actually being present.
     var executor = new AgentToolExecutor(new AgentWorkspaceTools());
     var options = new AgentWorkspaceOptions(workspace);
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "npm run undeclared-script" }, options));
+    var blocked = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "npm run undeclared-script" }, options);
+    Equal(NormalizedOutcome.Blocked, blocked.NormalizedOutcome.Outcome,
+        "an undeclared script should return a structured blocked outcome before process start");
     }
 
     public static Task AgentSafetyGateDeclaredFamilyCoversArgumentVariants()
@@ -1143,7 +1151,8 @@ internal static class AgentTests
     var state = await service.CreateTaskAsync("Review docs", options);
     var result = await service.RunAsync(state.TaskId, options);
 
-    Equal(AgentTaskStatus.WaitingForUser, result.State.Status, "hitting the step cap must hand the task back to the user, not leave it looking silently active");
+    Equal(AgentTaskStatus.Blocked, result.State.Status, "hitting the step cap must pause the task without presenting a fake reply question");
+    True(result.State.StepBudgetExhausted, "the persisted task must identify the step-budget pause");
     Equal(1, result.State.StepCount, "the loop should have executed exactly the capped number of steps");
     var transcript = await store.LoadTranscriptAsync(state.TaskId);
     True(transcript.Any(e => e.Content.Contains("step budget exhausted", StringComparison.Ordinal)), "the budget-exhausted note should be visible in the transcript");
@@ -2039,7 +2048,11 @@ internal static class AgentTests
     var store = new FileAgentTaskStateStore(settings);
     var tools = new AgentWorkspaceTools();
     var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
-    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+    var availableModels = await llm.GetModelsAsync();
+    var modelId = availableModels.Any(model => string.Equals(model.Id, "fake-sequenced-agent", StringComparison.Ordinal))
+        ? "fake-sequenced-agent"
+        : availableModels.Single().Id;
+    var options = new AgentWorkspaceOptions(root, ModelId: modelId);
 
     var state = await service.CreateTaskAsync(goal, options);
     var proposed = await service.RunStepAsync(state.TaskId, options);

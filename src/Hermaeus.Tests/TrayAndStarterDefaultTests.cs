@@ -22,12 +22,12 @@ public sealed class TrayAndStarterDefaultTests
         var ui = new UiSettings();
 
         Assert.True(ui.CloseToTray, "an existing install must behave exactly as it did before the split");
-        Assert.True(ui.MinimizeToTray);
+        Assert.False(ui.MinimizeToTray);
 
         // They move independently: wanting minimize-to-tray must not force
         // close-to-tray, which was the whole complaint.
         ui.CloseToTray = false;
-        Assert.True(ui.MinimizeToTray);
+        Assert.False(ui.MinimizeToTray);
         Assert.False(ui.CloseToTray);
     }
 

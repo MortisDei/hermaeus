@@ -9,6 +9,8 @@ using Hermaeus.Services;
 
 namespace Hermaeus.Services.ProcessManagement;
 
+public sealed record ManagedRuntimeProcessIdentity(int ProcessId, DateTime StartedAtUtc);
+
 /// <summary>
 /// Manages a single llama-server (or compatible) child process.
 /// Launches with configured args, health-polls /health until ready,
@@ -22,6 +24,7 @@ public sealed class ServerProcessManager : IDisposable
     private readonly RedactionService? _redactor;
     private readonly IProcessJobObject _jobObject;
     private readonly IPortOwnerLookup _portOwnerLookup;
+    private volatile bool _stopRequested;
     private const int MaxLogLines = 300;
 
     public ServerStatus Status { get; private set; } = ServerStatus.Stopped;
@@ -29,6 +32,24 @@ public sealed class ServerProcessManager : IDisposable
 
     public event Action<ServerStatus>? StatusChanged;
     public event Action<string>?       LogLine;
+
+    public ManagedRuntimeProcessIdentity? CurrentProcessIdentity
+    {
+        get
+        {
+            var process = _process;
+            try
+            {
+                return process is { HasExited: false }
+                    ? new ManagedRuntimeProcessIdentity(process.Id, process.StartTime.ToUniversalTime())
+                    : null;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                return null;
+            }
+        }
+    }
 
     private static readonly Regex OffloadedLayersRegex =
         new(@"offloaded\s+(?<used>\d+)\s*/\s*(?<total>\d+)\s+layers", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -73,6 +94,8 @@ public sealed class ServerProcessManager : IDisposable
         cfg.RuntimeHelpProbed = runtime.HelpProbeSucceeded;
         cfg.RuntimeSpeculativeTypes = runtime.SpeculativeTypes;
         cfg.RuntimeSupportsPromptThreads = runtime.SupportsPromptThreads;
+        cfg.RuntimeSupportsLoadMode = runtime.SupportsLoadMode;
+        cfg.RuntimeSupportsCorsOrigins = runtime.SupportsCorsOrigins;
         var runtimeValidation = ValidateRuntimeOptions(cfg);
         if (runtimeValidation is not null)
         {
@@ -98,6 +121,7 @@ public sealed class ServerProcessManager : IDisposable
 
         ErrorMessage = string.Empty;
         ClearLog();
+        _stopRequested = false;
         SetStatus(ServerStatus.Starting);
         if (speculative.HasMessage)
             Emit($"[hermaeus] Warning: {speculative.Message}");
@@ -133,6 +157,7 @@ public sealed class ServerProcessManager : IDisposable
         }
         catch (OperationCanceledException)
         {
+            _stopRequested = true;
             KillProcess();
             Emit("[hermaeus] Start cancelled.");
             SetStatus(ServerStatus.Stopped);
@@ -155,9 +180,44 @@ public sealed class ServerProcessManager : IDisposable
         if (Status == ServerStatus.Stopped && _process is null)
             return;
 
+        _stopRequested = true;
         Emit("[hermaeus] Stopping...");
         KillProcess();
         SetStatus(ServerStatus.Stopped);
+    }
+
+    /// <summary>
+    /// Stops the managed process and waits for the operating system to reap it.
+    /// Lab configuration changes use this boundary before starting another
+    /// model so the previous process cannot still hold model memory while the
+    /// next context is being created.
+    /// </summary>
+    public async Task StopAsync()
+    {
+        if (Status == ServerStatus.Stopped && _process is null)
+            return;
+
+        _stopRequested = true;
+        Emit("[hermaeus] Stopping...");
+        _monitorCts?.Cancel();
+        var process = _process;
+        try
+        {
+            if (process is { HasExited: false })
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+                await process.WaitForExitAsync();
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_process, process))
+                _process = null;
+            process?.Dispose();
+            SetStatus(ServerStatus.Stopped);
+        }
     }
 
     public string GetLog() => string.Join('\n', _logRing);
@@ -188,6 +248,7 @@ public sealed class ServerProcessManager : IDisposable
 
     public void Dispose()
     {
+        _stopRequested = true;
         _monitorCts?.Cancel();
         _monitorCts?.Dispose();
         KillProcess();
@@ -492,7 +553,7 @@ public sealed class ServerProcessManager : IDisposable
             WorkingDirectory       = GetWorkingDirectory(cfg.ExecutablePath)
         };
 
-        foreach (var arg in BuildLaunchArguments(cfg, cfg.ReasoningPreserveSupported))
+        foreach (var arg in BuildLaunchArguments(cfg, cfg.ReasoningPreserveSupported, cfg.RuntimeSupportsLoadMode, cfg.RuntimeSupportsCorsOrigins))
             startInfo.ArgumentList.Add(arg);
 
         return new Process
@@ -502,7 +563,8 @@ public sealed class ServerProcessManager : IDisposable
         };
     }
 
-    public static IReadOnlyList<string> BuildLaunchArguments(ServerConfig cfg, bool reasoningPreserveSupported = false)
+    public static IReadOnlyList<string> BuildLaunchArguments(ServerConfig cfg, bool reasoningPreserveSupported = false,
+        bool supportsLoadMode = false, bool supportsCorsOrigins = false)
     {
         var parts = new List<string>();
 
@@ -537,6 +599,13 @@ public sealed class ServerProcessManager : IDisposable
         var extraArgs = string.IsNullOrWhiteSpace(cfg.ExtraArgs)
             ? []
             : ExtraArgsParser.Split(cfg.ExtraArgs).ToList();
+
+        // UseProjector is the authoritative launch gate for the configured
+        // projector. ExtraArgs is an escape hatch for other runtime flags, but
+        // it must not bypass an explicit projector-off choice with a second
+        // --mmproj value.
+        if (!cfg.UseProjector)
+            RemoveProjectorArguments(extraArgs);
 
         bool HasArg(string flag) => extraArgs.Any(a => string.Equals(a, flag, StringComparison.OrdinalIgnoreCase));
 
@@ -638,11 +707,37 @@ public sealed class ServerProcessManager : IDisposable
         if (cfg.ContextShift && !HasArg("--context-shift") && !HasArg("--no-context-shift"))
             parts.Add("--context-shift");
 
-        if (cfg.MemoryLock && !HasArg("--mlock"))
-            parts.Add("--mlock");
+        if (supportsLoadMode && !HasArg("--load-mode") && !HasArg("--mlock") && !HasArg("--mmap") && !HasArg("--no-mmap"))
+        {
+            if (cfg.MemoryLock)
+            {
+                parts.Add("--load-mode");
+                parts.Add("mlock");
+            }
+            else if (cfg.NoMemoryMap)
+            {
+                parts.Add("--load-mode");
+                parts.Add("none");
+            }
+        }
+        else
+        {
+            if (cfg.MemoryLock && !HasArg("--mlock"))
+                parts.Add("--mlock");
 
-        if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
-            parts.Add("--no-mmap");
+            if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
+                parts.Add("--no-mmap");
+        }
+
+        // Managed llama-server is loopback-bound, but its default wildcard CORS
+        // policy still permits arbitrary web origins to read that local HTTP
+        // service. Add the narrower policy only after the selected executable
+        // advertises the option. External/custom servers remain untouched.
+        if (supportsCorsOrigins && !HasArg("--cors-origins"))
+        {
+            parts.Add("--cors-origins");
+            parts.Add("http://localhost,http://127.0.0.1");
+        }
 
         // Mixture-of-Experts CPU offload. Flag names read from llama-server
         // b10215's own --help, per the r27 rule that only flags the installed
@@ -722,7 +817,7 @@ public sealed class ServerProcessManager : IDisposable
         }
 
         // r19 5.3: enables llama-server's multimodal chat mode (image content parts).
-        if (!string.IsNullOrWhiteSpace(cfg.MmprojPath) && !HasArg("--mmproj"))
+        if (cfg.UseProjector && !string.IsNullOrWhiteSpace(cfg.MmprojPath) && !HasArg("--mmproj"))
         {
             parts.Add("--mmproj");
             parts.Add(cfg.MmprojPath);
@@ -732,6 +827,26 @@ public sealed class ServerProcessManager : IDisposable
             parts.AddRange(extraArgs);
 
         return parts;
+    }
+
+    private static void RemoveProjectorArguments(List<string> args)
+    {
+        for (var i = args.Count - 1; i >= 0; i--)
+        {
+            var argument = args[i];
+            if (argument.StartsWith("--mmproj=", StringComparison.OrdinalIgnoreCase))
+            {
+                args.RemoveAt(i);
+                continue;
+            }
+
+            if (!string.Equals(argument, "--mmproj", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            args.RemoveAt(i);
+            if (i < args.Count && !args[i].StartsWith("-", StringComparison.Ordinal))
+                args.RemoveAt(i);
+        }
     }
 
     private static string EffectiveKvCacheType(ServerConfig cfg) =>
@@ -768,6 +883,7 @@ public sealed class ServerProcessManager : IDisposable
             AutoStart      = cfg.AutoStart,
             ExtraArgs      = cfg.ExtraArgs,
             MmprojPath = cfg.MmprojPath,
+            UseProjector = cfg.UseProjector,
             KvCacheType = cfg.KvCacheType,
             KvCacheTypeK = cfg.KvCacheTypeK,
             KvCacheTypeV = cfg.KvCacheTypeV,
@@ -790,7 +906,9 @@ public sealed class ServerProcessManager : IDisposable
             },
             RuntimeHelpProbed = cfg.RuntimeHelpProbed,
             RuntimeSpeculativeTypes = cfg.RuntimeSpeculativeTypes,
-            RuntimeSupportsPromptThreads = cfg.RuntimeSupportsPromptThreads
+            RuntimeSupportsPromptThreads = cfg.RuntimeSupportsPromptThreads,
+            RuntimeSupportsLoadMode = cfg.RuntimeSupportsLoadMode,
+            RuntimeSupportsCorsOrigins = cfg.RuntimeSupportsCorsOrigins
         };
     }
 
@@ -960,11 +1078,19 @@ public sealed class ServerProcessManager : IDisposable
         // on another thread (process-crash class); ExitCode access on an
         // already-disposed Process is swallowed rather than left to throw
         // ObjectDisposedException on a threadpool thread.
+        if (sender is Process exited && !ReferenceEquals(_process, exited))
+            return;
+
         var code = TryGetExitCode(sender as Process);
         Emit($"[hermaeus] Process exited with code {code}.");
+        if (_stopRequested)
+        {
+            SetStatus(ServerStatus.Stopped);
+            return;
+        }
         if (Status == ServerStatus.Running)
         {
-            SetStatus(code == 0 ? ServerStatus.Stopped : ServerStatus.Error);
+            SetStatus(GetProcessExitStatus(stopRequested: false, code));
         }
         else if (Status == ServerStatus.Starting)
         {
@@ -997,6 +1123,9 @@ public sealed class ServerProcessManager : IDisposable
         catch (ObjectDisposedException) { return -1; }
         catch (InvalidOperationException) { return -1; }
     }
+
+    public static ServerStatus GetProcessExitStatus(bool stopRequested, int code) =>
+        stopRequested || code == 0 ? ServerStatus.Stopped : ServerStatus.Error;
 
     private void SetStatus(ServerStatus s)
     {

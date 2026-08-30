@@ -5,8 +5,6 @@ namespace Hermaeus.Core.Models;
 /// <summary>
 /// llama.cpp build flavour to install (r14 1.1). Auto resolves against the
 /// detected hardware; the concrete values pin a specific accelerator backend.
-/// Only Windows publishes distinct cuda/vulkan/cpu binaries that Hermaeus
-/// selects between; non-Windows platforms keep the default build regardless.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum LlamaRuntimeVariant { Auto, Cpu, Cuda, Vulkan }
@@ -29,8 +27,17 @@ public class DataManagementSettings
 
     /// <summary>
     /// Preferred llama.cpp build variant to download for install and update
-    /// (r14 1.1). Auto picks CUDA on NVIDIA, Vulkan on any other real GPU, and
-    /// CPU when no GPU is detected. An explicit choice always wins.
+    /// (r14 1.1). Auto prefers CUDA on NVIDIA and Vulkan on any other real GPU,
+    /// falls back to another compatible accelerated asset when upstream lacks
+    /// the preferred one, and uses CPU when no GPU is detected. An explicit
+    /// choice always wins.
     /// </summary>
     public LlamaRuntimeVariant LlamaRuntimeVariant { get; set; } = LlamaRuntimeVariant.Auto;
+
+    /// <summary>
+    /// Backend class of the last managed llama.cpp installation. This is kept
+    /// separately from the user's Auto preference so an update can preserve a
+    /// working backend without turning Auto into a machine-specific setting.
+    /// </summary>
+    public LlamaRuntimeVariant InstalledLlamaRuntimeVariant { get; set; } = LlamaRuntimeVariant.Auto;
 }

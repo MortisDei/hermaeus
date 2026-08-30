@@ -15,19 +15,40 @@ namespace Hermaeus.Voice;
 /// </summary>
 public static class AudioPlayback
 {
-    public static async Task PlayAsync(string wavFilePath, CancellationToken ct)
+    public static async Task PlayAsync(string wavFilePath, CancellationToken ct, Action<string>? onBackendSelected = null)
     {
-        if (OperatingSystem.IsWindows() && await TryRunAsync("powershell", [
-                "-NoProfile", "-Command",
-                $"(New-Object Media.SoundPlayer '{wavFilePath}').PlaySync();"
-            ], ct))
-            return;
+        if (string.IsNullOrWhiteSpace(wavFilePath) || !File.Exists(wavFilePath))
+            throw new InvalidDataException("Audio playback was not started because the generated WAV file is missing.");
+        await using (var stream = File.OpenRead(wavFilePath))
+            _ = WavFile.Read(stream);
 
-        if (await TryRunAsync("paplay", [wavFilePath], ct)) return;
-        if (await TryRunAsync("pw-play", [wavFilePath], ct)) return;
-        if (await TryRunAsync("aplay", ["-q", wavFilePath], ct)) return;
-        if (await TryRunAsync("afplay", [wavFilePath], ct)) return;
-        if (await TryRunAsync("ffplay", ["-nodisp", "-autoexit", wavFilePath], ct)) return;
+        var players = new List<(string Command, IReadOnlyList<string> Arguments)>();
+        if (OperatingSystem.IsWindows())
+            players.Add(("powershell", BuildArguments("powershell", wavFilePath)));
+        players.Add(("paplay", [wavFilePath]));
+        players.Add(("pw-play", [wavFilePath]));
+        players.Add(("aplay", ["-q", wavFilePath]));
+        players.Add(("afplay", [wavFilePath]));
+        players.Add(("ffplay", ["-nodisp", "-autoexit", wavFilePath]));
+
+        await PlayCandidatesAsync(players, TryRunAsync, ct, onBackendSelected);
+    }
+
+    internal static async Task PlayCandidatesAsync(
+        IReadOnlyList<(string Command, IReadOnlyList<string> Arguments)> players,
+        Func<string, IReadOnlyList<string>, CancellationToken, Task<bool>> tryRun,
+        CancellationToken ct,
+        Action<string>? onBackendSelected = null)
+    {
+        foreach (var player in players)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await tryRun(player.Command, player.Arguments, ct))
+            {
+                onBackendSelected?.Invoke(player.Command);
+                return;
+            }
+        }
 
         throw new InvalidOperationException("Could not find a system audio player for the generated WAV file.");
     }
@@ -45,7 +66,47 @@ public static class AudioPlayback
         return null;
     }
 
+    /// <summary>
+    /// Builds process arguments without embedding the user-controlled WAV path
+    /// in a shell command. PowerShell receives the path as an argument to a
+    /// fixed script body.
+    /// </summary>
+    public static IReadOnlyList<string> BuildArguments(string command, string wavFilePath) =>
+        command.Equals("powershell", StringComparison.OrdinalIgnoreCase)
+            ? ["-NoProfile", "-NonInteractive", "-Command",
+                "param([string]$path); (New-Object Media.SoundPlayer $path).PlaySync();",
+                wavFilePath]
+            : [wavFilePath];
+
     private static async Task<bool> TryRunAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
+    {
+        var psi = BuildStartInfo(command, args);
+        try
+        {
+            using var process = new Process { StartInfo = psi };
+            if (!process.Start())
+                return false;
+
+            return await RunProcessLifecycleAsync(
+                async token =>
+                {
+                    await process.WaitForExitAsync(token);
+                    return process.ExitCode;
+                },
+                () => TerminateOwnedProcessAsync(process),
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static ProcessStartInfo BuildStartInfo(string command, IReadOnlyList<string> args)
     {
         var psi = new ProcessStartInfo
         {
@@ -57,19 +118,55 @@ public static class AudioPlayback
         };
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
+        return psi;
+    }
 
+    internal static async Task<bool> RunProcessLifecycleAsync(
+        Func<CancellationToken, Task<int>> waitForExit,
+        Func<Task> terminateOwnedProcess,
+        CancellationToken ct)
+    {
         try
         {
-            using var process = new Process { StartInfo = psi };
-            if (!process.Start())
-                return false;
-
-            await process.WaitForExitAsync(ct);
-            return process.ExitCode == 0;
+            return await waitForExit(ct) == 0;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            try { await terminateOwnedProcess(); }
+            catch { }
+            throw;
         }
         catch
         {
             return false;
+        }
+    }
+
+    private static async Task TerminateOwnedProcessAsync(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException) when (process.HasExited)
+        {
+        }
+        catch (System.ComponentModel.Win32Exception) when (process.HasExited)
+        {
+        }
+        catch (NotSupportedException)
+        {
+            if (!process.HasExited)
+                process.Kill();
+        }
+
+        try
+        {
+            await process.WaitForExitAsync(CancellationToken.None);
+        }
+        catch (InvalidOperationException) when (process.HasExited)
+        {
         }
     }
 }

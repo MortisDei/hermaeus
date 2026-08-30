@@ -1,5 +1,6 @@
 using Hermaeus.Agent.Models;
 using Hermaeus.Agent.Services;
+using Hermaeus.Core.Models;
 using Xunit;
 
 namespace Hermaeus.Tests;
@@ -184,6 +185,8 @@ public sealed class AgentPatchReviewServiceTests
         var result = await service.RevertTaskAsync(task, options);
 
         Assert.Equal(2, result.RevertedCount);
+        Assert.Equal(NormalizedOutcome.Succeeded, result.NormalizedOutcome.Outcome);
+        Assert.All(result.Files, file => Assert.Equal(NormalizedOutcome.Succeeded, file.NormalizedOutcome.Outcome));
         Assert.Equal(2, result.TotalCount);
         Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));
         Assert.Equal("second-original", await File.ReadAllTextAsync(Path.Combine(workspace, "second.md")));
@@ -210,6 +213,7 @@ public sealed class AgentPatchReviewServiceTests
         var result = await service.RevertTaskAsync(task, options);
 
         Assert.Equal(1, result.RevertedCount);
+        Assert.Equal(NormalizedOutcome.Succeeded, result.NormalizedOutcome.Outcome);
         Assert.False(File.Exists(Path.Combine(workspace, "new-file.md")));
     }
 
@@ -233,6 +237,9 @@ public sealed class AgentPatchReviewServiceTests
 
         Assert.Equal(1, result.RevertedCount);
         Assert.Equal(2, result.TotalCount);
+        Assert.Equal(NormalizedOutcome.PartiallySucceeded, result.NormalizedOutcome.Outcome);
+        Assert.Contains(result.Files, file => file.Reverted && file.NormalizedOutcome.Outcome == NormalizedOutcome.Succeeded);
+        Assert.Contains(result.Files, file => !file.Reverted && file.NormalizedOutcome.Outcome == NormalizedOutcome.Blocked);
         Assert.Contains("Reverted 1 of 2", result.Summary, StringComparison.Ordinal);
         Assert.Contains("Skipped second.md", result.Summary, StringComparison.Ordinal);
         Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));

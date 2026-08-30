@@ -21,6 +21,7 @@ public partial class BenchmarkViewModel : ObservableObject
     /// <summary>Set while the app reassigns SelectedRun itself, so a bookkeeping selection never moves the user's tab.</summary>
     private bool _suppressRunDetailJump;
     private Task? _loadTask;
+    private bool _insightsLoaded;
 
     public UiBoundCollection<BenchmarkSuite> Suites { get; } = [];
     public UiBoundCollection<BenchmarkRunViewModel> Runs { get; } = [];
@@ -169,6 +170,7 @@ public partial class BenchmarkViewModel : ObservableObject
 
             await ReloadRunsAsync();
             Status = $"Loaded {Suites.Count} suite(s), {Runs.Count} run(s).";
+            await RefreshInsightsIfLoadedAsync();
         }
         finally
         {
@@ -201,6 +203,7 @@ public partial class BenchmarkViewModel : ObservableObject
             }
 
             await ReloadRunsAsync();
+            await RefreshInsightsIfLoadedAsync();
             if (run is not null)
                 SelectedRun = Runs.FirstOrDefault(r => r.Id == run.Id);
             _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
@@ -252,6 +255,7 @@ public partial class BenchmarkViewModel : ObservableObject
         {
             var rerun = await _benchmarks.RerunAsync(run.Id, new Progress<string>(s => Status = s), _runCts.Token);
             await ReloadRunsAsync();
+            await RefreshInsightsIfLoadedAsync();
             SelectedRun = Runs.FirstOrDefault(r => r.Id == rerun.Id);
         }
         finally
@@ -269,6 +273,7 @@ public partial class BenchmarkViewModel : ObservableObject
         if (run is null) return;
         await _benchmarks.DeleteRunAsync(run.Id);
         await ReloadRunsAsync();
+        await RefreshInsightsIfLoadedAsync();
         _toasts.Show("Benchmark deleted", run.Title, ToastKind.Info);
     }
 
@@ -295,6 +300,7 @@ public partial class BenchmarkViewModel : ObservableObject
         SelectedResult = null;
         SelectedResults.Clear();
         await ReloadRunsAsync();
+        await RefreshInsightsIfLoadedAsync();
         _toasts.Show("Benchmark history cleared", "Saved benchmark runs were removed.", ToastKind.Info);
     }
 
@@ -355,9 +361,10 @@ public partial class BenchmarkViewModel : ObservableObject
         try
         {
             var report = await _insights.LoadReportAsync();
+            _insightsLoaded = true;
             InsightsHasData = report.HasData;
             InsightsHeader = report.HasData
-                ? $"You've run {report.TotalRuns} benchmark(s) across {report.ModelCount} model(s) on this hardware."
+                ? $"You've run {report.TotalRuns} benchmark run(s) across {report.ModelCount} model(s) on this hardware."
                 : $"No comparable benchmark data yet ({report.TotalRuns} run(s) recorded). Run a starter suite to get recommendations.";
             InsightsBestOverall = report.BestOverall is null ? null : new ModelAggregateViewModel(report.BestOverall);
             InsightsHasNoComparisonBasis = report.HasData && report.ComparisonBasisCaseCount <= 0;
@@ -391,6 +398,12 @@ public partial class BenchmarkViewModel : ObservableObject
         {
             IsLoadingInsights = false;
         }
+    }
+
+    private async Task RefreshInsightsIfLoadedAsync()
+    {
+        if (_insightsLoaded)
+            await LoadInsightsAsync();
     }
 
     /// <summary>

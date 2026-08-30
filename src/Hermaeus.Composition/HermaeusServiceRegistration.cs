@@ -41,7 +41,15 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IDoctorService>(sp => sp.GetRequiredService<DoctorService>());
         s.AddSingleton<PrivacyAuditService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
+        s.AddSingleton<IRuntimeTelemetrySource, ProcessRuntimeTelemetrySource>();
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
+        s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
+        s.AddSingleton<GpuFitExperienceService>();
+        s.AddSingleton<ILabRuntimeHost, IsolatedLabRuntimeHost>();
+        s.AddSingleton<ILabExperimentService, LabExperimentService>();
+        s.AddSingleton<ILabWorkloadExecutor, LlamaServerLabWorkloadExecutor>();
+        s.AddSingleton<LabRecipeRunner>();
+        s.AddSingleton<ILabRecipeService, LabRecipeService>();
         s.AddSingleton<EvalEngine>();
         s.AddSingleton<BenchmarkService>();
         s.AddSingleton<IBenchmarkInsightsService, BenchmarkInsightsService>();
@@ -51,7 +59,9 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<ChatTraceService>();
         s.AddSingleton<ICommandRegistry, CommandRegistry>();
         s.AddSingleton<IConversationStore, ConversationStore>();
-        s.AddSingleton<IProjectStore, ProjectStore>();
+        s.AddSingleton<ProjectStore>();
+        s.AddSingleton<IProjectStore>(provider => provider.GetRequiredService<ProjectStore>());
+        s.AddSingleton<IProjectStateStore>(provider => provider.GetRequiredService<ProjectStore>());
         s.AddSingleton<ConversationExportService>();
         s.AddSingleton<ChatArtifactService>();
         s.AddSingleton<IMemoryStore, MemoryStore>();
@@ -75,6 +85,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<IVoiceOrchestrator, VoiceOrchestrator>();
+        s.AddSingleton<IAudioFeedbackService, AudioFeedbackService>();
         s.AddSingleton<VoiceNotificationBridge>();
         s.AddSingleton<NativeSpeechRecognitionProvider>();
         s.AddSingleton<OpenAiSpeechRecognitionProvider>();

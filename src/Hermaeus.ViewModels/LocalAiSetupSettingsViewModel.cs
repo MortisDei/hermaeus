@@ -34,7 +34,7 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
     public UiBoundCollection<string> LocalAiInstallPlanCreates { get; } = [];
     public UiBoundCollection<string> LocalAiInstallPlanInstalls { get; } = [];
 
-    public Action<string>? RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
 
     public LocalAiSetupSettingsViewModel(
         ISettingsService settings,
@@ -150,6 +150,7 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
 
             ApplySetupResult(action, result);
             await _saveSettings();
+            _data.RefreshLlamaRuntimeVariantStatus();
             await ScanLocalAiSetupAsync();
             _toasts.Show("Setup action complete", action.ExpectedResult, ToastKind.Success, 6000);
         }
@@ -217,7 +218,7 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void CopyLocalAiSetupCommands()
+    private async Task CopyLocalAiSetupCommands()
     {
         var text = LocalAiSetupActions.Count == 0
             ? LocalAiSetupLog
@@ -225,8 +226,15 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        RequestCopyToClipboard?.Invoke(text);
-        _toasts.Show("Setup commands copied", "Review commands before running them outside Hermaeus.", ToastKind.Info);
+        if (RequestCopyToClipboard is null)
+            return;
+
+        var copied = false;
+        try { copied = await RequestCopyToClipboard(text); }
+        catch { }
+        _toasts.Show(copied ? "Setup commands copied" : "Could not copy setup commands",
+            copied ? "Review commands before running them outside Hermaeus." : "The clipboard was unavailable.",
+            copied ? ToastKind.Success : ToastKind.Warning, 3000);
     }
 
     /// <summary>

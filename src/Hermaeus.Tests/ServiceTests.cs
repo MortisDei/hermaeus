@@ -2049,8 +2049,7 @@ namespace Hermaeus.Tests
         public static async Task SettingsSavePrunesPerConversationMemoryOverrides()
         {
             using var temp = new TempDir();
-            var path = temp.PathFor("settings.json");
-            var service = new SettingsService(path);
+            var service = NewSettings(temp, "settings.json");
             service.Settings.Memory.Enabled = true;
             service.Settings.Memory.EnabledPerConversation["inherits-global"] = true;
             service.Settings.Memory.EnabledPerConversation["explicit-off"] = false;
@@ -2182,13 +2181,12 @@ namespace Hermaeus.Tests
         public static async Task SettingsLoadMigratesLegacySharedLocalApiTokenToNamedEntry()
         {
             using var temp = new TempDir();
-            var path = temp.PathFor("settings/settings.json");
 
-            var writer = new SettingsService(path);
+            var writer = NewSettings(temp);
             writer.Settings.LocalApi.ApiToken = "secret:local-api-token-legacy";
             await writer.SaveAsync();
 
-            var reader = new SettingsService(path);
+            var reader = NewSettings(temp);
             await reader.LoadAsync();
 
             Equal(1, reader.Settings.LocalApi.Tokens.Count, "the legacy shared token should migrate into exactly one named entry");
@@ -2197,7 +2195,7 @@ namespace Hermaeus.Tests
             Equal(string.Empty, reader.Settings.LocalApi.ApiToken, "the legacy field should be cleared once migrated");
 
             // Migration should be idempotent: loading again must not duplicate the entry.
-            var reloaded = new SettingsService(path);
+            var reloaded = NewSettings(temp);
             await reloaded.LoadAsync();
             Equal(1, reloaded.Settings.LocalApi.Tokens.Count, "re-loading already-migrated settings should not duplicate the token entry");
         }
@@ -2209,7 +2207,7 @@ namespace Hermaeus.Tests
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await File.WriteAllTextAsync(path, "{ not valid json");
 
-            var settings = new SettingsService(path);
+            var settings = NewSettings(temp);
             await settings.LoadAsync();
 
             True(Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "settings.json.corrupt-*").Any(),
@@ -2238,8 +2236,9 @@ namespace Hermaeus.Tests
             vm.Ui.EnableGlobalHotkeys = true;
             vm.Memory.MemoryFeatureEnabled = true;
             vm.Memory.MemoryInjectionTokenBudget = 700;
+            vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
 
-            await vm.SaveCommand.ExecuteAsync(null);
+            await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
 
             Equal("http://127.0.0.1:9000", settings.Settings.Llm.LlamaCppBaseUrl, "llm section should apply base URL");
             Equal(true, settings.Settings.Llm.OpenAiEnabled, "llm section should apply remote toggle");

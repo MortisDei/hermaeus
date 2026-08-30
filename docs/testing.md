@@ -1,7 +1,8 @@
 # The test suite
 
-What the suite is, how to run it, and what is known about its cost. Written at
-r29 (v0.36.0-alpha) after the first whole-suite audit this project has had.
+This is the current test execution, coverage, and guard-test contract. Dated
+timing and coverage measurements are retained as evidence, not as permanent
+test-count or performance promises.
 
 ## Shape
 
@@ -131,6 +132,12 @@ r30; do not reintroduce polling or fixed delays for this behavior.
 ```bash
 ./scripts/coverage.sh          # or: pwsh ./scripts/coverage.ps1
 ```
+
+The coverage scripts assume the solution has already been restored and built,
+then run tests with `--no-restore`. Reports are written beneath the operating
+system temporary directory so coverage artifacts never enter the checkout.
+CI keeps the required restore and zero-warning build steps before its test
+workflow.
 
 Floor: **60%** line coverage, set in `scripts/coverage.sh`,
 `scripts/coverage.ps1` and stated in `AGENTS.md`. All four must agree.

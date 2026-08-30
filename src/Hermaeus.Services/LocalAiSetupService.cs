@@ -31,17 +31,20 @@ public sealed class LocalAiSetupService
     private readonly ModelDownloadService _modelDownloader;
     private readonly LlamaServerSetupService _llamaServerSetup;
     private readonly ModelManifestStore? _modelManifest;
+    private readonly ISystemInfoService? _systemInfo;
 
     public LocalAiSetupService(
         PythonHealthValidator pythonValidator,
         ModelDownloadService? modelDownloader = null,
         LlamaServerSetupService? llamaServerSetup = null,
-        ModelManifestStore? modelManifest = null)
+        ModelManifestStore? modelManifest = null,
+        ISystemInfoService? systemInfo = null)
     {
         _pythonValidator = pythonValidator;
         _modelDownloader = modelDownloader ?? new ModelDownloadService();
         _llamaServerSetup = llamaServerSetup ?? new LlamaServerSetupService();
         _modelManifest = modelManifest;
+        _systemInfo = systemInfo;
     }
 
     public async Task<LocalAiReadinessReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
@@ -207,7 +210,7 @@ public sealed class LocalAiSetupService
             LocalAiSetupActionKind.CreateDirectory => CreateSupportDirectory(action.TargetPath, progress),
             LocalAiSetupActionKind.DownloadGgufModel => await DownloadGgufModelAsync(action, progress, ct),
             LocalAiSetupActionKind.DownloadTtsModel => await DownloadTtsModelAsync(action, progress, ct),
-            LocalAiSetupActionKind.DownloadLlamaServer => await DownloadLlamaServerAsync(action, progress, ct),
+            LocalAiSetupActionKind.DownloadLlamaServer => await DownloadLlamaServerAsync(action, settings, progress, ct),
             _ => new LocalAiSetupResult(false, $"Unsupported setup action: {action.Kind}")
         };
     }
@@ -338,13 +341,36 @@ public sealed class LocalAiSetupService
 
     private async Task<LocalAiSetupResult> DownloadLlamaServerAsync(
         LocalAiSetupAction action,
+        AppSettings settings,
         IProgress<string>? progress,
         CancellationToken ct)
     {
         progress?.Report("Installing llama-server binary...");
         try
         {
-            var result = await _llamaServerSetup.InstallLatestAsync(action.TargetPath, LlamaRuntimeVariant.Cpu, progress, ct);
+            var configuredVariant = settings.DataManagement.LlamaRuntimeVariant;
+            var variant = configuredVariant;
+            if (variant == LlamaRuntimeVariant.Auto)
+            {
+                if (_systemInfo is null)
+                {
+                    return new LocalAiSetupResult(
+                        false,
+                        "Cannot choose a managed llama.cpp backend because hardware detection is unavailable. Select CPU, CUDA, or Vulkan explicitly.");
+                }
+
+                var profile = await _systemInfo.GetHardwareProfileAsync(ct);
+                variant = LlamaServerSetupService.ResolveVariant(LlamaRuntimeVariant.Auto, profile);
+            }
+
+            var result = await _llamaServerSetup.InstallLatestAsync(
+                action.TargetPath,
+                variant,
+                progress,
+                ct,
+                allowAutoAcceleratedFallback: configuredVariant == LlamaRuntimeVariant.Auto);
+            if (result.Success)
+                settings.DataManagement.InstalledLlamaRuntimeVariant = result.SelectedVariant ?? variant;
             return result;
         }
         catch (OperationCanceledException)

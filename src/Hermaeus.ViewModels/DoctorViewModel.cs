@@ -41,7 +41,7 @@ public partial class DoctorViewModel : ObservableObject
 
     public UiBoundCollection<DoctorCheck> Checks { get; } = [];
 
-    public Action<string>? RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestNavigate { get; set; }
 
     /// <summary>
@@ -219,8 +219,10 @@ public partial class DoctorViewModel : ObservableObject
     {
         if (check is null) return;
         if (RequestCopyToClipboard is null) return;
-        RequestCopyToClipboard(check.Diagnostics);
-        _toasts.Show("Diagnostics copied", check.Title, ToastKind.Success, 3000);
+        if (await RequestCopyToClipboard(check.Diagnostics))
+            _toasts.Show("Diagnostics copied", check.Title, ToastKind.Success, 3000);
+        else
+            _toasts.Show("Could not copy diagnostics", "The clipboard was unavailable.", ToastKind.Warning, 3000);
     }
 
     [RelayCommand]
@@ -229,8 +231,10 @@ public partial class DoctorViewModel : ObservableObject
         if (RequestCopyToClipboard is null) return;
         var payload = string.Join("\n\n", Checks.Select(c =>
             $"[{c.StatusLabel}] {c.Title}\n{c.Summary}\n{c.Detail}\n{c.Diagnostics}"));
-        RequestCopyToClipboard(payload);
-        _toasts.Show("Diagnostics copied", "Doctor summary copied to clipboard.", ToastKind.Success, 3000);
+        if (await RequestCopyToClipboard(payload))
+            _toasts.Show("Diagnostics copied", "Doctor summary copied to clipboard.", ToastKind.Success, 3000);
+        else
+            _toasts.Show("Could not copy diagnostics", "The clipboard was unavailable.", ToastKind.Warning, 3000);
     }
 
     [RelayCommand]
@@ -331,7 +335,6 @@ public partial class DoctorViewModel : ObservableObject
                 ok ? successBody : "See diagnostics for details.",
                 ok ? ToastKind.Success : ToastKind.Error,
                 7000);
-            await ScanAsync();
         }
         catch (Exception ex)
         {
@@ -424,6 +427,7 @@ public partial class DoctorViewModel : ObservableObject
                     _toasts.Show("Could not restart a server", ex.Message, ToastKind.Warning, 7000);
                 }
             }
+            await ScanAsync();
             LlamaServerProgress = string.Empty;
             IsInstallingLlamaServer = false;
             _installCts?.Dispose();

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -21,16 +22,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly ModelProfileService?  _modelProfiles;
     private readonly IActivityRecorder?    _activity;
     private readonly LocalModelCapabilityService? _capabilityService;
+    private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
     private OrphanServerInfo? _orphanInfo;
     private string? _lastModelPathForDefaults;
+    private string? _modelPathForMmproj;
 
     [ObservableProperty] private string       _name;
     [ObservableProperty] private string       _executablePath;
     [ObservableProperty] private string       _modelPath;
     /// <summary>r19 5.3: optional vision projector (--mmproj); empty means text-only.</summary>
     [ObservableProperty] private string       _mmprojPath = string.Empty;
+    /// <summary>Retains the configured projector path while controlling whether this server uses it.</summary>
+    [ObservableProperty] private bool         _useProjector = true;
     [ObservableProperty] private int          _port;
     [ObservableProperty] private int          _contextSize;
     [ObservableProperty] private int          _gpuLayers;
@@ -165,6 +170,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string       _orphanBannerText = string.Empty;
     [ObservableProperty] private string       _contextFitNote = string.Empty;
     [ObservableProperty] private bool         _hasContextFitWarning;
+    [ObservableProperty] private string       _gpuFitBreakdown = string.Empty;
+    public bool HasGpuFitBreakdown => !string.IsNullOrWhiteSpace(GpuFitBreakdown);
+    partial void OnGpuFitBreakdownChanged(string value) => OnPropertyChanged(nameof(HasGpuFitBreakdown));
 
     /// <summary>r19 2.1: names where the current Context Size value came from ("Context from model card" / "Context from Auto Tune"), empty when the user set it directly.</summary>
     [ObservableProperty] private string       _contextSourceLabel = string.Empty;
@@ -177,6 +185,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ? "Template support is confirmed for this model."
         : "Waiting for a successful model capability probe.";
     public bool IsRunning  => Status == ServerStatus.Running;
+    public ManagedRuntimeProcessIdentity? CurrentProcessIdentity => _mgr.CurrentProcessIdentity;
     public bool IsStopped  => Status is ServerStatus.Stopped or ServerStatus.Error;
     public bool IsStarting => Status == ServerStatus.Starting;
     public bool IsError    => Status == ServerStatus.Error;
@@ -193,6 +202,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ExecutablePath != ExecutablePath ||
         _config.ModelPath != ModelPath ||
         _config.MmprojPath != MmprojPath ||
+        _config.UseProjector != UseProjector ||
         _config.Port != Port ||
         _config.ContextSize != ContextSize ||
         _config.GpuLayers != GpuLayers ||
@@ -272,12 +282,27 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
     public UiBoundCollection<string> DetectedMmprojPaths { get; } = [];
 
+    public bool HasMissingModel => !string.IsNullOrWhiteSpace(ModelPath) && !File.Exists(ModelPath);
+    public string ModelPathHint => HasMissingModel
+        ? $"Configured model is missing: {ModelPath}. Browse for it or choose a verified model; Hermaeus will not substitute another file."
+        : string.Empty;
+
+    public bool HasMissingMmproj => !string.IsNullOrWhiteSpace(MmprojPath) && !File.Exists(MmprojPath);
+    public string MmprojHint => HasMissingMmproj
+        ? $"Configured projector is missing: {MmprojPath}. It is {(UseProjector ? "enabled" : "disabled")} for this server. Browse for it or clear it; the saved path and provenance stay visible until you repair or explicitly clear it."
+        : string.Empty;
+
+    [RelayCommand]
+    private void ClearMmproj()
+    {
+        MmprojPath = string.Empty;
+        _autoSelectedMmprojPath = null;
+    }
+
     /// <summary>
-    /// r27 follow-up: `mtp-*.gguf` draft heads found beside the selected model,
-    /// exactly as <see cref="DetectedMmprojPaths"/> finds projectors. An MTP
-    /// head ships inside its base model's repository, so if you have one, it is
-    /// already next to the model you just picked and you should not have to
-    /// type its path.
+    /// Local `mtp-*.gguf` files found beside the selected model are listed as
+    /// candidates, exactly as <see cref="DetectedMmprojPaths"/> lists projector
+    /// candidates. Their filenames do not establish compatibility.
     /// </summary>
     public UiBoundCollection<string> DetectedDraftModelPaths { get; } = [];
 
@@ -322,7 +347,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         // the scanned assets root never appears in `found`; without the
         // manual free-text fallback box this round removed, the ComboBox
         // would otherwise render blank for it after every rescan.
-        if (!string.IsNullOrWhiteSpace(current) && !DetectedModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(current) && !DetectedModelPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, current)))
             DetectedModelPaths.Insert(0, current);
         // DetectedModelPaths.Clear() fires a CollectionChanged Reset, which the
         // ComboBox bound to it (SelectedItem="{Binding ModelPath}", TwoWay by
@@ -337,14 +362,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             ModelPath = current;
     }
 
-    /// <summary>r19 5.3: rescans for `mmproj-*.gguf` files beside the selected model whenever
-    /// it changes, auto-filling the sole candidate when the field is still empty (never
-    /// overwrites an explicit choice, following the same repair-on-Clear() pattern as
-    /// <see cref="RefreshDetectedModels"/>).</summary>
+    /// <summary>Rescans for projector candidates beside the selected model. Candidates are
+    /// displayed for explicit user selection only; a filename is not compatibility evidence
+    /// and the sole candidate is never silently selected.</summary>
     private void RefreshDetectedMmprojPaths(string modelPath)
     {
-        var current = MmprojPath;
-        var wasAutoSelected = string.Equals(current, _autoSelectedMmprojPath, StringComparison.OrdinalIgnoreCase);
+        var modelChanged = !ModelPathSafety.AreSameLocalPath(_modelPathForMmproj, modelPath);
+        var current = modelChanged ? string.Empty : MmprojPath;
+        if (modelChanged && !string.IsNullOrWhiteSpace(MmprojPath))
+        {
+            _settingAutoMmproj = true;
+            try { MmprojPath = string.Empty; }
+            finally { _settingAutoMmproj = false; }
+        }
+
         DetectedMmprojPaths.Clear();
 
         if (!string.IsNullOrWhiteSpace(modelPath))
@@ -358,23 +389,21 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         }
 
         var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
-            && DetectedMmprojPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
-        var soleCandidate = DetectedMmprojPaths.Count == 1 ? DetectedMmprojPaths[0] : string.Empty;
+            && DetectedMmprojPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, current));
         if (!string.IsNullOrWhiteSpace(current) && !hasCurrentCandidate)
             DetectedMmprojPaths.Insert(0, current);
 
-        var replacement = (string.IsNullOrWhiteSpace(current) || wasAutoSelected || !File.Exists(current))
-            && !string.IsNullOrWhiteSpace(soleCandidate)
-            ? soleCandidate
-            : current;
-        SetAutoMmprojPath(replacement, soleCandidate);
+        SetAutoMmprojPath(current, string.Empty);
+        _modelPathForMmproj = string.IsNullOrWhiteSpace(modelPath) ? null : modelPath;
+        OnPropertyChanged(nameof(HasMissingMmproj));
+        OnPropertyChanged(nameof(MmprojHint));
     }
 
     /// <summary>
-    /// r27 follow-up: rescans for `mtp-*.gguf` draft heads whenever the model
-    /// changes, mirroring <see cref="RefreshDetectedMmprojPaths"/>, including
-    /// its rule of auto-filling the sole candidate only when the field is still
-    /// empty and never overwriting an explicit choice.
+    /// Rescans for draft-head candidates whenever the model changes. Candidates
+    /// are displayed for explicit user selection only. Filename and directory
+    /// conventions are not compatibility evidence, so a sole candidate is not
+    /// silently selected.
     /// unsloth ships the head in an `MTP/` subdirectory beside the model, so
     /// both that and the model's own directory are scanned.
     /// Populating this path does NOT enable speculative decoding. No flag is
@@ -385,7 +414,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private void RefreshDetectedDraftModelPaths(string modelPath)
     {
         var current = DraftModelPath;
-        var wasAutoSelected = string.Equals(current, _autoSelectedDraftModelPath, StringComparison.OrdinalIgnoreCase);
         DetectedDraftModelPaths.Clear();
 
         if (!string.IsNullOrWhiteSpace(modelPath))
@@ -406,16 +434,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         }
 
         var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
-            && DetectedDraftModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
-        var soleCandidate = DetectedDraftModelPaths.Count == 1 ? DetectedDraftModelPaths[0] : string.Empty;
-        if (!string.IsNullOrWhiteSpace(current) && !hasCurrentCandidate)
-            DetectedDraftModelPaths.Insert(0, current);
+            && DetectedDraftModelPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, current));
+        // A missing persisted path is not a candidate. Keeping it in the
+        // dropdown made a deleted draft look like the only useful choice and
+        // encouraged a launch with a dead companion. Preserve the path in the
+        // editor so it can be explained and cleared, but list only files that
+        // exist now.
 
-        var replacement = (string.IsNullOrWhiteSpace(current) || wasAutoSelected || !File.Exists(current))
-            && !string.IsNullOrWhiteSpace(soleCandidate)
-            ? soleCandidate
-            : current;
-        SetAutoDraftModelPath(replacement, soleCandidate);
+        SetAutoDraftModelPath(current, string.Empty);
 
         OnPropertyChanged(nameof(HasDetectedDraftModel));
         OnPropertyChanged(nameof(DraftModelHint));
@@ -426,9 +452,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _settingAutoMmproj = true;
         try
         {
-            if (!string.Equals(MmprojPath, path, StringComparison.OrdinalIgnoreCase))
+            if (!ModelPathSafety.AreSameLocalPath(MmprojPath, path))
                 MmprojPath = path;
-            _autoSelectedMmprojPath = string.Equals(path, soleCandidate, StringComparison.OrdinalIgnoreCase) ? path : null;
+            _autoSelectedMmprojPath = ModelPathSafety.AreSameLocalPath(path, soleCandidate) ? path : null;
         }
         finally { _settingAutoMmproj = false; }
     }
@@ -438,9 +464,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _settingAutoDraftModel = true;
         try
         {
-            if (!string.Equals(DraftModelPath, path, StringComparison.OrdinalIgnoreCase))
+            if (!ModelPathSafety.AreSameLocalPath(DraftModelPath, path))
                 DraftModelPath = path;
-            _autoSelectedDraftModelPath = string.Equals(path, soleCandidate, StringComparison.OrdinalIgnoreCase) ? path : null;
+            _autoSelectedDraftModelPath = ModelPathSafety.AreSameLocalPath(path, soleCandidate) ? path : null;
         }
         finally { _settingAutoDraftModel = false; }
     }
@@ -462,12 +488,25 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>True when a draft head was found beside the model, so the draft checkbox is worth offering.</summary>
-    public bool HasDetectedDraftModel => DetectedDraftModelPaths.Count > 0 || !string.IsNullOrWhiteSpace(DraftModelPath);
+    public bool HasDetectedDraftModel => DetectedDraftModelPaths.Count > 0;
+
+    public bool HasMissingDraftModel => !string.IsNullOrWhiteSpace(DraftModelPath) && !File.Exists(DraftModelPath);
+
+    public bool HasDraftModelHint => HasMissingDraftModel || !HasDetectedDraftModel;
 
     /// <summary>Says why the draft checkbox is unavailable, rather than leaving it inert and unexplained.</summary>
-    public string DraftModelHint => HasDetectedDraftModel
-        ? string.Empty
-        : "No mtp-*.gguf draft head was found beside this model. Download one from the model's repository, or pick a file.";
+    public string DraftModelHint => HasMissingDraftModel
+        ? $"The saved draft-model path is stale: {DraftModelPath}. It is not a usable candidate. If this model has a trusted repository mapping, review its current known companions first; otherwise clear it or choose a manually verified companion. Hermaeus will not substitute another model."
+        : HasDetectedDraftModel
+            ? string.Empty
+            : "No mtp-*.gguf draft head was found beside this model. Download one from the model's repository, or pick a file.";
+
+    [RelayCommand]
+    private void ClearDraftModel()
+    {
+        DraftModelPath = string.Empty;
+        _autoSelectedDraftModelPath = null;
+    }
 
     public ServerProcessViewModel(
         ServerConfig config,
@@ -498,7 +537,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _executablePath = config.ExecutablePath;
         _modelPath      = config.ModelPath;
         _mmprojPath     = config.MmprojPath;
+        _useProjector   = config.UseProjector;
         _lastModelPathForDefaults = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
+        _modelPathForMmproj = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _port           = config.Port;
         _contextSize    = config.ContextSize;
         _gpuLayers      = config.GpuLayers;
@@ -621,10 +662,68 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private void ApplyContextFitNote()
     {
+        GpuFitBreakdown = ComputeGpuFitBreakdown();
         var note = ComputeContextFitNote();
         ContextFitNote = note;
         HasContextFitWarning = !string.IsNullOrEmpty(note);
     }
+
+    private string ComputeGpuFitBreakdown()
+    {
+        if (_hardwareProfile is null || _ggufInfo is null || TryGetModelFileSizeBytes() is not long modelBytes)
+            return string.Empty;
+
+        var companions = new List<FitCompanionInput>();
+        if (UseProjector)
+            AddCompanion("Vision projector", MmprojPath, FitPlacement.Unknown);
+        if (UseDraftModelDecoding)
+            AddCompanion("Speculative draft model", DraftModelPath, FitPlacement.Unknown);
+
+        var prediction = ModelFitPredictor.Predict(new ModelFitPredictionRequest(
+            null,
+            modelBytes,
+            ContextSize,
+            GpuLayers,
+            Slots,
+            KvCacheTypeK,
+            KvCacheTypeV,
+            CapabilityStateForKv(KvCacheTypeK),
+            CapabilityStateForKv(KvCacheTypeV),
+            KvCacheMath.HasSwaFull(ExtraArgs),
+            ParseCpuMoeLayers(CpuMoeLayersText),
+            _hardwareProfile,
+            companions), _ggufInfo);
+        return ModelFitPredictor.FormatBreakdown(prediction);
+
+        void AddCompanion(string name, string path, FitPlacement placement)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                var file = new FileInfo(path);
+                if (file.Exists && file.Length > 0)
+                {
+                    companions.Add(new FitCompanionInput(
+                        name, file.Length, placement,
+                        EvidenceOrigin.DeterministicCalculation,
+                        "Separate companion file allocation using its observed file size."));
+                    return;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+
+            companions.Add(new FitCompanionInput(
+                name, 0, FitPlacement.Unknown,
+                EvidenceOrigin.DeterministicCalculation,
+                "The configured companion file size is unavailable."));
+        }
+    }
+
+    private CapabilityState CapabilityStateForKv(string type) =>
+        _localCapabilities?.Observations?.FirstOrDefault(observation =>
+            string.Equals(observation.CapabilityId, $"runtime.kv.type.{type.ToLowerInvariant()}", StringComparison.Ordinal))?.State
+        ?? CapabilityState.Unknown;
 
     /// <summary>
     /// Hardware-aware context-fit assessment (r17 01-gguf-context-and-tuning.md 1.4), replacing
@@ -705,7 +804,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            return File.Exists(ModelPath) ? new FileInfo(ModelPath).Length : null;
+            var file = new FileInfo(ModelPath);
+            return file.Exists && file.Length > 0 ? file.Length : null;
         }
         catch
         {
@@ -852,6 +952,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private void BrowseDraftModel()
+    {
+        RequestFilePicker?.Invoke(nameof(DraftModelPath));
+    }
+
+    [RelayCommand]
     private async Task AutoTuneAsync()
     {
         if (!CanEdit) return;
@@ -993,6 +1099,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public void StopIfRunning() => _mgr.Stop();
 
     /// <summary>
+    /// Stops this managed runtime at an awaited process boundary. Exclusive
+    /// workloads such as Lab must not begin loading a second model until the
+    /// source process has actually released its model memory.
+    /// </summary>
+    public Task StopAndWaitAsync() => _mgr.StopAsync();
+
+    /// <summary>
     /// r19 2.2: after an llama.cpp update rewrites <c>ExecutablePath</c>
     /// directly on the underlying <see cref="ServerConfig"/> (a live
     /// in-place mutation, not a settings reload), this VM's own bound
@@ -1010,7 +1123,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         var normalized = Path.GetFullPath(modelPath);
         var current = string.IsNullOrWhiteSpace(ModelPath) ? string.Empty : Path.GetFullPath(ModelPath);
-        var modelChanged = !string.Equals(current, normalized, StringComparison.OrdinalIgnoreCase);
+        var modelChanged = !ModelPathSafety.AreSameLocalPath(current, normalized);
 
         if (Status is ServerStatus.Running or ServerStatus.Starting && modelChanged)
             StopIfRunning();
@@ -1085,6 +1198,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ExecutablePath = ExecutablePath;
         _config.ModelPath      = ModelPath;
         _config.MmprojPath     = MmprojPath;
+        _config.UseProjector   = UseProjector;
         _config.Port           = Port;
         _config.ContextSize    = ContextSize;
         _config.GpuLayers      = GpuLayers;
@@ -1148,10 +1262,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// </summary>
     public ServerConfig BuildConfig() => new()
     {
+        Id             = Id,
         Name           = Name,
         ExecutablePath = ExecutablePath,
         ModelPath      = ModelPath,
         MmprojPath     = MmprojPath,
+        UseProjector   = UseProjector,
         Port           = Port,
         ContextSize    = ContextSize,
         GpuLayers      = GpuLayers,
@@ -1247,6 +1363,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnModelPathChanged(string value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasMissingModel));
+        OnPropertyChanged(nameof(ModelPathHint));
         OnPropertyChanged(nameof(ReasoningPreserveAvailable));
         OnPropertyChanged(nameof(ReasoningPreserveStatus));
         ScheduleContextFitRefresh();
@@ -1260,6 +1378,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         if (!_settingAutoMmproj)
             _autoSelectedMmprojPath = null;
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasMissingMmproj));
+        OnPropertyChanged(nameof(MmprojHint));
+    }
+    partial void OnUseProjectorChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(MmprojHint));
+        ApplyContextFitNote();
     }
     partial void OnPreserveReasoningChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 
@@ -1272,7 +1398,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private void RepairDetectedModelPathsIfBrowsedOutsideRoot(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
-        if (!DetectedModelPaths.Contains(value, StringComparer.OrdinalIgnoreCase))
+        if (!DetectedModelPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, value)))
             DetectedModelPaths.Insert(0, value);
     }
 
@@ -1291,7 +1417,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             _lastModelPathForDefaults = value;
             return;
         }
-        if (string.Equals(value, _lastModelPathForDefaults, StringComparison.OrdinalIgnoreCase))
+        if (ModelPathSafety.AreSameLocalPath(value, _lastModelPathForDefaults))
             return;
         _lastModelPathForDefaults = value;
 
@@ -1336,7 +1462,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(HasPromptThreadsControl));
     }
-    partial void OnSlotsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSlotsChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasMissingMmproj));
+        OnPropertyChanged(nameof(MmprojHint));
+        ApplyContextFitNote();
+    }
     partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAutoStartChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnExtraArgsChanged(string value)
@@ -1364,11 +1496,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(NeedsFlashAttentionForQuantizedV));
+        ApplyContextFitNote();
     }
     partial void OnContextShiftChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnMemoryLockChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnNoMemoryMapChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnCpuMoeLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnCpuMoeLayersTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        ApplyContextFitNote();
+    }
 
     /// <summary>
     /// Empty/0 off, "all" (or any negative) all layers, otherwise N. Public
@@ -1406,7 +1543,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             _autoSelectedDraftModelPath = null;
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(HasDetectedDraftModel));
+        OnPropertyChanged(nameof(HasMissingDraftModel));
         OnPropertyChanged(nameof(DraftModelHint));
+        OnPropertyChanged(nameof(HasDraftModelHint));
         ApplyDraftFitNote();
     }
     partial void OnDraftGpuLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1419,14 +1558,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         var generation = ++_runtimeCapabilityGeneration;
         var facts = await LocalModelCapabilityService.ProbeRuntimeAsync(executablePath);
         IReadOnlyList<CapabilityDrift> drift = [];
+        LocalModelCapabilities? capabilities = null;
         if (_capabilityService is not null && File.Exists(ModelPath))
-            drift = (await _capabilityService.ProbeWithDriftAsync(ModelPath, executablePath)).Drift;
+        {
+            var probe = await _capabilityService.ProbeWithDriftAsync(ModelPath, executablePath);
+            drift = probe.Drift;
+            capabilities = probe.Capabilities;
+        }
         RunOnUi(() =>
         {
             if (generation != _runtimeCapabilityGeneration)
                 return;
 
             _runtimeSpeculativeTypes.Clear();
+            _localCapabilities = capabilities;
             foreach (var type in facts.SpeculativeTypes)
                 _runtimeSpeculativeTypes.Add(type);
             SupportsPromptThreads = facts.SupportsPromptThreads;
@@ -1442,6 +1587,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(CanEditNgramDecoding));
             OnPropertyChanged(nameof(CanEditDraftModelDecoding));
             OnPropertyChanged(nameof(HasPromptThreadsControl));
+            ApplyContextFitNote();
             ShowCapabilityDrift(drift);
         });
     }
@@ -1493,9 +1639,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         }
 
         var draftBytes = new FileInfo(draftPath).Length;
-        var targetBytes = TryGetModelFileSizeBytes() ?? 0;
+        var targetBytes = TryGetModelFileSizeBytes();
         var vram = _hardwareProfile?.MaxGpuVramBytes ?? 0;
-        var combined = targetBytes + draftBytes;
+        if (!targetBytes.HasValue || draftBytes <= 0)
+        {
+            DraftFitNote = !targetBytes.HasValue
+                ? "Target model size is Unknown; the combined draft fit cannot be estimated."
+                : "Draft model size is Unknown; the combined draft fit cannot be estimated.";
+            return;
+        }
+
+        var combined = targetBytes.Value + draftBytes;
 
         DraftFitNote = vram > 0
             ? $"Target plus draft is roughly {FormatGb(combined)} of weights against {FormatGb(vram)} of VRAM."
@@ -1503,14 +1657,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// r18 04-llama-server-engine-options.md 4.0: llama.cpp historically requires flash
-    /// attention enabled to use a quantized V cache. Inform-only - never auto-changes either
-    /// field; the user can launch with exactly what they chose regardless.
+    /// llama.cpp may leave Flash Attention disabled when auto is selected for a quantized
+    /// V cache. Inform-only - never auto-changes either field; the user can launch with
+    /// exactly what they chose regardless.
     /// </summary>
     public bool NeedsFlashAttentionForQuantizedV =>
-        !string.Equals(KvCacheType, "f16", StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(KvCacheType, "bf16", StringComparison.OrdinalIgnoreCase)
-        && string.Equals(FlashAttention, "off", StringComparison.OrdinalIgnoreCase);
+        KvCacheMath.RequiresRuntimeAdvertisement(KvCacheTypeV)
+        && !string.Equals(FlashAttention, "on", StringComparison.OrdinalIgnoreCase);
 
     private static string EffectiveKvCacheType(ServerConfig config)
     {
@@ -1533,9 +1686,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private RuntimeLogEntry MapLog(string line)
     {
         var lowered = line.ToLowerInvariant();
-        var level = lowered.Contains("error") || lowered.Contains("failed")
-            ? RuntimeLogLevel.Error
-            : lowered.Contains("warn") ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info;
+        var level = RuntimeLogClassifier.ClassifyLevel(line);
+        if (level == RuntimeLogLevel.Info &&
+            (lowered.Contains("slot", StringComparison.Ordinal) || lowered.Contains("kv cache", StringComparison.Ordinal)))
+            level = RuntimeLogLevel.Debug;
 
         var category = lowered.Contains("starting") || lowered.Contains("launched") || lowered.Contains("ready")
             ? RuntimeLogCategory.Startup
@@ -1638,6 +1792,40 @@ public partial class ServicesViewModel : ViewModelBase
     /// </summary>
     public bool AnyServerRunning => Servers.Any(s => s.Status == ServerStatus.Running);
 
+    /// <summary>
+    /// Identifies a loopback llama.cpp endpoint that belongs to a managed
+    /// server currently known to be stopped. Remote endpoints and servers in
+    /// Starting remain probeable because this view model cannot establish that
+    /// they are intentionally unavailable.
+    /// </summary>
+    public bool IsManagedServerStopped(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) || !endpoint.IsLoopback)
+            return false;
+
+        return Servers.Any(server =>
+            !server.EmbeddingsMode &&
+            server.Port == endpoint.Port &&
+            server.Status == ServerStatus.Stopped);
+    }
+
+    /// <summary>
+    /// Identifies a loopback llama.cpp endpoint whose unavailable model list is
+    /// expected because the managed server is stopped or is still in its
+    /// health-wait startup phase. Error is deliberately excluded so a genuine
+    /// startup failure remains visible.
+    /// </summary>
+    public bool IsManagedServerExpectedUnavailable(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) || !endpoint.IsLoopback)
+            return false;
+
+        return Servers.Any(server =>
+            !server.EmbeddingsMode &&
+            server.Port == endpoint.Port &&
+            server.Status is ServerStatus.Stopped or ServerStatus.Starting);
+    }
+
     public RuntimeKind[] RuntimeKinds { get; } =
     [
         RuntimeKind.LlamaCpp,
@@ -1696,6 +1884,69 @@ public partial class ServicesViewModel : ViewModelBase
         });
     }
 
+    /// <summary>
+    /// Builds live Chat telemetry from the managed server row that owns the
+    /// serving process. Process identity comes from the child process itself,
+    /// never from a port lookup. Incomplete configuration or hardware facts
+    /// remain incomplete rather than being guessed.
+    /// </summary>
+    public async Task<RuntimeTelemetryRequest?> CreateManagedTelemetryRequestAsync(
+        string modelId,
+        CancellationToken ct = default)
+    {
+        var server = Servers.FirstOrDefault(item =>
+            item.IsRunning
+            && !item.EmbeddingsMode
+            && (string.IsNullOrWhiteSpace(modelId)
+                || string.Equals(item.ModelPath, modelId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Path.GetFileName(item.ModelPath), modelId, StringComparison.OrdinalIgnoreCase)));
+        if (server is null || server.CurrentProcessIdentity is not { } process)
+            return null;
+
+        var config = server.BuildConfig();
+        var runtime = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(config.ExecutablePath, null, ct);
+        var gguf = File.Exists(config.ModelPath)
+            ? await Task.Run(() => GgufMetadataReader.TryRead(config.ModelPath), ct)
+            : null;
+        var model = RuntimeIdentityFactory.CreateModelIdentity(config.ModelPath, gguf);
+        var hardware = new HardwareIdentityV2(
+            Environment.OSVersion.Platform.ToString(),
+            RuntimeInformation.ProcessArchitecture.ToString(),
+            string.IsNullOrWhiteSpace(_hardwareProfile?.GpuName) ? string.Empty : "unknown",
+            _hardwareProfile?.GpuName ?? string.Empty,
+            _hardwareProfile is { MaxGpuVramBytes: > 0 } profile ? profile.MaxGpuVramBytes : null,
+            _hardwareProfile is { TotalRamBytes: > 0 } ram ? ram.TotalRamBytes : null,
+            string.Empty,
+            "single",
+            IdentityCompleteness.Incomplete);
+        var speculative = config.Speculative ?? new SpeculativeDecodingConfig();
+        var companionIdentity = string.IsNullOrWhiteSpace(speculative.DraftModelPath)
+            ? string.Empty
+            : RuntimeIdentityFactory.CreateModelIdentity(speculative.DraftModelPath, null).StableId;
+        var configuration = new ConfigurationIdentityV2(
+            config.ContextSize,
+            config.GpuLayers,
+            config.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", > 0 => "gpu-partial", _ => string.Empty },
+            config.Threads,
+            config.PromptThreads,
+            config.Slots,
+            null,
+            null,
+            config.KvCacheTypeK,
+            config.KvCacheTypeV,
+            config.FlashAttention,
+            string.Join(",", speculative.Types),
+            companionIdentity,
+            $"nmax={speculative.NMax};nmin={speculative.NMin};pmin={speculative.PMin}",
+            config.CpuMoeLayers,
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            IdentityCompleteness.Incomplete);
+        var fingerprint = new EmpiricalProfileFingerprintV2(runtime, model, hardware, configuration);
+        return new RuntimeTelemetryRequest(
+            $"chat-{server.Id}", process.ProcessId, process.StartedAtUtc,
+            runtime, fingerprint, IncludeDeviceTotals: true);
+    }
+
     /// <summary>Re-checks every non-Running server's port for a leftover process (r9 02-server-lifecycle.md 2.3). Startup and Services-view-refresh entry point.</summary>
     [RelayCommand]
     public async Task RefreshOrphanDetectionAsync()
@@ -1740,6 +1991,8 @@ public partial class ServicesViewModel : ViewModelBase
                 Port = configs.Count == 0 ? 8080 : 8081,
                 EmbeddingsMode = configs.Count == 1
             });
+
+        ResolveInstalledManagedExecutables(configs);
 
         var configIds = new HashSet<string>(configs.Select(c => c.Id));
         var existing = Servers.ToDictionary(s => s.Id);
@@ -1790,6 +2043,60 @@ public partial class ServicesViewModel : ViewModelBase
 
     private static string BuildAvailabilityFingerprint(IEnumerable<ServerConfig> configs) =>
         string.Join("|", configs.Select(c => $"{c.Id}:{c.Port}:{c.ExecutablePath}:{c.ModelPath}"));
+
+    private void ResolveInstalledManagedExecutables(IEnumerable<ServerConfig> configs)
+    {
+        var assetsRoot = _settings.Settings.DataManagement.LocalAiAssetsRoot?.Trim();
+        if (string.IsNullOrWhiteSpace(assetsRoot))
+            return;
+
+        string installPath;
+        try
+        {
+            installPath = Path.Combine(Path.GetFullPath(assetsRoot), "llama-server");
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        var resolved = LlamaServerSetupService.ResolveInstalledExecutable(installPath);
+        if (string.IsNullOrWhiteSpace(resolved))
+            return;
+
+        foreach (var config in configs)
+        {
+            var configured = config.ExecutablePath?.Trim() ?? string.Empty;
+            if (IsDefaultLlamaServerPath(configured) || IsMissingPathUnderInstall(configured, installPath))
+                config.ExecutablePath = resolved;
+        }
+    }
+
+    private static bool IsDefaultLlamaServerPath(string path)
+    {
+        var fileName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return string.Equals(fileName, "llama-server", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, "llama-server.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsMissingPathUnderInstall(string path, string installPath)
+    {
+        if (string.IsNullOrWhiteSpace(path) || File.Exists(path))
+            return false;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var fullRoot = Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase)
+                && Path.GetFileName(fullPath).StartsWith("llama-server", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// r19 2.2: stops every currently-Running managed server whose executable
@@ -1961,10 +2268,21 @@ public partial class ServicesViewModel : ViewModelBase
         foreach (var serverId in suspended)
         {
             var server = Servers.FirstOrDefault(s => s.Id == serverId);
-            server?.StopIfRunning();
+            if (server is not null)
+                await server.StopAndWaitAsync();
         }
 
         return await Task.FromResult(suspended);
+    }
+
+    public async Task<IReadOnlyList<string>> SuspendRunningServersAsync(IEnumerable<string> serverIds)
+    {
+        var requested = serverIds.ToHashSet(StringComparer.Ordinal);
+        var suspended = Servers.Where(server => requested.Contains(server.Id) && server.IsRunning)
+            .Select(server => server.Id).ToArray();
+        foreach (var id in suspended)
+            await Servers.First(server => server.Id == id).StopAndWaitAsync();
+        return suspended;
     }
 
     public async Task<IReadOnlyList<string>> PrepareEmbeddingServerForWorkAsync()
@@ -1992,6 +2310,12 @@ public partial class ServicesViewModel : ViewModelBase
     {
         foreach (var srv in Servers)
             srv.StopIfRunning();
+    }
+
+    public async Task StopAllAsync()
+    {
+        foreach (var srv in Servers)
+            await srv.StopAndWaitAsync();
     }
 
     public async Task SelectChatModelAndRestartAsync(string modelPath, CancellationToken ct = default)

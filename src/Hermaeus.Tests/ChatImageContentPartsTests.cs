@@ -108,6 +108,46 @@ public sealed class ChatImageContentPartsTests
     }
 
     [Fact]
+    public void BuildLaunchArguments_omits_configured_projector_when_use_is_disabled()
+    {
+        var cfg = new ServerConfig
+        {
+            ModelPath = "model.gguf",
+            MmprojPath = "verified-projector.gguf",
+            UseProjector = false,
+            ExtraArgs = "--mmproj manual-projector.gguf --threads 8"
+        };
+
+        var args = ServerProcessManager.BuildLaunchArguments(cfg).ToList();
+
+        Assert.DoesNotContain("--mmproj", args);
+        Assert.DoesNotContain("verified-projector.gguf", args);
+        Assert.DoesNotContain("manual-projector.gguf", args);
+        Assert.Contains("--threads", args);
+        Assert.Equal("verified-projector.gguf", cfg.MmprojPath);
+    }
+
+    [Fact]
+    public void BuildLaunchArguments_uses_the_configured_projector_when_re_enabled()
+    {
+        var cfg = new ServerConfig
+        {
+            ModelPath = "model.gguf",
+            MmprojPath = "verified-projector.gguf",
+            UseProjector = false
+        };
+
+        Assert.DoesNotContain("--mmproj", ServerProcessManager.BuildLaunchArguments(cfg));
+
+        cfg.UseProjector = true;
+        var args = ServerProcessManager.BuildLaunchArguments(cfg).ToList();
+        var index = args.IndexOf("--mmproj");
+
+        Assert.True(index >= 0);
+        Assert.Equal("verified-projector.gguf", args[index + 1]);
+    }
+
+    [Fact]
     public void BuildLaunchArguments_respects_an_explicit_mmproj_in_ExtraArgs()
     {
         var cfg = new ServerConfig { ModelPath = "model.gguf", MmprojPath = "auto-suggested.gguf", ExtraArgs = "--mmproj manual-override.gguf" };

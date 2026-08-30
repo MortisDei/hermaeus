@@ -1,8 +1,7 @@
 # Voice
 
-Text-to-speech (output) and, as of r24, speech-to-text (input). Both are
-off-by-default, local-first by default, and never persist audio beyond the
-moment they need it.
+Text-to-speech (output) and speech-to-text (input) are optional, local-first by
+default, and never persist audio beyond the moment they need it.
 
 ## Voice Architecture and Providers
 
@@ -153,6 +152,14 @@ and swap a message's speak icon to a stop icon for exactly as long as that
 utterance is actually playing. Chat has a global stop-speaking control plus
 a per-message speak/stop icon swap wired to this.
 
+Audio feedback is a separate bounded semantic cue service. It covers only the
+reviewed task, runtime, long-operation, and recording events, with per-event
+defaults, volume, mute, visual equivalents, and suppression while TTS speaks.
+It never cues ordinary token arrival, clicks, navigation, or high GPU use.
+Windows playback keeps the WAV path as an argument to a fixed PowerShell
+script rather than interpolating it into command text; temporary cue files are
+deleted after playback.
+
 ## Audio Data and Privacy Lifecycle
 
 - Voice previews use transient generated audio and delete temporary WAV files
@@ -190,16 +197,6 @@ duration.
   Audio is processed in fixed 30-second windows, so memory does not grow with
   recording length: a forty-minute file costs the same per window as a
   five-second one, and progress is reported per window.
-
-  r25 replaced the `facebook/wav2vec2-base-960h` CTC model r24 shipped here.
-  The in-process design was right and is unchanged; the model was not. Its
-  vocabulary held 26 uppercase letters and an apostrophe, with no lowercase
-  and no punctuation anywhere in it, so every transcript read
-  `HELLO CAN YOU CHECK THE BUILD` and no post-processing could restore what
-  was never produced. Whisper's own decoder turned out to be tractable
-  in-process because an exported ONNX graph carries its key/value cache as
-  named tensors rather than requiring the attention arithmetic to be written
-  by hand.
 
   Same asset posture as native Kokoro: nothing downloads until the explicit
   install action in **Services -> Voice**, and inference then runs fully
@@ -293,11 +290,18 @@ provider's own voices, with a chevron that opens the list and a
 "(Default voice)" sentinel meaning "use the global voice". It also accepts
 free text, for a provider that cannot enumerate its voices.
 
-Providers only list their voices when the voice service is running and
-`Refresh` has been pressed on **Services -> Voice**. Until then the picker
-holds nothing but the sentinel and a placeholder, which looks like a populated
-list and is not, so the section says so in plain text and names the fix. Typing
-a voice id the provider knows works either way.
+The shared voice settings refresh this authoritative list when voice settings
+load and whenever the active provider changes. The channel section names that
+provider while it is loading, reports the number of named voices when it
+succeeds, and keeps Refresh as an explicit retry. If a provider cannot report
+names, the picker holds only the sentinel and placeholder and says so plainly.
+Typing a verified voice id remains available in that state; Hermaeus does not
+silently choose a different voice.
+
+Each refresh is owned by the provider selection that started it. A later
+selection cancels the older request when possible and otherwise discards its
+late result, so a stale provider can never populate the current provider's
+catalogue.
 
 Speech recognition follows the identical split: provider/device/model/install
 on **Services -> Voice** (`SttSettingsViewModel`, its own DI-shared

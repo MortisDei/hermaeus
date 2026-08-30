@@ -38,9 +38,24 @@ public sealed class AgentContextReceiptSectionViewModel
     public string Summary => $"{SectionLabel}: {ItemCount} item{(ItemCount == 1 ? "" : "s")}, ~{EstimatedTokens} tokens";
 }
 
+public sealed record AgentSubTaskModelOption(string ModelId, string Label, bool IsAvailable = true);
+
+public partial class AgentSubTaskModelChoiceViewModel : ObservableObject
+{
+    public int Index { get; init; }
+    public string Goal { get; init; } = string.Empty;
+    public UiBoundCollection<AgentSubTaskModelOption> Options { get; } = [];
+    [ObservableProperty] private AgentSubTaskModelOption? _selectedOption;
+}
+
 public sealed class AgentReviewQueueItemViewModel
 {
-    public AgentReviewQueueItemViewModel(AgentReviewQueueItem item, string recipePreview = "", string activeWorkspaceRoot = "")
+    public AgentReviewQueueItemViewModel(
+        AgentReviewQueueItem item,
+        string recipePreview = "",
+        string activeWorkspaceRoot = "",
+        IReadOnlyList<LlmModel>? availableModels = null,
+        AgentTaskState? fullState = null)
     {
         TaskId = item.TaskId;
         Goal = item.Goal;
@@ -69,6 +84,7 @@ public sealed class AgentReviewQueueItemViewModel
             && !string.Equals(WorkspaceRoot, activeWorkspaceRoot, StringComparison.OrdinalIgnoreCase)
                 ? $"workspace: {Path.GetFileName(WorkspaceRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}"
                 : string.Empty;
+        BuildSubTaskModelChoices(item.PendingToolAction, availableModels ?? [], fullState);
     }
 
     public string TaskId { get; }
@@ -127,6 +143,8 @@ public sealed class AgentReviewQueueItemViewModel
     /// <summary>What a pending run_command approval will actually execute (r6 3.2); empty for non-command tools.</summary>
     public string RecipePreview { get; }
     public bool HasRecipePreview => !string.IsNullOrWhiteSpace(RecipePreview);
+    public UiBoundCollection<AgentSubTaskModelChoiceViewModel> SubTaskModelChoices { get; } = [];
+    public bool HasSubTaskModelChoices => SubTaskModelChoices.Count > 0;
 
     /// <summary>
     /// The command family this row is blocked on, when the agent asked for a
@@ -138,6 +156,38 @@ public sealed class AgentReviewQueueItemViewModel
     public string UndeclaredCommandFamily { get; init; } = string.Empty;
     public bool CanDeclareCommandFamily => UndeclaredCommandFamily.Length > 0;
     public string DeclareCommandFamilyLabel => $"Allow '{UndeclaredCommandFamily}' in this workspace";
+
+    private void BuildSubTaskModelChoices(
+        AgentPendingToolAction? pending,
+        IReadOnlyList<LlmModel> availableModels,
+        AgentTaskState? state)
+    {
+        if (pending is null || !string.Equals(pending.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase)
+            || !pending.Arguments.TryGetValue("subtasks", out var raw)
+            || raw is not JsonElement { ValueKind: JsonValueKind.Array } array)
+            return;
+
+        var parentLabel = string.IsNullOrWhiteSpace(state?.ModelDisplayName) ? state?.ModelId ?? "parent" : state.ModelDisplayName;
+        var subtasks = array.EnumerateArray().ToArray();
+        for (var index = 0; index < subtasks.Length; index++)
+        {
+            var subtask = subtasks[index];
+            if (subtask.ValueKind != JsonValueKind.Object) continue;
+            var goal = subtask.TryGetProperty("goal", out var goalValue) ? goalValue.GetString() ?? string.Empty : string.Empty;
+            var proposed = subtask.TryGetProperty("model_id", out var modelValue) ? modelValue.GetString() ?? string.Empty : string.Empty;
+            var choice = new AgentSubTaskModelChoiceViewModel { Index = index, Goal = goal };
+            choice.Options.Add(new AgentSubTaskModelOption(string.Empty, $"Inherit {parentLabel}"));
+            foreach (var model in availableModels.Where(model => model.IsVisible))
+                choice.Options.Add(new AgentSubTaskModelOption(model.Id, model.DisplayName));
+            choice.SelectedOption = choice.Options.FirstOrDefault(option => string.Equals(option.ModelId, proposed, StringComparison.Ordinal));
+            if (choice.SelectedOption is null)
+            {
+                choice.SelectedOption = new AgentSubTaskModelOption(proposed, $"Unavailable: {proposed}", false);
+                choice.Options.Add(choice.SelectedOption);
+            }
+            SubTaskModelChoices.Add(choice);
+        }
+    }
 }
 
 /// <summary>
@@ -156,6 +206,8 @@ public sealed class AgentTaskListItemViewModel
         ParentTaskId = item.ParentTaskId;
         PendingStepCount = item.PendingStepCount;
         HasReservations = item.HasReservations;
+        ModelId = item.ModelId;
+        ModelDisplayName = item.ModelDisplayName;
     }
 
     public string TaskId { get; }
@@ -165,6 +217,11 @@ public sealed class AgentTaskListItemViewModel
     public string? ParentTaskId { get; }
     public int PendingStepCount { get; }
     public bool HasReservations { get; }
+    public string ModelId { get; }
+    public string ModelDisplayName { get; }
+    public string ModelLabel => string.IsNullOrWhiteSpace(ModelId)
+        ? "Model inherits on next run"
+        : $"{(string.IsNullOrWhiteSpace(ModelDisplayName) ? ModelId : ModelDisplayName)} ({ModelId})";
     public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentTaskId);
     /// <summary>r23 2.3: presentation only - status stays Complete; a non-empty Reservations list just changes what this label says.</summary>
     public string StatusLabel => Status == AgentTaskStatus.Complete && HasReservations ? "Completed with reservations" : Status.ToString();
@@ -662,6 +719,7 @@ public partial class AgentViewModel : ViewModelBase
     public string CurrentTaskStatusLabel => CurrentTask switch
     {
         null => "No active task",
+        { StepBudgetExhausted: true } => "Paused at step budget",
         { Status: AgentTaskStatus.Complete, Reservations.Count: > 0 } => "Completed with reservations",
         _ => CurrentTask.Status.ToString()
     };
@@ -699,7 +757,23 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
     public string CurrentTaskGoalLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Goal) ? "No goal loaded" : CurrentTask.Goal;
-    public string CurrentTaskSummaryLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
+    public string CurrentTaskModelLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.ModelId)
+        ? string.Empty
+        : $"{(string.IsNullOrWhiteSpace(CurrentTask.ModelDisplayName) ? CurrentTask.ModelId : CurrentTask.ModelDisplayName)} ({CurrentTask.ModelId})";
+    public string CurrentTaskSummaryLabel
+    {
+        get
+        {
+            if (CurrentTask is null)
+                return "No summary yet";
+            if (CurrentTask.StepBudgetExhausted)
+                return "The automatic run paused after reaching its step budget. Continue to resume the remaining work.";
+            if (CurrentTask.Status is (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
+                && !string.IsNullOrWhiteSpace(CurrentTask.LastUserMessage))
+                return CurrentTask.LastUserMessage;
+            return string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
+        }
+    }
 
     /// <summary>r19 3.1/3.3: a task that will not resume its own loop without user action - the
     /// Continue affordance and New task button both key off this.</summary>
@@ -709,7 +783,9 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>r19 3.3: presentation only - a terminal task whose own plan still lists pending
     /// steps declared victory prematurely; pairs with the Continue box (3.1) to answer
     /// "it stopped halfway, now what".</summary>
-    public string PrematureCompleteNote => CurrentTask is { } t && IsTaskTerminal && t.PendingSteps.Count > 0
+    public string PrematureCompleteNote => CurrentTask?.StepBudgetExhausted == true
+        ? "Paused after reaching the automatic step budget."
+        : CurrentTask is { } t && IsTaskTerminal && t.PendingSteps.Count > 0
         ? $"Finished with {t.PendingSteps.Count} planned step{(t.PendingSteps.Count == 1 ? "" : "s")} not run."
         : string.Empty;
     public bool HasPrematureCompleteNote => !string.IsNullOrEmpty(PrematureCompleteNote);
@@ -722,7 +798,15 @@ public partial class AgentViewModel : ViewModelBase
     public string PlanRevisedLabel => CurrentTask?.PlanRevisedAtStep is { } step ? $"revised at step {step}" : string.Empty;
     public bool HasPlanRevision => PlanRevisedLabel.Length > 0;
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
-    public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
+    public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null, StepBudgetExhausted: false };
+
+    public bool IsStepBudgetExhausted => CurrentTask?.StepBudgetExhausted == true;
+    public string ContinueBoxTitle => IsStepBudgetExhausted ? "Continue after step budget" : "Continue task";
+    public string ContinueInstructionWatermark => IsStepBudgetExhausted
+        ? "Add steps or leave empty to continue the remaining plan"
+        : "What should it do next? Leave empty to finish the remaining planned steps";
+    public bool ShowRunStep => !IsRunning && CurrentTask is { Status: AgentTaskStatus.New or AgentTaskStatus.Running }
+        && (SelectedModel is not null || !string.IsNullOrWhiteSpace(CurrentTask.ModelId));
 
     /// <summary>
     /// What the agent actually asked, shown with the reply box. The question
@@ -899,6 +983,23 @@ public partial class AgentViewModel : ViewModelBase
     /// instruction.
     /// </summary>
     public bool HasDecisionWaiting => HasReviewQueue || IsWaitingForReply || ShowContinueBox;
+
+    /// <summary>Plain-language next step for the normal workbench flow, not an internal state label.</summary>
+    public string NextUserActionLabel => DescribeNextUserAction(CurrentTask);
+
+    public static string DescribeNextUserAction(AgentTaskState? task) => task switch
+    {
+        null => "Describe a goal, choose a workspace and model, then start the agent.",
+        { Status: AgentTaskStatus.Running } => "Agent is working. You can follow progress above or stop the task.",
+        { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: not null } => "Review the requested action above, then approve or reject it.",
+        { StepBudgetExhausted: true } => "Step budget exhausted. Add steps or continue the remaining plan, or stop the task.",
+        { Status: AgentTaskStatus.WaitingForUser } => "Agent needs your answer. Reply in the panel above.",
+        { Status: AgentTaskStatus.Blocked } => "Agent is blocked. Read the reason above, then provide an instruction or change the workspace policy.",
+        { Status: AgentTaskStatus.Complete } => "Review the outcome below, then inspect Changes or start a follow-up task.",
+        { Status: AgentTaskStatus.Failed } => "Review the failure and transcript, then provide a new instruction or start again.",
+        { Status: AgentTaskStatus.Cancelled } => "This task was stopped. Review its outcome or start a new task.",
+        _ => "Review the task details, then run or continue it when ready."
+    };
 
     public bool HasNewLessons => NewLessons.Count > 0;
     public bool HasWorkspaceMemory => WorkspaceMemoryCount > 0;
@@ -1129,12 +1230,13 @@ public partial class AgentViewModel : ViewModelBase
         var options = BuildOptions();
         foreach (var item in await _store.ListReviewQueueAsync())
         {
+            var fullState = await _store.LoadAsync(item.TaskId);
             // The recipe preview describes what a pending run_command would
             // execute; it must reflect the TASK's own workspace, not the
             // workbench's active one (r16 01-orchestration-hardening.md 1.4).
             var previewOptions = item.WorkspaceRoot is { Length: > 0 } root ? options with { WorkspaceRoot = root } : options;
             var preview = item.PendingToolAction is null ? string.Empty : AgentApprovalPreview.Describe(item.PendingToolAction, previewOptions);
-            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview, WorkspaceRoot)
+            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview, WorkspaceRoot, AvailableModels, fullState)
             {
                 UndeclaredCommandFamily = ResolveUndeclaredFamily(item)
             });
@@ -1186,7 +1288,8 @@ public partial class AgentViewModel : ViewModelBase
     private async Task ApproveReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        var result = await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, item.PendingFingerprint, BuildOptions());
+        var expectedFingerprint = await PersistSubTaskModelChoicesAsync(item) ?? item.PendingFingerprint;
+        var result = await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, expectedFingerprint, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
         if (!result.Applied)
@@ -1213,6 +1316,32 @@ public partial class AgentViewModel : ViewModelBase
         // inference silently failed whenever the child itself was the open
         // task (r16 01-orchestration-hardening.md 1.1).
         await ResumeAgentLoopIfRunnableAsync(item.ParentTaskId ?? item.TaskId);
+    }
+
+    private async Task<string?> PersistSubTaskModelChoicesAsync(AgentReviewQueueItemViewModel item)
+    {
+        if (!item.HasSubTaskModelChoices) return null;
+        var state = await _store.LoadAsync(item.TaskId);
+        var pending = state?.PendingToolAction;
+        if (state is null || pending is null
+            || !string.Equals(AgentApprovalFingerprint.Resolve(pending), item.PendingFingerprint, StringComparison.Ordinal)
+            || !pending.Arguments.TryGetValue("subtasks", out var raw)
+            || raw is not JsonElement { ValueKind: JsonValueKind.Array } array)
+            return item.PendingFingerprint;
+
+        var nodes = System.Text.Json.Nodes.JsonNode.Parse(array.GetRawText())?.AsArray();
+        if (nodes is null) return item.PendingFingerprint;
+        foreach (var choice in item.SubTaskModelChoices)
+        {
+            if (choice.Index >= nodes.Count || nodes[choice.Index] is not System.Text.Json.Nodes.JsonObject node) continue;
+            var modelId = choice.SelectedOption?.ModelId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(modelId)) node.Remove("model_id");
+            else node["model_id"] = modelId;
+        }
+        pending.Arguments["subtasks"] = JsonSerializer.SerializeToElement(nodes);
+        pending.Fingerprint = AgentApprovalFingerprint.Compute(pending.ToolName, pending.Arguments);
+        await _store.SaveAsync(state);
+        return pending.Fingerprint;
     }
 
     /// <summary>
@@ -2310,7 +2439,27 @@ public partial class AgentViewModel : ViewModelBase
         && !string.IsNullOrWhiteSpace(WorkspaceRoot)
         && SelectedModel is not null;
 
-    private bool CanRunStep() => !IsRunning && CurrentTask is not null && SelectedModel is not null;
+    private bool CanRunStep() => ShowRunStep;
+
+    [RelayCommand(CanExecute = nameof(CanChangeTaskModel))]
+    private async Task ChangeTaskModelAsync()
+    {
+        if (CurrentTask is null || SelectedModel is null) return;
+        try
+        {
+            CurrentTask = await _agent.ChangeTaskModelAsync(CurrentTask.TaskId, SelectedModel.Id);
+            RefreshTaskPreview();
+            await RefreshRecentAsync();
+            StatusMessage = $"Task model changed to {SelectedModel.DisplayName}. Run or continue when ready.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private bool CanChangeTaskModel() => !IsRunning && CurrentTask is not null && SelectedModel is not null
+        && !string.Equals(CurrentTask.ModelId, SelectedModel.Id, StringComparison.Ordinal);
 
     private async Task RefreshRecentAsync()
     {
@@ -2329,9 +2478,11 @@ public partial class AgentViewModel : ViewModelBase
     private void RefreshTaskPreview()
     {
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(NextUserActionLabel));
         OnPropertyChanged(nameof(HasReservations));
         OnPropertyChanged(nameof(CurrentStepCountLabel));
         OnPropertyChanged(nameof(CurrentTaskGoalLabel));
+        OnPropertyChanged(nameof(CurrentTaskModelLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
         OnPropertyChanged(nameof(QueuedPatchCount));
         OnPropertyChanged(nameof(PendingPatchCount));
@@ -2412,6 +2563,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         StartCommand.NotifyCanExecuteChanged();
         RunStepCommand.NotifyCanExecuteChanged();
+        ChangeTaskModelCommand.NotifyCanExecuteChanged();
         if (ScenarioSuite is not null)
             ScenarioSuite.ModelId = value?.Id ?? string.Empty;
     }
@@ -2421,14 +2573,21 @@ public partial class AgentViewModel : ViewModelBase
         SendReplyCommand.NotifyCanExecuteChanged();
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
+        ChangeTaskModelCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsWaitingForReply));
         OnPropertyChanged(nameof(IsSteering));
         OnPropertyChanged(nameof(ReplyBoxTitle));
         OnPropertyChanged(nameof(ReplyWatermark));
         OnPropertyChanged(nameof(ReplyButtonLabel));
         OnPropertyChanged(nameof(ShowReplyBox));
+        OnPropertyChanged(nameof(IsStepBudgetExhausted));
+        OnPropertyChanged(nameof(ContinueBoxTitle));
+        OnPropertyChanged(nameof(ContinueInstructionWatermark));
         OnPropertyChanged(nameof(CurrentQuestion));
         OnPropertyChanged(nameof(HasCurrentQuestion));
+        OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
+        OnPropertyChanged(nameof(ShowRunStep));
         OnPropertyChanged(nameof(CanShowNewTaskButton));
         OnPropertyChanged(nameof(IsTaskTerminal));
         OnPropertyChanged(nameof(PrematureCompleteNote));
@@ -2507,6 +2666,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasDecisionWaiting));
 
         OnPropertyChanged(nameof(CurrentStepCountLabel));
+        OnPropertyChanged(nameof(ShowRunStep));
 
         if (value)
             StartActivityTicker();

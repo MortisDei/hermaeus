@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Diagnostics;
+using System.ComponentModel;
+using System.Collections;
 using Hermaeus.Agent.Models;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
@@ -44,27 +46,77 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         AgentWorkspaceOptions options,
         CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
         var trimmedToolName = toolName.Trim();
+        if (ct.IsCancellationRequested)
+            return Result(trimmedToolName, arguments, "The operation was cancelled before execution.",
+                AgentToolOutcomeSignal.Cancelled);
+
         if (trimmedToolName.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
         {
             if (_mcpBridge is null || !_mcpBridge.CanExecute(trimmedToolName))
-                throw new InvalidOperationException($"No MCP bridge is configured to execute '{toolName}'.");
+                return Result(trimmedToolName, arguments, $"No MCP bridge is configured to execute '{toolName}'.",
+                    AgentToolOutcomeSignal.Unavailable);
 
-            var mcpOutput = await _mcpBridge.ExecuteAsync(trimmedToolName, arguments, ct);
+            McpToolExecutionResult mcpOutput;
+            try
+            {
+                mcpOutput = await _mcpBridge.ExecuteAsync(trimmedToolName, arguments, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return Result(trimmedToolName, arguments, "The MCP call was cancelled.", AgentToolOutcomeSignal.Cancelled);
+            }
+            catch (Exception ex)
+            {
+                return Result(trimmedToolName, arguments, ex.Message, AgentToolOutcomeSignal.Failed);
+            }
+
             return new AgentToolResult
             {
                 Tool = trimmedToolName,
                 Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
-                ResultSummary = Summarize(mcpOutput, trimmedToolName),
-                Source = new SourceReference(ProvenanceKind.AgentTool, trimmedToolName, Locator: trimmedToolName)
+                ResultSummary = Summarize(mcpOutput.Content, trimmedToolName),
+                Source = new SourceReference(ProvenanceKind.AgentTool, trimmedToolName, Locator: trimmedToolName),
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(trimmedToolName, new AgentToolOutcomeEvidence(
+                    mcpOutput.IsError switch
+                    {
+                        false => AgentToolOutcomeSignal.StructuredSuccess,
+                        true => AgentToolOutcomeSignal.StructuredFailure,
+                        null => AgentToolOutcomeSignal.Unclassified
+                    }, Detail: mcpOutput.IsError is null
+                        ? "The MCP response did not include a structured completion status."
+                        : "The MCP response included structured completion status."))
             };
         }
 
         var normalized = Normalize(toolName);
+        if (!KnownTools.Contains(normalized, StringComparer.Ordinal))
+            return Result(normalized, arguments, $"Unsupported agent tool: {toolName}", AgentToolOutcomeSignal.Unavailable);
+
         if (normalized == "run_command")
         {
-            var commandResult = await RunCommandAsync(options, Arg(arguments, "command"), ct);
+            CommandExecutionResult commandResult;
+            try
+            {
+                commandResult = await RunCommandAsync(options, Arg(arguments, "command"), ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return Result(normalized, arguments, "The command was cancelled by the caller.", AgentToolOutcomeSignal.Cancelled);
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode is 2 or 3)
+            {
+                return Result(normalized, arguments, "The command executable was not found.", AgentToolOutcomeSignal.Unavailable);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Result(normalized, arguments, ex.Message, AgentToolOutcomeSignal.PolicyBlocked);
+            }
+            catch (Exception ex)
+            {
+                return Result(normalized, arguments, ex.Message, AgentToolOutcomeSignal.Failed);
+            }
+
             return new AgentToolResult
             {
                 Tool = normalized,
@@ -72,7 +124,11 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                 ResultSummary = Summarize(commandResult.Summary, normalized),
                 ExitCode = commandResult.ExitCode,
                 TimedOut = commandResult.TimedOut,
-                Source = BuildSource(normalized, arguments)
+                Source = BuildSource(normalized, arguments),
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(normalized, new AgentToolOutcomeEvidence(
+                    commandResult.TimedOut ? AgentToolOutcomeSignal.TimedOut : AgentToolOutcomeSignal.Completed,
+                    commandResult.ExitCode,
+                    commandResult.TimedOut ? "The configured command deadline elapsed." : $"The process exited with code {commandResult.ExitCode}."))
             };
         }
 
@@ -128,18 +184,77 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             {
                 Tool = normalized,
                 Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
-                ResultSummary = ex.Message
+                ResultSummary = ex.Message,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(normalized,
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "Workspace policy or the configured read budget refused the operation."))
             };
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return Result(normalized, arguments, "The operation was cancelled by the caller.", AgentToolOutcomeSignal.Cancelled);
+        }
+        catch (FileNotFoundException ex)
+        {
+            return Result(normalized, arguments, ex.Message, AgentToolOutcomeSignal.Unavailable);
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            return Result(normalized, arguments, ex.Message, AgentToolOutcomeSignal.Unavailable);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Result(normalized, arguments, ex.Message, AgentToolOutcomeSignal.PolicyBlocked);
+        }
+        catch (Exception ex)
+        {
+            return Result(normalized, arguments, ex.Message, AgentToolOutcomeSignal.Failed);
+        }
+
+        var summary = result is GitDiffInspectionResult inspection
+            ? inspection.Summary
+            : Summarize(result, normalized);
+        var signal = result switch
+        {
+            GitDiffInspectionResult gitDiff => gitDiff.Signal,
+            ICollection { Count: 0 } => AgentToolOutcomeSignal.Empty,
+            AgentFileReadResult { Changed: false } when normalized is "apply_draft_patch" or "edit_file" or "create_file"
+                => AgentToolOutcomeSignal.NoEffect,
+            _ => AgentToolOutcomeSignal.Completed
+        };
 
         return new AgentToolResult
         {
             Tool = normalized,
             Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
-            ResultSummary = Summarize(result, normalized),
-            Source = BuildSource(normalized, arguments)
+            ResultSummary = summary,
+            Source = BuildSource(normalized, arguments),
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(normalized,
+                new AgentToolOutcomeEvidence(signal, Detail: signal == AgentToolOutcomeSignal.Empty
+                    ? "The operation completed with a valid empty result."
+                    : "The operation completed using structured executor evidence."))
         };
     }
+
+    private static AgentToolResult Result(
+        string tool,
+        Dictionary<string, object?> arguments,
+        string summary,
+        AgentToolOutcomeSignal signal) => new()
+        {
+            Tool = tool,
+            Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
+            ResultSummary = Summarize(summary, tool),
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(tool,
+                new AgentToolOutcomeEvidence(signal, Detail: signal switch
+                {
+                    AgentToolOutcomeSignal.Unavailable => "The requested executor, dependency, or target was proven unavailable.",
+                    AgentToolOutcomeSignal.PolicyBlocked => "A deterministic validation or policy guard refused the operation.",
+                    AgentToolOutcomeSignal.Failed => "The operation was attempted and failed.",
+                    AgentToolOutcomeSignal.Cancelled => "The caller cancelled the operation.",
+                    _ => "The retained executor evidence could not establish a stronger outcome."
+                }))
+        };
 
     private static SourceReference? BuildSource(string normalizedTool, Dictionary<string, object?> arguments)
     {
@@ -212,12 +327,14 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         return $"[{omitted} earlier line(s) omitted]\n" + string.Join('\n', lines[^maxLines..]);
     }
 
-    private static async Task<string> InspectGitDiffAsync(AgentWorkspaceOptions options, CancellationToken ct)
+    private sealed record GitDiffInspectionResult(string Summary, AgentToolOutcomeSignal Signal);
+
+    private static async Task<GitDiffInspectionResult> InspectGitDiffAsync(AgentWorkspaceOptions options, CancellationToken ct)
     {
         var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
         var git = Path.Combine(root, ".git");
         if (!Directory.Exists(git))
-            return "Workspace is not a Git repository.";
+            return new GitDiffInspectionResult("Workspace is not a Git repository.", AgentToolOutcomeSignal.Unavailable);
 
         var psi = new ProcessStartInfo
         {
@@ -232,7 +349,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         psi.ArgumentList.Add("--short");
         using var process = Process.Start(psi);
         if (process is null)
-            return "Could not start git status.";
+            return new GitDiffInspectionResult("Could not start git status.", AgentToolOutcomeSignal.Failed);
 
         // Read stdout/stderr concurrently with waiting: a large working tree
         // can produce more output than the OS pipe buffer holds, and reading
@@ -251,14 +368,18 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         {
             try { process.Kill(entireProcessTree: true); }
             catch { }
-            return "git status timed out.";
+            return new GitDiffInspectionResult("git status timed out.", AgentToolOutcomeSignal.TimedOut);
         }
 
         var output = await stdoutTask;
         var error = await stderrTask;
         if (process.ExitCode != 0)
-            return string.IsNullOrWhiteSpace(error) ? "git status failed." : error.Trim();
-        return string.IsNullOrWhiteSpace(output) ? "No working tree changes." : output.Trim();
+            return new GitDiffInspectionResult(
+                string.IsNullOrWhiteSpace(error) ? "git status failed." : error.Trim(),
+                AgentToolOutcomeSignal.Failed);
+        return string.IsNullOrWhiteSpace(output)
+            ? new GitDiffInspectionResult("No working tree changes.", AgentToolOutcomeSignal.Empty)
+            : new GitDiffInspectionResult(output.Trim(), AgentToolOutcomeSignal.Completed);
     }
 
     internal static string Arg(Dictionary<string, object?> args, params string[] names)

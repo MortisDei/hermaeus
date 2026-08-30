@@ -7,12 +7,17 @@ set -euo pipefail
 THRESHOLD="${1:-60}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT_DIR/src/Hermaeus.Tests/Hermaeus.Tests.csproj"
-RESULTS_DIR="$ROOT_DIR/dist/.coverage"
+RESULTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hermaeus-coverage.XXXXXX")"
+cleanup() {
+  if [[ -n "${RESULTS_DIR:-}" && -d "$RESULTS_DIR" ]]; then
+    rm -rf -- "$RESULTS_DIR"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-rm -rf "$RESULTS_DIR"
-mkdir -p "$RESULTS_DIR"
-
-dotnet test "$PROJECT" --collect:"XPlat Code Coverage" --results-directory "$RESULTS_DIR" \
+dotnet test "$PROJECT" --no-restore --collect:"XPlat Code Coverage" --results-directory "$RESULTS_DIR" \
     -p:CoverletOutputFormat=cobertura -p:Threshold="$THRESHOLD" -p:ThresholdType=line -p:ThresholdStat=total
 
 report="$(find "$RESULTS_DIR" -name coverage.cobertura.xml | head -n 1)"

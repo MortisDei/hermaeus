@@ -56,6 +56,20 @@ public partial class SettingsView : UserControl
                 vm.Data.DataRootDirectory = folders[0].Path.LocalPath;
         };
 
+        vm.Data.RequestDataRootMigrationConfirmation = async plan =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+
+            var moveDescription = plan.FilesToMove > 0
+                ? $"Move {plan.FilesToMove} existing Hermaeus workspace file(s)"
+                : "Use the destination data folder";
+            var dialog = new ConfirmActionDialog(
+                "Confirm data folder change",
+                $"Current data folder:\n{plan.PreviousDataRoot}\n\nDestination:\n{plan.CurrentDataRoot}\n\n{moveDescription}. Existing workspace state will be handled by Hermaeus' safe migration path.");
+            return await dialog.ShowDialog<bool>(owner);
+        };
+
         vm.Data.RequestLocalAiAssetsRootPicker = async () =>
         {
             var folders = await PickFolderAsync("Choose local AI assets folder");
@@ -98,8 +112,10 @@ public partial class SettingsView : UserControl
         vm.LocalAiSetup.RequestCopyToClipboard = async text =>
         {
             var top = TopLevel.GetTopLevel(this);
-            if (top?.Clipboard is not null)
-                await top.Clipboard.SetTextAsync(text);
+            if (top?.Clipboard is not { } clipboard)
+                return false;
+            try { await clipboard.SetTextAsync(text); return true; }
+            catch { return false; }
         };
     }
 

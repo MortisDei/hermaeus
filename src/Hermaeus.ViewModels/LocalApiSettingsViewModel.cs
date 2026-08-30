@@ -19,6 +19,7 @@ public partial class LocalApiSettingsViewModel : ObservableObject
 {
     private readonly ISecretStore _secrets;
     private readonly ISettingsService? _settings;
+    private readonly Func<Task>? _applyRuntime;
 
     [ObservableProperty] private bool _enabled;
     [ObservableProperty] private int _port = 39300;
@@ -29,10 +30,11 @@ public partial class LocalApiSettingsViewModel : ObservableObject
 
     public UiBoundCollection<LocalApiTokenRowViewModel> Tokens { get; } = [];
 
-    public LocalApiSettingsViewModel(ISecretStore secrets, ISettingsService? settings = null)
+    public LocalApiSettingsViewModel(ISecretStore secrets, ISettingsService? settings = null, Func<Task>? applyRuntime = null)
     {
         _secrets = secrets;
         _settings = settings;
+        _applyRuntime = applyRuntime;
     }
 
     public void ReloadFrom(AppSettings settings)
@@ -74,6 +76,8 @@ public partial class LocalApiSettingsViewModel : ObservableObject
         var entry = new LocalApiTokenEntry { Name = name, SecretRef = secretRef };
         _settings.Settings.LocalApi.Tokens.Add(entry);
         await _settings.SaveAsync();
+        if (_applyRuntime is not null)
+            await _applyRuntime();
 
         Tokens.Add(new LocalApiTokenRowViewModel { Id = entry.Id, Name = entry.Name, CreatedAtDisplay = entry.CreatedAt.ToLocalTime().ToString("g") });
         NewTokenName = string.Empty;
@@ -89,6 +93,8 @@ public partial class LocalApiSettingsViewModel : ObservableObject
 
         _settings.Settings.LocalApi.Tokens.RemoveAll(t => t.Id == row.Id);
         await _settings.SaveAsync();
+        if (_applyRuntime is not null)
+            await _applyRuntime();
 
         var existing = Tokens.FirstOrDefault(t => t.Id == row.Id);
         if (existing is not null)

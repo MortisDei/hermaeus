@@ -19,11 +19,12 @@ public sealed class LlamaCppService : IDisposable
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _modelsFetchDown = new();
 
     /// <summary>
-    /// Optional gate (r14 4.3): returns true when the managed server for a base
-    /// URL is known Stopped, letting GetModelsAsync skip the HTTP attempt and
-    /// the error entirely. Unset means always probe.
+    /// Optional state gate: returns true when a managed server for a base URL is
+    /// intentionally Stopped or is Starting while its health wait owns startup.
+    /// In either case an unavailable model list is expected. Unset means always
+    /// probe and report failures.
     /// </summary>
-    public Func<string, bool>? IsBaseUrlKnownStopped { get; set; }
+    public Func<string, bool>? IsBaseUrlExpectedUnavailable { get; set; }
     private readonly HttpClient _http;
     private readonly ISettingsService _settings;
     private readonly IRuntimeLogService _logs;
@@ -61,10 +62,9 @@ public sealed class LlamaCppService : IDisposable
     {
         var baseUrl = Base;
 
-        // r14 4.3: a connection-refused probe against our own stopped managed
-        // server is the expected state, not an error. Skip the attempt (and any
-        // log) entirely when the caller knows the server is Stopped.
-        if (IsBaseUrlKnownStopped?.Invoke(baseUrl) == true)
+        // A connection-refused probe against our own stopped server, or a
+        // server still in its health-wait startup phase, is expected state.
+        if (IsBaseUrlExpectedUnavailable?.Invoke(baseUrl) == true)
             return [];
 
         try
@@ -81,6 +81,12 @@ public sealed class LlamaCppService : IDisposable
             var models = data?.Data?
                 .Select(m => new LlmModel { Id = m.Id, Name = Path.GetFileNameWithoutExtension(m.Id), Provider = "llama.cpp", ProviderTag = ProviderTagValue, SupportsOutputConstraints = true })
                 .ToList() ?? [];
+
+            // llama-server normally reports the model path as the OpenAI model
+            // id. Recover the file facts here while the identity is still tied
+            // to that response. A missing or non-path id remains Unknown.
+            foreach (var model in models)
+                PopulateLocalFileMetadata(model);
 
             // llama-server hosts exactly one model at a time, so the probed context
             // length from /props applies to whatever it returned above.
@@ -105,6 +111,24 @@ public sealed class LlamaCppService : IDisposable
                 _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, $"llama.cpp models unavailable at {baseUrl}: {ex.Message}"));
             return [];
         }
+    }
+
+    private static void PopulateLocalFileMetadata(LlmModel model)
+    {
+        if (!model.Id.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            var file = new FileInfo(model.Id);
+            if (!file.Exists || file.Length <= 0)
+                return;
+
+            model.SizeBytes = file.Length;
+            model.ModifiedAt = file.LastWriteTimeUtc;
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>

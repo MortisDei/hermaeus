@@ -30,6 +30,8 @@ public static class HarnessCases
         [new HarnessCase("data root migration repoints without moving when target already has every file", BackupMigrationTests.DataRootMigrationRepointsWithoutMovingWhenTargetAlreadyHasEveryFile)],
         [new HarnessCase("settings save without previous root skips migration", BackupMigrationTests.SaveWithoutPreviousDataRootDoesNotAttemptMigration)],
         [new HarnessCase("data root migration moves db files and leaves no junk", BackupMigrationTests.DataRootMigrationMovesFiles)],
+        [new HarnessCase("case-distinct data roots use platform filesystem identity", BackupMigrationTests.CaseDistinctDataRootsUsePlatformFilesystemIdentity)],
+        [new HarnessCase("data root migration rolls back after move failure", BackupMigrationTests.DataRootMigrationRollsBackAfterMoveFailure)],
         [new HarnessCase("data root migration moves every known file family", BackupMigrationTests.DataRootMigrationMovesEveryKnownFileFamily)],
         [new HarnessCase("data root migration never moves settings.json", BackupMigrationTests.DataRootMigrationNeverMovesSettingsJson)],
         [new HarnessCase("data root migration ignores the current process lock", BackupMigrationTests.DataRootMigrationIgnoresTheCurrentProcessLock)],

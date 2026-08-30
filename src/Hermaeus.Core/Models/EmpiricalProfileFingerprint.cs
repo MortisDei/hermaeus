@@ -10,6 +10,8 @@ namespace Hermaeus.Core.Models;
 /// </summary>
 public sealed class EmpiricalProfileFingerprint
 {
+    public int Version => 1;
+    public IdentityCompleteness Completeness => IdentityCompleteness.Incomplete;
     public string ModelIdentity { get; set; } = string.Empty;
     public string ModelHash { get; set; } = string.Empty;
     public string Quantization { get; set; } = string.Empty;

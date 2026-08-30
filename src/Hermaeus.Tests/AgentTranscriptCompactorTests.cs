@@ -90,6 +90,8 @@ public sealed class AgentTranscriptCompactorTests
             Tool = tool,
             Arguments = arguments,
             ResultSummary = result,
-            Source = new Hermaeus.Core.Models.SourceReference(Hermaeus.Core.Models.ProvenanceKind.AgentTool, tool)
+            Source = new Hermaeus.Core.Models.SourceReference(Hermaeus.Core.Models.ProvenanceKind.AgentTool, tool),
+            NormalizedOutcome = Hermaeus.Core.Models.NormalizedToolOutcome.Create(
+                Hermaeus.Core.Models.NormalizedOutcome.Succeeded, "test-success", "Test executor succeeded.")
         }, timestamp);
 }

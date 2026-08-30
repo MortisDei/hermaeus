@@ -9,6 +9,211 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [Unreleased]
+
+### Changed
+
+- Managed llama.cpp installs now accept either the known `llama-bNNNNN/`
+  wrapper or a flat upstream package while rejecting mixed layouts before
+  extraction. KV Lab recipes now exclude the baseline representation, require
+  explicit Flash Attention for quantized V-cache configurations, and refuse
+  launches that would reproduce llama.cpp's quantized-V initialization failure.
+- Windows WDDM GPU Process Memory counters are documented as an unsupported
+  source for trustworthy process VRAM on R31; unavailable per-process values
+  remain `Unknown` and whole-device totals are never attributed to llama-server.
+- R31 release-blocker repairs preserve cross-group Settings autosave state,
+  persist MCP collection edits, wait for isolated Lab runtimes to exit before
+  switching candidates, classify Hermaeus update-check failures by cause, and
+  bound persistent runtime-log volume while retaining aggregate timing and
+  recoverable memory-fit diagnostics.
+- Nested wheel scrolling now keeps input with the pane under the pointer,
+  bubbles at content edges, and preserves horizontal overflow. Memory rows show
+  persistent pinned state, Lab blocks concurrent runs and labels manual finish
+  clearly, named Lab evidence groups its result and slices, and model cards show
+  the current auto-tune profile directly.
+- Lab Evidence now presents one top-level entry per durable experiment execution
+  while retaining slice/provenance drill-down. Review state is visible beside
+  the Evidence action, confirmation dialogs are positioned over their owning
+  Hermaeus window, and model configuration editors hydrate saved tune values
+  from the shared profile.
+- Lab completion results now lead with structured experiment and model identity,
+  status, timestamps, tested configurations, recommendation state, correctness,
+  throughput, and RAM/VRAM deltas. Missing measurements remain `Unknown`, and the
+  model configuration flyout stays bounded and work-area aware on narrow screens.
+- Tray Quit acknowledges immediately while the existing awaited shutdown runs.
+  Intentional managed-process termination no longer appears as a transient Error
+  when the OS reports exit code 137.
+- Lab now stops and awaits the selected source runtime before isolated
+  measurements, records isolated launch failures in persisted runtime logs,
+  refuses silent source-configuration drift during restoration, and reports
+  only clipboard copies that actually completed.
+- R31 graduates Hermaeus's current product maturity from Alpha to Beta. The
+  next release is prepared as `0.38.0-beta`; no release or tag is created by
+  this close-out.
+- New settings keep a minimized window on the taskbar by default. The separate
+  Close to tray choice and existing persisted choices are unchanged.
+- Chat streaming now respects a user scroll-up during transcript remeasurement.
+  Lab evidence refreshes after successful, failed, and cancelled recipe runs,
+  and oversized evidence is split into bounded recoverable slices committed
+  with their completion marker as one SQLite transaction.
+- GPU Fit keeps missing model and companion file sizes as `Unknown` instead of
+  formatting them as zero. GGUF header reads now use exact bounded reads.
+- R31 Beta dogfood corrections now preserve chat scroll-up state during
+  streaming, show known GPU Fit subtotals beside unresolved components, attach
+  Chat telemetry to the exact managed server process through the visible
+  telemetry action, validate Kokoro preview WAVs before owned playback, and
+  mark missing companions instead of treating dead paths as candidates.
+- Fixed pending Settings autosaves being discarded during clean shutdown, Lab
+  failures being overwritten by an evidence-count refresh, and the Settings
+  Voice channel picker filtering a populated provider catalogue down to its
+  default sentinel. Shutdown now waits for model refresh callbacks before
+  disposing the services they use.
+- R31 Beta dogfood now separates managed projector use from the retained
+  projector path, omits disabled projectors from llama-server launches, and
+  exposes verified companion repair or explicit Browse/Clear paths when a
+  companion is missing or stale.
+- Fixed managed llama.cpp pruning for nested archive layouts such as
+  `b10679/llama-b10679/llama-server`: canonical build identities now protect
+  the selected runtime, and deletion revalidates owned direct children of the
+  managed root.
+- Fixed Settings data-root changes after removal of the general Save action:
+  **Move data...** now confirms the current and destination roots before using
+  the existing safe migration path, while ordinary autosave cannot migrate an
+  unconfirmed workspace.
+- Fixed AI Assets root edits not reaching the normal autosave path. Managed
+  llama.cpp updates now match Linux GPU asset names, re-evaluate Auto against
+  current hardware, record the selected backend separately, refuse missing or
+  unlaunchable GPU backends instead of silently downgrading to CPU, and flatten
+  the known upstream `llama-bNNNNN/` archive wrapper inside Hermaeus's owned
+  build directory.
+- Fixed model-list probes so connection refusal is quiet while a managed
+  server is intentionally stopped or still starting under its health wait;
+  startup errors and running-server failures remain visible.
+- Final R31 dogfood closure fixes normalized-path model duplicates, stale
+  projector selection, role-aware companion repair, managed llama-server
+  resolution, model Search keyboard activation, Lab server discovery and
+  evidence empty states, truthful Agent budget pauses, benchmark activity and
+  Insights refresh, Recall degradation labels, and popup edge constraints.
+- R31 Beta repair pass fixes the no-edit Lab freeze identity mismatch, selects
+  guided-recipe candidates during Review, presents human-readable Lab deltas
+  and exclusions, reads NVIDIA per-process VRAM through the existing
+  `nvidia-smi` path when available, avoids duplicate same-build llama.cpp
+  installs, handles legacy nested managed runtime directories, and rescans
+  Doctor after stopped servers have restarted.
+- Fixed Local API token and port changes remaining stale in an already-running
+  child. Settings now serialize the change, restart the owned child, wait for
+  health, and keep the process stopped if the new configuration cannot start.
+- Fixed Linux data-root identity treating case-distinct directories as one,
+  and made data-root migration roll back completed moves when a later transfer
+  or settings write fails. Lab isolated runs now clean up owned runtimes after
+  ordinary workload or telemetry exceptions as well as cancellation.
+- Normal Settings preferences autosave with a visible persistence state. The
+  top-level Save button is removed, task audio notifications default off, and
+  managed llama.cpp uses newer load-mode and localhost-only CORS arguments only
+  after the selected runtime advertises them.
+- Hugging Face model cards prefer a hash-verified `.hermaeus/companions.json`
+  mapping but also resolve ordinary sibling `mmproj*.gguf` and
+  `MTP/mtp*.gguf` layouts when same-revision LFS hashes and bounded GGUF
+  metadata prove the role and model relationship. Ambiguous candidates require
+  review. Initial downloads show known sizes, per-model automatic update policy
+  is persisted, updates and missing-asset recovery retain exact
+  revision/source/hash identity, and disabling the policy prompts Keep files /
+  Remove files / Cancel before any removal.
+- Lab now leads with the normal setup-and-run path and keeps live run state and
+  evidence refresh feedback beside the primary action. Services keeps managed
+  server controls compact by placing GPU Fit diagnostics below the configuration
+  grid. A missing draft path is called stale, remains non-runnable, and directs
+  the user to review trusted current companions before choosing a replacement.
+- Settings -> Voice now refreshes the active provider's authoritative voice
+  list during its normal load and provider-change lifecycle, names the provider
+  while loading or unavailable, and keeps Refresh as an honest retry. Agent's
+  Run tab now makes the goal -> plan/review -> approval -> progress -> outcome
+  path and the current next action visible without changing any approval gate.
+
+## [0.38.0-alpha] - 2026-08-24
+
+### Added
+
+- Agent tool, MCP, approval, safety-gate, and rewind records now retain a
+  deterministic provider-neutral outcome beside their raw evidence. Historical
+  tasks remain loadable as `Unknown`, and the five evidence origins now remain
+  distinct through JSON persistence while legacy `Inferred` values load as
+  model inference.
+- Added the Lab Evidence surface and the additive `experience.db` store for
+  typed Agent, GPU Fit, and Lab-run evidence, with exact filters, redacted
+  export, linked corrections, confirmed hard removal, and data-root migration
+  and backup coverage.
+- Runtime capability evidence now uses an extensible dotted-id registry with
+  exact runtime and optional model identities. New benchmark evidence also
+  carries a path-free v2 runtime/model/hardware/configuration fingerprint while
+  historical v1 fingerprints and capability caches remain readable.
+- GPU Fit now exposes a deterministic weights, separate K/V, runtime overhead,
+  companion, and policy-headroom breakdown in Services. A shared runtime
+  telemetry source records process-scoped RAM and honest Unknown GPU evidence,
+  and fingerprint-matched observations can be stored and compared without
+  modifying the analytical prediction.
+- Lab now freezes immutable experiment definitions, launches a dedicated
+  loopback runtime without mutating Chat or saved settings, preserves
+  source-labelled observations and correctness-gated comparisons, cleans up by
+  exact process ownership, and exposes a stale-identity-guarded Apply review
+  through the normal settings save flow.
+- Added bounded Lab recipes for GPU layers, context, runtime-advertised KV,
+  Flash Attention, and CPU-MoE placement. Each preserves its baseline, combines
+  GPU Fit prediction with shared process telemetry and greedy correctness
+  evidence, stops on repeated failure or mismatch, and stores repeated evidence
+  in bounded immutable configuration slices without auto-selecting a winner.
+- Added the compact Chat telemetry flyout and shared bounded sampler seam. Chat
+  request timings remain direct evidence, health policy is deterministic and
+  deduplicated, and missing process/resource counters remain `Unknown`.
+- Added explicit audio feedback settings and semantic cue service with bounded
+  queueing, TTS suppression, visual equivalents, generated short PCM cues, and
+  safe argument-only Windows playback. Chat scroll pin-state transitions now
+  have regression coverage without replacing the existing anchoring behavior.
+- Added conditional Lab adapters for general external drafting and EAGLE-3,
+  plus bounded one-at-a-time draft maximum/minimum, probability, and GPU-layer
+  recipes. Exact runtime flags, verified target/companion identities,
+  tokenizer/vocabulary compatibility, EAGLE target binding, draft acceptance,
+  memory, and output equivalence remain explicit gates; missing proof stays
+  `Unknown`.
+- Added a controlled prompt/shared-prefix Lab recipe that pairs identical
+  reconstructed prompts with request caching disabled and enabled, retains only
+  prompt hashes, and reports prompt timing/throughput plus exact output
+  correctness. Direct reused-token counts remain Missing unless the exact
+  runtime proves a reviewed response field; timing is never converted into a
+  token count.
+- Added revisioned, user-owned Project State with directly editable objectives,
+  milestones, status, and structured continuity items. Model-origin proposals
+  remain in a provenance-visible review queue until edited/accepted or rejected,
+  stale revisions fail atomically, and only bounded accepted state reaches
+  project-bound Chat and Agent context receipts.
+- Agent plan review now supports a configured visible model per sub-task or an
+  explicit parent-model inheritance choice. Resolved identities persist through
+  task state, transcripts, traces, reports, restart, and parent synthesis; a
+  missing selected model pauses without silent fallback, and paused task model
+  changes require the audited **Use for task** action.
+- Added the versioned Agent Local API DTO and deny-by-default per-token policy
+  contract for saved workspace, visible model, Project, ownership, operation,
+  and concurrency scope. Agent execution routes remain unmapped because Desktop
+  and the separate Local API process do not yet share one task-mutation owner;
+  capabilities reports that reason and no API approval operation exists.
+
+### Fixed
+
+- Lab runtime ownership now preserves malformed, truncated, or unreadable
+  manifests as `Unknown` and refuses recovery or ownership mutation until the
+  evidence can be read safely. Read failure is no longer treated as no owners.
+- A directly owned Lab session now stops its child runtime even if persisted
+  ownership evidence becomes `Unknown`; the unreadable manifest remains intact
+  for later reconciliation.
+- Audio playback cancellation now terminates the player process Hermaeus
+  spawned, propagates cancellation, and does not fall through to later players.
+
+### Changed
+
+- Embedded MTP is now `Available` only after model-specific capability or
+  observed drafting evidence. NextN metadata plus generic runtime help remains
+  `Unknown`, and a failed probe never becomes `Unavailable`.
+
 ## [0.37.0-alpha] - 2026-08-20
 
 ### Fixed

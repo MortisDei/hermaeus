@@ -15,10 +15,7 @@ public sealed class VoiceTempFileCleanupTests
     /// caller (VoiceOrchestrator.PlayAsync, always) did not request a
     /// persisted OutputPath, and never deleted it after playback - every
     /// spoken chat reply, notification, and agent narration left a wav on
-    /// disk. PlayAudio: true is required to exercise the fix, so this
-    /// genuinely spawns the OS player against a fake (non-audio) body; the
-    /// assertion only cares that the temp file is gone afterward, not that
-    /// playback actually produced sound.
+    /// disk. Playback is injected so this remains a deterministic cleanup test.
     /// </summary>
     [Fact]
     public async Task GenerateSpeechAsync_deletes_the_temp_wav_after_a_fake_synthesis_and_playback_cycle()
@@ -29,19 +26,13 @@ public sealed class VoiceTempFileCleanupTests
 
         var handler = new FakeSpeechHandler();
         using var http = new HttpClient(handler);
-        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http);
+        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http,
+            static (_, _) => Task.CompletedTask);
 
         var result = await provider.GenerateSpeechAsync(new VoiceSynthesisRequest("hello", OutputPath: null, PlayAudio: true));
 
         Assert.False(string.IsNullOrWhiteSpace(result.OutputPath));
 
-        // Poll rather than assert immediately: GenerateSpeechAsync's own delete happens
-        // synchronously after PlayWavFileAsync returns, but a transient OS-level file lock
-        // (antivirus/indexer scanning a file moments after it was written) can delay the
-        // delete becoming visible to this process's own File.Exists check.
-        var deadline = DateTime.UtcNow.AddSeconds(2);
-        while (File.Exists(result.OutputPath) && DateTime.UtcNow < deadline)
-            await Task.Delay(200);
         Assert.False(File.Exists(result.OutputPath), $"temp wav {result.OutputPath} should be deleted after playback");
     }
 
@@ -56,11 +47,59 @@ public sealed class VoiceTempFileCleanupTests
 
         var handler = new FakeSpeechHandler();
         using var http = new HttpClient(handler);
-        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http);
+        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http,
+            static (_, _) => Task.CompletedTask);
 
         await provider.GenerateSpeechAsync(new VoiceSynthesisRequest("hello", OutputPath: explicitPath, PlayAudio: false));
 
         Assert.True(File.Exists(explicitPath), "an explicitly requested OutputPath must not be deleted");
+    }
+
+    [Fact]
+    public async Task OpenAi_playback_uses_injected_shared_seam_without_default_association()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Llm.OpenAiApiKey = "plain-key";
+        var handler = new FakeSpeechHandler();
+        using var http = new HttpClient(handler);
+        string? playedPath = null;
+        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http,
+            (path, _) =>
+            {
+                playedPath = path;
+                return Task.CompletedTask;
+            });
+
+        var result = await provider.GenerateSpeechAsync(new VoiceSynthesisRequest("hello", PlayAudio: true));
+
+        Assert.True(result.Success);
+        Assert.Equal(result.OutputPath, playedPath);
+        Assert.Contains("hermaeus-openai-", playedPath, StringComparison.Ordinal);
+        Assert.False(File.Exists(result.OutputPath));
+    }
+
+    [Fact]
+    public async Task OpenAi_preview_uses_the_shared_non_associating_playback_path()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Llm.OpenAiApiKey = "plain-key";
+        var handler = new FakeSpeechHandler();
+        using var http = new HttpClient(handler);
+        string? playedPath = null;
+        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http,
+            (path, _) =>
+            {
+                playedPath = path;
+                return Task.CompletedTask;
+            });
+
+        await provider.PreviewVoiceAsync("alloy", "preview");
+
+        Assert.NotNull(playedPath);
+        Assert.Contains("hermaeus-openai-", playedPath, StringComparison.Ordinal);
+        Assert.False(File.Exists(playedPath));
     }
 
     private sealed class PassthroughSecretStore : ISecretStore

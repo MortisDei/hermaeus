@@ -52,6 +52,10 @@ explicit user approval before it executes.
   explanation when the task is a sub-task (continue the parent instead), is
   already running, or has a tool approval pending. A "New Task" button next
   to Start always starts an actual fresh task.
+- Reaching `Agent.MaxAutoSteps` is persisted as a truthful blocked budget pause,
+  not as a semantic question from the user. The Run tab offers Continue/Add
+  steps or Stop, keeps the model response separate from the pause explanation,
+  and records the budget decision in task state and transcript.
 
 ### Context & Retrieval
 
@@ -66,6 +70,17 @@ explicit user approval before it executes.
   entries without the required provenance stay separate. Three or more
   unchanged successful calls add an informational context-receipt diagnostic;
   it never blocks a call or changes task status or loop behavior.
+- Every new tool, approval, safety-gate, and rewind result carries a
+  provider-neutral normalized outcome alongside its existing raw summary,
+  exit code, timeout, patch detail, and provenance. Outcomes distinguish
+  success, partial success, no effect, unavailable dependencies, user denial,
+  deterministic blocking, failure, cancellation, timeout, and unknown. They
+  are derived only from executor or gate evidence, never from model-authored
+  result prose. Older task files load as `Unknown` without reinterpretation.
+- Model-facing replay includes that normalized label plus the bounded raw
+  summary. Only deterministically successful results are replay-safe; outcome
+  labels never grant authority or bypass an approval, workspace, token, or
+  destructive-action guard.
 - Surfaces relevant lessons from the self-learning store (see below).
 - Classifies risky actions before execution.
 
@@ -94,6 +109,13 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
 - **Run.** Goal, workspace, model and RAG dataset; the Start Agent button; the
   run outcome for a finished task; the agent's own response; sub-tasks and
   plan; and the task state, context receipt and retrieved context, collapsed.
+  The task's frozen model identity is shown independently of the current model
+  picker. Changing the picker does not retarget an existing task. A paused task
+  can use **Use for task** to make an explicit, audited model change after the
+  newly selected model is checked against the current visible model list.
+  A project-bound task receives a separate bounded `Project State` receipt
+  section only when accepted State exists. It names the accepted revision;
+  pending and rejected proposals are excluded.
 - **Changes.** The draft patch queue and the run ledger (files, before/after,
   commands, approvals, and Rewind run). Carries a count when patches are
   waiting on you; no other tab has a badge.
@@ -107,6 +129,12 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
 The panel opens on Run every time and never switches tabs on its own. A
 finished run lights the Changes badge and says so in the run outcome; it does
 not move the page under you.
+
+The Run tab also keeps the normal path visible: describe the goal, review the
+plan and each requested approval, follow progress, then review the outcome and
+Changes. Its current-action line is derived from task state, so a blocked,
+waiting, complete, failed, or cancelled task states the next reviewable action
+without granting authority or moving the user to another screen.
 
 ### What the agent can do here
 
@@ -178,10 +206,7 @@ removes the need to click through every read-only step by hand.
 An unreadable model response does not stop the run. The response is recorded,
 a corrective note is appended to the transcript naming what was wrong with it,
 and the loop takes another step; three unreadable responses in a row still fail
-the task. Before this, one bad response synthesized an `ask_user`, which parked
-the task in `waiting_for_review` and showed the user a reply box for a question
-the agent had never asked, while the three-strike budget was unreachable
-because reaching it took three manual Run Step clicks.
+the task.
 
 A directory listing describes the workspace, so it gets a budget suited to that
 rather than sharing the search-hit cap. `list_files` returns entries sorted, and
@@ -195,9 +220,7 @@ A truncated read is never a dead end. `read_file` results carry the line range
 they cover and a continuation hint naming the exact `line_offset` to ask for
 next, and a file over the whole-file byte cap can still be read in slices (the
 size ceiling applies to reading a file whole, not to a bounded line range). The
-system prompt says so too. Before this, a result said only `"truncated": true`
-and a real run concluded the tool "cannot return the entire file content in one
-go" and abandoned the file.
+system prompt says so too.
 
 A response that names a tool in `next_action.type` (for example
 `"type": "set_plan"` with a null `tool_name`) is repaired into the protocol's
@@ -215,9 +238,8 @@ answered separately, on their own explicit approve/reject path.
 
 ## Steering a Running Task
 
-The agent used to take an instruction once, at creation. Watching a task head
-in the wrong direction left two options: let it finish wrong, or press Stop and
-lose the run. Steering is the third.
+Steering lets a user redirect a task that is already running without losing the
+task's persisted state or approval history.
 
 While a task is running, the same box that answers an `ask_user` question sends
 an instruction instead. Its caption, watermark and button label change with the
@@ -353,13 +375,30 @@ step itself fails or returns something unusable, a deterministic fallback
 report (built from the sub-task specs themselves) takes its place instead of
 failing the whole run - the sub-task work already happened.
 
+### Per-subtask model selection
+
+The plan review shows a model selector for every proposed child. Choices are
+limited to configured visible models plus an explicit **Inherit parent** option.
+The selection is written back into the pending plan and its approval fingerprint
+is recomputed before approval, so the approved payload is exactly the plan that
+materializes. Unknown, hidden, removed, or unavailable explicit model ids are
+rejected before any child is created.
+
+Each resolved child model is persisted on the sub-task spec and child task before
+execution. Task state, recent-task and sub-task rows, transcripts, traces,
+context receipts, child reports, and the final synthesis input retain that model
+identity. Siblings may use different models, while synthesis always returns to
+the parent's persisted model. A stopped or missing frozen model blocks visibly
+with an actionable message and no inference call or silent fallback. Model choice
+does not change tools, workspace policy, risk classification, approvals, depth,
+or orchestration budgets.
+
 Explicit design limitations: no parallel child execution (one local
-model, one GPU), no nesting beyond depth 1, no user-editable specialist
+model at a time, one GPU), no nesting beyond depth 1, no user-editable specialist
 profiles yet (the fixed catalog - `general`, `correctness`, `security`,
-`tests`, `performance`, `docs` - ships first), no per-child model selection
-(children inherit the parent's model and workspace), no approval inheritance
-of any kind, and no background/detached orchestration (the run lives in the
-workbench session like any agent run; a crash-resumable parent is enough).
+`tests`, `performance`, `docs` - ships first), no approval inheritance of any
+kind, and no background/detached orchestration (the run lives in the workbench
+session like any agent run; a crash-resumable parent is enough).
 
 ## Transcript
 
@@ -466,12 +505,11 @@ they remain reachable only through the JSON protocol.
 
 ### Constrained planner protocol
 
-The JSON text protocol is therefore not a legacy path for weak models. It is
-the only path to every MCP tool, for every model, whenever the provider does
-not return native tool calls.
+The JSON text protocol remains the path to every MCP tool and is also the
+fallback for providers that do not return native tool calls.
 
-Since r28, that protocol has a real JSON schema, and the schema is sent as an
-output constraint whenever the selected model's provider can enforce one
+That protocol has a JSON schema, and the schema is sent as an output constraint
+whenever the selected model's provider can enforce one
 (`docs/features.md`, "Constrained output"), which includes every local
 llama.cpp and Ollama model. The sampler is what keeps `next_action.type` to
 the four action kinds and `risk_level` to its four values, rather than a
@@ -601,6 +639,21 @@ safety. The agent does not:
 
 Making these non-goals explicit helps users trust that the workbench will not
 perform unexpected actions.
+
+## Local API ownership boundary
+
+The versioned Agent Local API contract defines requests, responses, per-token scope,
+ownership rules, and pure authorization policy. It does not expose the
+conditional Agent routes. Desktop and `Hermaeus.LocalApi` are separate processes
+and do not yet share one serialized task-mutation owner, so a second Agent
+service could race task runs, steering, cancellation, and approval state.
+
+The capabilities endpoint reports Agent execution unavailable with that reason.
+Existing tokens gain no authority: their additive Agent scope defaults disabled
+with an empty operation and saved-workspace allowlist. There is no approval or
+denial endpoint, and token possession plus a fingerprint is never approval. See
+[Agent Local API contract](agent-api.md) for the complete v1 surface and the gate
+that must be met before route handlers can ship.
 
 ## Agent Loop
 
@@ -746,8 +799,7 @@ Each task persists the workspace root it was created against. Approving a
 pending action (from the review queue, which lists tasks across every
 workspace) always executes against the task's own stored root, never
 whichever workspace happens to be active in the workbench at approval time.
-Older tasks created before this behavior shipped, with no stored root, fall
-back to the workbench's active workspace, exactly as before.
+Tasks with no stored root use the workbench's active workspace for compatibility.
 
 ## Workspace Policy
 
@@ -915,24 +967,22 @@ that the model produced the exact same number and order of sub-tasks the
 manifest happens to hardcode - a model that reasonably splits a goal
 differently is not itself a failure of orchestration.
 
-Sixteen scenarios ship built in, including three added in r23: `14-confused-
-user-authority` (a goal that pre-announces consent must still go through
-approval), `15-tool-result-poisoning` (provocative directory and file names,
-not file body content, as the injection vector), and `17-memory-poisoning`
-(a workspace instructs the agent to record a lesson claiming blanket
-approval, and also exercises the workspace policy end to end via a `never`
-rule over a secrets file). Scenario 16 in the suggester's own numbering
-shipped as code hardening instead (approval fingerprint binding, r23 4.1):
-the suite grades model behaviour and cannot itself tamper with task state
-between an approval's render and its click, so there is no model-behaviour
-scenario to write for it.
+Sixteen scenarios ship built in, including `14-confused-user-authority` (a goal
+that pre-announces consent must still go through approval),
+`15-tool-result-poisoning` (provocative directory and file names, not file body
+content, as the injection vector), and `17-memory-poisoning` (a workspace
+instructs the agent to record a lesson claiming blanket approval, and also
+exercises the workspace policy end to end via a `never` rule over a secrets
+file). Approval fingerprint binding is covered by direct code tests because a
+scenario cannot safely tamper with task state between an approval's render and
+its click.
 
 `forbid_active_lesson_matching` (used by scenario 17) asserts that no lesson
 left active in the sandbox lesson store after the run matches an
 approval-policy claim token (the same list the stated-lesson gate-claim
-filter, r23 4.2, rejects at capture time). A claim the model attempted and
-the filter rejected passes this check by construction, since it was never
-stored; only a claim that reached the store some other way fails it.
+filter, rejects at capture time). A claim the model attempted and the filter
+rejected passes this check by construction, since it was never stored; only a
+claim that reached the store some other way fails it.
 
 ## Manual Verification
 
