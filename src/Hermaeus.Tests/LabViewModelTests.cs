@@ -446,6 +446,48 @@ public sealed class LabViewModelTests
         Assert.True(confirmed);
     }
 
+    [Fact]
+    public async Task Changing_evidence_selection_invalidates_an_existing_apply_review()
+    {
+        using var temp = new TempDir();
+        var (store, _) = Build(temp);
+        var experiments = new ReviewableExperimentService();
+        var vm = new LabViewModel(store, new FakeToasts(), experiments, null, null);
+        await store.AddAsync(new EmpiricalExperienceDraft
+        {
+            Id = "summary", Domain = EmpiricalExperienceDomains.LabRun,
+            ContextJson = "{\"runId\":\"run-1\"}",
+            ActionJson = JsonSerializer.Serialize(CompletedSummary("run-1", ["slice-1"]), new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            Outcome = NormalizedToolOutcome.Create(NormalizedOutcome.Succeeded, "lab-run-completed", "completed"),
+            Provenance = TestProvenance()
+        });
+
+        var confirmationCalled = false;
+        vm.ConfirmApply = _ =>
+        {
+            confirmationCalled = true;
+            return Task.FromResult(true);
+        };
+
+        await vm.RefreshAsync();
+        vm.ReviewApplyCommand.Execute(null);
+        Assert.True(vm.CanConfirmApply);
+
+        var historical = new ExperienceRowViewModel(new EmpiricalExperience
+        {
+            Id = "historical",
+            Domain = EmpiricalExperienceDomains.LabRun,
+            ContextJson = "{\"runId\":\"run-historical\"}",
+            ActionJson = "{}"
+        });
+        vm.Experiences.Add(historical);
+        vm.SelectedExperience = historical;
+
+        Assert.False(vm.CanConfirmApply);
+        await vm.ConfirmApplyCommand.ExecuteAsync(null);
+        Assert.False(confirmationCalled);
+    }
+
     private static LabRunCompletionSummary CompletedSummary(string runId, IReadOnlyList<string> slices) =>
         new(runId, "definition", LabRunStatus.Succeeded, DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow,
             [],

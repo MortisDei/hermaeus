@@ -650,8 +650,11 @@ public partial class LabViewModel : ViewModelBase
 
     partial void OnSelectedExperienceChanged(ExperienceRowViewModel? value)
     {
+        _applyReview = null;
+        ApplyReviewSummary = string.Empty;
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(CanReviewCurrentRun));
+        OnPropertyChanged(nameof(CanConfirmApply));
         if (value is null) return;
         CorrectionOutcome = value.Experience.Outcome.Outcome.ToString();
         CorrectionDetail = value.Experience.Outcome.Detail;
@@ -1033,11 +1036,22 @@ public partial class LabViewModel : ViewModelBase
     [RelayCommand]
     private async Task ConfirmApplyAsync()
     {
-        if (_experiments is null || _applyReview?.CanApply != true || ConfirmApply is null
-            || !await ConfirmApply(_applyReview)) return;
+        var review = _applyReview;
+        var selectedRunId = SelectedExperience?.LabRunId;
+        if (_experiments is null || review?.CanApply != true || ConfirmApply is null
+            || !await ConfirmApply(review)) return;
+
+        if (!ReferenceEquals(_applyReview, review)
+            || !string.Equals(SelectedExperience?.LabRunId, selectedRunId, StringComparison.Ordinal))
+        {
+            ApplyReviewSummary = "The selected evidence changed while Apply was being confirmed. Review the current selection again.";
+            OnPropertyChanged(nameof(CanConfirmApply));
+            return;
+        }
+
         try
         {
-            await _experiments.ApplyAsync(_applyReview);
+            await _experiments.ApplyAsync(review);
             ApplyReviewSummary = "Reviewed fields were saved through the normal Settings flow.";
             _applyReview = null;
             OnPropertyChanged(nameof(CanConfirmApply));

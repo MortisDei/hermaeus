@@ -925,14 +925,20 @@ public partial class RagViewModel : ObservableObject
             // copy above never touched the live dataset, so this is the only
             // thing that can bring the UI's view of the model/ReindexRequired
             // back in sync with whatever the pipeline actually committed.
-            await LoadDatasetsAsync();
-            await RefreshDatasetManagerAsync();
-            if (restoreServices is not null)
+            try
             {
-                var restoreErrors = await restoreServices();
-                foreach (var error in restoreErrors)
-                    _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                        $"RAG service restore failed: {error}"));
+                await LoadDatasetsAsync();
+                await RefreshDatasetManagerAsync();
+            }
+            finally
+            {
+                if (restoreServices is not null)
+                {
+                    var restoreErrors = await restoreServices();
+                    foreach (var error in restoreErrors)
+                        _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                            $"RAG service restore failed: {error}"));
+                }
             }
         }
     }

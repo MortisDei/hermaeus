@@ -2,6 +2,7 @@ using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
+using System.Text.Json;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -274,13 +275,32 @@ public sealed class SettingsViewModelSaveLifecycleTests
 
         await WaitForAsync(
             () => File.Exists(temp.PathFor("settings/settings.json"))
-                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(aiRoot, StringComparison.Ordinal),
+                && PersistedLocalAiAssetsRootEquals(temp.PathFor("settings/settings.json"), aiRoot),
             "debounced AI assets root write", timeoutMs: 5000);
         var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
 
         Assert.Equal(aiRoot, reloaded.Settings.DataManagement.LocalAiAssetsRoot);
         vm.Shutdown();
+    }
+
+    private static bool PersistedLocalAiAssetsRootEquals(string path, string expected)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            return document.RootElement.TryGetProperty("DataManagement", out var dataManagement)
+                && dataManagement.TryGetProperty("LocalAiAssetsRoot", out var assetsRoot)
+                && string.Equals(assetsRoot.GetString(), expected, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     [Fact]

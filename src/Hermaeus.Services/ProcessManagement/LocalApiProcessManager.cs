@@ -21,6 +21,7 @@ public sealed class LocalApiProcessManager : IDisposable
     private readonly IRuntimeLogService? _runtimeLogs;
     private readonly Func<(string? FileName, IReadOnlyList<string> Args)> _resolveLaunchTarget;
     private readonly Func<string?> _settingsPathResolver;
+    private bool _stopRequested;
 
     private sealed record LocalApiRuntimeConfiguration(int Port, IReadOnlyList<(string Id, string SecretRef)> Tokens);
 
@@ -100,6 +101,7 @@ public sealed class LocalApiProcessManager : IDisposable
             _process = null;
             _activeConfiguration = null;
         }
+        Volatile.Write(ref _stopRequested, false);
         if (!settings.LocalApi.Enabled) return;
 
         if (settings.LocalApi.Tokens.Count == 0)
@@ -134,10 +136,11 @@ public sealed class LocalApiProcessManager : IDisposable
             psi.ArgumentList.Add(Path.GetFullPath(settingsPath));
         }
 
-        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        _process.OutputDataReceived += (_, _) => { };
-        _process.ErrorDataReceived += (_, _) => { };
-        _process.Exited += (_, _) => SetStatus("Stopped");
+        var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        _process = process;
+        process.OutputDataReceived += (_, _) => { };
+        process.ErrorDataReceived += (_, _) => { };
+        process.Exited += OnProcessExited;
 
         try
         {
@@ -156,7 +159,7 @@ public sealed class LocalApiProcessManager : IDisposable
             _process.BeginErrorReadLine();
 
             var port = settings.LocalApi.Port is > 0 and <= 65535 ? settings.LocalApi.Port : 39300;
-            await WaitForHealthAsync(port, ct).ConfigureAwait(false);
+            await WaitForHealthAsync(process, port, ct).ConfigureAwait(false);
             _activeConfiguration = GetRuntimeConfiguration(settings);
             SetStatus("Running");
         }
@@ -185,6 +188,7 @@ public sealed class LocalApiProcessManager : IDisposable
 
     private async Task StopCoreAsync()
     {
+        Volatile.Write(ref _stopRequested, true);
         var process = _process;
         if (process is null)
         {
@@ -233,7 +237,7 @@ public sealed class LocalApiProcessManager : IDisposable
         StatusChanged?.Invoke();
     }
 
-    private static async Task WaitForHealthAsync(int port, CancellationToken ct)
+    private static async Task WaitForHealthAsync(Process process, int port, CancellationToken ct)
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         var url = $"http://127.0.0.1:{port}/health";
@@ -241,6 +245,8 @@ public sealed class LocalApiProcessManager : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
+            if (process.HasExited)
+                throw new InvalidOperationException($"Hermaeus.LocalApi exited before it became healthy. Exit code: {TryGetExitCode(process)}.");
             try
             {
                 using var response = await http.GetAsync(url, ct);
@@ -252,6 +258,25 @@ public sealed class LocalApiProcessManager : IDisposable
         }
 
         throw new TimeoutException("Hermaeus.LocalApi did not become healthy within 30 seconds.");
+    }
+
+    private void OnProcessExited(object? sender, EventArgs e)
+    {
+        if (sender is not Process exited || !ReferenceEquals(_process, exited))
+            return;
+
+        _activeConfiguration = null;
+        SetStatus(GetProcessExitStatus(Volatile.Read(ref _stopRequested), TryGetExitCode(exited)));
+    }
+
+    internal static string GetProcessExitStatus(bool stopRequested, int code) =>
+        stopRequested || code == 0 ? "Stopped" : $"Error (Local API exited with code {code})";
+
+    private static int TryGetExitCode(Process process)
+    {
+        try { return process.ExitCode; }
+        catch (ObjectDisposedException) { return -1; }
+        catch (InvalidOperationException) { return -1; }
     }
 
     /// <summary>

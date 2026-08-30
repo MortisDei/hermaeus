@@ -12,6 +12,14 @@ namespace Hermaeus.Tests;
 
 public sealed class LocalApiProcessManagerBoundaryTests
 {
+    [Theory]
+    [InlineData(true, 137, "Stopped")]
+    [InlineData(false, 137, "Error (Local API exited with code 137)")]
+    [InlineData(false, 0, "Stopped")]
+    public void Process_exit_status_distinguishes_intentional_stop_from_crash(
+        bool stopRequested, int code, string expected) =>
+        Assert.Equal(expected, LocalApiProcessManager.GetProcessExitStatus(stopRequested, code));
+
     private sealed class BoundarySecretStore : ISecretStore
     {
         public bool IsReference(string value) => false;
