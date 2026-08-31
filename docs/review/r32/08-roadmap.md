@@ -572,15 +572,17 @@ The automated R32 release-readiness audit is complete for `0.39.0-beta`:
   found. The Batch 12 branch CI run `33393611503` passed on Ubuntu and
   Windows.
 - An isolated Linux/COSMIC `0.39.0-beta` package smoke using temporary HOME
-  and XDG data reached a real Hermaeus window and initialized its stores. With
-  the default tray enabled, the run recorded an unhandled
-  `Avalonia.FreeDesktop.DBusMenuExporter` / `Tmds.DBus` null-reference failure
-  while emitting a menu layout update. A tray-disabled retry initialized and
-  recorded `CleanExit: true`, but it was not the required artwork, high-DPI,
-  narrow-window, keyboard/accessibility, hardware, or owner-data validation.
-  This is live evidence against declaring tray-enabled COSMIC behavior ready,
-  not evidence of a path reset, and no production tray behavior is silently
-  declared fixed.
+  and XDG data reached a real Hermaeus window and initialized its stores. The
+  temporary XDG root also moved `SingleInstanceGuard`, so this run deliberately
+  created an unsupported second Hermaeus process beside the owner's already
+  running instance. The tray-enabled temporary process then recorded
+  unhandled Avalonia/Tmds.DBus failures during menu-layout or D-Bus disconnect
+  handling, while the owner process remained stable. A tray-disabled retry
+  initialized and recorded `CleanExit: true`. This is useful dual-instance
+  harness evidence, not proof that the single-instance production package fails,
+  and it does not satisfy the required artwork, high-DPI, narrow-window,
+  keyboard/accessibility, hardware, or owner-data validation. It is not evidence
+  of a path reset, and no production tray behavior is silently declared fixed.
 
 Batch 13 remains `No` in the table because automated evidence cannot replace
 the named owner gates. The reviewed host has no managed Windows runtime, so
