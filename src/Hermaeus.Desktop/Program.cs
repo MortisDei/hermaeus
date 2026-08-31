@@ -7,9 +7,31 @@ namespace Hermaeus.Desktop;
 class Program
 {
     internal static PackageIntegrationLaunch? PackageIntegrationLaunch { get; private set; }
+    private static Action? _activationRequested;
+    private static int _activationPending;
     private const long MaxCrashLogBytes = 512 * 1024;
     private const int MaxCrashEntryCharacters = 128 * 1024;
     private static readonly object CrashLogLock = new();
+
+    internal static Action? ActivationRequested
+    {
+        get => Volatile.Read(ref _activationRequested);
+        set
+        {
+            Volatile.Write(ref _activationRequested, value);
+            if (value is not null && Interlocked.Exchange(ref _activationPending, 0) != 0)
+                value();
+        }
+    }
+
+    private static void RequestActivation()
+    {
+        var action = Volatile.Read(ref _activationRequested);
+        if (action is not null)
+            action();
+        else
+            Interlocked.Exchange(ref _activationPending, 1);
+    }
 
     // r19 1.3: crash logs must land where the user's other logs and data
     // live, not next to the executable (unwritable in a packaged install,
@@ -85,14 +107,25 @@ class Program
         // A second instance would write to the same SQLite data root with no
         // cross-process coordination; refuse to start rather than risk it.
         var ownsInstance = SingleInstanceGuard.TryAcquire();
+        SingleInstanceActivationServer? activation = null;
         if (!ownsInstance && PackageIntegrationLaunch is null)
+        {
+            SingleInstanceActivationClient.TryActivateExistingAsync(
+                SingleInstanceActivationClient.DefaultPipeName).GetAwaiter().GetResult();
             return;
+        }
 
         if (PackageIntegrationLaunch is not null)
             PackageIntegrationLaunch = PackageIntegrationLaunch with { CanRun = ownsInstance };
 
         try
         {
+            if (ownsInstance)
+            {
+                activation = new SingleInstanceActivationServer(SingleInstanceActivationClient.DefaultPipeName);
+                activation.Start(RequestActivation);
+            }
+
             // Global unhandled exception handlers to capture unexpected crashes.
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
@@ -109,6 +142,8 @@ class Program
         }
         finally
         {
+            ActivationRequested = null;
+            activation?.Dispose();
             if (ownsInstance)
                 SingleInstanceGuard.Release();
         }

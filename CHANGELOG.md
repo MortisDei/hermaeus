@@ -13,6 +13,10 @@ limit.
 
 ### Changed
 
+- Corrective hardening now recognizes Linux GPU shared libraries in Doctor,
+  keeps typed Auto placement out of CPU-only advisories, separates installed
+  llama.cpp identity from an Unknown latest-release comparison, and activates
+  the existing desktop instance when a second normal launch is attempted.
 - R32 development is prepared as `0.39.0-beta`; no release or tag is created
   by this work.
 - R32 Batch 4 adds whole-workload resource admission receipts in Services and

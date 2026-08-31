@@ -2634,7 +2634,9 @@ public partial class ChatViewModel : ViewModelBase
             return false;
         var chatServer = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
             ?? _settings.Settings.ManagedServers.FirstOrDefault();
-        if (chatServer is not null && chatServer.GpuLayers != 0)
+        if (chatServer is null
+            || !chatServer.TryGetGpuPlacement(out var placement, out _)
+            || placement?.Kind != GpuPlacementKind.Cpu)
             return false;
         try
         {

@@ -431,6 +431,50 @@ public sealed class LlamaRuntimeVariantTests
     public void ShouldAdviseGpuInference_fires_only_when_gpu_wasted(bool gpu, bool cpuBuild, int layers, bool expected)
         => Assert.Equal(expected, DoctorService.ShouldAdviseGpuInference(gpu, cpuBuild, layers));
 
+    [Fact]
+    public void ShouldAdviseGpuInference_does_not_treat_typed_auto_as_cpu()
+    {
+        Assert.False(DoctorService.ShouldAdviseGpuInference(
+            hasRealGpu: true,
+            installedBuildIsCpu: false,
+            GpuPlacementIntent.Auto()));
+    }
+
+    [Fact]
+    public void Cpu_only_build_detection_recognizes_linux_gpu_shared_libraries()
+    {
+        using var temp = new TempDir();
+        var executable = temp.PathFor("llama-server");
+        File.WriteAllText(executable, "test executable");
+        File.WriteAllText(temp.PathFor("libggml-cpu.so"), "cpu backend");
+        File.WriteAllText(temp.PathFor("libggml-vulkan.so"), "vulkan backend");
+
+        Assert.False(DoctorService.IsCpuOnlyBuild(executable));
+    }
+
+    [Fact]
+    public void Cpu_only_build_detection_recognizes_windows_gpu_libraries()
+    {
+        using var temp = new TempDir();
+        var executable = temp.PathFor("llama-server.exe");
+        File.WriteAllText(executable, "test executable");
+        File.WriteAllText(temp.PathFor("ggml-cuda.dll"), "cuda backend");
+
+        Assert.False(DoctorService.IsCpuOnlyBuild(executable));
+    }
+
+    [Fact]
+    public void Cpu_only_build_detection_does_not_treat_unrelated_files_as_gpu_proof()
+    {
+        using var temp = new TempDir();
+        var executable = temp.PathFor("llama-server");
+        File.WriteAllText(executable, "test executable");
+        File.WriteAllText(temp.PathFor("model-cuda-not-a-library.gguf"), "model");
+        File.WriteAllText(temp.PathFor("notes-vulkan.txt"), "notes");
+
+        Assert.True(DoctorService.IsCpuOnlyBuild(executable));
+    }
+
     private static string? Select(LlamaPlatform platform, LlamaRuntimeVariant variant)
         => LlamaServerSetupService.SelectDownloadAsset(B10066Assets, platform, variant)?.BrowserDownloadUrl;
 

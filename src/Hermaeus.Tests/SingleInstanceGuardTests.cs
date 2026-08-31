@@ -5,6 +5,20 @@ namespace Hermaeus.Tests;
 
 internal static class SingleInstanceGuardTests
 {
+    public static async Task ActivationClientNotifiesTheOwner()
+    {
+        var pipeName = "hermaeus-test-" + Guid.NewGuid().ToString("N");
+        using var server = new SingleInstanceActivationServer(pipeName);
+        var activated = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.Start(() => activated.TrySetResult(true));
+
+        True(await SingleInstanceActivationClient.TryActivateExistingAsync(
+            pipeName, TimeSpan.FromMilliseconds(250)),
+            "a live owner activation listener should accept a second launch request");
+        True(await activated.Task.WaitAsync(TimeSpan.FromSeconds(2)),
+            "the owner should receive the activation request");
+    }
+
     public static Task SecondAcquireOnTheSameLockFileFails()
     {
         using var temp = new TempDir();

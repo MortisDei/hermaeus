@@ -59,7 +59,9 @@ for Knowledge behavior in Chat.
   Attention, context shift, CPU-MoE placement, vision projectors, and
   capability-gated speculative decoding. Unsupported or unproven runtime
   features stay `Unknown` or `Unavailable`; Hermaeus does not guess from a
-  filename or a generic flag.
+  filename or a generic flag. Doctor recognizes GPU backend shared libraries
+  on Windows and Linux, and reports installed runtime identity separately from
+  an unavailable latest-release comparison.
 - Nested scroll surfaces give the wheel to the content under the pointer and
   bubble to a page only when that content reaches its edge. Horizontal wheel
   input is retained where a pane provides horizontal overflow.
@@ -281,6 +283,10 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 
 ## System, Logs, Activity, and Settings
 
+- A second normal launch asks the existing per-user desktop instance to show
+  and activate its window, then exits. The file lock remains the cross-process
+  data-safety gate; the package install and uninstall helpers remain separate
+  utility launches.
 - System shows app, operating-system, CPU, RAM, storage, database, managed
   component, and best-effort GPU information.
 - Chat telemetry can sample the currently active managed server process. Its

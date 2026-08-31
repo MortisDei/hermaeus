@@ -474,6 +474,7 @@ public static class HarnessCases
 
     public static IEnumerable<object[]> SingleInstanceGuard =>
     [
+        [new HarnessCase("activation client notifies the owner", SingleInstanceGuardTests.ActivationClientNotifiesTheOwner)],
         [new HarnessCase("second acquire on the same lock file fails", SingleInstanceGuardTests.SecondAcquireOnTheSameLockFileFails)],
         [new HarnessCase("release frees the lock for a next acquire", SingleInstanceGuardTests.ReleaseFreesTheLockForANextAcquire)]
     ];

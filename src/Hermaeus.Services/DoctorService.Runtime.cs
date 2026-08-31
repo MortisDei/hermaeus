@@ -131,10 +131,10 @@ public sealed partial class DoctorService
                 "llama.cpp update check",
                 DoctorCheckStatus.Info,
                 $"Installed {local.Label}",
-                "Could not reach GitHub releases, so Doctor could not compare against the latest llama.cpp build.",
+                "Installed identity is known. Latest release: Unknown because GitHub release metadata was unavailable. Comparison: Unknown; no update or current-state claim is made.",
                 "Open Services",
                 true,
-                $"Executable: {resolved}\nVersion output: {local.Raw}",
+                $"Executable: {resolved}\nVersion output: {local.Raw}\nInstalled: {local.Label}\nLatest: Unknown\nComparison: Unknown",
                 "Runtime");
         }
 
@@ -144,9 +144,12 @@ public sealed partial class DoctorService
             : comparison == LlamaVersionComparison.Incomparable
                 ? DoctorCheckStatus.Info
                 : DoctorCheckStatus.Ready;
+        var latestLabel = latest.FromSharedCache
+            ? $"{latest.TagName} (cached {latest.MetadataObservedAt:u})"
+            : latest.TagName;
         var summary = comparison == LlamaVersionComparison.Incomparable
-            ? $"Installed {local.Label}; latest {latest.TagName} (not comparable)"
-            : $"Installed {local.Label}; latest {latest.TagName}";
+            ? $"Installed {local.Label}; latest {latestLabel} (not comparable)"
+            : $"Installed {local.Label}; latest {latestLabel}";
         var detail = comparison switch
         {
             LlamaVersionComparison.Outdated => "Download a newer llama.cpp release or rerun Local AI setup.",
@@ -162,7 +165,7 @@ public sealed partial class DoctorService
             detail,
             "Open Services",
             true,
-            $"Executable: {resolved}\nVersion output: {local.Raw}\nLatest: {latest.TagName} ({latest.PublishedAt:O})",
+            $"Executable: {resolved}\nVersion output: {local.Raw}\nLatest: {latest.TagName} ({latest.PublishedAt:O})\nMetadata source: {(latest.FromSharedCache ? $"shared cache at {latest.MetadataObservedAt:O}" : "live release lookup")}",
             "Runtime");
     }
 
@@ -200,7 +203,16 @@ public sealed partial class DoctorService
     /// <summary>
     /// Fires when a real GPU is present but inference is still configured for
     /// the CPU (r14 1.4): either the installed build has no GPU backend, or the
-    /// chat server's effective offload is 0. Pure decision for tests.
+    /// chat server is explicitly configured for CPU placement. Typed Auto is
+    /// not treated as CPU merely because its legacy integer is zero. Pure
+    /// decision for tests.
+    /// </summary>
+    public static bool ShouldAdviseGpuInference(bool hasRealGpu, bool installedBuildIsCpu, GpuPlacementIntent? placement)
+        => hasRealGpu && (installedBuildIsCpu || placement?.Kind == GpuPlacementKind.Cpu);
+
+    /// <summary>
+    /// Compatibility overload for callers that still have only the legacy
+    /// integer form. New runtime decisions must use the typed overload above.
     /// </summary>
     public static bool ShouldAdviseGpuInference(bool hasRealGpu, bool installedBuildIsCpu, int chatGpuLayers)
         => hasRealGpu && (installedBuildIsCpu || chatGpuLayers == 0);
@@ -287,35 +299,37 @@ public sealed partial class DoctorService
         if (!await IsServerRespondingAsync(chat.Port, ct))
             return null;
 
-        var chatGpuLayers = chat.GpuLayers;
+        if (!chat.TryGetGpuPlacement(out var placement, out _))
+            return null;
+
         var resolvedExe = ResolveExecutable(chat.ExecutablePath ?? string.Empty);
         var installedBuildIsCpu = IsCpuOnlyBuild(resolvedExe);
 
-        if (!ShouldAdviseGpuInference(hasRealGpu, installedBuildIsCpu, chatGpuLayers))
+        if (!ShouldAdviseGpuInference(hasRealGpu, installedBuildIsCpu, placement))
             return null;
 
         var reason = installedBuildIsCpu
             ? "the installed llama-server is a CPU-only build"
-            : "the chat server is set to 0 GPU layers";
+            : "the chat server is explicitly set to CPU placement";
         return BuildCheck(
             "gpu-inference",
             "GPU inference",
             DoctorCheckStatus.Warning,
             $"GPU present but {reason}",
-            $"{profile.GpuName ?? "A GPU"} was detected, but {reason}, so your prompts are read and generated at CPU speed. Install a GPU build in Services and set the chat server to offload all layers.",
+            $"{profile.GpuName ?? "A GPU"} was detected, but {reason}. Install a GPU build in Services and choose Auto, All, or an exact layer count if you want accelerated inference. Effective placement remains Unknown until the running runtime reports it.",
             "Open Services",
             true,
-            $"GPU: {profile.GpuName}\nInstalled build CPU-only: {installedBuildIsCpu}\nChat gpu-layers: {chatGpuLayers}",
+            $"GPU: {profile.GpuName}\nInstalled build CPU-only: {installedBuildIsCpu}\nConfigured placement: {placement?.CanonicalValue ?? "Unknown"}\nEffective placement: Unknown until /props evidence is available",
             "Runtime");
     }
 
     /// <summary>
     /// True when no GPU backend runtime sits next to the executable (r14 1.4):
-    /// CPU builds ship only ggml-cpu/ggml-base DLLs, GPU builds add
+    /// CPU builds ship only ggml-cpu/ggml-base shared libraries, GPU builds add
     /// ggml-cuda/ggml-vulkan (and cudart for CUDA). An empty/unresolved path is
     /// treated as CPU so the advisory nudges toward a real GPU install.
     /// </summary>
-    private static bool IsCpuOnlyBuild(string executablePath)
+    internal static bool IsCpuOnlyBuild(string executablePath)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
             return true;
@@ -324,10 +338,14 @@ public sealed partial class DoctorService
             return true;
         try
         {
-            foreach (var file in Directory.EnumerateFiles(dir, "*.dll", SearchOption.TopDirectoryOnly))
+            foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly))
             {
-                var name = Path.GetFileName(file).ToLowerInvariant();
-                if (name.Contains("cuda") || name.Contains("vulkan") || name.Contains("cudart") || name.Contains("hip") || name.Contains("sycl"))
+                var name = Path.GetFileName(file);
+                if (!IsSharedLibrary(name))
+                    continue;
+
+                var lower = name.ToLowerInvariant();
+                if (lower.Contains("cuda") || lower.Contains("vulkan") || lower.Contains("cudart") || lower.Contains("hip") || lower.Contains("sycl"))
                     return false;
             }
             return true;
@@ -336,6 +354,11 @@ public sealed partial class DoctorService
         {
             return true;
         }
+
+        static bool IsSharedLibrary(string name) =>
+            name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".dylib", StringComparison.OrdinalIgnoreCase)
+            || name.Contains(".so", StringComparison.OrdinalIgnoreCase);
     }
 
     private DoctorCheck CheckUntunedGgufModels()
@@ -809,8 +832,21 @@ public sealed partial class DoctorService
                 ? LlamaVersionComparison.Outdated
                 : LlamaVersionComparison.Current;
 
-    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct) =>
-        GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", FetchLatestLlamaReleaseAsync, ct);
+    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
+    {
+        var shared = LlamaServerSetupService.LastSuccessfulRelease;
+        if (shared is { } cached)
+        {
+            return Task.FromResult<LlamaLatestRelease?>(new(
+                cached.Download.TagName,
+                TryParseLlamaBuild(cached.Download.TagName),
+                cached.Download.PublishedAt ?? cached.CachedAt,
+                cached.CachedAt,
+                true));
+        }
+
+        return GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", FetchLatestLlamaReleaseAsync, ct);
+    }
 
     private async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
     {
@@ -820,7 +856,9 @@ public sealed partial class DoctorService
             return new LlamaLatestRelease(
                 release.TagName,
                 TryParseLlamaBuild(release.TagName),
-                release.PublishedAt ?? DateTimeOffset.MinValue);
+                release.PublishedAt ?? DateTimeOffset.MinValue,
+                DateTimeOffset.UtcNow,
+                false);
         }
         catch
         {
@@ -863,7 +901,12 @@ public sealed partial class DoctorService
     }
 
     private sealed record LlamaVersionInfo(string Label, int? BuildNumber, string Raw, bool Started, int? ExitCode, string Error);
-    private sealed record LlamaLatestRelease(string TagName, int? BuildNumber, DateTimeOffset PublishedAt);
+    private sealed record LlamaLatestRelease(
+        string TagName,
+        int? BuildNumber,
+        DateTimeOffset PublishedAt,
+        DateTimeOffset MetadataObservedAt,
+        bool FromSharedCache);
 }
 
 internal enum LlamaVersionComparison
