@@ -52,7 +52,7 @@ the stores into one schema.
 | 0 | Verify installed Linux/Windows runtime help/version, exact argument spelling and effective-placement observability against the already-fixed doc 02 contract; inspect pinned reranker graph batch dimensions; capture current build/test/coverage baseline | planning pack | mandatory environment facts | Yes |
 | CI | Separate non-required pre-PR branch checks from required PR merge-context checks; preserve main/fork coverage and trusted-push security boundaries; add authority-scoped superseded-run cancellation without changing repository settings | live ruleset re-read, doc 09 | mandatory operational efficiency | No |
 | 1 | Typed CPU/Auto/All/Exact launch intent and exact legacy/tune-profile migration; remove implicit tune-profile-on-Start mutation; canonical managed launch specification, conflict policy for core `ExtraArgs`, one configured/planned/rendered/effective/observed projection and fingerprint, versioned compatibility tests | 0 | mandatory correctness foundation | Yes |
-| 2 | Services-owned model inventory with bounded scan/GGUF/manifest cache and explicit invalidation; converge simple card fit onto the versioned prediction engine while preserving a labelled pre-download estimate | 0, 1 | mandatory shared foundation | No |
+| 2 | Services-owned model inventory with bounded scan/GGUF/manifest cache and explicit invalidation; converge simple card fit onto the versioned prediction engine while preserving a labelled pre-download estimate | 0, 1 | mandatory shared foundation | Yes |
 | 3 | Resource consumer registry, allocation owner/component/per-device model, immutable snapshots, local/remote/owned identity, authoritative per-device and Unknown observations, in-process adapters, bounded persistence | 1, 2 | mandatory resource spine | No |
 | 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | No |
 | 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | No |
@@ -180,9 +180,33 @@ as a detailed prediction.
 Batch 2 verification: bounded inventory, invalidation, manifest refresh,
 fit-facade delegation, and model-page regression tests passed (47 focused);
 the full sequential suite passed with 2,372 passed and 17 skipped out of
-2,389 tests; and the zero-warning solution build passed. Test results were
-written outside the checkout. The corrective CI run for the Windows fixture
-boundary is still the push gate for the next Batch 2 commit.
+2,389 tests; the zero-warning solution build passed; and the pushed Batch 2
+run `33358704564` passed on Ubuntu and Windows. Test results were written
+outside the checkout. Batch 2 is Landed.
+
+### 8.2.4 CI batch evidence
+
+The required `build-and-test (ubuntu-latest)` and
+`build-and-test (windows-latest)` jobs now exist only in `ci.yml` for `main`
+pushes and `main` pull requests. Development pushes matching `r*/round` use
+the separate `branch-ci.yml`: a read-only GitHub API gate checks for an open
+same-repository pull request with the exact branch and `main` base, and only
+when none exists does the distinct `branch-build-and-test` matrix run. The
+trusted Windows Defender exclusion remains limited to push workflows.
+
+Branch, pull-request, and main authorities have separate concurrency groups.
+Branch runs cancel superseded pushes on the same ref; pull-request runs cancel
+superseded updates for that PR; main runs are never cancelled by unrelated
+main activity. The branch matrix never emits either required check name, so a
+skipped non-required branch job cannot satisfy protection accidentally.
+
+Static workflow guards pass (5 tests), and the live ruleset was re-read before
+editing: the required check names and pull-request requirement remain as
+documented. A required-check attachment exercise against a draft pull request
+was not performed because this round is not authorized to open or modify a
+pull request. The CI row therefore remains `No` pending that owner-only live
+gate, even though the workflow implementation and branch-push exercise are
+ready for review.
 
 The pre-change baseline was a zero-warning solution build, 2,354 passed and
 17 skipped out of 2,371 sequential tests, and 38,550 of 60,422 covered lines

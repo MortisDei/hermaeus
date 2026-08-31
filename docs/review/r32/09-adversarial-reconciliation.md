@@ -56,11 +56,11 @@ expansions are unsupported by the evidence and are deliberately narrower:
 
 ## 9.3 CI trigger and required-check contract
 
-Current facts:
+Current facts at the pre-change audit baseline were:
 
-- `.github/workflows/ci.yml` runs on `push` to `main` and `r*/round`, and on
+- `.github/workflows/ci.yml` ran on `push` to `main` and `r*/round`, and on
   `pull_request` to `main`;
-- both events publish `build-and-test (ubuntu-latest)` and
+- both events published `build-and-test (ubuntu-latest)` and
   `build-and-test (windows-latest)`;
 - the active `main` ruleset strictly requires those exact two GitHub Actions
   checks and a pull request, with no approval count requirement;
@@ -68,6 +68,14 @@ Current facts:
   no-op branch/PR job could falsely satisfy protection;
 - the trusted-push-only Windows Defender exclusion is an intentional security
   boundary and is not generalized to pull requests.
+
+The implemented workflow change removes `r*/round` from `ci.yml`. Those pushes
+now use `branch-ci.yml`, which checks for an exact open same-repository PR and
+otherwise runs only the distinct non-required `branch-build-and-test` matrix.
+The required names remain in `ci.yml` for `main` pushes and `main` pull
+requests. The live ruleset still has the required names and pull-request
+requirement recorded above; a post-change required-check attachment exercise
+remains an owner-only live gate.
 
 The skipped-job and required-name constraints follow GitHub's current
 [status-check contract](https://docs.github.com/en/pull-requests/reference/status-checks)

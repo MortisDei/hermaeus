@@ -1,20 +1,50 @@
-name: CI
+name: Branch CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || 'ci-main' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    branches: ['r*/round']
 
 permissions:
   contents: read
+  pull-requests: read
+
+concurrency:
+  group: branch-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  find_open_pr:
+    name: find-open-pr
+    runs-on: ubuntu-latest
+    outputs:
+      has_open_pr: ${{ steps.lookup.outputs.has_open_pr }}
+    steps:
+      - name: Check for the matching open pull request
+        id: lookup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          count="$(gh api \
+            --method GET \
+            "repos/${REPOSITORY}/pulls" \
+            -f state=open \
+            -f base=main \
+            -f "head=${REPOSITORY_OWNER}:${BRANCH_NAME}" \
+            --jq 'length')"
+          if [[ "$count" == "0" ]]; then
+            echo "has_open_pr=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_open_pr=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  branch_build_and_test:
+    name: branch-build-and-test (${{ matrix.os }})
+    needs: find_open_pr
+    if: needs.find_open_pr.outputs.has_open_pr == 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -30,10 +60,6 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # The repository has no lock files, so the cache key is the hash of
-      # every project file: a package reference only changes when one of
-      # those changes (r28 doc 06 6.3). Worth 20 to 30 seconds a run. It is
-      # not, and must not be mistaken for, a fix for the Windows test gap.
       - name: Cache NuGet packages
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -47,24 +73,13 @@ jobs:
       - name: Build (zero warnings enforced)
         run: dotnet build Hermaeus.sln --no-restore -c Release
 
-      # r29 doc 04 4.1: an experiment, not a settled optimisation. The
-      # measurement in that doc showed the Windows leg's cost is hosted-runner
-      # filesystem I/O rather than test code (the same test that takes 164ms on
-      # a dev machine takes 4,409ms here). Real-time scanning of every file the
-      # suite creates is the one cheap, reversible lever. Success condition:
-      # the Windows summed test duration in the TRX artifact falls materially
-      # below 501.4s. If it does not, delete this step.
       - name: Exclude test working set from Defender (windows only)
-        if: runner.os == 'Windows' && github.event_name == 'push'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
           Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
 
-      # The TRX logger is VSTest's own, so this adds no package. It exists
-      # because the Windows leg spends about seven times as long inside this
-      # step as the Linux leg does, and nobody knew which tests owned the
-      # difference (r28 doc 04 4.1). See docs/pull-requests.md, "CI timing".
       - name: Test
         run: dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
 
@@ -72,6 +87,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: test-results-${{ matrix.os }}
+          name: branch-test-results-${{ matrix.os }}
           path: '**/test-results.trx'
           if-no-files-found: warn
