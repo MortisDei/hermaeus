@@ -58,10 +58,11 @@ public static class LlamaTuneProfileStore
     }
 
     /// <summary>Finds-or-creates the profile for <paramref name="modelPath"/> and updates it in
-    /// place. GpuLayers/Threads/TotalLayers/LlamaServerVersion come from <paramref name="result"/>
-    /// when supplied (a fresh auto-tune); otherwise GpuLayers/Threads fall back to the caller's
-    /// current values (a plain config save keeps whatever was last tuned) and TotalLayers/
-    /// LlamaServerVersion are left as previously recorded. Returns null without modifying
+    /// place. Typed GPU placement, Threads, TotalLayers, and LlamaServerVersion come from
+    /// <paramref name="result"/> when supplied (a fresh auto-tune); otherwise placement/Threads
+    /// fall back to the caller's current values (a plain config save keeps whatever was last
+    /// tuned) and TotalLayers/LlamaServerVersion are left as previously recorded. Returns null
+    /// without modifying
     /// settings when the model path does not resolve to an existing file.</summary>
     public static LlamaTuneProfile? Upsert(
         AppSettings settings,
@@ -70,7 +71,8 @@ public static class LlamaTuneProfileStore
         string extraArgs,
         int currentGpuLayers,
         int currentThreads,
-        ServerTuneResult? result = null)
+        ServerTuneResult? result = null,
+        GpuPlacementIntent? currentPlacement = null)
     {
         var normalized = ResolveExistingModelPath(modelPath);
         if (string.IsNullOrWhiteSpace(normalized))
@@ -87,7 +89,13 @@ public static class LlamaTuneProfileStore
         profile.ModelPath = normalized;
         profile.ModelSizeBytes = file.Length;
         profile.ModelModifiedAtUtc = file.LastWriteTimeUtc;
-        profile.GpuLayers = result?.GpuLayers ?? currentGpuLayers;
+        var placement = result is not null
+            ? GpuPlacementIntent.TryFromLegacy(result.GpuLayers, out var tunedPlacement, out _)
+                ? tunedPlacement
+                : null
+            : currentPlacement ?? (GpuPlacementIntent.TryFromLegacy(currentGpuLayers, out var current, out _) ? current : null);
+        profile.GpuPlacement = placement;
+        profile.GpuLayers = placement?.LegacyGpuLayers ?? result?.GpuLayers ?? currentGpuLayers;
         profile.TotalLayers = result?.TotalLayers ?? profile.TotalLayers;
         profile.Threads = result?.Threads ?? currentThreads;
         profile.ContextSize = contextSize;

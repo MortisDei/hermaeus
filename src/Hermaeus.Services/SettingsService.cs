@@ -135,6 +135,7 @@ public sealed class SettingsService : ISettingsService
             UpgradeSpeculativeDecoding(server);
             NormalizeKvCache(server, warning);
             server.PromptThreads = Math.Max(0, server.PromptThreads);
+            NormalizeGpuPlacement(server, warning);
 
             if (!seenIds.Add(server.Id))
             {
@@ -154,6 +155,36 @@ public sealed class SettingsService : ISettingsService
             servers.Insert(0, CreateDefaultServer(false));
         if (!servers.Any(server => server.EmbeddingsMode))
             servers.Add(CreateDefaultServer(true));
+    }
+
+    private static void NormalizeGpuPlacement(ServerConfig server, Action<string>? warning)
+    {
+        if (server.GpuPlacement is null)
+        {
+            if (GpuPlacementIntent.TryFromLegacy(server.GpuLayers, out var legacy, out var legacyError))
+            {
+                server.GpuPlacement = legacy;
+                server.GpuPlacementValidationError = string.Empty;
+            }
+            else
+            {
+                server.GpuPlacementValidationError = legacyError ?? "GPU placement is invalid.";
+                warning?.Invoke($"Managed server '{server.Name}' has invalid GPU placement: {server.GpuPlacementValidationError} Repair it before launching.");
+            }
+
+            return;
+        }
+
+        if (!server.GpuPlacement.TryValidate(out var error))
+        {
+            server.GpuPlacementValidationError = error ?? "GPU placement is invalid.";
+            warning?.Invoke($"Managed server '{server.Name}' has invalid GPU placement: {server.GpuPlacementValidationError} Repair it before launching.");
+            return;
+        }
+
+        server.GpuPlacementValidationError = string.Empty;
+        if (server.GpuPlacement.LegacyGpuLayers is int legacyLayers)
+            server.GpuLayers = legacyLayers;
     }
 
     private static void NormalizeKvCache(ServerConfig server, Action<string>? warning)
@@ -206,6 +237,10 @@ public sealed class SettingsService : ISettingsService
             if (!File.Exists(_path)) return;
             var json = await File.ReadAllTextAsync(_path);
             Settings = JsonSerializer.Deserialize<AppSettings>(json, Opts) ?? new();
+            // Materialize the typed placement in memory, but do not persist it
+            // merely because the application started. The next owner-initiated
+            // settings save writes the new shape.
+            NormalizeSettings(Settings);
             needsPersist = MigrateLegacyLocalEndpoints(Settings);
             needsPersist |= MigrateLegacyLocalApiToken(Settings);
             notify = true;
@@ -428,6 +463,7 @@ public sealed class SettingsService : ISettingsService
     private void NormalizeSettings(AppSettings settings)
     {
         NormalizeManagedServers(settings.ManagedServers, message => NormalizationWarning?.Invoke(message));
+        NormalizeTuneProfiles(settings.LlamaTuneProfiles);
 
         if (settings.Memory.EnabledPerConversation.Count == 0)
             return;
@@ -448,6 +484,23 @@ public sealed class SettingsService : ISettingsService
             .Take(MaxPerConversationMemoryOverrides)
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         settings.Memory.EnabledPerConversation = keep;
+    }
+
+    private static void NormalizeTuneProfiles(List<LlamaTuneProfile> profiles)
+    {
+        foreach (var profile in profiles)
+        {
+            if (profile.GpuPlacement is null)
+            {
+                if (GpuPlacementIntent.TryFromLegacy(profile.GpuLayers, out var legacy, out _))
+                    profile.GpuPlacement = legacy;
+                continue;
+            }
+
+            if (profile.GpuPlacement.TryValidate(out _)
+                && profile.GpuPlacement.LegacyGpuLayers is int legacyLayers)
+                profile.GpuLayers = legacyLayers;
+        }
     }
 
     private static bool MigrateLegacyLocalEndpoints(AppSettings settings)
@@ -512,6 +565,7 @@ public sealed class SettingsService : ISettingsService
         Port = embeddingsMode ? 39202 : 39201,
         ContextSize = embeddingsMode ? 2048 : 4096,
         GpuLayers = 0,
+        GpuPlacement = GpuPlacementIntent.Cpu(),
         Threads = 4,
         EmbeddingsMode = embeddingsMode,
         AutoStart = false

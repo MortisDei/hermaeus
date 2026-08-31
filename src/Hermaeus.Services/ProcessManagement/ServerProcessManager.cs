@@ -70,6 +70,15 @@ public sealed class ServerProcessManager : IDisposable
     {
         if (Status is ServerStatus.Running or ServerStatus.Starting) return;
 
+        if (!cfg.TryGetGpuPlacement(out _, out var placementError))
+        {
+            ErrorMessage = $"GPU placement needs repair before launch: {placementError}";
+            ClearLog();
+            SetStatus(ServerStatus.Error);
+            Emit($"[hermaeus] ERROR: {ErrorMessage}");
+            return;
+        }
+
         // Port preflight (r9 02-server-lifecycle.md 2.2): a conflicting port
         // fails instantly with the port and (best-effort) its owner named,
         // instead of launching a doomed process that exits the moment it
@@ -96,6 +105,11 @@ public sealed class ServerProcessManager : IDisposable
         cfg.RuntimeSupportsPromptThreads = runtime.SupportsPromptThreads;
         cfg.RuntimeSupportsLoadMode = runtime.SupportsLoadMode;
         cfg.RuntimeSupportsCorsOrigins = runtime.SupportsCorsOrigins;
+        cfg.RuntimeSupportsGpuPlacementCpu = IsAvailable(runtime, "runtime.gpu-placement.cpu");
+        cfg.RuntimeSupportsGpuPlacementAuto = IsAvailable(runtime, "runtime.gpu-placement.auto");
+        cfg.RuntimeSupportsGpuPlacementAll = IsAvailable(runtime, "runtime.gpu-placement.all");
+        cfg.RuntimeSupportsGpuPlacementExact = IsAvailable(runtime, "runtime.gpu-placement.exact");
+        cfg.RuntimeSupportsFit = IsAvailable(runtime, "runtime.fit");
         var runtimeValidation = ValidateRuntimeOptions(cfg);
         if (runtimeValidation is not null)
         {
@@ -270,6 +284,7 @@ public sealed class ServerProcessManager : IDisposable
             Port           = cfg.Port,
             ContextSize    = cfg.ContextSize,
             GpuLayers      = cfg.GpuLayers,
+            GpuPlacement   = cfg.GpuPlacement,
             Threads        = cfg.Threads,
             Slots          = cfg.Slots,
             EmbeddingsMode = cfg.EmbeddingsMode,
@@ -322,6 +337,7 @@ public sealed class ServerProcessManager : IDisposable
                 Port           = baseConfig.Port,
                 ContextSize    = tunedContext,
                 GpuLayers      = -1,
+                GpuPlacement   = GpuPlacementIntent.All(),
                 Threads        = threads,
                 Slots          = baseConfig.Slots,
                 EmbeddingsMode = baseConfig.EmbeddingsMode,
@@ -352,6 +368,9 @@ public sealed class ServerProcessManager : IDisposable
                 Port           = baseConfig.Port,
                 ContextSize    = baseConfig.ContextSize,
                 GpuLayers      = candidate,
+                GpuPlacement   = GpuPlacementIntent.TryFromLegacy(candidate, out var candidatePlacement, out _)
+                    ? candidatePlacement
+                    : null,
                 Threads        = threads,
                 Slots          = baseConfig.Slots,
                 EmbeddingsMode = baseConfig.EmbeddingsMode,
@@ -587,18 +606,37 @@ public sealed class ServerProcessManager : IDisposable
             parts.Add(cfg.Threads.ToString());
         }
 
-        // r14 1.3: 0 keeps CPU inference (flag omitted); -1 offloads every
-        // layer, which llama-server spells as a large finite count; N>0 offloads
-        // exactly N.
-        if (cfg.GpuLayers != 0)
-        {
-            parts.Add("--n-gpu-layers");
-            parts.Add(cfg.GpuLayers < 0 ? "999" : cfg.GpuLayers.ToString());
-        }
-
         var extraArgs = string.IsNullOrWhiteSpace(cfg.ExtraArgs)
             ? []
             : ExtraArgsParser.Split(cfg.ExtraArgs).ToList();
+
+        if (!cfg.TryGetGpuPlacement(out var placement, out var placementError))
+            throw new InvalidOperationException($"GPU placement needs repair before launch: {placementError}");
+
+        CanonicalizeCoreExtraArguments(cfg, placement!, extraArgs);
+
+        // R32 02-adaptive-local-inference.md 2.3: placement is explicit and
+        // fit ownership is never inferred from an omitted legacy integer.
+        // Auto delegates placement to the runtime fit mechanism; every other
+        // intent pins placement and turns fit off.
+        if (placement!.Kind == GpuPlacementKind.Auto)
+        {
+            parts.Add("--fit");
+            parts.Add("on");
+        }
+        else
+        {
+            parts.Add("--fit");
+            parts.Add("off");
+            parts.Add("--n-gpu-layers");
+            parts.Add(placement.Kind switch
+            {
+                GpuPlacementKind.Cpu => "0",
+                GpuPlacementKind.All => "all",
+                GpuPlacementKind.Exact => placement.ExactLayerCount!.Value.ToString(CultureInfo.InvariantCulture),
+                _ => throw new InvalidOperationException("Unknown GPU placement kind.")
+            });
+        }
 
         // UseProjector is the authoritative launch gate for the configured
         // projector. ExtraArgs is an escape hatch for other runtime flags, but
@@ -829,6 +867,75 @@ public sealed class ServerProcessManager : IDisposable
         return parts;
     }
 
+    private static void CanonicalizeCoreExtraArguments(
+        ServerConfig cfg,
+        GpuPlacementIntent placement,
+        List<string> extraArgs)
+    {
+        for (var index = extraArgs.Count - 1; index >= 0; index--)
+        {
+            var token = extraArgs[index];
+            var equals = token.IndexOf('=');
+            var option = equals > 0 ? token[..equals] : token;
+            var key = option.ToLowerInvariant() switch
+            {
+                "-c" or "--ctx-size" or "--context-size" => "context",
+                "--n-gpu-layers" or "--gpu-layers" or "-ngl" => "placement",
+                "--fit" => "fit",
+                "--threads" => "threads",
+                "--parallel" => "slots",
+                "--port" => "port",
+                "--host" => "host",
+                _ => string.Empty
+            };
+            if (key.Length == 0)
+                continue;
+
+            var expected = key switch
+            {
+                "context" => cfg.ContextSize.ToString(CultureInfo.InvariantCulture),
+                "threads" when cfg.Threads > 0 => cfg.Threads.ToString(CultureInfo.InvariantCulture),
+                "slots" => Math.Max(1, cfg.Slots).ToString(CultureInfo.InvariantCulture),
+                "port" => cfg.Port.ToString(CultureInfo.InvariantCulture),
+                "host" => "127.0.0.1",
+                "fit" => placement.Kind == GpuPlacementKind.Auto ? "on" : "off",
+                "placement" => PlacementArgumentValue(placement),
+                _ => null
+            };
+            if (expected is null)
+                throw new InvalidOperationException($"ExtraArgs cannot override typed launch option '{option}'. Configure the typed field instead.");
+
+            var value = equals > 0 ? token[(equals + 1)..] : index + 1 < extraArgs.Count ? extraArgs[index + 1] : null;
+            if (string.IsNullOrWhiteSpace(value) || value.StartsWith("-", StringComparison.Ordinal))
+                throw new InvalidOperationException($"ExtraArgs option '{option}' requires a value agreeing with the typed launch configuration.");
+
+            var agrees = key == "placement"
+                ? PlacementValuesAgree(value, placement)
+                : string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
+            if (!agrees)
+                throw new InvalidOperationException($"ExtraArgs option '{option}' conflicts with the typed launch configuration (expected '{expected}', got '{value}').");
+
+            extraArgs.RemoveAt(index);
+            if (equals < 0)
+                extraArgs.RemoveAt(index);
+        }
+    }
+
+    private static string PlacementArgumentValue(GpuPlacementIntent placement) => placement.Kind switch
+    {
+        GpuPlacementKind.Cpu => "0",
+        GpuPlacementKind.Auto => "auto",
+        GpuPlacementKind.All => "all",
+        GpuPlacementKind.Exact => placement.ExactLayerCount!.Value.ToString(CultureInfo.InvariantCulture),
+        _ => throw new InvalidOperationException("Unknown GPU placement kind.")
+    };
+
+    private static bool PlacementValuesAgree(string value, GpuPlacementIntent placement) =>
+        placement.Kind == GpuPlacementKind.All
+            ? string.Equals(value, "all", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "999", StringComparison.OrdinalIgnoreCase)
+            : string.Equals(value, PlacementArgumentValue(placement), StringComparison.OrdinalIgnoreCase);
+
     private static void RemoveProjectorArguments(List<string> args)
     {
         for (var i = args.Count - 1; i >= 0; i--)
@@ -876,6 +983,7 @@ public sealed class ServerProcessManager : IDisposable
             Port           = cfg.Port,
             ContextSize    = cfg.ContextSize,
             GpuLayers      = cfg.GpuLayers,
+            GpuPlacement   = cfg.GpuPlacement,
             Threads        = cfg.Threads,
             PromptThreads  = cfg.PromptThreads,
             Slots          = cfg.Slots,
@@ -908,12 +1016,31 @@ public sealed class ServerProcessManager : IDisposable
             RuntimeSpeculativeTypes = cfg.RuntimeSpeculativeTypes,
             RuntimeSupportsPromptThreads = cfg.RuntimeSupportsPromptThreads,
             RuntimeSupportsLoadMode = cfg.RuntimeSupportsLoadMode,
-            RuntimeSupportsCorsOrigins = cfg.RuntimeSupportsCorsOrigins
+            RuntimeSupportsCorsOrigins = cfg.RuntimeSupportsCorsOrigins,
+            RuntimeSupportsGpuPlacementCpu = cfg.RuntimeSupportsGpuPlacementCpu,
+            RuntimeSupportsGpuPlacementAuto = cfg.RuntimeSupportsGpuPlacementAuto,
+            RuntimeSupportsGpuPlacementAll = cfg.RuntimeSupportsGpuPlacementAll,
+            RuntimeSupportsGpuPlacementExact = cfg.RuntimeSupportsGpuPlacementExact,
+            RuntimeSupportsFit = cfg.RuntimeSupportsFit
         };
     }
 
     private static string? ValidateRuntimeOptions(ServerConfig cfg)
     {
+        if (!cfg.TryGetGpuPlacement(out var placement, out var placementError))
+            return $"GPU placement needs repair before launch: {placementError}";
+
+        var placementSupported = placement!.Kind switch
+        {
+            GpuPlacementKind.Cpu => cfg.RuntimeSupportsGpuPlacementCpu,
+            GpuPlacementKind.Auto => cfg.RuntimeSupportsGpuPlacementAuto && cfg.RuntimeSupportsFit,
+            GpuPlacementKind.All => cfg.RuntimeSupportsGpuPlacementAll,
+            GpuPlacementKind.Exact => cfg.RuntimeSupportsGpuPlacementExact,
+            _ => false
+        };
+        if (!placementSupported)
+            return $"The selected llama-server has no proven capability for GPU placement '{placement.CanonicalValue}'. Select a runtime that advertises the requested placement and fit semantics.";
+
         if (cfg.PromptThreads > 0 && !cfg.RuntimeSupportsPromptThreads)
             return "This llama-server does not advertise --threads-batch. Remove Prompt processing threads or select a runtime that supports it.";
 
@@ -934,6 +1061,11 @@ public sealed class ServerProcessManager : IDisposable
             ? null
             : $"The selected llama-server does not advertise speculative type(s): {string.Join(", ", unsupported)}. Remove them or select a runtime that supports them.";
     }
+
+    private static bool IsAvailable(LlamaRuntimeCapabilityFacts facts, string capabilityId) =>
+        facts.LaunchCapabilities is not null
+        && facts.LaunchCapabilities.TryGetValue(capabilityId, out var evidence)
+        && evidence.State == CapabilityState.Available;
 
     private static string ResolveExecutable(string executablePath)
     {

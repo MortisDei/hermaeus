@@ -71,6 +71,7 @@ public sealed record LabConfiguration
     public string Label { get; init; } = string.Empty;
     public int ContextSize { get; init; }
     public int GpuLayers { get; init; }
+    public GpuPlacementIntent? GpuPlacement { get; init; }
     public int Threads { get; init; }
     public int PromptThreads { get; init; }
     public int Slots { get; init; }

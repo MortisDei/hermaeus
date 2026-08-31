@@ -12,12 +12,46 @@ public class ServerConfig
     public int    ContextSize    { get; set; } = 4096;
 
     /// <summary>
-    /// GPU offload layers (r14 1.3). 0 means explicit CPU inference (the flag
-    /// is omitted); -1 means "all layers", rendered as <c>--n-gpu-layers 999</c>
-    /// and the default for new managed servers when a real GPU is detected; a
-    /// positive N offloads exactly N layers.
+    /// Legacy integer GPU-layer setting retained for source compatibility and
+    /// one-version JSON migration. New settings use <see cref="GpuPlacement"/>.
     /// </summary>
-    public int    GpuLayers      { get; set; } = 0;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int GpuLayers { get; set; } = 0;
+
+    /// <summary>Typed CPU, Auto, All, or Exact GPU placement intent.</summary>
+    public GpuPlacementIntent? GpuPlacement { get; set; }
+
+    /// <summary>
+    /// Reads the old JSON property but is omitted after the typed migration is
+    /// present. SettingsService performs that migration in memory on load and
+    /// writes the new shape on the next ordinary save.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("GpuLayers")]
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? LegacyGpuLayersJson
+    {
+        get => GpuPlacement is null ? GpuLayers : null;
+        set
+        {
+            if (value is int legacy)
+                GpuLayers = legacy;
+        }
+    }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string GpuPlacementValidationError { get; set; } = string.Empty;
+
+    public bool TryGetGpuPlacement(out GpuPlacementIntent? intent, out string? error)
+    {
+        if (GpuPlacement is not null)
+        {
+            intent = GpuPlacement;
+            var valid = intent.TryValidate(out error);
+            return valid;
+        }
+
+        return GpuPlacementIntent.TryFromLegacy(GpuLayers, out intent, out error);
+    }
     public int    Threads        { get; set; } = 4;
 
     /// <summary>
@@ -128,4 +162,19 @@ public class ServerConfig
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool RuntimeSupportsCorsOrigins { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsGpuPlacementCpu { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsGpuPlacementAuto { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsGpuPlacementAll { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsGpuPlacementExact { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsFit { get; set; }
 }

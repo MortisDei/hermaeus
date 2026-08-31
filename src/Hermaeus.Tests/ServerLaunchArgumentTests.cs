@@ -1,6 +1,7 @@
 using Hermaeus.Core.Models;
 using Hermaeus.Services;
 using Hermaeus.Services.ProcessManagement;
+using System.Text.Json;
 using Xunit;
 
 namespace Hermaeus.Tests;
@@ -13,10 +14,29 @@ namespace Hermaeus.Tests;
 public sealed class ServerLaunchArgumentTests
 {
     [Fact]
-    public void GpuLayers_renders_by_semantics()
+    public void Typed_gpu_placement_renders_by_semantics()
     {
-        Assert.DoesNotContain("--n-gpu-layers", Args(new ServerConfig { GpuLayers = 0 }));
-        Assert.Equal("999", ArgValue(Args(new ServerConfig { GpuLayers = -1 }), "--n-gpu-layers"));
+        var cpu = Args(new ServerConfig { GpuPlacement = GpuPlacementIntent.Cpu() });
+        Assert.Equal("off", ArgValue(cpu, "--fit"));
+        Assert.Equal("0", ArgValue(cpu, "--n-gpu-layers"));
+
+        var auto = Args(new ServerConfig { GpuPlacement = GpuPlacementIntent.Auto() });
+        Assert.Equal("on", ArgValue(auto, "--fit"));
+        Assert.DoesNotContain("--n-gpu-layers", auto);
+
+        var all = Args(new ServerConfig { GpuPlacement = GpuPlacementIntent.All() });
+        Assert.Equal("off", ArgValue(all, "--fit"));
+        Assert.Equal("all", ArgValue(all, "--n-gpu-layers"));
+
+        var exact = Args(new ServerConfig { GpuPlacement = GpuPlacementIntent.Exact(20) });
+        Assert.Equal("20", ArgValue(exact, "--n-gpu-layers"));
+    }
+
+    [Fact]
+    public void Legacy_integer_maps_to_typed_placement()
+    {
+        Assert.Equal("0", ArgValue(Args(new ServerConfig { GpuLayers = 0 }), "--n-gpu-layers"));
+        Assert.Equal("all", ArgValue(Args(new ServerConfig { GpuLayers = -1 }), "--n-gpu-layers"));
         Assert.Equal("20", ArgValue(Args(new ServerConfig { GpuLayers = 20 }), "--n-gpu-layers"));
     }
 
@@ -29,14 +49,11 @@ public sealed class ServerLaunchArgumentTests
     }
 
     [Fact]
-    public void User_parallel_and_cache_reuse_override_defaults()
+    public void Core_extra_argument_conflict_is_rejected()
     {
-        var args = Args(new ServerConfig { Slots = 4, ExtraArgs = "--parallel 8 --cache-reuse 32" });
-        // A user-supplied value wins; the default is not also emitted.
-        Assert.Equal(1, args.Count(a => a == "--parallel"));
-        Assert.Equal(1, args.Count(a => a == "--cache-reuse"));
-        Assert.Equal("8", ArgValue(args, "--parallel"));
-        Assert.Equal("32", ArgValue(args, "--cache-reuse"));
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            Args(new ServerConfig { Slots = 4, ExtraArgs = "--parallel 8 --cache-reuse 32" }));
+        Assert.Contains("conflicts", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -160,15 +177,63 @@ public sealed class ServerLaunchArgumentTests
     }
 
     [Fact]
-    public void A_fresh_default_config_produces_a_byte_identical_command_line_to_v0_22_0_alpha()
+    public void A_fresh_default_config_explicitly_pins_cpu_placement()
     {
         var cfg = new ServerConfig { ModelPath = "model.gguf" };
         var args = Args(cfg);
 
         Assert.Equal(
             ["-m", "model.gguf", "--port", "8080", "--host", "127.0.0.1", "--ctx-size", "4096",
-             "--threads", "4", "--parallel", "1", "--cache-reuse", "256"],
+             "--threads", "4", "--fit", "off", "--n-gpu-layers", "0", "--parallel", "1", "--cache-reuse", "256"],
             args);
+    }
+
+    [Fact]
+    public void Legacy_settings_are_written_in_the_typed_shape_after_normalization()
+    {
+        var settings = new AppSettings
+        {
+            ManagedServers = [new ServerConfig { Name = "Chat", GpuLayers = -1 }]
+        };
+
+        SettingsService.NormalizeManagedServers(settings.ManagedServers);
+        var json = JsonSerializer.Serialize(settings);
+
+        Assert.Contains("\"GpuPlacement\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"Kind\":\"All\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"GpuLayers\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Loading_does_not_rewrite_legacy_settings_until_an_ordinary_save()
+    {
+        using var temp = new TempDir();
+        var path = temp.PathFor("settings/settings.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var legacy = "{\"ManagedServers\":[{\"Name\":\"Chat\",\"Port\":39201,\"GpuLayers\":-1}]}";
+        await File.WriteAllTextAsync(path, legacy);
+
+        var settings = Helpers.NewSettings(temp);
+        await settings.LoadAsync();
+
+        Assert.Equal(GpuPlacementKind.All, settings.Settings.ManagedServers[0].GpuPlacement?.Kind);
+        Assert.Equal(legacy, await File.ReadAllTextAsync(path));
+
+        await settings.SaveAsync();
+        var saved = await File.ReadAllTextAsync(path);
+        Assert.Contains("\"GpuPlacement\"", saved, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"GpuLayers\"", saved, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Invalid_legacy_gpu_layers_remain_invalid_for_repair()
+    {
+        var server = new ServerConfig { GpuLayers = -2 };
+        SettingsService.NormalizeManagedServers([server]);
+
+        Assert.False(server.TryGetGpuPlacement(out _, out var error));
+        Assert.Contains("must be 0", error, StringComparison.Ordinal);
+        Assert.Equal(error, server.GpuPlacementValidationError);
     }
 
     [Fact]

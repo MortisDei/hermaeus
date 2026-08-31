@@ -76,6 +76,7 @@ public class AppSettings
             Port           = 39201,
             ContextSize    = 4096,
             GpuLayers      = 0,
+            GpuPlacement   = GpuPlacementIntent.Cpu(),
             Threads        = 4,
             EmbeddingsMode = false,
             AutoStart      = false
@@ -87,6 +88,7 @@ public class AppSettings
             Port           = 39202,
             ContextSize    = 2048,
             GpuLayers      = 0,
+            GpuPlacement   = GpuPlacementIntent.Cpu(),
             Threads        = 4,
             EmbeddingsMode = true,
             AutoStart      = false

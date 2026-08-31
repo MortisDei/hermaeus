@@ -1006,26 +1006,40 @@ public sealed class BenchmarkService
         if (!string.IsNullOrWhiteSpace(managedServer?.Speculative?.DraftModelPath))
             companionIdentity = RuntimeIdentityFactory.CreateModelIdentity(managedServer.Speculative.DraftModelPath, null).StableId;
 
-        var configuration = new ConfigurationIdentityV2(
-            metadata.ContextSize,
-            metadata.GpuLayers,
-            metadata.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", > 0 => "gpu-partial", _ => string.Empty },
-            metadata.Threads,
-            metadata.PromptThreads,
-            managedServer?.Slots,
-            metadata.BatchSize,
-            null,
-            metadata.KvCacheTypeK,
-            metadata.KvCacheTypeV,
-            metadata.FlashAttention,
-            metadata.SpeculativeTypes,
-            companionIdentity,
-            $"nmax={metadata.SpeculativeNMax?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty};nmin={metadata.SpeculativeNMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty};pmin={metadata.SpeculativePMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}",
-            managedServer?.CpuMoeLayers,
-            new Dictionary<string, string>(StringComparer.Ordinal),
-            managedServer is not null && string.IsNullOrWhiteSpace(managedServer.ExtraArgs)
+        var identitySource = managedServer ?? new ServerConfig
+        {
+            ContextSize = metadata.ContextSize ?? 4096,
+            GpuLayers = metadata.GpuLayers ?? 0,
+            GpuPlacement = GpuPlacementIntent.TryFromLegacy(metadata.GpuLayers ?? 0, out var placement, out _)
+                ? placement
+                : null,
+            Threads = metadata.Threads ?? 0,
+            PromptThreads = metadata.PromptThreads ?? 0,
+            KvCacheTypeK = metadata.KvCacheTypeK,
+            KvCacheTypeV = metadata.KvCacheTypeV,
+            FlashAttention = metadata.FlashAttention,
+            Speculative = new SpeculativeDecodingConfig
+            {
+                Types = (metadata.SpeculativeTypes ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+                NMax = metadata.SpeculativeNMax,
+                NMin = metadata.SpeculativeNMin,
+                PMin = metadata.SpeculativePMin
+            }
+        };
+        var configuration = ConfigurationIdentityFactory.Create(identitySource, companionIdentity) with
+        {
+            ContextSize = metadata.ContextSize,
+            GpuLayers = metadata.GpuLayers,
+            Threads = metadata.Threads,
+            PromptThreads = metadata.PromptThreads,
+            Slots = managedServer?.Slots,
+            BatchSize = metadata.BatchSize,
+            SpeculativeMechanism = metadata.SpeculativeTypes ?? string.Empty,
+            FlashAttention = metadata.FlashAttention ?? string.Empty,
+            Completeness = managedServer is not null && string.IsNullOrWhiteSpace(managedServer.ExtraArgs)
                 ? IdentityCompleteness.Complete
-                : IdentityCompleteness.Incomplete);
+                : IdentityCompleteness.Incomplete
+        };
 
         return new EmpiricalProfileFingerprintV2(runtime, modelIdentity, hardware, configuration);
     }

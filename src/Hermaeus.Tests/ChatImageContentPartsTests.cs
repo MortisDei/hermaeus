@@ -115,7 +115,7 @@ public sealed class ChatImageContentPartsTests
             ModelPath = "model.gguf",
             MmprojPath = "verified-projector.gguf",
             UseProjector = false,
-            ExtraArgs = "--mmproj manual-projector.gguf --threads 8"
+            ExtraArgs = "--mmproj manual-projector.gguf --alias chat"
         };
 
         var args = ServerProcessManager.BuildLaunchArguments(cfg).ToList();
@@ -123,7 +123,7 @@ public sealed class ChatImageContentPartsTests
         Assert.DoesNotContain("--mmproj", args);
         Assert.DoesNotContain("verified-projector.gguf", args);
         Assert.DoesNotContain("manual-projector.gguf", args);
-        Assert.Contains("--threads", args);
+        Assert.Contains("--alias", args);
         Assert.Equal("verified-projector.gguf", cfg.MmprojPath);
     }
 

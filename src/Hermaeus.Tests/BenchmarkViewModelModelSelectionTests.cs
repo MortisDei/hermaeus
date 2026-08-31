@@ -62,15 +62,13 @@ public sealed class BenchmarkViewModelModelSelectionTests
 
         await vm.RunCommand.ExecuteAsync(null);
 
-        // ServerProcessManager raises Starting synchronously, but the server row
-        // marshals that transition through the captured UI synchronization
-        // context. The command can complete before xUnit drains that post, so
-        // wait for the intentionally unconfigured start attempt to reach Error
-        // before checking the exact transition count.
+        // The selected runtime is intentionally unconfigured. Batch 1 rejects
+        // its unproven placement before entering Starting, so this remains an
+        // attempted run without claiming that a child process was launched.
         await WaitForAsync(
             () => services.Servers[0].Status == ServerStatus.Error,
             "the intentionally unconfigured managed server restart to settle");
         Assert.Equal(Path.GetFullPath(modelPath), services.Servers[0].ModelPath);
-        Assert.Equal(1, starts);
+        Assert.Equal(0, starts);
     }
 }

@@ -51,7 +51,7 @@ the stores into one schema.
 | ---: | --- | --- | --- | --- |
 | 0 | Verify installed Linux/Windows runtime help/version, exact argument spelling and effective-placement observability against the already-fixed doc 02 contract; inspect pinned reranker graph batch dimensions; capture current build/test/coverage baseline | planning pack | mandatory environment facts | Yes |
 | CI | Separate non-required pre-PR branch checks from required PR merge-context checks; preserve main/fork coverage and trusted-push security boundaries; add authority-scoped superseded-run cancellation without changing repository settings | live ruleset re-read, doc 09 | mandatory operational efficiency | No |
-| 1 | Typed CPU/Auto/All/Exact launch intent and exact legacy/tune-profile migration; remove implicit tune-profile-on-Start mutation; canonical managed launch specification, conflict policy for core `ExtraArgs`, one configured/planned/rendered/effective/observed projection and fingerprint, versioned compatibility tests | 0 | mandatory correctness foundation | No |
+| 1 | Typed CPU/Auto/All/Exact launch intent and exact legacy/tune-profile migration; remove implicit tune-profile-on-Start mutation; canonical managed launch specification, conflict policy for core `ExtraArgs`, one configured/planned/rendered/effective/observed projection and fingerprint, versioned compatibility tests | 0 | mandatory correctness foundation | Yes |
 | 2 | Services-owned model inventory with bounded scan/GGUF/manifest cache and explicit invalidation; converge simple card fit onto the versioned prediction engine while preserving a labelled pre-download estimate | 0, 1 | mandatory shared foundation | No |
 | 3 | Resource consumer registry, allocation owner/component/per-device model, immutable snapshots, local/remote/owned identity, authoritative per-device and Unknown observations, in-process adapters, bounded persistence | 1, 2 | mandatory resource spine | No |
 | 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | No |
@@ -112,6 +112,43 @@ and `token_type_ids`, with `logits` shaped `[batch_size, 1]`. Genuine graph
 batch support is proven. The current reranker still scores candidates one at
 a time; batching remains the separate Batch 6 experiment and is not part of
 Batch 0.
+
+### 8.2.2 Batch 1 evidence
+
+Batch 1 landed the versioned `GpuPlacementIntent` shape with `Cpu`, `Auto`,
+`All`, and `Exact(N)` kinds. Legacy `GpuLayers` values map as `0 -> Cpu`,
+`-1 -> All`, and positive values to `Exact(N)`. Values below `-1`, malformed
+typed intents, and unsupported intent schema versions remain invalid and
+refuse launch with a repair error. A missing typed field therefore remains
+CPU, preserving the old deserialization meaning rather than becoming Auto.
+
+Settings load materializes the typed intent in memory without rewriting the
+file. The next ordinary save writes `GpuPlacement` and omits legacy
+`GpuLayers`. Tune profiles receive the same typed mapping and remain evidence;
+ordinary Start and model selection no longer copy profile values into the
+editor or saved server configuration.
+
+The managed argument builder now consumes the single typed intent. CPU emits
+explicit fit-off plus zero layers, Auto emits fit-on with placement unset, and
+All or Exact emit fit-off plus the proven explicit placement form. Core
+`ExtraArgs` aliases for host, port, context, threads, slots, fit, and placement
+are removed when they agree and refuse launch when they conflict. Loopback
+host ownership is therefore not bypassable through the escape hatch.
+
+`ConfigurationIdentityFactory` is shared by managed telemetry, Lab, and
+benchmark projections. It includes the placement schema/value, includes
+recognized non-core extras as hashed identity inputs, and retains bounded
+unknown extra hashes while marking identity `Incomplete`. The installed Linux
+runtime facts from Batch 0 prove the syntax needed by these forms, but the
+host still reports no devices and `/props` exposes no effective placement or
+fit result. Effective runtime placement and fit outcome therefore remain
+Unknown for the Batch 1 live gate. Windows remains Unknown because no managed
+Windows runtime is installed or mounted in the review environment.
+
+Batch 1 verification: focused launch, migration, profile, and identity tests
+passed (37); the full sequential suite passed with 2,367 passed and 17
+skipped; the zero-warning solution build passed. Test results were written
+outside the checkout.
 
 The pre-change baseline was a zero-warning solution build, 2,354 passed and
 17 skipped out of 2,371 sequential tests, and 38,550 of 60,422 covered lines

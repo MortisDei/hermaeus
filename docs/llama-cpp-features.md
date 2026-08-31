@@ -61,11 +61,12 @@ The R32 launch contract distinguishes typed intent from runtime evidence:
 | All | explicit `all` or a proven equivalent | fit off |
 | Exact(N) | explicit numeric GPU-layer count | fit off |
 
-Batch 0 only establishes whether the selected executable accepts the relevant
-syntax and whether effective values can be observed. It does not add these
-controls to settings or change the current launch precedence. If syntax is not
-proven, the capability is unavailable. If a failed probe or runtime response
-does not establish effective placement, it remains Unknown.
+Batch 0 established whether the selected executable accepts the relevant
+syntax and whether effective values can be observed. Batch 1 stores the typed
+intent and renders one conflict-free launch vector. A runtime capability probe
+still gates launch: a requested mode with no Available evidence is refused,
+and a successful syntax probe without effective-placement reporting remains
+Unknown rather than being presented as effective.
 
 The bounded R32 launch capability ids include `runtime.gpu-placement.cpu`,
 `runtime.gpu-placement.auto`, `runtime.gpu-placement.all`,

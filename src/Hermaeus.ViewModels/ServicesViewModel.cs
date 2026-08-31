@@ -39,6 +39,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int          _port;
     [ObservableProperty] private int          _contextSize;
     [ObservableProperty] private int          _gpuLayers;
+    [ObservableProperty] private string       _gpuPlacementSelection = "CPU";
     [ObservableProperty] private int          _threads;
     [ObservableProperty] private int          _promptThreads;
     [ObservableProperty] private int          _slots;
@@ -119,6 +120,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public bool CanEditNgramDecoding => CanEdit && (SupportsNgramDecoding || UseNgramDecoding);
     public bool CanEditDraftModelDecoding => CanEdit && (SupportsDraftModelDecoding || UseDraftModelDecoding);
     public bool HasPromptThreadsControl => SupportsPromptThreads || PromptThreads > 0;
+    public static IReadOnlyList<string> GpuPlacementOptions { get; } = ["CPU", "Auto", "All", "Exact"];
+    public bool IsExactGpuPlacement => string.Equals(GpuPlacementSelection, "Exact", StringComparison.Ordinal);
 
     private bool HasType(string type) =>
         ParseTypes(SpeculativeTypes).Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
@@ -174,7 +177,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public bool HasGpuFitBreakdown => !string.IsNullOrWhiteSpace(GpuFitBreakdown);
     partial void OnGpuFitBreakdownChanged(string value) => OnPropertyChanged(nameof(HasGpuFitBreakdown));
 
-    /// <summary>r19 2.1: names where the current Context Size value came from ("Context from model card" / "Context from Auto Tune"), empty when the user set it directly.</summary>
+    /// <summary>Names where the current Context Size value came from, empty when the user set it directly.</summary>
     [ObservableProperty] private string       _contextSourceLabel = string.Empty;
     public bool HasContextSourceLabel => !string.IsNullOrEmpty(ContextSourceLabel);
     partial void OnContextSourceLabelChanged(string value) => OnPropertyChanged(nameof(HasContextSourceLabel));
@@ -205,7 +208,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.UseProjector != UseProjector ||
         _config.Port != Port ||
         _config.ContextSize != ContextSize ||
-        _config.GpuLayers != GpuLayers ||
+        PlacementCanonical(_config) != CurrentPlacementCanonical() ||
         _config.Threads != Threads ||
         _config.PromptThreads != PromptThreads ||
         _config.Slots != Slots ||
@@ -222,14 +225,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         !SpeculativeMatchesConfig();
 
     /// <summary>
-    /// Human-readable effective GPU offload for the Services card (r14 1.3):
-    /// "all layers" for -1, "0 (CPU)" for 0, or the explicit layer count.
+    /// Human-readable configured GPU placement for the Services card. Effective
+    /// placement remains a runtime observation and is not guessed here.
     /// </summary>
-    public string EffectiveOffloadLabel => GpuLayers switch
+    public string EffectiveOffloadLabel => GpuPlacementSelection switch
     {
-        < 0 => "all layers",
-        0 => "0 (CPU)",
-        var n => n.ToString()
+        "CPU" => "0 (CPU)",
+        "Auto" => "automatic placement",
+        "All" => "all layers",
+        "Exact" => $"{GpuLayers} layers (exact)",
+        _ => "Unknown placement"
     };
 
     /// <summary>
@@ -543,6 +548,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _port           = config.Port;
         _contextSize    = config.ContextSize;
         _gpuLayers      = config.GpuLayers;
+        _gpuPlacementSelection = PlacementSelection(config);
         _threads        = config.Threads;
         _promptThreads  = config.PromptThreads;
         _slots          = config.Slots;
@@ -670,6 +676,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private string ComputeGpuFitBreakdown()
     {
+        if (string.Equals(GpuPlacementSelection, "Auto", StringComparison.Ordinal))
+            return "GPU fit: Unknown until the selected runtime reports effective placement.";
+
         if (_hardwareProfile is null || _ggufInfo is null || TryGetModelFileSizeBytes() is not long modelBytes)
             return string.Empty;
 
@@ -744,6 +753,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         if (hw is null || info is null)
             return flatNote;
+
+        if (string.Equals(GpuPlacementSelection, "Auto", StringComparison.Ordinal))
+            return "GPU fit is Unknown until the selected runtime reports effective placement.";
 
         var fileSizeBytes = TryGetModelFileSizeBytes();
         var bpeK = KvCacheMath.ResolveBytesPerElement(KvCacheType, ExtraArgs, isKeyCache: true);
@@ -891,7 +903,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private async Task StartCoreAsync(CancellationToken ct)
     {
-        ApplyTuneProfileIfAvailable();
         SyncToConfig();
         await SaveConfigAsync();
         if (BeforeStartAsync is not null)
@@ -1131,7 +1142,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         if (modelChanged)
         {
             ModelPath = normalized;
-            ApplyTuneProfileIfAvailable();
             SyncToConfig();
             await SaveConfigAsync();
         }
@@ -1145,24 +1155,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             throw new InvalidOperationException(ErrorMessage);
     }
 
-    private bool ApplyTuneProfileIfAvailable()
-    {
-        var profile = LlamaTuneProfileStore.Find(_settings.Settings, ModelPath);
-        if (profile is null)
-            return false;
-
-        GpuLayers = profile.GpuLayers;
-        Threads = profile.Threads;
-        if (profile.ContextSize > 0)
-            ContextSize = profile.ContextSize;
-        if (!string.IsNullOrWhiteSpace(profile.ExtraArgs))
-            ExtraArgs = profile.ExtraArgs;
-        return true;
-    }
-
     private Task PersistTuneProfileAsync(ServerTuneResult? result = null)
     {
-        LlamaTuneProfileStore.Upsert(_settings.Settings, ModelPath, ContextSize, ExtraArgs, GpuLayers, Threads, result);
+        LlamaTuneProfileStore.Upsert(_settings.Settings, ModelPath, ContextSize, ExtraArgs, GpuLayers, Threads, result, BuildGpuPlacement());
         return Task.CompletedTask;
     }
 
@@ -1201,7 +1196,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.UseProjector   = UseProjector;
         _config.Port           = Port;
         _config.ContextSize    = ContextSize;
-        _config.GpuLayers      = GpuLayers;
+        var placement = BuildGpuPlacement();
+        _config.GpuPlacement  = placement;
+        _config.GpuLayers      = placement.LegacyGpuLayers ?? 0;
         _config.Threads        = Threads;
         _config.PromptThreads  = PromptThreads;
         _config.Slots          = Slots;
@@ -1255,6 +1252,37 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             linked.BaseUrl = url;
     }
 
+    private GpuPlacementIntent BuildGpuPlacement() => GpuPlacementSelection switch
+    {
+        "CPU" => GpuPlacementIntent.Cpu(),
+        "Auto" => GpuPlacementIntent.Auto(),
+        "All" => GpuPlacementIntent.All(),
+        "Exact" => GpuPlacementIntent.Exact(GpuLayers),
+        _ => GpuPlacementIntent.Cpu()
+    };
+
+    private string CurrentPlacementCanonical() => BuildGpuPlacement().CanonicalValue;
+
+    private static string PlacementCanonical(ServerConfig config) =>
+        config.TryGetGpuPlacement(out var placement, out _)
+            ? placement!.CanonicalValue
+            : "invalid";
+
+    private static string PlacementSelection(ServerConfig config)
+    {
+        if (!config.TryGetGpuPlacement(out var placement, out _))
+            return "CPU";
+
+        return placement!.Kind switch
+        {
+            GpuPlacementKind.Cpu => "CPU",
+            GpuPlacementKind.Auto => "Auto",
+            GpuPlacementKind.All => "All",
+            GpuPlacementKind.Exact => "Exact",
+            _ => "CPU"
+        };
+    }
+
     /// <summary>
     /// The editor's current state as a <see cref="ServerConfig"/>, without
     /// touching the saved one. Public because it is the honest way to ask
@@ -1271,6 +1299,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         Port           = Port,
         ContextSize    = ContextSize,
         GpuLayers      = GpuLayers,
+        GpuPlacement   = BuildGpuPlacement(),
         Threads        = Threads,
         PromptThreads  = PromptThreads,
         Slots          = Slots,
@@ -1403,8 +1432,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// r19 2.1: applies precedence tune-profile &gt; model-card default &gt;
-    /// leave-as-is when the selected model actually changes to a different
+    /// r32 Batch 1: applies the model-card context default only when the
+    /// selected model actually changes to a different
     /// file. <see cref="RefreshDetectedModels"/> re-assigns <see cref="ModelPath"/>
     /// back to its own current value to repair the ComboBox binding after a
     /// list rebuild; that reassignment must never re-apply defaults on top
@@ -1420,12 +1449,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         if (ModelPathSafety.AreSameLocalPath(value, _lastModelPathForDefaults))
             return;
         _lastModelPathForDefaults = value;
-
-        if (ApplyTuneProfileIfAvailable())
-        {
-            ContextSourceLabel = "Context from Auto Tune";
-            return;
-        }
 
         var card = _modelProfiles?.Get(value)
             ?? _modelProfiles?.Profiles.FirstOrDefault(p =>
@@ -1452,8 +1475,37 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
     partial void OnGpuLayersChanged(int value)
     {
+        if (value == -1)
+            GpuPlacementSelection = "All";
+        else if (value == 0 && string.Equals(GpuPlacementSelection, "Exact", StringComparison.Ordinal))
+            GpuPlacementSelection = "CPU";
+        else if (value > 0)
+            GpuPlacementSelection = "Exact";
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
+        OnPropertyChanged(nameof(IsExactGpuPlacement));
+        ApplyContextFitNote();
+    }
+    partial void OnGpuPlacementSelectionChanged(string value)
+    {
+        switch (value)
+        {
+            case "CPU":
+            case "Auto":
+                GpuLayers = 0;
+                break;
+            case "All":
+                GpuLayers = -1;
+                break;
+            case "Exact":
+                if (GpuLayers <= 0)
+                    GpuLayers = 1;
+                break;
+        }
+
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(EffectiveOffloadLabel));
+        OnPropertyChanged(nameof(IsExactGpuPlacement));
         ApplyContextFitNote();
     }
     partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1923,24 +1975,7 @@ public partial class ServicesViewModel : ViewModelBase
         var companionIdentity = string.IsNullOrWhiteSpace(speculative.DraftModelPath)
             ? string.Empty
             : RuntimeIdentityFactory.CreateModelIdentity(speculative.DraftModelPath, null).StableId;
-        var configuration = new ConfigurationIdentityV2(
-            config.ContextSize,
-            config.GpuLayers,
-            config.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", > 0 => "gpu-partial", _ => string.Empty },
-            config.Threads,
-            config.PromptThreads,
-            config.Slots,
-            null,
-            null,
-            config.KvCacheTypeK,
-            config.KvCacheTypeV,
-            config.FlashAttention,
-            string.Join(",", speculative.Types),
-            companionIdentity,
-            $"nmax={speculative.NMax};nmin={speculative.NMin};pmin={speculative.PMin}",
-            config.CpuMoeLayers,
-            new Dictionary<string, string>(StringComparer.Ordinal),
-            IdentityCompleteness.Incomplete);
+        var configuration = ConfigurationIdentityFactory.Create(config, companionIdentity);
         var fingerprint = new EmpiricalProfileFingerprintV2(runtime, model, hardware, configuration);
         return new RuntimeTelemetryRequest(
             $"chat-{server.Id}", process.ProcessId, process.StartedAtUtc,

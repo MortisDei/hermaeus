@@ -84,14 +84,13 @@ and behavior.
   <https://huggingface.co/docs/hub/en/model-cards>.
 
 These facts establish the R32 semantic contract rather than postponing it.
-Hermaeus currently defines `GpuLayers == 0` as explicit CPU but renders that
-state by omitting `--n-gpu-layers`; on a runtime whose default is `auto`, that
-does not preserve intent. Doc 02 therefore defines a typed CPU/Auto/All/Exact
-intent, exact legacy migration, tune profiles as non-authoritative evidence,
-explicit fit ownership, and effective-placement audit. Doc 08 Batch 0 verifies
-the selected installed binaries against that contract and marks unsupported
-capabilities unavailable or Unknown. It does not get to choose a different
-precedence chain.
+Batch 0 verified the selected installed binaries against that contract and
+marked unsupported capabilities unavailable or Unknown. Batch 1 now stores a
+typed CPU/Auto/All/Exact intent, migrates legacy values on ordinary save,
+treats tune profiles as non-authoritative evidence, renders explicit fit
+ownership, and shares one configuration identity projection. Effective
+placement remains an observed runtime fact and is still Unknown on a host with
+no enumerated devices.
 
 ## Documents
 

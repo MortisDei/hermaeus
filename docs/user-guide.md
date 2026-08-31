@@ -304,6 +304,13 @@ the Hermaeus window, rechecks the selected server plus runtime/model identity,
 and saves through the normal Settings path. Review is separate from running an
 experiment, and experiment evidence is retained.
 
+Managed server GPU placement is edited as CPU, Auto, All, or Exact. The setting
+is a request, not a claim about effective runtime placement. Auto is available
+only when the selected runtime proves both automatic placement and fit support;
+unsupported or unobservable behavior stays unavailable or Unknown. Matching
+Auto-tune profiles are evidence and are not silently applied when a server
+starts or a model is selected.
+
 Choose **Inspect runtime recipes** to see GPU placement, context, KV, Flash
 Attention, CPU-MoE, external draft, EAGLE-3, and speculative parameter plans
 for the selected runtime. `Unknown` means the

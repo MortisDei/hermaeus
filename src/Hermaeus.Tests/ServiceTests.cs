@@ -2335,14 +2335,14 @@ namespace Hermaeus.Tests
                 Threads = 6,
                 GpuLayers = 12,
                 EmbeddingsMode = true,
-                ExtraArgs = "--alias \"local model\" --host 0.0.0.0 --flag"
+                ExtraArgs = "--alias \"local model\" --flag"
             }).ToList();
 
             Equal("-m", args[0], "model flag should be first");
             Equal("/models/local model.gguf", args[1], "model path with spaces should remain one argument");
             ContainsInOrder(args, "--host", "127.0.0.1", "managed host should be loopback by default");
             ContainsInOrder(args, "--alias", "local model", "quoted extra arg should remain one argument");
-            ContainsInOrder(args, "--host", "0.0.0.0", "extra args should be preserved as data arguments");
+            True(args.Contains("--flag"), "non-core extra args should be preserved as data arguments");
             False(args.Any(a => a.Contains(';', StringComparison.Ordinal)), "argument builder should not synthesize shell separators");
             True(args.Contains("--embeddings"), "embeddings mode should add embeddings flag");
             ContainsInOrder(args, "--pooling", "mean", "embeddings mode should default to OAI-compatible mean pooling");
