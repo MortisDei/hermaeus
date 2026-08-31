@@ -552,6 +552,35 @@ and 0 errors; and the full sequential suite passed with 2,535 passed, 17
 skipped, and 2,552 total tests. Batch 11 branch CI run `33391762243` passed on
 Ubuntu and Windows.
 
+### 8.2.15 Batch 13 readiness audit
+
+The automated R32 release-readiness audit is complete for `0.39.0-beta`:
+
+- The solution build passed with 0 warnings and 0 errors. The complete
+  sequential suite passed with 2,535 passed, 17 skipped, and 2,552 total
+  tests. The canonical 60% line-coverage gate passed with all generated
+  results outside the checkout.
+- The Linux `linux-x64` tarball and cross-built Windows `win-x64` ZIP both
+  built as `0.39.0-beta`; each checksum verified, each archive passed its
+  integrity test, required launcher/application/package files were present,
+  and no PDB files were included. The Windows result proves packaging only,
+  not Windows runtime or GUI behavior.
+- The complete committed R32 range was checked for `git diff --check`,
+  tracked test/coverage/model artifacts, credentials, private paths, raw
+  owner data, em dashes in added lines, unsafe process-launch changes, and
+  accidental workflow or repository-setting changes. No new violation was
+  found. The Batch 12 branch CI run `33393611503` passed on Ubuntu and
+  Windows.
+
+Batch 13 remains `No` in the table because automated evidence cannot replace
+the named owner gates. The reviewed host has no managed Windows runtime, so
+Windows runtime identity, placement, fit, and GUI behavior remain Unknown.
+Linux/COSMIC artwork layout, high-DPI and narrow-window behavior, keyboard and
+screen-reader behavior, constrained whole-workload placement and effective
+fit, compatible hardware pressure/recovery, and the required same-repository
+PR merge-context check have not been owner-validated in this round. No release
+tag, PR, merge, workflow dispatch, or repository-setting change was made.
+
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest
 Unknown or measured no-benefit result closes the investigation but does not
