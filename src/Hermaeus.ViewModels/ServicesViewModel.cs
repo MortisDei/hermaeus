@@ -23,6 +23,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly IActivityRecorder?    _activity;
     private readonly LocalModelCapabilityService? _capabilityService;
     private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
@@ -48,6 +49,18 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool         _autoStart;
     [ObservableProperty] private bool         _preserveReasoning;
     [ObservableProperty] private string       _extraArgs = string.Empty;
+    [ObservableProperty] private AdaptiveInferenceMode _adaptiveMode = AdaptiveInferenceMode.Fixed;
+    [ObservableProperty] private int          _adaptiveMinimumContext;
+    [ObservableProperty] private long         _adaptiveMinimumGpuHeadroomBytes = ResourceHeadroomPolicy.DefaultDeviceStabilityBytes;
+    [ObservableProperty] private bool         _adaptiveAllowGpuLayerReduction;
+    [ObservableProperty] private bool         _adaptiveAllowContextReduction;
+    [ObservableProperty] private bool         _adaptiveAllowKvPrecisionChange;
+    [ObservableProperty] private bool         _adaptiveAllowCpuMoePlacement;
+    [ObservableProperty] private bool         _adaptiveAllowMultiDevicePlacement;
+    [ObservableProperty] private bool         _adaptivePreserveAcceleratedBackend = true;
+    [ObservableProperty] private int          _adaptivePreferredEvidenceAgeDays = 7;
+    public static IReadOnlyList<AdaptiveInferenceMode> AdaptiveModeOptions { get; } =
+        [AdaptiveInferenceMode.Fixed, AdaptiveInferenceMode.Advise, AdaptiveInferenceMode.AdaptAtLaunch];
 
     // r18 04-llama-server-engine-options.md 4.1: first-class engine options, editable-form
     // fields on the server editor next to Context Size/GPU Layers/Threads/Slots.
@@ -225,6 +238,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.MemoryLock != MemoryLock ||
         _config.NoMemoryMap != NoMemoryMap ||
         _config.CpuMoeLayers != ParseCpuMoeLayers(CpuMoeLayersText) ||
+        _config.AdaptiveEnvelope?.CanonicalValue != BuildAdaptiveEnvelope().CanonicalValue ||
         !SpeculativeMatchesConfig();
 
     /// <summary>
@@ -528,7 +542,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ModelProfileService? modelProfiles = null,
         IActivityRecorder? activity = null,
         LocalModelCapabilityService? capabilityService = null,
-        IResourceCoordinator? resourceCoordinator = null)
+        IResourceCoordinator? resourceCoordinator = null,
+        AdaptiveInferenceExperienceService? adaptiveExperience = null)
     {
         _mgr = new ServerProcessManager(redactor, resourceCoordinator: resourceCoordinator);
         _config   = config;
@@ -542,12 +557,24 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _activity = activity;
         _capabilityService = capabilityService;
         _resourceCoordinator = resourceCoordinator;
+        _adaptiveExperience = adaptiveExperience;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
         _modelPath      = config.ModelPath;
         _mmprojPath     = config.MmprojPath;
         _useProjector   = config.UseProjector;
+        var adaptive = config.AdaptiveEnvelope ?? new AdaptiveInferenceEnvelope();
+        _adaptiveMode = adaptive.Mode;
+        _adaptiveMinimumContext = adaptive.MinimumContext;
+        _adaptiveMinimumGpuHeadroomBytes = adaptive.MinimumGpuHeadroomBytes;
+        _adaptiveAllowGpuLayerReduction = adaptive.AllowGpuLayerReduction;
+        _adaptiveAllowContextReduction = adaptive.AllowContextReduction;
+        _adaptiveAllowKvPrecisionChange = adaptive.AllowKvPrecisionChange;
+        _adaptiveAllowCpuMoePlacement = adaptive.AllowCpuMoePlacement;
+        _adaptiveAllowMultiDevicePlacement = adaptive.AllowMultiDevicePlacement;
+        _adaptivePreserveAcceleratedBackend = adaptive.PreserveAcceleratedBackend;
+        _adaptivePreferredEvidenceAgeDays = Math.Clamp((int)Math.Round(adaptive.PreferredEvidenceAge.TotalDays), 1, 30);
         _lastModelPathForDefaults = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _modelPathForMmproj = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _port           = config.Port;
@@ -920,18 +947,101 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         var config = BuildConfig();
         _resourceCoordinator.RegisterConsumer(ResourceAllocationFactory.ManagedServerConsumer(config));
-            var request = new ResourceAdmissionRequest(
-                config.Id,
-                ResourceAllocationFactory.ManagedServerProposal(config),
-                callerId: $"services.server.{config.Id}",
-                allowUnknown: true);
+
+        var envelope = config.AdaptiveEnvelope ?? new AdaptiveInferenceEnvelope();
         try
         {
-            await using var lease = await _resourceCoordinator.AcquireAsync(request, ct);
-            AdmissionReceipt = FormatAdmissionReceipt(lease.Plan);
-            if (BeforeStartAsync is not null)
-                await BeforeStartAsync(this);
-            await _mgr.StartAsync(config, lease, ct);
+            if (envelope.Mode == AdaptiveInferenceMode.Fixed)
+            {
+                await StartCandidateAsync(config, AdaptiveInferencePlanner.HeadroomPolicy(config), ct);
+                return;
+            }
+
+            var runtime = await LocalModelCapabilityService.ProbeRuntimeAsync(config.ExecutablePath, ct);
+            var model = File.Exists(config.ModelPath)
+                ? await Task.Run(() => GgufMetadataReader.TryRead(config.ModelPath), ct)
+                : null;
+            var planningRequest = CreateAdmissionRequest(config, AdaptiveInferencePlanner.HeadroomPolicy(config));
+            var planningSnapshot = await _resourceCoordinator.PlanAsync(planningRequest, ct);
+            var adaptive = AdaptiveInferencePlanner.Build(config, planningSnapshot, runtime, model);
+            var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(
+                config.ExecutablePath, runtime.VersionOrHelpText, ct);
+            var modelIdentity = RuntimeIdentityFactory.CreateModelIdentity(config.ModelPath, model);
+            var configurationIdentity = ConfigurationIdentityFactory.Create(config).StableId;
+            var preference = _adaptiveExperience is null
+                ? null
+                : await _adaptiveExperience.FindPreferredCandidateAsync(
+                    planningSnapshot,
+                    runtimeIdentity,
+                    modelIdentity,
+                    configurationIdentity,
+                    envelope,
+                    ct: ct);
+            adaptive = AdaptiveInferencePlanner.PreferCandidate(adaptive, preference?.CandidateId);
+            AdmissionReceipt = FormatAdaptivePlan(adaptive, planningSnapshot);
+            if (preference is not null)
+                AdmissionReceipt += $" Preferred recent compatible success: {preference.CandidateId}.";
+
+            if (envelope.Mode == AdaptiveInferenceMode.Advise)
+                return;
+
+            var failures = new List<string>();
+            foreach (var candidate in adaptive.Candidates)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var candidateConfig = candidate.Configuration;
+                    var policy = AdaptiveInferencePlanner.HeadroomPolicy(candidateConfig);
+                    var request = CreateAdmissionRequest(candidateConfig, policy, allowUnknown: false);
+                    await using var lease = await _resourceCoordinator.AcquireAsync(request, ct);
+                    AdmissionReceipt = $"Adaptive candidate {candidate.Ordinal + 1}: {candidate.Reason} {FormatAdmissionReceipt(lease.Plan)}";
+                    if (BeforeStartAsync is not null)
+                        await BeforeStartAsync(this);
+                    await _mgr.StartAsync(candidateConfig, lease, ct);
+                    var launch = _mgr.LastLaunchResult;
+                    await TryRecordAdaptiveOutcomeAsync(
+                        lease.Plan,
+                        runtimeIdentity,
+                        modelIdentity,
+                        configurationIdentity,
+                        candidate,
+                        launch,
+                        ct);
+
+                    if (_mgr.Status == ServerStatus.Running)
+                    {
+                        if (candidate.RequiresEffectiveObservation && _mgr.LastEffectiveLaunch?.IsAuditable != true)
+                        {
+                            failures.Add($"{candidate.CandidateId}: effective placement/context remained Unknown after health.");
+                            await _mgr.StopAsync();
+                            ErrorMessage = "Adaptive launch stopped because the selected runtime did not expose an auditable effective placement and context. No fallback was attempted.";
+                            Status = ServerStatus.Error;
+                            NotifyStatusProps();
+                            return;
+                        }
+                        return;
+                    }
+
+                    failures.Add($"{candidate.CandidateId}: {launch.FailureKind}. {launch.ErrorMessage}");
+                    if (launch.FailureKind != ServerLaunchFailureKind.ResourceExhaustion)
+                        break;
+                    await _mgr.StopAsync();
+                }
+                catch (ResourceAdmissionException ex)
+                {
+                    AdmissionReceipt = $"Adaptive candidate {candidate.Ordinal + 1}: {candidate.Reason} {FormatAdmissionReceipt(ex.Plan)}";
+                    failures.Add($"{candidate.CandidateId}: admission refused because {ex.Plan.Feasibility}.");
+                    if (ex.Plan.Feasibility != ResourcePlanFeasibility.DoesNotFit)
+                        break;
+                }
+            }
+
+            ErrorMessage = failures.Count == 0
+                ? "No bounded adaptive launch candidate was available."
+                : $"No bounded adaptive launch candidate started successfully.\n\n{string.Join("\n", failures)}";
+            Status = ServerStatus.Error;
+            NotifyStatusProps();
         }
         catch (ResourceAdmissionException ex)
         {
@@ -940,6 +1050,73 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             Status = ServerStatus.Error;
             NotifyStatusProps();
         }
+    }
+
+    private ResourceAdmissionRequest CreateAdmissionRequest(
+        ServerConfig config,
+        ResourceHeadroomPolicy policy,
+        bool allowUnknown = true) =>
+        new(
+            config.Id,
+            ResourceAllocationFactory.ManagedServerProposal(config),
+            policy,
+            callerId: $"services.server.{config.Id}",
+            allowUnknown: allowUnknown);
+
+    private async Task StartCandidateAsync(ServerConfig config, ResourceHeadroomPolicy policy, CancellationToken ct)
+    {
+        var request = CreateAdmissionRequest(config, policy);
+        await using var lease = await _resourceCoordinator!.AcquireAsync(request, ct);
+        AdmissionReceipt = FormatAdmissionReceipt(lease.Plan);
+        if (BeforeStartAsync is not null)
+            await BeforeStartAsync(this);
+        await _mgr.StartAsync(config, lease, ct);
+    }
+
+    private async Task TryRecordAdaptiveOutcomeAsync(
+        ResourceWorkloadPlan workload,
+        RuntimeIdentityV2 runtime,
+        ModelIdentityV2 model,
+        string configurationIdentity,
+        AdaptiveInferenceCandidate candidate,
+        ServerLaunchResult result,
+        CancellationToken ct)
+    {
+        if (_adaptiveExperience is null)
+            return;
+
+        try
+        {
+            await _adaptiveExperience.RecordAsync(
+                workload,
+                runtime,
+                model,
+                configurationIdentity,
+                candidate.CandidateId,
+                candidate.ChangedFields,
+                result,
+                ct);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            AdmissionReceipt += " Adaptive outcome persistence timed out.";
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            AdmissionReceipt += " Adaptive outcome persistence was unavailable.";
+        }
+    }
+
+    private static string FormatAdaptivePlan(AdaptiveInferencePlan plan, ResourceWorkloadPlan workload)
+    {
+        var candidates = plan.Candidates.Count == 0
+            ? "none"
+            : string.Join("; ", plan.Candidates.Select(candidate =>
+                $"{candidate.Ordinal + 1}. {candidate.CandidateId} ({string.Join(", ", candidate.ChangedFields.DefaultIfEmpty("unchanged"))})"));
+        var unavailable = plan.UnavailableReasons.Count == 0
+            ? string.Empty
+            : $" Unavailable/Unknown: {string.Join(" ", plan.UnavailableReasons)}";
+        return $"Adaptive {plan.Mode} plan from {workload.Feasibility}: {candidates}.{unavailable}";
     }
 
     private static string FormatAdmissionReceipt(ResourceWorkloadPlan plan)
@@ -1261,6 +1438,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.NoMemoryMap    = NoMemoryMap;
         _config.CpuMoeLayers   = ParseCpuMoeLayers(CpuMoeLayersText);
         _config.Speculative    = BuildSpeculative();
+        _config.AdaptiveEnvelope = BuildAdaptiveEnvelope();
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
@@ -1285,6 +1463,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         else
             SyncChatBaseUrlToPort();
     }
+
+    private AdaptiveInferenceEnvelope BuildAdaptiveEnvelope() => new()
+    {
+        Mode = AdaptiveMode,
+        MinimumContext = AdaptiveMinimumContext,
+        MinimumGpuHeadroomBytes = AdaptiveMinimumGpuHeadroomBytes,
+        AllowGpuLayerReduction = AdaptiveAllowGpuLayerReduction,
+        AllowContextReduction = AdaptiveAllowContextReduction,
+        AllowKvPrecisionChange = AdaptiveAllowKvPrecisionChange,
+        AllowCpuMoePlacement = AdaptiveAllowCpuMoePlacement,
+        AllowMultiDevicePlacement = AdaptiveAllowMultiDevicePlacement,
+        PreserveAcceleratedBackend = AdaptivePreserveAcceleratedBackend,
+        PreferredEvidenceAge = TimeSpan.FromDays(Math.Clamp(AdaptivePreferredEvidenceAgeDays, 1, 30))
+    };
 
     private void SyncChatBaseUrlToPort()
     {
@@ -1361,7 +1553,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         MemoryLock     = MemoryLock,
         NoMemoryMap    = NoMemoryMap,
         CpuMoeLayers   = ParseCpuMoeLayers(CpuMoeLayersText),
-        Speculative    = BuildSpeculative()
+        Speculative    = BuildSpeculative(),
+        AdaptiveEnvelope = BuildAdaptiveEnvelope()
     };
 
     /// <summary>
@@ -1603,6 +1796,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasUnsavedChanges));
         ApplyContextFitNote();
     }
+    partial void OnAdaptiveModeChanged(AdaptiveInferenceMode value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveMinimumContextChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveMinimumGpuHeadroomBytesChanged(long value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowGpuLayerReductionChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowContextReductionChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowKvPrecisionChangeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowCpuMoePlacementChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowMultiDevicePlacementChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptivePreserveAcceleratedBackendChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptivePreferredEvidenceAgeDaysChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 
     /// <summary>
     /// Empty/0 off, "all" (or any negative) all layers, otherwise N. Public
@@ -1829,6 +2032,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly IActivityRecorder? _activity;
     private readonly ModelProfileService _modelProfiles;
     private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private HardwareProfile? _hardwareProfile;
 
     /// <summary>Shared (DI singleton) with <see cref="SettingsViewModel.Tts"/> - voice
@@ -1946,7 +2150,8 @@ public partial class ServicesViewModel : ViewModelBase
         SttSettingsViewModel? stt = null,
         IStartupTimingService? startupTiming = null,
         LocalModelCapabilityService? capabilityService = null,
-        IResourceCoordinator? resourceCoordinator = null)
+        IResourceCoordinator? resourceCoordinator = null,
+        AdaptiveInferenceExperienceService? adaptiveExperience = null)
     {
         _startupTiming = startupTiming;
         _settings = settings;
@@ -1962,6 +2167,7 @@ public partial class ServicesViewModel : ViewModelBase
         _activity = activity;
         _capabilityService = capabilityService;
         _resourceCoordinator = resourceCoordinator;
+        _adaptiveExperience = adaptiveExperience;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
         _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
@@ -2100,7 +2306,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _adaptiveExperience)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };

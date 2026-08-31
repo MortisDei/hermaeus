@@ -31,7 +31,8 @@ public sealed record LlamaRuntimeCapabilityFacts(
     bool SupportsSpeculativeDraftGpuLayers = false,
     bool SupportsLoadMode = false,
     bool SupportsCorsOrigins = false,
-    IReadOnlyDictionary<string, CapabilityEvidence>? LaunchCapabilities = null);
+    IReadOnlyDictionary<string, CapabilityEvidence>? LaunchCapabilities = null,
+    string? VersionOrHelpText = null);
 
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
@@ -121,7 +122,8 @@ public sealed class LocalModelCapabilityService
                 || help.Contains("-ngld", StringComparison.Ordinal),
             SupportsLoadMode: help.Contains("--load-mode", StringComparison.Ordinal),
             SupportsCorsOrigins: help.Contains("--cors-origins", StringComparison.Ordinal),
-            LaunchCapabilities: ParseLaunchCapabilities(help));
+            LaunchCapabilities: ParseLaunchCapabilities(help),
+            VersionOrHelpText: help);
     }
 
     /// <summary>
@@ -293,7 +295,7 @@ public sealed class LocalModelCapabilityService
         }
         catch (JsonException)
         {
-            return facts with { PropsProbeSucceeded = true, SupportsPreserveReasoningTemplate = null, Modalities = [] };
+            return facts with { PropsProbeSucceeded = false, SupportsPreserveReasoningTemplate = null, Modalities = [] };
         }
     }
 

@@ -11,6 +11,23 @@ namespace Hermaeus.Services.ProcessManagement;
 
 public sealed record ManagedRuntimeProcessIdentity(int ProcessId, DateTime StartedAtUtc);
 
+public enum ServerLaunchFailureKind
+{
+    None,
+    ResourceExhaustion,
+    Configuration,
+    PortConflict,
+    RuntimeUnavailable,
+    Cancelled,
+    Unknown
+}
+
+public sealed record ServerLaunchResult(
+    ServerStatus Status,
+    ServerLaunchFailureKind FailureKind,
+    EffectiveLaunchObservation? EffectiveLaunch,
+    string ErrorMessage);
+
 /// <summary>
 /// Manages a single llama-server (or compatible) child process.
 /// Launches with configured args, health-polls /health until ready,
@@ -32,6 +49,9 @@ public sealed class ServerProcessManager : IDisposable
 
     public ServerStatus Status { get; private set; } = ServerStatus.Stopped;
     public string       ErrorMessage { get; private set; } = string.Empty;
+    public ServerLaunchResult LastLaunchResult { get; private set; } =
+        new(ServerStatus.Stopped, ServerLaunchFailureKind.None, null, string.Empty);
+    public EffectiveLaunchObservation? LastEffectiveLaunch => LastLaunchResult.EffectiveLaunch;
 
     public event Action<ServerStatus>? StatusChanged;
     public event Action<string>?       LogLine;
@@ -118,12 +138,15 @@ public sealed class ServerProcessManager : IDisposable
     {
         if (Status is ServerStatus.Running or ServerStatus.Starting) return;
 
+        LastLaunchResult = new(ServerStatus.Starting, ServerLaunchFailureKind.None, null, string.Empty);
+
         if (!cfg.TryGetGpuPlacement(out _, out var placementError))
         {
             ErrorMessage = $"GPU placement needs repair before launch: {placementError}";
             ClearLog();
             SetStatus(ServerStatus.Error);
             Emit($"[hermaeus] ERROR: {ErrorMessage}");
+            SetLaunchResult(ServerLaunchFailureKind.Configuration);
             return;
         }
 
@@ -140,6 +163,7 @@ public sealed class ServerProcessManager : IDisposable
             ClearLog();
             SetStatus(ServerStatus.Error);
             Emit($"[hermaeus] ERROR: {ErrorMessage}");
+            SetLaunchResult(ServerLaunchFailureKind.PortConflict);
             return;
         }
 
@@ -158,6 +182,8 @@ public sealed class ServerProcessManager : IDisposable
         cfg.RuntimeSupportsGpuPlacementAll = IsAvailable(runtime, "runtime.gpu-placement.all");
         cfg.RuntimeSupportsGpuPlacementExact = IsAvailable(runtime, "runtime.gpu-placement.exact");
         cfg.RuntimeSupportsFit = IsAvailable(runtime, "runtime.fit");
+        cfg.RuntimeSupportsFitTarget = IsAvailable(runtime, "runtime.fit.target");
+        cfg.RuntimeSupportsFitMinimumContext = IsAvailable(runtime, "runtime.fit.minimum-context");
         var runtimeValidation = ValidateRuntimeOptions(cfg);
         if (runtimeValidation is not null)
         {
@@ -165,6 +191,7 @@ public sealed class ServerProcessManager : IDisposable
             ClearLog();
             SetStatus(ServerStatus.Error);
             Emit($"[hermaeus] ERROR: {ErrorMessage}");
+            SetLaunchResult(ServerLaunchFailureKind.Configuration);
             return;
         }
 
@@ -178,6 +205,7 @@ public sealed class ServerProcessManager : IDisposable
             ClearLog();
             SetStatus(ServerStatus.Error);
             Emit($"[hermaeus] ERROR: {ErrorMessage}");
+            SetLaunchResult(ServerLaunchFailureKind.Configuration);
             return;
         }
 
@@ -214,8 +242,12 @@ public sealed class ServerProcessManager : IDisposable
             _monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             await WaitForHealthAsync(cfg.Port, () => _process, _monitorCts.Token);
 
+            var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(cfg.ExecutablePath, runtime.VersionOrHelpText, ct);
+            var props = await ReadPropsAsync(cfg.Port, ct);
+            var effective = EffectiveLaunchObservationParser.Parse(cfg, runtimeIdentity, props);
             SetStatus(ServerStatus.Running);
             Emit($"[hermaeus] Server ready on port {cfg.Port}.");
+            SetLaunchResult(ServerLaunchFailureKind.None, effective);
         }
         catch (OperationCanceledException)
         {
@@ -223,6 +255,7 @@ public sealed class ServerProcessManager : IDisposable
             KillProcess();
             Emit("[hermaeus] Start cancelled.");
             SetStatus(ServerStatus.Stopped);
+            SetLaunchResult(ServerLaunchFailureKind.Cancelled);
         }
         catch (Exception ex)
         {
@@ -230,6 +263,7 @@ public sealed class ServerProcessManager : IDisposable
             ErrorMessage = BuildErrorMessage(ex);
             SetStatus(ServerStatus.Error);
             Emit($"[hermaeus] ERROR: {ex.Message}");
+            SetLaunchResult(ClassifyFailure(ex, ErrorMessage));
         }
     }
 
@@ -674,6 +708,16 @@ public sealed class ServerProcessManager : IDisposable
         {
             parts.Add("--fit");
             parts.Add("on");
+            if (cfg.RuntimeSupportsFitTarget && cfg.RuntimeFitTargetBytes is > 0)
+            {
+                parts.Add("--fit-target");
+                parts.Add(cfg.RuntimeFitTargetBytes.Value.ToString(CultureInfo.InvariantCulture));
+            }
+            if (cfg.RuntimeSupportsFitMinimumContext && cfg.RuntimeFitMinimumContext is > 0)
+            {
+                parts.Add("--fit-ctx");
+                parts.Add(cfg.RuntimeFitMinimumContext.Value.ToString(CultureInfo.InvariantCulture));
+            }
         }
         else
         {
@@ -933,6 +977,8 @@ public sealed class ServerProcessManager : IDisposable
                 "-c" or "--ctx-size" or "--context-size" => "context",
                 "--n-gpu-layers" or "--gpu-layers" or "-ngl" => "placement",
                 "--fit" => "fit",
+                "--fit-target" => "fit-target",
+                "--fit-ctx" => "fit-minimum-context",
                 "--threads" => "threads",
                 "--parallel" => "slots",
                 "--port" => "port",
@@ -950,6 +996,8 @@ public sealed class ServerProcessManager : IDisposable
                 "port" => cfg.Port.ToString(CultureInfo.InvariantCulture),
                 "host" => "127.0.0.1",
                 "fit" => placement.Kind == GpuPlacementKind.Auto ? "on" : "off",
+                "fit-target" when cfg.RuntimeSupportsFitTarget && cfg.RuntimeFitTargetBytes is > 0 => cfg.RuntimeFitTargetBytes.Value.ToString(CultureInfo.InvariantCulture),
+                "fit-minimum-context" when cfg.RuntimeSupportsFitMinimumContext && cfg.RuntimeFitMinimumContext is > 0 => cfg.RuntimeFitMinimumContext.Value.ToString(CultureInfo.InvariantCulture),
                 "placement" => PlacementArgumentValue(placement),
                 _ => null
             };
@@ -1041,6 +1089,7 @@ public sealed class ServerProcessManager : IDisposable
             EmbeddingsMode = cfg.EmbeddingsMode,
             AutoStart      = cfg.AutoStart,
             ExtraArgs      = cfg.ExtraArgs,
+            AdaptiveEnvelope = cfg.AdaptiveEnvelope?.Clone() ?? new AdaptiveInferenceEnvelope(),
             MmprojPath = cfg.MmprojPath,
             UseProjector = cfg.UseProjector,
             KvCacheType = cfg.KvCacheType,
@@ -1072,7 +1121,11 @@ public sealed class ServerProcessManager : IDisposable
             RuntimeSupportsGpuPlacementAuto = cfg.RuntimeSupportsGpuPlacementAuto,
             RuntimeSupportsGpuPlacementAll = cfg.RuntimeSupportsGpuPlacementAll,
             RuntimeSupportsGpuPlacementExact = cfg.RuntimeSupportsGpuPlacementExact,
-            RuntimeSupportsFit = cfg.RuntimeSupportsFit
+            RuntimeSupportsFit = cfg.RuntimeSupportsFit,
+            RuntimeSupportsFitTarget = cfg.RuntimeSupportsFitTarget,
+            RuntimeSupportsFitMinimumContext = cfg.RuntimeSupportsFitMinimumContext,
+            RuntimeFitTargetBytes = cfg.RuntimeFitTargetBytes,
+            RuntimeFitMinimumContext = cfg.RuntimeFitMinimumContext
         };
     }
 
@@ -1233,6 +1286,48 @@ public sealed class ServerProcessManager : IDisposable
         throw new TimeoutException($"llama-server on port {port} did not respond within 5 minutes");
     }
 
+    private static async Task<string?> ReadPropsAsync(int port, CancellationToken ct)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromMilliseconds(750) };
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromMilliseconds(750));
+        try
+        {
+            using var response = await http.GetAsync(
+                $"http://127.0.0.1:{port}/props",
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            const int maxBytes = 128 * 1024;
+            var buffer = new byte[maxBytes + 1];
+            var total = 0;
+            while (total < buffer.Length)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(total), timeout.Token);
+                if (read == 0)
+                    break;
+                total += read;
+            }
+
+            return total > maxBytes ? null : Encoding.UTF8.GetString(buffer, 0, total);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Completes when the process exits, or never for a null process.</summary>
     private static Task WhenProcessExitsAsync(Process? process, CancellationToken ct)
     {
@@ -1319,6 +1414,32 @@ public sealed class ServerProcessManager : IDisposable
 
     public static ServerStatus GetProcessExitStatus(bool stopRequested, int code) =>
         stopRequested || code == 0 ? ServerStatus.Stopped : ServerStatus.Error;
+
+    public static ServerLaunchFailureKind ClassifyFailure(Exception exception, string? detail = null)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        var text = $"{exception.Message}\n{detail}";
+        if (Regex.IsMatch(text,
+                @"out\s+of\s+memory|not\s+enough\s+memory|failed\s+to\s+allocate|allocation\s+failed|memory\s+allocation|cuda[^\r\n]*(?:out\s+of\s+memory|allocation)|vulkan[^\r\n]*(?:out\s+of\s+memory|allocation)",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            return ServerLaunchFailureKind.ResourceExhaustion;
+
+        return exception switch
+        {
+            FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException or System.ComponentModel.Win32Exception
+                => ServerLaunchFailureKind.RuntimeUnavailable,
+            ArgumentException or FormatException or InvalidOperationException
+                => ServerLaunchFailureKind.Configuration,
+            _ => ServerLaunchFailureKind.Unknown
+        };
+    }
+
+    private void SetLaunchResult(
+        ServerLaunchFailureKind failureKind,
+        EffectiveLaunchObservation? effective = null)
+    {
+        LastLaunchResult = new(Status, failureKind, effective, ErrorMessage);
+    }
 
     private void SetStatus(ServerStatus s)
     {

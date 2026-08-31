@@ -55,7 +55,7 @@ the stores into one schema.
 | 2 | Services-owned model inventory with bounded scan/GGUF/manifest cache and explicit invalidation; converge simple card fit onto the versioned prediction engine while preserving a labelled pre-download estimate | 0, 1 | mandatory shared foundation | Yes |
 | 3 | Resource consumer registry, allocation owner/component/per-device model, immutable snapshots, local/remote/owned identity, authoritative per-device and Unknown observations, in-process adapters, bounded persistence | 1, 2 | mandatory resource spine | Yes |
 | 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | Yes |
-| 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | No |
+| 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | Yes |
 | 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | No |
 | 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | No |
 | 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | No |
@@ -274,6 +274,40 @@ tests; the zero-warning solution build passed; and version bump CI run
 `33360884985` passed on Ubuntu and Windows. Required PR-check attachment and
 the Linux/COSMIC and Windows owner live resource-pressure gates remain
 operational follow-up, not simulated evidence.
+
+### 8.2.7 Batch 5 evidence
+
+Managed server configuration now persists the expanded adaptive envelope with
+`Fixed` as the default. `Advise` only presents a plan. `AdaptAtLaunch` builds a
+maximum-eight, deterministic single-axis candidate set from configured intent,
+GGUF facts, runtime help, quality evidence, and the whole-workload plan. It
+does not replace a model or provider, alter network exposure, remove a
+projector, increase slots, or silently fall back from configured `Auto` to CPU.
+
+Fit target is derived only from exactly one complete known device headroom.
+`--fit-target` and `--fit-ctx` are rendered only when the selected runtime's
+help proves the corresponding fit controls. Otherwise the control remains
+Unavailable or Unknown. The reusable scalar `/props` parser identifies itself
+as `llama-props-scalar-v1`, retains exact runtime identity, and treats missing,
+malformed, non-object, or unrecognised effective values as Unknown. A healthy
+endpoint is not placement proof.
+
+Every adaptive attempt uses a fresh whole-workload reservation. Resource-only
+failures can advance to the next candidate after owned teardown; configuration,
+runtime, port, cancellation, and Unknown outcomes cannot. Changed candidates
+are transient. A recent successful launch is preferred only when runtime,
+model, complete hardware, base configuration, workload identity, and bounded
+evidence age all match; the new snapshot and admission checks still run. More
+elaborate hysteresis beyond preferring that last compatible success remains
+deferred under the documented descope order.
+
+Batch 5 verification: focused adaptive tests passed (22); the zero-warning
+solution build passed; and the full sequential suite passed with 2,430 passed,
+17 skipped, and 2,447 total tests. Test results were written outside the
+checkout. Installed-runtime effective placement and fit reporting remains
+Unknown in the reviewed environment, so the constrained Linux/COSMIC and
+Windows live adaptive-start gates remain owner validation rather than claimed
+automation.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

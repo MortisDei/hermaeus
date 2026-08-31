@@ -152,6 +152,20 @@ Services card shows the admission receipt used for its start. Reservations are
 short-lived concurrency guards only. They do not stop or unload another
 consumer, change settings, or attribute a whole-device total to one process.
 
+Managed server cards also expose an **Adaptive launch** envelope. It is **Fixed**
+by default. **Advise** computes and displays bounded alternatives without
+starting one, while **AdaptAtLaunch** may retry a resource-exhausted start with
+only the explicitly enabled compromise fields. GPU-layer reductions preserve
+an accelerated backend, context reductions stay above the configured minimum,
+and KV or CPU-MoE changes require selected-runtime and quality evidence.
+Every attempt obtains a fresh whole-workload reservation. If effective context
+or placement cannot be audited through structured runtime output, the attempt
+stops visibly rather than guessing or falling back to CPU. The transient launch
+candidate is never saved over the configured server values. A recent compatible
+successful launch may be preferred only when the exact runtime, model, complete
+hardware, base configuration, workload identity, and evidence age match. The
+current resource snapshot and admission checks still apply.
+
 If onboarding is already complete and Chat reports that no chat model is set
 up, go to **Services** to configure or start the current model server. A stopped
 server does not reset onboarding. The setup wizard remains available from

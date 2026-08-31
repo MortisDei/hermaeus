@@ -122,6 +122,8 @@ public sealed record ResourceWorkloadPlan
     public ResourcePlanFeasibility Feasibility { get; }
     public IReadOnlyList<ResourceDeviceHeadroom> DeviceHeadroom { get; }
     public long? SystemRemainingBytes { get; }
+    public string HardwareIdentityId { get; }
+    public bool HardwareIdentityComplete { get; }
     public string DerivationVersion { get; }
 
     public ResourceWorkloadPlan(
@@ -136,7 +138,9 @@ public sealed record ResourceWorkloadPlan
         ResourcePlanFeasibility feasibility,
         IEnumerable<ResourceDeviceHeadroom>? deviceHeadroom,
         long? systemRemainingBytes,
-        string derivationVersion)
+        string derivationVersion,
+        string? hardwareIdentityId = null,
+        bool hardwareIdentityComplete = false)
     {
         PlanId = ResourceModelValidation.Opaque(planId, nameof(planId));
         SnapshotId = ResourceModelValidation.Opaque(snapshotId, nameof(snapshotId));
@@ -151,6 +155,8 @@ public sealed record ResourceWorkloadPlan
         // deliberately retained in the receipt rather than rejected as an
         // invalid byte count.
         SystemRemainingBytes = systemRemainingBytes;
+        HardwareIdentityId = hardwareIdentityId?.Trim() ?? string.Empty;
+        HardwareIdentityComplete = hardwareIdentityComplete;
         DerivationVersion = ResourceModelValidation.Opaque(derivationVersion, nameof(derivationVersion));
         Feasibility = feasibility;
     }

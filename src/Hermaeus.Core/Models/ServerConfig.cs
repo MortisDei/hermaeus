@@ -72,6 +72,12 @@ public class ServerConfig
     public string ExtraArgs      { get; set; } = string.Empty;
 
     /// <summary>
+    /// Explicit bounds for R32 adaptive launch. The envelope is persisted with
+    /// the managed server, while any launch overlay remains transient.
+    /// </summary>
+    public AdaptiveInferenceEnvelope AdaptiveEnvelope { get; set; } = new();
+
+    /// <summary>
     /// First-class engine options (r18 04-llama-server-engine-options.md 4.1). All default to
     /// today's exact command line (additive JSON: an older saved config deserializes to these
     /// defaults and produces a byte-identical launch). Every option is the user's explicit
@@ -177,4 +183,16 @@ public class ServerConfig
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool RuntimeSupportsFit { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsFitTarget { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsFitMinimumContext { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public long? RuntimeFitTargetBytes { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? RuntimeFitMinimumContext { get; set; }
 }

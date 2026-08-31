@@ -82,6 +82,16 @@ for Knowledge behavior in Chat.
   Admission uses short-lived reservations to prevent concurrent approvals from
   relying on the same stale headroom. It never stops, unloads, or changes
   another consumer, and Unknown is never treated as zero.
+- Managed servers have an opt-in adaptive launch envelope. Fixed is the
+  default, Advise plans without launching, and AdaptAtLaunch may try only a
+  bounded single-axis GPU-layer, context, KV, or known MoE compromise that the
+  saved envelope allows. Each attempt uses fresh whole-workload admission and
+  an auditable structured runtime observation; Unknown effective placement or
+  context stops adaptive launch, and no transient candidate is written back to
+  saved settings. A recent compatible successful launch may be preferred only
+  when its exact runtime, model, hardware, base configuration, workload, and
+  bounded evidence age match; it never skips fresh admission. Unsupported fit,
+  cache, and multi-device behavior remains Unavailable or Unknown.
 - Model cards use the detailed versioned prediction when local GGUF shape
   metadata is available. Remote or pre-download cards retain a clearly labelled
   rough pre-download estimate until that metadata exists.
@@ -190,7 +200,7 @@ with the experiment, recorded model identity when available, status,
 timestamps, tested configurations, recommendation state, correctness, and
 measured or predicted resource deltas. Missing measurements remain `Unknown`.
 
-The Evidence surface stores typed Agent, GPU Fit, and Lab records with source
+The Evidence surface stores typed Agent, GPU Fit, Lab, and adaptive-launch records with source
 links, fingerprints, corrections, redacted export, and confirmed removal.
 Experience is descriptive evidence only. It never grants approval, changes a
 safety decision, or rewrites the analytical GPU Fit prediction.

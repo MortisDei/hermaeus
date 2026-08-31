@@ -56,6 +56,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
         s.AddSingleton<GpuFitExperienceService>();
+        s.AddSingleton<AdaptiveInferenceExperienceService>();
         s.AddSingleton<ILabRuntimeHost, IsolatedLabRuntimeHost>();
         s.AddSingleton<ILabExperimentService, LabExperimentService>();
         s.AddSingleton<ILabWorkloadExecutor, LlamaServerLabWorkloadExecutor>();

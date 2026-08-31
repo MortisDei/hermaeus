@@ -263,7 +263,9 @@ public sealed class ResourceCoordinator : IResourceCoordinator, IDisposable
             feasibility,
             deviceHeadroom,
             systemRemaining,
-            DerivationVersion);
+            DerivationVersion,
+            snapshot.HardwareIdentity.StableId,
+            snapshot.HardwareIdentity.Completeness == IdentityCompleteness.Complete);
     }
 
     private ResourcePriorityClass GetPriority(string consumerId, ResourceSnapshot snapshot) =>

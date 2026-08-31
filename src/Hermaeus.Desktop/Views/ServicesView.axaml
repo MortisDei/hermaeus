@@ -222,7 +222,7 @@
 
                                 <!-- ── Config grid ───────────────────────── -->
                                 <Grid ColumnDefinitions="100,*,Auto"
-                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                                       RowSpacing="8" ColumnSpacing="10">
 
                                     <!-- Executable -->
@@ -450,6 +450,63 @@
                                         <TextBlock Text="{Binding ReasoningPreserveStatus}"
                                                    IsVisible="{Binding !ReasoningPreserveAvailable}"
                                                    FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <!-- R32 adaptive inference envelope. Defaults are Fixed
+                                         and conservative; relaxed fields remain explicit. -->
+                                    <TextBlock Grid.Row="7" Grid.Column="0"
+                                               Text="Adaptive launch" VerticalAlignment="Top"
+                                               Opacity="0.6" FontSize="13" />
+                                    <StackPanel Grid.Row="7" Grid.Column="1" Spacing="6">
+                                        <Grid ColumnDefinitions="Auto,150,Auto,140" ColumnSpacing="8">
+                                            <TextBlock Text="Mode:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding AdaptiveModeOptions}"
+                                                      SelectedItem="{Binding AdaptiveMode}"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      FontSize="12"
+                                                      ToolTip.Tip="Fixed preserves configured values. Advise plans without launching. AdaptAtLaunch may try only enabled envelope fields." />
+                                            <TextBlock Grid.Column="2" Text="Min context:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <NumericUpDown Grid.Column="3"
+                                                           Value="{Binding AdaptiveMinimumContext}"
+                                                           Minimum="0" Maximum="131072" Increment="512"
+                                                           IsEnabled="{Binding CanEdit}" FontSize="12"
+                                                           ToolTip.Tip="Minimum context for adaptive reduction. 0 means the configured context is the floor." />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="Auto,140,Auto,140" ColumnSpacing="8">
+                                            <TextBlock Text="GPU headroom:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <NumericUpDown Grid.Column="1"
+                                                           Value="{Binding AdaptiveMinimumGpuHeadroomBytes}"
+                                                           Minimum="0" Maximum="9223372036854775807" Increment="67108864"
+                                                           IsEnabled="{Binding CanEdit}" FontSize="12"
+                                                           ToolTip.Tip="Minimum device headroom reserved for the rest of the workload, in bytes." />
+                                            <TextBlock Grid.Column="2" Text="Evidence days:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <NumericUpDown Grid.Column="3"
+                                                           Value="{Binding AdaptivePreferredEvidenceAgeDays}"
+                                                           Minimum="1" Maximum="30" Increment="1"
+                                                           IsEnabled="{Binding CanEdit}" FontSize="12"
+                                                           ToolTip.Tip="Maximum age of compatible adaptive evidence. A fresh resource snapshot is still required every launch." />
+                                        </Grid>
+                                        <WrapPanel ItemSpacing="12" LineSpacing="4">
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowGpuLayerReduction}" Content="Reduce GPU layers"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Allow bounded exact GPU-layer reductions while preserving an accelerated backend." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowContextReduction}" Content="Reduce context"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Allow context reduction on the named ladder, never below the minimum." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowKvPrecisionChange}" Content="Change KV precision"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Only runtime-advertised KV types with compatible quality evidence can be considered." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowCpuMoePlacement}" Content="CPU MoE experts"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Allow CPU placement for known MoE experts when the selected runtime proves both controls." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowMultiDevicePlacement}" Content="Multi-device"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Request multi-device planning only. Execution remains unavailable until device and split behavior are proven." />
+                                            <CheckBox IsChecked="{Binding AdaptivePreserveAcceleratedBackend}" Content="Preserve accelerated backend"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Keep enabled to prevent CPU fallback. R32 never silently falls back from managed Auto to CPU." />
+                                        </WrapPanel>
                                     </StackPanel>
 
                                 </Grid>

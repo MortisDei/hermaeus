@@ -18,6 +18,14 @@ limit.
 - R32 Batch 4 adds whole-workload resource admission receipts in Services and
   System Overview, with expiring reservations and explicit Unknown resource
   state across managed runtimes, Lab, voice, ONNX, and embedding backfill.
+- R32 Batch 5 adds an opt-in adaptive launch envelope with deterministic,
+  bounded candidates, runtime-gated fit target/minimum-context controls,
+  conservative structured effective-launch observations, fresh admission for
+  retries, compatible recent-success preference, and transient overlays that
+  never overwrite saved settings.
+- Fixed a transient Settings autosave race by publishing direct-save settings
+  only after their atomic file replacement completes, preserving the existing
+  autosave and direct-save lifecycle behavior.
 
 ## [0.38.0-beta] - 2026-08-30
 
