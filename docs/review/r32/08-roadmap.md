@@ -79,6 +79,7 @@ Observed 2026-08-31 on the managed Linux assets available to the review host:
 | --- | --- | --- | --- |
 | Linux b10688 | `0.3.0-dev`, build `10688`, commit `c589f0ed1`, GNU 11.4.0, Linux x86_64 | `03bb2c08cac030cf8ed03df451fff94ee4424e910c362a8bf2a2371a84c8aa34` | 59,017-byte help; `0`, `auto`, `all`, and `17` accepted in the controlled server probe |
 | Linux b10690 | `0.3.0-dev`, build `10690`, commit `bdf395515`, GNU 11.4.0, Linux x86_64 | `23ec6a3727260d051573d8fce9baa57829e47c19545bfd0abf5d90cf3c0b628b` | Byte-identical help to b10688; `0`, `auto`, `all`, and `17` accepted in the controlled server probe |
+| Linux b10717 (owner-managed current) | `0.3.0-dev`, build `10717`, commit `a32af33de`, GNU 11.4.0, Linux x86_64 | `c9bb114c6fcb4a58b1466d8d7d07091f8080bcd74d42ce666509dc5d3f86ad70` | 59,010-byte help; `--list-devices` reported Vulkan0 NVIDIA GeForce GTX 1660 SUPER with 6,390 MiB total and about 1,059 MiB free; owner runtime log recorded chat and embedding readiness after the update |
 | Windows managed runtime | Not installed or mounted in the inspected environment | Unknown | Windows-specific facts remain Unknown, not inferred from Linux |
 
 Both Linux server help responses advertise `--n-gpu-layers` with exact numeric,
@@ -93,6 +94,17 @@ normal managed launch executables.
 Both helper files are 15,968 bytes with mode `0664` and SHA256
 `b2ad073a0c093706e5dfdfe2c9864d199ed921e49ea0383a7d0013e2ad8a81c8`; their
 loader-invoked version output matches the corresponding server build.
+
+An owner-approved refresh on 2026-08-31 inspected the current b10717 helper as
+well. Its loader-invoked version matched build `10717`, and its 59,010-byte
+help hash was `54e2c36a03920ef7f0fca2fb6fd37042506c6e1d6c8e03d516a5578f0917a844`.
+The current capability cache records help-level proof for CPU, Auto, All, exact
+layers, fit, fit target, minimum fit context, device selection, split controls,
+KV controls, and cache/checkpoint controls for the b10717 identity. It still
+records effective fit reporting as Unknown because `/props` exposes no stable
+effective placement or fit result. The earlier b10690 controlled probe's
+`(none)` device list therefore remains evidence about that selected asset and
+probe, not a claim that the current owner-managed Vulkan asset has no device.
 
 The controlled probes used the pinned embedding GGUF with `--device none`.
 Each placement value reached a healthy loopback server and clean shutdown on
