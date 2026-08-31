@@ -44,6 +44,10 @@ public sealed class RagTraceChunk
     public string Title { get; set; } = string.Empty;
     public string File { get; set; } = string.Empty;
     public string Path { get; set; } = string.Empty;
+    public string SourceId { get; set; } = string.Empty;
+    public string SourceRevisionId { get; set; } = string.Empty;
+    public string ContentHash { get; set; } = string.Empty;
+    public string GenerationId { get; set; } = string.Empty;
     public float Score { get; set; }
     public string Content { get; set; } = string.Empty;
 

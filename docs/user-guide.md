@@ -235,7 +235,11 @@ Knowledge/RAG, conversations, and Agent task history.
 **Knowledge** ingests files into a local RAG dataset. Attach a dataset to a Chat
 conversation from the Knowledge picker. Retrieval is bounded and cited; weak
 matches are omitted instead of forced into every answer. Reindex after changing
-the embedding model.
+the embedding model. Dataset Manager shows the published generation history,
+while ordinary retrieval uses only the current complete generation. A cancelled
+or failed ingest leaves the prior generation in place. Removing missing sources
+requires separate confirmation and publishes a replacement generation rather
+than deleting live rows mid-ingest.
 
 **Memories** are durable, reviewable facts stored under Data Root. Settings
 control whether memory and Recall context may be injected into Chat. The Chat

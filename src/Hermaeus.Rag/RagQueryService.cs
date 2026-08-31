@@ -190,6 +190,10 @@ public sealed class RagQueryService
     public async Task<RagDataset?> GetDatasetAsync(string datasetId, CancellationToken ct = default)
         => (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
 
+    public async Task<List<RagDatasetGeneration>> GetGenerationHistoryAsync(
+        string datasetId, CancellationToken ct = default)
+        => await _store.GetGenerationHistoryAsync(datasetId, ct);
+
     public async Task<List<RagChunk>> GetChunksForDatasetAsync(string datasetId, bool includeEmbeddings = false, CancellationToken ct = default)
         => await _store.GetChunksAsync(datasetId, includeEmbeddings, ct);
 
@@ -221,24 +225,13 @@ public sealed class RagQueryService
         if (sourcePaths.Count == 0)
             return 0;
 
-        await _store.DeleteChunksForSourcesAsync(datasetId, sourcePaths, ct);
-
-        var remaining = await _store.GetChunksAsync(datasetId, includeEmbeddings: false, ct);
-        var stats = Bm25Scorer.BuildStats(remaining);
-        await _store.SaveBm25StatsAsync(datasetId, stats, ct);
-
-        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
-        if (ds is not null)
-        {
-            ds.ChunkCount = remaining.Count;
-            await _store.SaveDatasetAsync(ds, ct);
-        }
+        var remainingCount = await _store.RemoveSourcesByPublishingGenerationAsync(datasetId, sourcePaths, ct);
 
         ClearCache(datasetId);
         _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-            $"RAG removed {sourcePaths.Count} missing source(s) from dataset {datasetId}; {remaining.Count} chunk(s) remain."));
+            $"RAG removed {sourcePaths.Count} missing source(s) from dataset {datasetId}; {remainingCount} chunk(s) remain."));
 
-        return remaining.Count;
+        return remainingCount;
     }
 
     public async Task<RagRetrievalResult> RetrieveAsync(
@@ -249,6 +242,8 @@ public sealed class RagQueryService
     {
         opts ??= new RagQueryOptions();
         var sw = Stopwatch.StartNew();
+        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
+        var currentGenerationId = ds?.CurrentGenerationId ?? string.Empty;
 
         // r27 2.1: "absent from the cache" and "cached and genuinely empty" are
         // different states. Only the first one needs a load, and a dataset that
@@ -258,7 +253,17 @@ public sealed class RagQueryService
         bool cacheHit;
         lock (_cacheSync)
         {
-            cacheHit = _cache.TryGetValue(datasetId, out scanIndex!);
+            cacheHit = _cache.TryGetValue(datasetId, out scanIndex!)
+                && string.Equals(scanIndex.GenerationId, currentGenerationId, StringComparison.Ordinal);
+            if (!cacheHit)
+            {
+                _cache.Remove(datasetId);
+                if (_cacheSizes.Remove(datasetId, out var staleSize))
+                    _cacheBytes -= staleSize;
+                var staleNode = _cacheOrder.Find(datasetId);
+                if (staleNode is not null)
+                    _cacheOrder.Remove(staleNode);
+            }
             if (cacheHit)
                 TouchCacheUnsafe(datasetId);
         }
@@ -274,8 +279,6 @@ public sealed class RagQueryService
         var plan = await BuildQueryPlanAsync(datasetId, question, ct);
 
         // read dataset config to obtain hybrid retriever weights and check the embedding model
-        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
-
         // r10 01-rag-correctness.md 1.4: a dataset embedded with one model
         // queried under a different current model produces either a raw
         // exception (mismatched dimensions) or silent garbage rankings
@@ -895,6 +898,10 @@ public sealed class RagQueryService
             Title = scored.Chunk.SourceTitle,
             File = scored.Chunk.SourceFile,
             Path = scored.Chunk.SourcePath,
+            SourceId = scored.Chunk.SourceId,
+            SourceRevisionId = scored.Chunk.SourceRevisionId,
+            ContentHash = scored.Chunk.SourceHash,
+            GenerationId = scored.Chunk.GenerationId,
             Score = scored.Score,
             Content = scored.Chunk.Content,
             VectorScore = semanticById.TryGetValue(id, out var sem) ? sem.Score : null,

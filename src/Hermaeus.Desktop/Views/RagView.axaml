@@ -103,6 +103,20 @@
                                                 <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding ReindexStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding DimensionsLabel}" FontSize="11" Opacity="0.55" />
+                                                <TextBlock Text="{Binding GenerationHistoryLabel}" FontSize="11" Opacity="0.55" />
+                                                <ItemsControl ItemsSource="{Binding GenerationHistory}" Margin="0,0,0,2">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock FontSize="10" Opacity="0.5">
+                                                                <Run Text="{Binding State}" />
+                                                                <Run Text=" · " />
+                                                                <Run Text="{Binding ChunkCount, StringFormat='{}{0} chunks'}" />
+                                                                <Run Text=" · " />
+                                                                <Run Text="{Binding EmbeddingIdentity}" />
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
                                                 <!-- r27 02 2.7: the memory ceiling as a fact, in the same
                                                      register as the rest of the dataset health line, so it is
                                                      visible while a corpus grows rather than discovered as a
@@ -290,6 +304,10 @@
                                            FontSize="11"
                                            Classes="faint"
                                            TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding SelectedSource.CitationIdentity}"
+                                           FontSize="10"
+                                           Classes="faint"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
                             <Border Grid.Column="1"
                                     CornerRadius="4"

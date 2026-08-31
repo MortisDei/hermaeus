@@ -60,7 +60,7 @@ the stores into one schema.
 | 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | Yes |
 | 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | Yes |
 | 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | Yes |
-| 10 | Stable watched-root/source identity, staged source revisions and dataset generations, embedding cardinality/dimension validation, source revalidation, atomic RAG publication, exact-revision citations, crash/cancellation preservation, Dataset Manager history | 9 lineage contract, existing RAG | mandatory temporal correctness | No |
+| 10 | Stable watched-root/source identity, staged source revisions and dataset generations, embedding cardinality/dimension validation, source revalidation, atomic RAG publication, exact-revision citations, crash/cancellation preservation, Dataset Manager history | 9 lineage contract, existing RAG | mandatory temporal correctness | Yes |
 | 11 | Pinned Hugging Face thumbnail metadata, exact-host manual redirects, bounded pre-decode header inspection/cache service, selected repo/download/installed-card presentation, cache management | 2 | mandatory independent | No |
 | 12 | Only the already-selected targeted hardening from doc 06 that was not naturally completed by its owning batch; cross-batch integration tests; authoritative feature/workflow/security/privacy docs; CHANGELOG only for landed behavior | 1-11 changed batches | mandatory close-out, not a catch-all | No |
 | 13 | Full automated gates, canonical coverage, public diff/security/privacy audit, Linux/COSMIC and Windows live matrix, deferred ledger close-out | all landed batches | mandatory release-readiness evidence | No |
@@ -444,6 +444,42 @@ line-coverage gate passed. Test and coverage results were written outside the
 checkout. Owner live gates remain a real memory revise/timeline/current/as-of
 flow, rejection of one contradiction proposal, and forget/delete followed by
 restart and export verification.
+
+### 8.2.12 Batch 10 evidence
+
+Batch 10 publishes RAG content through source revisions and complete dataset
+generations:
+
+- Watched roots have stable platform-native identity where available, and
+  source identity is dataset, watch-root, and normalized relative locator. Root
+  disappearance, replacement, reparse/symlink traversal, and unknown identity
+  block a missing-source plan rather than risking a destructive false positive.
+- Ingest stages chunks, embeddings, full-text search, and BM25 statistics under
+  a new generation. One transaction advances the query-visible current pointer
+  only after exact embedding cardinality, finite non-empty vectors, consistent
+  dimensions, source identity, and content-hash revalidation pass. Failure or
+  cancellation leaves the prior current generation intact; stale staged rows are
+  scavenged at startup.
+- Revisions retain source evidence, content hash, embedding identity, and
+  predecessor identity. Retrieval, chat receipts, and Dataset Manager history
+  expose generation, source, revision, and content identity without storing an
+  absolute owner path as the identity. Missing-source removal also publishes a
+  replacement generation, so the previous query-visible set is not deleted
+  first. Generation-aware cache entries cannot survive a current-pointer
+  change.
+- The Dataset Manager shows generation state, embedding identity, chunk count,
+  and publication history. RAG citations use an exact dataset/generation/source/
+  revision/content locator, and the RAG documentation describes the retained
+  deletion and owner-validation limits.
+
+Batch 10 verification: the focused RAG, watcher, lineage, chat, and stream
+filters passed 94 tests; the zero-warning solution build passed with 0 warnings
+and 0 errors; the full sequential suite passed with 2,496 passed, 17 skipped,
+and 2,513 total tests. Test results were written outside the checkout. The
+native Windows root-identity path was compiled but not executed in this Linux
+run, so its runtime behavior remains an owner Windows live gate. Owner live
+gates remain a changed watched source, exact old/new citation revision, and a
+cancelled or failed reindex that preserves the prior complete version.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

@@ -234,7 +234,7 @@ namespace Hermaeus.Tests
             True(chunks.Count < 500, "cancellation during embedding should reduce final chunk count significantly");
         }
 
-        public static async Task RagDirectoryIngestPersistsCompletedFileBatches()
+        public static async Task RagDirectoryIngestCancellationLeavesPriorGenerationUntouched()
         {
             using var temp = new TempDir();
             var settings = NewSettings(temp);
@@ -243,11 +243,17 @@ namespace Hermaeus.Tests
             await store.InitializeAsync();
             var docs = temp.PathFor("docs");
             Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "file-00.txt"), "seed source alpha beta gamma");
+
+            var dataset = new RagDataset { Name = "atomic-ingest" };
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            await pipeline.IngestDirectoryAsync(dataset, docs);
+            var before = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+            var beforeGeneration = (await store.GetDatasetsAsync()).Single(d => d.Id == dataset.Id).CurrentGenerationId;
+
             for (var i = 0; i < 60; i++)
                 await File.WriteAllTextAsync(Path.Combine(docs, $"file-{i:D2}.txt"), $"batch checkpoint source {i} alpha beta gamma");
 
-            var dataset = new RagDataset { Name = "checkpointed-ingest" };
-            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
             using var cts = new CancellationTokenSource();
             var progress = new InlineProgress(p =>
             {
@@ -263,9 +269,13 @@ namespace Hermaeus.Tests
             {
             }
 
-            var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
-            True(chunks.Any(c => c.SourceFile == "file-00.txt"), "completed file batches should be persisted before later cancellation");
-            False(chunks.Any(c => c.SourceFile == "file-59.txt"), "cancelled later batches should not be fully persisted");
+            var after = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+            var afterGeneration = (await store.GetDatasetsAsync()).Single(d => d.Id == dataset.Id).CurrentGenerationId;
+            Equal(beforeGeneration, afterGeneration, "cancellation before publication must leave the current generation pointer untouched");
+            Equal(before.Count, after.Count, "cancellation before publication must leave the prior chunks query-visible");
+            Equal(string.Join("\n", before.Select(c => $"{c.SourceFile}:{c.Content}")),
+                string.Join("\n", after.Select(c => $"{c.SourceFile}:{c.Content}")),
+                "cancellation must not publish a partial file batch");
         }
 
         public static async Task RagIngestCancellationDuringStorage()

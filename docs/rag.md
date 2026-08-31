@@ -69,12 +69,16 @@ traces, versioned SQLite schema migrations, and native eval support.
 - Optional explicit web URLs (off by default).
 - Reindex diffing and corpus health warnings.
 - In-progress cancellation support.
-- Directory ingest processes local files in bounded file batches, embedding and
-  flushing each batch to SQLite before loading the next one. Large folders can
-  resume with **Skip unchanged** after an interrupted run instead of rebuilding
-  the whole corpus in memory.
-- The ingest pipeline uses cancellable, batched embedding and storage steps to
-  reduce DB lock contention and make long ingests abortable from the UI.
+- Directory ingest processes local files in bounded file batches, but publishes
+  only one complete dataset generation after all requested source chunks have
+  been embedded and validated. Cancellation or failure before publication
+  leaves the prior generation query-visible. Large folders can resume with
+  **Skip unchanged** after an interrupted run without exposing a partial
+  generation.
+- The ingest pipeline uses cancellable, batched embedding and one atomic
+  publication step. Source content and watched-root identity are revalidated
+  immediately before publication, so a file changed during embedding cannot be
+  published under stale evidence.
 - Large ingests report separate overall progress and current-stage progress.
   Embedding progress identifies both the file batch and embedding batch, and
   oversized embedding inputs are retried with smaller clamps before failing the
@@ -109,9 +113,15 @@ file counts, and duplicate-source counts, with these actions:
   cache. Progress reports through the same ingest progress UI.
 - **Remove missing** - shown only when one or more source files no longer
   exist on disk. Lists the missing paths and, after explicit confirmation,
-  deletes their chunks, rebuilds BM25 stats, and refreshes health. Never runs
+  publishes a replacement generation without those sources, rebuilds BM25
+  stats as part of that publication, and refreshes health. Never runs
   automatically: a temporarily unmounted drive must not silently shred a
-  dataset.
+  dataset. The prior generation remains query-visible until the replacement
+  commits.
+- Each published generation records its embedding identity, dimensions, chunk
+  count, predecessor, and current or superseded state. Source revisions record
+  the exact content hash and source evidence. The Dataset Manager shows this
+  history for inspection and ordinary retrieval uses only the current pointer.
 - **Delete** - deletes the dataset and all of its chunks and BM25 stats
   (explicit deletes, not a database cascade), after confirmation.
 
@@ -136,7 +146,10 @@ those folders taken once at ingest time.
   against the dataset's stored source rows - new, changed, missing, or
   unchanged - without changing anything. Change detection prefers a stored
   content hash; it falls back to modification time (with a one-second
-  tolerance) only when no hash was recorded. The scan is cancellable.
+  tolerance) only when no hash was recorded. It verifies stable root identity,
+  containment, and symlink/reparse ancestors. A missing, replaced, or
+  identity-Unknown root reports an error and produces no missing-source removal
+  plan. The scan is cancellable.
 - **Refresh now** runs the scan, shows the plan, and applies it after
   confirmation. New and changed files are ingested through the normal
   pipeline (`IngestDuplicatePolicy.Replace`) - the same chunking, embedding,
@@ -181,6 +194,9 @@ outcome without holding anything open for the life of the process.
 ### Querying
 
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
+  Each citation also carries the dataset generation, stable source id, source
+  revision id, and content hash that supplied the indexed chunk. A path remains
+  display evidence only and is not the citation identity.
 - RAG query traces now include query variants, planner notes, packing summaries,
   and refusal reasons.
 - Malformed source or trace metadata markers are logged as warnings instead of

@@ -116,9 +116,11 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
   changed files by default; removing missing sources remains a separate,
   explicitly confirmed action. Automatic refresh is off by default.
 - Dataset Manager exposes source and chunk health, embedding identity,
-  dimensions, missing and stale files, duplicate rows, index size, and reindex
-  state. A dataset embedded with another model falls back to keyword retrieval
-  or requires reindexing according to the operation.
+  dimensions, missing and stale files, duplicate rows, index size, reindex
+  state, and published generation history. A dataset embedded with another
+  model falls back to keyword retrieval or requires reindexing according to the
+  operation. RAG publication is atomic, and source citations retain the exact
+  generation, source revision, and content hash that supplied the chunk.
 - Chat Knowledge injection is bounded and cited. Weak retrieval adds nothing
   rather than forcing unrelated chunks into a response.
 - RAG has a native evaluation harness with retrieval metrics, refusal handling,

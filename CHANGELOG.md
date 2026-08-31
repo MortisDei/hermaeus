@@ -45,6 +45,12 @@ limit.
   contradiction proposals, transactional hard deletion, and bounded redacted
   versioned memory history export. Existing CSV export remains
   current-projection-only.
+- R32 Batch 10 adds stable watched-root and source lineage, staged source
+  revisions and dataset generations, exact embedding cardinality/dimension/
+  finite-value validation, immediate source revalidation, atomic RAG
+  publication, generation-aware query caches, exact-revision citations, and
+  Dataset Manager generation history. Missing-source removal now publishes a
+  replacement generation and cancellation cannot expose a partial ingest.
 
 ## [0.38.0-beta] - 2026-08-30
 

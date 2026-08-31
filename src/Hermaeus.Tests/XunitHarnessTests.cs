@@ -191,7 +191,7 @@ public static class HarnessCases
         [new HarnessCase("RAG ingest cancellation during embedding stops gracefully", RagTests.RagIngestCancellationDuringEmbedding)],
         [new HarnessCase("RAG ingest cancellation during storage stops gracefully", RagTests.RagIngestCancellationDuringStorage)],
         [new HarnessCase("RAG ingest clamps oversized embedding inputs", RagTests.RagIngestClampsOversizedEmbeddingInputs)],
-        [new HarnessCase("RAG directory ingest persists completed file batches", RagTests.RagDirectoryIngestPersistsCompletedFileBatches)],
+        [new HarnessCase("RAG directory cancellation leaves the prior generation untouched", RagTests.RagDirectoryIngestCancellationLeavesPriorGenerationUntouched)],
         [new HarnessCase("RAG embedding input includes final sentence of default-sized chunk with long source path", RagTests.RagEmbeddingInputIncludesFinalSentenceOfDefaultSizedChunkWithLongSourcePath)],
         [new HarnessCase("RAG chunk size guard warns when target chunk chars exceeds the clamp", RagTests.RagChunkSizeGuardWarnsWhenTargetChunkCharsExceedsTheClamp)],
         [new HarnessCase("RAG raised embedding clamp improves recall on long-chunk fixture", RagTests.RagRaisedEmbeddingClampImprovesRecallOnLongChunkFixture)],

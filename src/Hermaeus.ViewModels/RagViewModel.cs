@@ -19,6 +19,10 @@ public partial class RagSourceViewModel : ObservableObject
     public string Title   { get; init; } = string.Empty;
     public string File    { get; init; } = string.Empty;
     public string Path    { get; init; } = string.Empty;
+    public string SourceId { get; init; } = string.Empty;
+    public string SourceRevisionId { get; init; } = string.Empty;
+    public string ContentHash { get; init; } = string.Empty;
+    public string GenerationId { get; init; } = string.Empty;
     public string Content { get; init; } = string.Empty;
     public float  Score   { get; init; }
     public string ScoreDisplay => $"{Score:F3}";
@@ -40,6 +44,9 @@ public partial class RagSourceViewModel : ObservableObject
 
     public string CitationLabel => $"[{Rank}] {Title}";
     public string ShortCitationLabel => $"[{Rank}]";
+    public string CitationIdentity => string.IsNullOrWhiteSpace(SourceRevisionId)
+        ? "Legacy or unversioned source"
+        : $"Revision {SourceRevisionId} · {ContentHash[..Math.Min(ContentHash.Length, 12)]}";
     public string Snippet
     {
         get
@@ -102,7 +109,14 @@ public sealed class RagDatasetManagerItemViewModel
     public int StaleFiles { get; set; }
     public int DuplicateSources { get; set; }
     public IReadOnlyList<string> MissingSourcePaths { get; set; } = [];
+    public IReadOnlyList<RagDatasetGeneration> GenerationHistory { get; set; } = [];
     public string LastIngestLabel => CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    public string GenerationHistoryLabel => GenerationHistory.Count switch
+    {
+        0 => "Generations: none",
+        1 => "Generations: 1 published",
+        var count => $"Generations: {count} published, latest is current"
+    };
 
     /// <summary>doc 03 3.5: watched-source surfacing on the Dataset Manager card.</summary>
     public int WatchedSourceCount => Dataset.Config.WatchedSources.Count;
@@ -1114,6 +1128,15 @@ public partial class RagViewModel : ObservableObject
                 item.SourceCount = 0;
             }
 
+            try
+            {
+                item.GenerationHistory = await _query.GetGenerationHistoryAsync(dataset.Id);
+            }
+            catch
+            {
+                item.GenerationHistory = [];
+            }
+
             DatasetManagerItems.Add(item);
         }
 
@@ -1134,6 +1157,10 @@ public partial class RagViewModel : ObservableObject
                 Title = chunk.Title,
                 File = chunk.File,
                 Path = chunk.Path,
+                SourceId = chunk.SourceId,
+                SourceRevisionId = chunk.SourceRevisionId,
+                ContentHash = chunk.ContentHash,
+                GenerationId = chunk.GenerationId,
                 Score = chunk.Score,
                 Content = chunk.Content,
                 OutOfCount = chunk.OutOfCount,

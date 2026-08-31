@@ -51,15 +51,19 @@ public sealed class WatchedSourceService
     public async Task<RagRefreshPlan> ScanAsync(RagDataset dataset, CancellationToken ct = default)
     {
         var chunks = await _store.GetChunksAsync(dataset.Id, includeEmbeddings: false, ct);
+        var pathComparer = OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
         var bySource = chunks
             .Where(c => !string.IsNullOrWhiteSpace(c.SourcePath))
-            .GroupBy(c => c.SourcePath, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            .GroupBy(c => c.SourcePath, pathComparer)
+            .ToDictionary(g => g.Key, g => g.First(), pathComparer);
 
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(pathComparer);
         var newFiles = new List<string>();
         var changed = new List<string>();
         var errors = new List<string>();
+        var blockedRoots = new List<string>();
         var unchanged = 0;
 
         foreach (var watched in dataset.Config.WatchedSources)
@@ -68,6 +72,28 @@ public sealed class WatchedSourceService
             if (!PathRootValidator.TryValidate(watched.Root, out var root, out var rootError))
             {
                 errors.Add($"{watched.Root}: {rootError}");
+                AddBlockedRoot(blockedRoots, watched.Root);
+                continue;
+            }
+
+            var rootIdentity = RagSourceIdentity.TryGetRootIdentity(root);
+            if (rootIdentity is null)
+            {
+                errors.Add($"{root}: root identity is Unknown; no removal or refresh plan was created.");
+                blockedRoots.Add(root);
+                continue;
+            }
+            if (!string.IsNullOrWhiteSpace(watched.LastConfirmedRootIdentity)
+                && !string.Equals(watched.LastConfirmedRootIdentity, rootIdentity, StringComparison.Ordinal))
+            {
+                errors.Add($"{root}: root identity changed; confirm the replacement folder before refreshing.");
+                blockedRoots.Add(root);
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(watched.LastConfirmedRootIdentity))
+            {
+                errors.Add($"{root}: root identity has not been confirmed; no refresh or missing-source plan was created.");
+                blockedRoots.Add(root);
                 continue;
             }
 
@@ -79,12 +105,18 @@ public sealed class WatchedSourceService
             catch (Exception ex)
             {
                 errors.Add($"{root}: {ex.Message}");
+                blockedRoots.Add(root);
                 continue;
             }
 
             foreach (var file in files)
             {
                 ct.ThrowIfCancellationRequested();
+                if (!IsSafeFileUnderRoot(root, file))
+                {
+                    errors.Add($"{file}: symbolic-link or reparse ancestor rejected.");
+                    continue;
+                }
                 seen.Add(file);
 
                 if (!bySource.TryGetValue(file, out var existing))
@@ -95,7 +127,7 @@ public sealed class WatchedSourceService
 
                 try
                 {
-                    if (IsChanged(file, existing.SourceHash, existing.SourceModifiedUtc))
+                    if (await IsChangedAsync(file, existing.SourceHash, existing.SourceModifiedUtc, ct))
                         changed.Add(file);
                     else
                         unchanged++;
@@ -110,7 +142,9 @@ public sealed class WatchedSourceService
         // Missing: an indexed source path that falls under a watched root but
         // was not found on this scan.
         var missing = bySource.Keys
-            .Where(path => !seen.Contains(path) && IsUnderAnyWatchedRoot(path, dataset.Config.WatchedSources))
+            .Where(path => !seen.Contains(path)
+                && !blockedRoots.Any(root => IsUnderRoot(root, path))
+                && IsUnderAnyWatchedRoot(path, dataset.Config.WatchedSources))
             .ToList();
 
         return new RagRefreshPlan(newFiles, changed, missing, unchanged, errors);
@@ -158,28 +192,54 @@ public sealed class WatchedSourceService
         lock (_refreshingLock) return _refreshing.Contains(datasetId);
     }
 
-    private static bool IsChanged(string file, string existingHash, DateTime? existingModifiedUtc)
+    private static async Task<bool> IsChangedAsync(
+        string file, string existingHash, DateTime? existingModifiedUtc, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(existingHash))
-            return ComputeHash(file) != existingHash;
+            return !string.Equals(await ComputeSourceHashAsync(file, ct), existingHash, StringComparison.Ordinal);
 
         if (existingModifiedUtc is null) return true;
         var mtime = File.GetLastWriteTimeUtc(file);
         return (mtime - existingModifiedUtc.Value).Duration() > MtimeTolerance;
     }
 
-    private static string ComputeHash(string file)
+    private static async Task<string> ComputeSourceHashAsync(string file, CancellationToken ct)
     {
-        using var stream = File.OpenRead(file);
-        return Convert.ToHexString(SHA256.HashData(stream));
+        if (Path.GetExtension(file).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var extracted = await PdfTextExtractor.ExtractAsync(file, ct);
+            return extracted.HasText ? ComputeHash(extracted.Text) : string.Empty;
+        }
+
+        return ComputeHash(await File.ReadAllTextAsync(file, ct));
     }
+
+    private static string ComputeHash(string text) => Convert.ToHexString(
+        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
 
     private static bool IsUnderAnyWatchedRoot(string path, IReadOnlyList<RagWatchedSource> watched) =>
         watched.Any(w =>
         {
             if (!PathRootValidator.TryValidate(w.Root, out var root, out _)) return false;
-            return path.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+            return IsUnderRoot(root, path);
         });
+
+    private static void AddBlockedRoot(List<string> blockedRoots, string root)
+    {
+        try
+        {
+            blockedRoots.Add(Path.GetFullPath(root.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+        }
+    }
+
+    private static bool IsUnderRoot(string root, string path)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
+    }
 
     private static IReadOnlyList<string> EnumerateMatchingFiles(string root, RagWatchedSource watched)
     {
@@ -192,6 +252,8 @@ public sealed class WatchedSourceService
         var results = new List<string>();
         foreach (var file in all)
         {
+            if (!IsSafeFileUnderRoot(root, file))
+                continue;
             var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
             if (excludes.Any(g => GlobMatcher.IsMatch(g, relative))) continue;
             if (!includes.Any(g => GlobMatcher.IsMatch(g, relative))) continue;
@@ -199,5 +261,30 @@ public sealed class WatchedSourceService
         }
 
         return results;
+    }
+
+    private static bool IsSafeFileUnderRoot(string root, string file)
+    {
+        var fullFile = Path.GetFullPath(file);
+        var relative = Path.GetRelativePath(root, fullFile);
+        if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            return false;
+
+        var current = root;
+        foreach (var segment in relative.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            try
+            {
+                if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                    return false;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

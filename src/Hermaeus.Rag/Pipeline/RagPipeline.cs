@@ -3,6 +3,7 @@ using Hermaeus.Rag.Embeddings;
 using Hermaeus.Rag.Models;
 using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
+using Hermaeus.Core.Services;
 using System.Security.Cryptography;
 using System.Net;
 using System.Text;
@@ -43,6 +44,9 @@ public sealed class RagPipeline
 
     /// <summary>Header (title/path/heading/etc.) must not crowd out chunk content inside the embedding budget.</summary>
     private const int MaxHeaderTokens = 48;
+    private static StringComparer PathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
 
     public RagPipeline(SqliteRagStore store, IEmbeddingService embed)
         : this(store, embed, null)
@@ -71,9 +75,7 @@ public sealed class RagPipeline
 
         // r24 doc 03 3.3: a watched-source refresh passes its own computed
         // new+changed file list (already filtered by include/exclude globs)
-        // instead of the directory-wide .txt/.md/.pdf scan below, so the same
-        // pipeline - chunking, embedding, BM25 rebuild, cache invalidation -
-        // runs for both a manual ingest and a refresh with no parallel path.
+        // instead of the directory-wide .txt/.md/.pdf scan below.
         var files = explicitFiles?.OrderBy(f => f).ToList() ?? Directory.GetFiles(directory, "*.txt", SearchOption.AllDirectories)
             .Concat(Directory.GetFiles(directory, "*.md", SearchOption.AllDirectories))
             .Concat(Directory.GetFiles(directory, "*.pdf", SearchOption.AllDirectories))
@@ -89,7 +91,7 @@ public sealed class RagPipeline
 
         var report = new IngestReport();
 
-        // lookup existing source hashes to decide skip/replace
+        var existingChunks = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true, ct);
         var existingHashes = await _store.GetSourceHashesAsync(dataset.Id, files, ct);
 
         var health = new RagIngestHealth { FileCount = files.Count };
@@ -97,12 +99,15 @@ public sealed class RagPipeline
         var duplicateKeys = new HashSet<string>(StringComparer.Ordinal);
         var totalChunksSeen = 0;
 
-        // ── 1. Chunk, embed, and store in file batches ────────────────────
-        // r10 01-rag-correctness.md 1.6: a dry run must not create or
-        // update the dataset row; the final save at the end of this method
-        // is already skipped by the dry-run early return below.
-        if (!options.DryRun)
-            await _store.SaveDatasetAsync(dataset, ct);
+        var newChunks = new List<RagChunk>();
+        var changedSourcePaths = new HashSet<string>(PathComparer);
+        var sourceDescriptors = new Dictionary<string, RagSourceDescriptor>(StringComparer.Ordinal);
+        var sourceRevisions = new Dictionary<string, RagSourceRevision>(StringComparer.Ordinal);
+
+        // ── 1. Chunk and embed in file batches, but do not publish yet ─────
+        // Every database write waits for the complete generation. The old
+        // current pointer therefore remains query-visible through failure or
+        // cancellation during this whole phase.
         for (int batchStart = 0; batchStart < files.Count; batchStart += DirectoryFileBatchSize)
         {
             ct.ThrowIfCancellationRequested();
@@ -113,7 +118,6 @@ public sealed class RagPipeline
             var fileBatch = files.Skip(batchStart).Take(DirectoryFileBatchSize).ToList();
             var batchChunks = new List<RagChunk>();
             var batchParents = new List<RagChunk>();
-            var changedSourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             for (int fi = 0; fi < fileBatch.Count; fi++)
             {
@@ -142,10 +146,7 @@ public sealed class RagPipeline
                         report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.ReportOnly, Message = "Would replace (report-only)" });
                     }
                     else
-                    {
-                        // Replace path - will be treated as replace later
                         report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.Replaced, Message = "Will replace existing source" });
-                    }
                 }
                 else
                 {
@@ -162,8 +163,33 @@ public sealed class RagPipeline
                     health.Warnings.Add($"Large file: {document.SourcePath}");
                 }
 
-                var textChunks = _chunker.Chunk(document.Text, file, document.Title, dataset.Config);
+                if (options.DuplicatePolicy == IngestDuplicatePolicy.ReportOnly)
+                    continue;
+
+                var watched = FindWatchedSource(dataset, document.SourcePath);
+                var existingForSource = existingChunks.FirstOrDefault(c => PathsEqual(c.SourcePath, document.SourcePath));
+                var sourceId = string.IsNullOrWhiteSpace(existingForSource?.SourceId)
+                    ? RagSourceIdentity.ForSource(dataset.Id, watched, document.SourcePath)
+                    : existingForSource.SourceId;
+                var previousRevisionId = existingForSource?.SourceRevisionId;
+                var revisionId = existingForSource is not null
+                    && string.Equals(existingForSource.SourceHash, document.SourceHash, StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(existingForSource.SourceRevisionId)
+                    ? existingForSource.SourceRevisionId
+                    : $"revision:{Guid.NewGuid():N}";
+                sourceDescriptors[sourceId] = new RagSourceDescriptor(
+                    sourceId, dataset.Id, watched?.WatchRootId,
+                    RagSourceIdentity.RelativeLocator(watched, document.SourcePath), RagSourceKind.LocalFile,
+                    watched?.LastConfirmedRootIdentity);
+                sourceRevisions[revisionId] = new RagSourceRevision(
+                    revisionId, sourceId, document.SourceHash,
+                    $"local file {RagSourceIdentity.RelativeLocator(watched, document.SourcePath)}",
+                    EmbeddingIdentity(dataset), RagSourceRevisionState.Staged, DateTime.UtcNow,
+                    string.Equals(revisionId, previousRevisionId, StringComparison.Ordinal) ? null : previousRevisionId,
+                    document.ModifiedUtc);
                 changedSourcePaths.Add(document.SourcePath);
+
+                var textChunks = _chunker.Chunk(document.Text, file, document.Title, dataset.Config);
 
                 foreach (var tc in textChunks)
                 {
@@ -171,6 +197,8 @@ public sealed class RagPipeline
                         health.EmptyChunkCount++;
 
                     var chunk = CreateChunk(dataset.Id, document.SourceFile, document.SourcePath, document.SourceHash, document.ModifiedUtc, document.Title, tc);
+                    chunk.SourceId = sourceId;
+                    chunk.SourceRevisionId = revisionId;
 
                     if (!duplicateKeys.Add($"{chunk.SourcePath}\n{chunk.Content}"))
                         health.DuplicateChunkCount++;
@@ -180,6 +208,8 @@ public sealed class RagPipeline
                         // Parent chunk (stored but not embedded for indexing)
                         var parentId = Guid.NewGuid().ToString();
                         var parent = CreateChunk(dataset.Id, document.SourceFile, document.SourcePath, document.SourceHash, document.ModifiedUtc, document.Title, tc, tc.ParentContent, parentId, null);
+                        parent.SourceId = sourceId;
+                        parent.SourceRevisionId = revisionId;
                         parent.IsParent = true;
                         batchParents.Add(parent);
                         chunk.ParentId = parentId;
@@ -196,41 +226,27 @@ public sealed class RagPipeline
                 continue;
 
             await EmbedChunksAsync(dataset, batchChunks, progress, ct, batchStepBase + 1, overallTotal, batchLabel);
-
-            progress?.Report(new IngestProgress("Storing", Math.Min(batchStart + fileBatch.Count, files.Count), files.Count,
-                $"Writing {batchLabel.ToLowerInvariant()} to SQLite...", batchStepBase + 2, overallTotal, batchLabel));
-            ct.ThrowIfCancellationRequested();
-            await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
-
-            ct.ThrowIfCancellationRequested();
-            if (batchParents.Count > 0)
-                await _store.SaveChunksBatchAsync(batchParents, ct);
-
-            ct.ThrowIfCancellationRequested();
-            await _store.SaveChunksBatchAsync(batchChunks, ct);
+            newChunks.AddRange(batchParents);
+            newChunks.AddRange(batchChunks);
         }
 
         AddHealthWarnings(health);
 
-        // ── 2. If dry-run, skip embedding and storage, return report and health
-        if (options.DryRun)
+        // ── 2. If dry-run/report-only, skip embedding and storage ─────────
+        if (options.DryRun || options.DuplicatePolicy == IngestDuplicatePolicy.ReportOnly)
         {
             report.Health = health;
             progress?.Report(new IngestProgress("Done", totalChunksSeen, totalChunksSeen, $"Dry-run complete. {report.Summary()}"));
             return report;
         }
 
-        // ── 3. BM25 stats ─────────────────────────────────────────────────
-        progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats...", overallTotal - 1, overallTotal, "Final index"));
-        var allStoredChunks = await _store.GetChunksAsync(dataset.Id, includeEmbeddings: false, ct);
-        var stats = Bm25Scorer.BuildStats(allStoredChunks);
-        await _store.SaveBm25StatsAsync(dataset.Id, stats, ct);
+        progress?.Report(new IngestProgress("Storing", files.Count, files.Count,
+            "Publishing complete dataset generation...", overallTotal - 1, overallTotal, "Atomic publication"));
+        var retained = existingChunks.Where(c => !changedSourcePaths.Contains(c.SourcePath)).ToList();
+        await PublishSnapshotAsync(dataset, retained.Concat(newChunks).ToList(), sourceDescriptors, sourceRevisions, progress, overallTotal, ct);
+        var indexedChunkCount = retained.Concat(newChunks).Count(c => !c.IsParent);
 
-        // ── 4. Update dataset chunk count ─────────────────────────────────
-        dataset.ChunkCount = allStoredChunks.Count;
-        await _store.SaveDatasetAsync(dataset, ct);
-
-        progress?.Report(new IngestProgress("Done", allStoredChunks.Count, allStoredChunks.Count,
+        progress?.Report(new IngestProgress("Done", indexedChunkCount, indexedChunkCount,
             $"{totalChunksSeen} chunks processed from {files.Count} files. Health: {BuildHealthSummary(health)}", overallTotal, overallTotal, "Complete"));
 
         report.Health = health;
@@ -249,7 +265,7 @@ public sealed class RagPipeline
         IProgress<IngestProgress>? progress = null,
         CancellationToken ct = default)
     {
-        var chunks = await _store.GetChunksAsync(dataset.Id, includeEmbeddings: false, ct);
+        var chunks = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: false, ct);
         if (chunks.Count == 0)
         {
             progress?.Report(new IngestProgress("Done", 0, 0, "Nothing to reindex."));
@@ -258,35 +274,18 @@ public sealed class RagPipeline
 
         progress?.Report(new IngestProgress("Embedding", 0, chunks.Count, $"Reindexing {chunks.Count} chunk(s)..."));
 
-        for (var i = 0; i < chunks.Count; i += EmbedBatchSize)
-        {
-            ct.ThrowIfCancellationRequested();
-            var batch = chunks.Skip(i).Take(EmbedBatchSize).ToList();
-            var embeddings = await EmbedBatchWithRetryAsync(batch, dataset.Config, ct);
-            if (embeddings.Count > 0)
-                dataset.Config.EmbeddingDimensions = embeddings[0].Length;
-
-            for (var j = 0; j < batch.Count; j++)
-                batch[j].Embedding = embeddings[j];
-
-            ct.ThrowIfCancellationRequested();
-            await _store.SaveChunksBatchAsync(batch, ct);
-
-            var done = Math.Min(i + EmbedBatchSize, chunks.Count);
-            progress?.Report(new IngestProgress("Embedding", done, chunks.Count, $"Reindexed {done} of {chunks.Count} chunk(s)"));
-        }
-
-        progress?.Report(new IngestProgress("Indexing", 0, 1, "Rebuilding BM25 stats..."));
+        var workingChunks = chunks.Select(CloneChunkForWorking).ToList();
+        var embeddedChunks = workingChunks.Where(c => !c.IsParent).ToList();
+        dataset.Config.EmbeddingDimensions = 0;
+        await EmbedChunksAsync(dataset, embeddedChunks, progress, ct);
+        progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats..."));
         ct.ThrowIfCancellationRequested();
-        var statsSource = await _store.GetChunksAsync(dataset.Id, includeEmbeddings: false, ct);
-        var stats = Bm25Scorer.BuildStats(statsSource);
-        await _store.SaveBm25StatsAsync(dataset.Id, stats, ct);
+        await PublishSnapshotAsync(dataset, workingChunks,
+            new Dictionary<string, RagSourceDescriptor>(),
+            new Dictionary<string, RagSourceRevision>(), progress, 1, ct);
 
-        ct.ThrowIfCancellationRequested();
-        await _store.SaveDatasetAsync(dataset, ct);
-
-        progress?.Report(new IngestProgress("Done", chunks.Count, chunks.Count, $"Reindex complete: {chunks.Count} chunk(s)."));
-        return chunks.Count;
+        progress?.Report(new IngestProgress("Done", embeddedChunks.Count, embeddedChunks.Count, $"Reindex complete: {embeddedChunks.Count} chunk(s)."));
+        return embeddedChunks.Count;
     }
 
     public async Task<IngestReport> IngestWebAsync(
@@ -318,7 +317,7 @@ public sealed class RagPipeline
 
         var allChunks = new List<RagChunk>();
         var parentChunks = new List<RagChunk>();
-        var sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sourcePaths = new HashSet<string>(PathComparer);
         var health = new RagIngestHealth { FileCount = documents.Count };
         AddChunkSizeGuardWarning(health, dataset.Config);
         progress?.Report(new IngestProgress("Chunking", 0, documents.Count, $"Chunking {documents.Count} web page(s)"));
@@ -576,8 +575,15 @@ public sealed class RagPipeline
         IProgress<IngestProgress>? progress,
         CancellationToken ct)
     {
+        var existing = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true, ct);
+        AssignLineage(dataset, allChunks, existing, sourceKind: RagSourceKind.WebUrl);
+        AssignLineage(dataset, parentChunks, existing, sourceKind: RagSourceKind.WebUrl);
         await EmbedChunksAsync(dataset, allChunks, progress, ct);
-        await StoreChunksAsync(dataset, allChunks, parentChunks, changedSourcePaths, progress, ct);
+        await PublishSnapshotAsync(
+            dataset,
+            existing.Where(c => !changedSourcePaths.Contains(c.SourcePath)).Concat(parentChunks).Concat(allChunks).ToList(),
+            new Dictionary<string, RagSourceDescriptor>(),
+            new Dictionary<string, RagSourceRevision>(), progress, 1, ct);
     }
 
     private async Task EmbedChunksAsync(
@@ -615,57 +621,238 @@ public sealed class RagPipeline
         }
     }
 
-    private async Task StoreChunksAsync(
+    private async Task PublishSnapshotAsync(
         RagDataset dataset,
-        List<RagChunk> allChunks,
-        List<RagChunk> parentChunks,
-        HashSet<string> changedSourcePaths,
+        List<RagChunk> chunks,
+        IReadOnlyDictionary<string, RagSourceDescriptor> suppliedSources,
+        IReadOnlyDictionary<string, RagSourceRevision> suppliedRevisions,
         IProgress<IngestProgress>? progress,
+        int overallTotal,
         CancellationToken ct)
     {
-        int total = allChunks.Count;
-        progress?.Report(new IngestProgress("Storing", 0, total, "Writing to SQLite..."));
-
         ct.ThrowIfCancellationRequested();
-        await _store.SaveDatasetAsync(dataset, ct);
+        NormalizeWatchedSources(dataset);
+        var existing = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true, ct);
+        AssignLineage(dataset, chunks, existing, RagSourceKind.LocalFile);
 
-        ct.ThrowIfCancellationRequested();
-        await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
-
-        if (parentChunks.Count > 0)
+        var sources = suppliedSources.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        var revisions = suppliedRevisions.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        foreach (var group in chunks.GroupBy(c => c.SourceId, StringComparer.Ordinal))
         {
-            ct.ThrowIfCancellationRequested();
-            // save parent chunks in smaller batches to allow cancellation responsiveness
-            const int saveBatch = 1000;
-            for (int i = 0; i < parentChunks.Count; i += saveBatch)
+            var sample = group.First();
+            var watched = FindWatchedSource(dataset, sample.SourcePath);
+            var isWeb = sample.SourcePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || sample.SourcePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+            sources[group.Key] = new RagSourceDescriptor(
+                group.Key, dataset.Id, isWeb ? null : watched?.WatchRootId,
+                isWeb ? sample.SourcePath : RagSourceIdentity.RelativeLocator(watched, sample.SourcePath),
+                isWeb ? RagSourceKind.WebUrl : RagSourceKind.LocalFile,
+                isWeb ? null : watched?.LastConfirmedRootIdentity);
+
+            var revision = group.First().SourceRevisionId;
+            if (!revisions.ContainsKey(revision))
             {
-                ct.ThrowIfCancellationRequested();
-                var batch = parentChunks.Skip(i).Take(saveBatch).ToList();
-                await _store.SaveChunksBatchAsync(batch, ct);
-                progress?.Report(new IngestProgress("Storing", Math.Min(i + saveBatch, total), total, "Writing parent chunks"));
+                var previous = existing.FirstOrDefault(c => c.SourceId == group.Key)?.SourceRevisionId;
+                revisions[revision] = new RagSourceRevision(
+                    revision, group.Key, sample.SourceHash, "Indexed source content",
+                    EmbeddingIdentity(dataset), RagSourceRevisionState.Staged, DateTime.UtcNow,
+                    string.Equals(previous, revision, StringComparison.Ordinal) ? null : previous,
+                    sample.SourceModifiedUtc);
             }
         }
 
-        ct.ThrowIfCancellationRequested();
-        // save main chunks in batches for responsiveness
-        const int mainSaveBatch = 1000;
-        for (int i = 0; i < allChunks.Count; i += mainSaveBatch)
+        var prepared = CloneForGeneration(chunks);
+        var embedded = prepared.Where(c => !c.IsParent).ToList();
+        var dimensions = embedded.Count == 0 ? 0 : embedded[0].Embedding.Length;
+        dataset.Config.EmbeddingDimensions = dimensions;
+        var stats = Bm25Scorer.BuildStats(embedded);
+        await ValidateStagedLocalSourcesAsync(dataset, chunks, ct);
+        progress?.Report(new IngestProgress("Indexing", 0, 1,
+            "Building BM25 stats and publishing atomically...", overallTotal - 1, overallTotal, "Atomic publication"));
+        await _store.PublishGenerationAsync(
+            dataset, prepared, stats, [.. sources.Values], [.. revisions.Values],
+            EmbeddingIdentity(dataset), dimensions, ct);
+    }
+
+    private void AssignLineage(
+        RagDataset dataset,
+        IReadOnlyList<RagChunk> chunks,
+        IReadOnlyList<RagChunk> existing,
+        RagSourceKind sourceKind)
+    {
+        foreach (var chunk in chunks)
         {
-            ct.ThrowIfCancellationRequested();
-            var batch = allChunks.Skip(i).Take(mainSaveBatch).ToList();
-            await _store.SaveChunksBatchAsync(batch, ct);
-            progress?.Report(new IngestProgress("Storing", Math.Min(i + mainSaveBatch, total), total, $"Writing chunks {i}-{Math.Min(i + mainSaveBatch, total)}"));
+            var existingForSource = existing.FirstOrDefault(c => PathsEqual(c.SourcePath, chunk.SourcePath));
+            var watched = sourceKind == RagSourceKind.LocalFile
+                ? FindWatchedSource(dataset, chunk.SourcePath)
+                : null;
+            if (string.IsNullOrWhiteSpace(chunk.SourceId))
+            {
+                chunk.SourceId = existingForSource is not null && !string.IsNullOrWhiteSpace(existingForSource.SourceId)
+                    ? existingForSource.SourceId
+                    : RagSourceIdentity.ForSource(dataset.Id, watched, chunk.SourcePath);
+            }
+
+            if (string.IsNullOrWhiteSpace(chunk.SourceRevisionId))
+            {
+                chunk.SourceRevisionId = existingForSource is not null
+                    && string.Equals(existingForSource.SourceHash, chunk.SourceHash, StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(existingForSource.SourceRevisionId)
+                    ? existingForSource.SourceRevisionId
+                    : $"revision:{Guid.NewGuid():N}";
+            }
+        }
+    }
+
+    private static List<RagChunk> CloneForGeneration(IReadOnlyList<RagChunk> chunks)
+    {
+        var ids = chunks.ToDictionary(c => c.Id, _ => Guid.NewGuid().ToString(), StringComparer.Ordinal);
+        return chunks.Select(chunk => new RagChunk
+        {
+            Id = ids[chunk.Id],
+            DatasetId = chunk.DatasetId,
+            SourceFile = chunk.SourceFile,
+            SourcePath = chunk.SourcePath,
+            SourceHash = chunk.SourceHash,
+            SourceId = chunk.SourceId,
+            SourceRevisionId = chunk.SourceRevisionId,
+            GenerationId = string.Empty,
+            SourceModifiedUtc = chunk.SourceModifiedUtc,
+            SourceTitle = chunk.SourceTitle,
+            Content = chunk.Content,
+            ChunkIndex = chunk.ChunkIndex,
+            ChunkTotal = chunk.ChunkTotal,
+            ParentId = chunk.ParentId is not null && ids.TryGetValue(chunk.ParentId, out var parentId) ? parentId : null,
+            IsParent = chunk.IsParent,
+            TokenCount = chunk.TokenCount,
+            Embedding = [.. chunk.Embedding],
+            CreatedAt = chunk.CreatedAt,
+            ChunkKind = chunk.ChunkKind,
+            HeadingPath = chunk.HeadingPath,
+            CodeSymbolInfo = chunk.CodeSymbolInfo,
+            PageNumber = chunk.PageNumber,
+            EventType = chunk.EventType,
+            SourceUrl = chunk.SourceUrl
+        }).ToList();
+    }
+
+    private static RagChunk CloneChunkForWorking(RagChunk chunk) => new()
+    {
+        Id = chunk.Id,
+        DatasetId = chunk.DatasetId,
+        SourceFile = chunk.SourceFile,
+        SourcePath = chunk.SourcePath,
+        SourceHash = chunk.SourceHash,
+        SourceId = chunk.SourceId,
+        SourceRevisionId = chunk.SourceRevisionId,
+        GenerationId = chunk.GenerationId,
+        SourceModifiedUtc = chunk.SourceModifiedUtc,
+        SourceTitle = chunk.SourceTitle,
+        Content = chunk.Content,
+        ChunkIndex = chunk.ChunkIndex,
+        ChunkTotal = chunk.ChunkTotal,
+        ParentId = chunk.ParentId,
+        IsParent = chunk.IsParent,
+        TokenCount = chunk.TokenCount,
+        Embedding = [],
+        CreatedAt = chunk.CreatedAt,
+        ChunkKind = chunk.ChunkKind,
+        HeadingPath = chunk.HeadingPath,
+        CodeSymbolInfo = chunk.CodeSymbolInfo,
+        PageNumber = chunk.PageNumber,
+        EventType = chunk.EventType,
+        SourceUrl = chunk.SourceUrl
+    };
+
+    private static RagWatchedSource? FindWatchedSource(RagDataset dataset, string sourcePath)
+    {
+        foreach (var watched in dataset.Config.WatchedSources)
+        {
+            if (!PathRootValidator.TryValidate(watched.Root, out var root, out _))
+                continue;
+            var relative = Path.GetRelativePath(root, sourcePath);
+            if (!relative.StartsWith("..", StringComparison.Ordinal)
+                && !Path.IsPathRooted(relative))
+                return watched;
         }
 
-        progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats..."));
-        ct.ThrowIfCancellationRequested();
-        var stats = Bm25Scorer.BuildStats(allChunks);
-        ct.ThrowIfCancellationRequested();
-        await _store.SaveBm25StatsAsync(dataset.Id, stats, ct);
+        return null;
+    }
 
-        dataset.ChunkCount = allChunks.Count;
-        ct.ThrowIfCancellationRequested();
-        await _store.SaveDatasetAsync(dataset, ct);
+    private static bool PathsEqual(string left, string right) =>
+        PathComparer.Equals(left, right);
+
+    private static async Task ValidateStagedLocalSourcesAsync(
+        RagDataset dataset, IReadOnlyList<RagChunk> chunks, CancellationToken ct)
+    {
+        var staged = chunks
+            .Where(chunk => string.IsNullOrWhiteSpace(chunk.GenerationId)
+                && !chunk.SourcePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                && !chunk.SourcePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(chunk => chunk.SourcePath, PathComparer);
+
+        foreach (var group in staged)
+        {
+            ct.ThrowIfCancellationRequested();
+            var sourcePath = group.Key;
+            var watched = FindWatchedSource(dataset, sourcePath);
+            if (watched is not null)
+            {
+                if (!PathRootValidator.TryValidate(watched.Root, out var root, out var rootError))
+                    throw new InvalidOperationException($"Cannot publish {sourcePath}: {rootError}");
+                var currentIdentity = RagSourceIdentity.TryGetRootIdentity(root);
+                if (currentIdentity is null || string.IsNullOrWhiteSpace(watched.LastConfirmedRootIdentity))
+                    throw new InvalidOperationException($"Cannot publish {sourcePath}: watched root identity is Unknown.");
+                if (!string.Equals(currentIdentity, watched.LastConfirmedRootIdentity, StringComparison.Ordinal))
+                    throw new InvalidOperationException($"Cannot publish {sourcePath}: watched root identity changed.");
+                if (!IsSafeFileUnderRoot(root, sourcePath))
+                    throw new InvalidOperationException($"Cannot publish {sourcePath}: symbolic-link or reparse ancestor rejected.");
+            }
+
+            var document = await LoadLocalDocumentAsync(sourcePath, new RagIngestHealth(), ct)
+                ?? throw new InvalidOperationException($"Cannot publish {sourcePath}: source is no longer readable.");
+            if (group.Any(chunk => !string.Equals(chunk.SourceHash, document.SourceHash, StringComparison.Ordinal)))
+                throw new InvalidOperationException($"Cannot publish {sourcePath}: source content changed during ingest.");
+        }
+    }
+
+    private static bool IsSafeFileUnderRoot(string root, string file)
+    {
+        var fullFile = Path.GetFullPath(file);
+        var relative = Path.GetRelativePath(root, fullFile);
+        if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            return false;
+
+        var current = root;
+        foreach (var segment in relative.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            try
+            {
+                if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                    return false;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string EmbeddingIdentity(RagDataset dataset) =>
+        string.IsNullOrWhiteSpace(dataset.Config.EmbeddingModel) ? "Unknown" : dataset.Config.EmbeddingModel.Trim();
+
+    private static void NormalizeWatchedSources(RagDataset dataset)
+    {
+        foreach (var watched in dataset.Config.WatchedSources)
+        {
+            if (string.IsNullOrWhiteSpace(watched.WatchRootId))
+                watched.WatchRootId = RagSourceIdentity.ForWatchedRoot(dataset.Id, watched.Root);
+            if (string.IsNullOrWhiteSpace(watched.LastConfirmedRootIdentity))
+                watched.LastConfirmedRootIdentity = RagSourceIdentity.TryGetRootIdentity(watched.Root);
+        }
     }
 
     private static async Task<LocalDocument?> LoadLocalDocumentAsync(string file, RagIngestHealth health, CancellationToken ct)
@@ -716,7 +903,17 @@ public sealed class RagPipeline
             var texts = batch.Select(c => BuildEmbeddingInput(c, cfg, tokenLimit)).ToList();
             try
             {
-                return await _embed.EmbedBatchAsync(texts, ct);
+                var embeddings = await _embed.EmbedBatchAsync(texts, ct);
+                if (embeddings.Count != batch.Count)
+                    throw new InvalidOperationException($"Embedding service returned {embeddings.Count} vectors for {batch.Count} requested chunks.");
+                if (embeddings.Any(vector => vector.Length == 0 || vector.Any(value => !float.IsFinite(value))))
+                    throw new InvalidOperationException("Embedding service returned an empty or non-finite vector.");
+                var dimensions = embeddings.Select(vector => vector.Length).Distinct().ToList();
+                if (dimensions.Count != 1)
+                    throw new InvalidOperationException("Embedding service returned mixed vector dimensions in one batch.");
+                if (cfg.EmbeddingDimensions > 0 && cfg.EmbeddingDimensions != dimensions[0])
+                    throw new InvalidOperationException($"Embedding service returned dimension {dimensions[0]}, expected {cfg.EmbeddingDimensions}.");
+                return embeddings;
             }
             catch (InvalidOperationException ex) when (LooksLikeOversizedEmbeddingInput(ex))
             {

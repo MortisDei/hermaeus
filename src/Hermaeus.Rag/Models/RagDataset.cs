@@ -9,6 +9,7 @@ public class RagDataset
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastIngestUtc { get; set; }
     public string LastIngestPath { get; set; } = string.Empty;
+    public string? CurrentGenerationId { get; set; }
 
     /// <summary>r24 doc 01: project this dataset belongs to, or empty for none. A
     /// default and a filter only; the dataset stays usable from anywhere.</summary>
@@ -62,6 +63,8 @@ public class RagDatasetConfig
 public sealed class RagWatchedSource
 {
     public string Root { get; set; } = string.Empty;
+    public string WatchRootId { get; set; } = string.Empty;
+    public string? LastConfirmedRootIdentity { get; set; }
     public List<string> IncludeGlobs { get; set; } = [];
 
     /// <summary>Ships non-empty by default (doc 03 3.1): a user who points a watched

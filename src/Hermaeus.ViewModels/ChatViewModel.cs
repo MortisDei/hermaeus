@@ -2215,7 +2215,13 @@ public partial class ChatViewModel : ViewModelBase
             // chunks into "thanks!" or "write me a poem" just because a
             // dataset happens to be attached.
             if (RagQueryService.WouldRefuse(retrieval.SemanticCandidates, retrieval.Bm25Candidates, opts.RefusalThreshold))
-                return (string.Empty, [], sw.ElapsedMilliseconds, 0, "retrieval below confidence threshold; nothing injected");
+            {
+                const string refusalNote = "retrieval below confidence threshold; nothing injected";
+                var note = string.IsNullOrWhiteSpace(retrieval.PlannerNotes)
+                    ? refusalNote
+                    : $"{retrieval.PlannerNotes}; {refusalNote}";
+                return (string.Empty, [], sw.ElapsedMilliseconds, 0, note);
+            }
 
             var pack = _rag.BuildContextPack(retrieval.Selected, opts);
             if (pack.PackedChunks.Count == 0 || string.IsNullOrWhiteSpace(pack.Text))
@@ -2232,9 +2238,10 @@ public partial class ChatViewModel : ViewModelBase
             var sources = pack.PackedChunks.Select(packed => new SourceReference(
                 ProvenanceKind.Rag,
                 packed.Chunk.SourceTitle,
-                Locator: string.IsNullOrWhiteSpace(packed.Chunk.SourcePath) ? packed.Chunk.SourceFile : packed.Chunk.SourcePath,
+                Locator: RagCitationIdentity.BuildLocator(packed.Chunk),
                 Snippet: packed.Content,
-                Timestamp: null)).ToList();
+                Timestamp: packed.Chunk.SourceModifiedUtc,
+                EvidenceOrigin: EvidenceOrigin.DirectObservation)).ToList();
 
             return (contextText, sources, sw.ElapsedMilliseconds, pack.PackedChunks.Count, retrieval.PlannerNotes);
         }

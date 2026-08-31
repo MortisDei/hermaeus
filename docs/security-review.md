@@ -206,14 +206,26 @@ Current mitigations:
 - Current local ingest implementation only enumerates `.txt` and `.md`.
 - Optional web ingest must be explicitly enabled per dataset and only accepts
   listed HTTP(S) URLs.
-- Source paths are explicit in citations and query traces.
+- Watched roots are identity-checked and every scanned file is rechecked for
+  containment and symlink/reparse ancestors. A missing, replaced, or unknown
+  root cannot produce a missing-source removal plan.
+- RAG content, embeddings, full-text rows, and BM25 statistics publish as one
+  complete generation. A failed or cancelled ingest leaves the prior current
+  generation query-visible, and citations bind to the exact source revision
+  and content hash rather than a path alone.
+- Source paths remain explicit display evidence in citations and query traces,
+  but are not the source identity.
 - Oversized files are counted and surfaced in ingest health.
 - Web pages are capped and script/style blocks are stripped before chunking.
 - Prompt template shape is validated.
 
-Required follow-up: see `docs/security-roadmap.md` ("Stronger RAG file-size
-enforcement", "Broader text sanitization / domain allow-listing for web
-ingest").
+Limitations: RAG source and generation history remains plaintext in the active
+store and its backups until the user deletes the dataset; prior exports,
+backups, snapshots, and storage remanence are not revoked. Local source files
+are revalidated before publication, but a source can still change after a
+successful publication and before a later query. Required follow-up: see
+`docs/security-roadmap.md` ("Stronger RAG file-size enforcement", "Broader
+text sanitization / domain allow-listing for web ingest").
 
 ### Malicious Local Executable Path
 
