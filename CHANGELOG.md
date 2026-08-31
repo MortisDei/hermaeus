@@ -9,6 +9,13 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [Unreleased]
+
+### Changed
+
+- R32 development is prepared as `0.39.0-beta`; no release or tag is created
+  by this work.
+
 ## [0.38.0-beta] - 2026-08-30
 
 ### Changed
