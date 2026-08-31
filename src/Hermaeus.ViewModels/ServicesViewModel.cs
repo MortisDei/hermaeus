@@ -24,6 +24,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly LocalModelCapabilityService? _capabilityService;
     private readonly IResourceCoordinator? _resourceCoordinator;
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
+    private readonly RecommendationDerivationService? _recommendationDerivation;
     private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
@@ -543,7 +544,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         IActivityRecorder? activity = null,
         LocalModelCapabilityService? capabilityService = null,
         IResourceCoordinator? resourceCoordinator = null,
-        AdaptiveInferenceExperienceService? adaptiveExperience = null)
+        AdaptiveInferenceExperienceService? adaptiveExperience = null,
+        RecommendationDerivationService? recommendationDerivation = null)
     {
         _mgr = new ServerProcessManager(redactor, resourceCoordinator: resourceCoordinator);
         _config   = config;
@@ -558,6 +560,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _capabilityService = capabilityService;
         _resourceCoordinator = resourceCoordinator;
         _adaptiveExperience = adaptiveExperience;
+        _recommendationDerivation = recommendationDerivation;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -1001,6 +1004,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                     await _mgr.StartAsync(candidateConfig, lease, ct);
                     var launch = _mgr.LastLaunchResult;
                     await TryRecordAdaptiveOutcomeAsync(
+                        config,
                         lease.Plan,
                         runtimeIdentity,
                         modelIdentity,
@@ -1074,6 +1078,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     private async Task TryRecordAdaptiveOutcomeAsync(
+        ServerConfig configured,
         ResourceWorkloadPlan workload,
         RuntimeIdentityV2 runtime,
         ModelIdentityV2 model,
@@ -1096,6 +1101,46 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                 candidate.ChangedFields,
                 result,
                 ct);
+
+            if (_recommendationDerivation is not null
+                && candidate.ChangesConfiguration
+                && result.FailureKind == ServerLaunchFailureKind.None
+                && result.EffectiveLaunch?.IsAuditable == true)
+            {
+                var currentIdentity = ConfigurationIdentityFactory.Create(configured);
+                var patch = ManagedServerRecommendationPatch.Create(configured.Id, configured, candidate.Configuration);
+                var now = DateTime.UtcNow;
+                var recommendation = await _recommendationDerivation.DeriveAsync(new RecommendationProposal(
+                    RecommendationKind.RuntimeConfiguration,
+                    configured.Id,
+                    currentIdentity.StableId,
+                    patch,
+                    [new RecommendationEvidenceReference(
+                        $"adaptive-effective-{candidate.CandidateId}",
+                        "adaptive-effective-launch",
+                        Required: true,
+                        CapabilityState.Available,
+                        now,
+                        configured.AdaptiveEnvelope?.PreferredEvidenceAge)],
+                    [new RecommendationCondition("candidate", candidate.CandidateId)],
+                    [new RecommendationTradeoff("restart", "requires-explicit-restart")],
+                    "compatible-proven-launch",
+                    1,
+                    "adaptive-effective-values",
+                    now,
+                    currentIdentity.Completeness == IdentityCompleteness.Complete,
+                    TargetExists: true,
+                    RequiredEvidenceRevoked: false,
+                    Contradicted: false,
+                    RequiredEvidenceExpired: false,
+                    MinimumFactsComplete: currentIdentity.Completeness == IdentityCompleteness.Complete
+                        && runtime.Completeness == IdentityCompleteness.Complete
+                        && model.Completeness == IdentityCompleteness.Complete
+                        && workload.HardwareIdentityComplete,
+                    Actionable: true,
+                    ExpiresAtUtc: now + (configured.AdaptiveEnvelope?.PreferredEvidenceAge ?? TimeSpan.FromDays(7))));
+                AdmissionReceipt += $" Reviewable configuration recommendation: {recommendation.Id}.";
+            }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -2033,6 +2078,9 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly ModelProfileService _modelProfiles;
     private readonly IResourceCoordinator? _resourceCoordinator;
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
+    private readonly RecommendationDerivationService? _recommendationDerivation;
+    private readonly IRecommendationStore? _recommendationStore;
+    private readonly RecommendationApplicationService? _recommendationApplication;
     private HardwareProfile? _hardwareProfile;
 
     /// <summary>Shared (DI singleton) with <see cref="SettingsViewModel.Tts"/> - voice
@@ -2072,6 +2120,46 @@ public partial class ServicesViewModel : ViewModelBase
 
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
+    public UiBoundCollection<RecommendationReviewViewModel> Recommendations { get; } = [];
+    public bool HasRecommendations => Recommendations.Count > 0;
+    public Action<string>? RequestNavigate { get; set; }
+
+    /// <summary>
+    /// Loads current and accepted managed-server recommendations after startup
+    /// has selected the settings data root. Other recommendation kinds remain
+    /// owned by their source page and are not shown as Services actions.
+    /// </summary>
+    public async Task RefreshRecommendationsAsync(CancellationToken ct = default)
+    {
+        if (_recommendationStore is null || _recommendationApplication is null)
+            return;
+        try
+        {
+            var rows = await _recommendationStore.QueryAsync(new RecommendationQuery { Limit = 32 }, ct);
+            var servers = _settings.Settings.ManagedServers.ToDictionary(server => server.Id, StringComparer.Ordinal);
+            var cards = rows
+                .Where(row => row.Status is RecommendationStatus.Current or RecommendationStatus.Accepted
+                    && string.Equals(row.ProposedPatch.TargetDomain, ManagedServerRecommendationPatch.TargetDomain, StringComparison.Ordinal))
+                .Select(row => new RecommendationReviewViewModel(
+                    row,
+                    _recommendationApplication,
+                    servers.GetValueOrDefault(row.TargetIdentity),
+                    () => RefreshRecommendationsAsync(),
+                    RequestNavigate))
+                .ToList();
+            RunOnUi(() =>
+            {
+                Recommendations.Clear();
+                foreach (var card in cards)
+                    Recommendations.Add(card);
+                OnPropertyChanged(nameof(HasRecommendations));
+            });
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // A store timeout is not a reason to make the Services page fail.
+        }
+    }
 
     public void RefreshAllDetectedModels()
     {
@@ -2151,7 +2239,10 @@ public partial class ServicesViewModel : ViewModelBase
         IStartupTimingService? startupTiming = null,
         LocalModelCapabilityService? capabilityService = null,
         IResourceCoordinator? resourceCoordinator = null,
-        AdaptiveInferenceExperienceService? adaptiveExperience = null)
+        AdaptiveInferenceExperienceService? adaptiveExperience = null,
+        RecommendationDerivationService? recommendationDerivation = null,
+        IRecommendationStore? recommendationStore = null,
+        RecommendationApplicationService? recommendationApplication = null)
     {
         _startupTiming = startupTiming;
         _settings = settings;
@@ -2168,9 +2259,16 @@ public partial class ServicesViewModel : ViewModelBase
         _capabilityService = capabilityService;
         _resourceCoordinator = resourceCoordinator;
         _adaptiveExperience = adaptiveExperience;
+        _recommendationDerivation = recommendationDerivation;
+        _recommendationStore = recommendationStore;
+        _recommendationApplication = recommendationApplication;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
-        _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
+        _settings.SettingsChanged += (_, _) =>
+        {
+            RunOnUi(Rebuild);
+            _ = RefreshRecommendationsAsync();
+        };
         if (_systemInfo is not null)
             _ = LoadHardwareProfileAsync();
     }
@@ -2306,7 +2404,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _adaptiveExperience)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _adaptiveExperience, _recommendationDerivation)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };

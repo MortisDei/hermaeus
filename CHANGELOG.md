@@ -31,6 +31,11 @@ limit.
   foundation with deterministic eligibility, fixed rule identities,
   deduplication, and durable pending decision and rollback records. It does not
   add automatic application or model/workload routing.
+- R32 Batch 8 adds shared recommendation review cards, stale-guarded managed
+  server Apply and Undo, startup reconciliation by observed settings identity,
+  auditable adaptive-result proposals, and review-only benchmark model
+  guidance. Applying a recommendation never restarts a running server or
+  changes model selection automatically.
 - Fixed a transient Settings autosave race by publishing direct-save settings
   only after their atomic file replacement completes, preserving the existing
   autosave and direct-save lifecycle behavior.

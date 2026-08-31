@@ -58,6 +58,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
         s.AddSingleton<RecommendationRuleRegistry>();
         s.AddSingleton<RecommendationDerivationService>();
+        s.AddSingleton<RecommendationApplicationService>();
         s.AddSingleton<GpuFitExperienceService>();
         s.AddSingleton<AdaptiveInferenceExperienceService>();
         s.AddSingleton<ILabRuntimeHost, IsolatedLabRuntimeHost>();

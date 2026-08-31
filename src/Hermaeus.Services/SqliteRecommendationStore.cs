@@ -217,6 +217,18 @@ public sealed class SqliteRecommendationStore : IRecommendationStore
         return prepared;
     }
 
+    public async Task ConsumeRollbackAsync(string rollbackId, CancellationToken ct = default)
+    {
+        ValidateOpaque(rollbackId, nameof(rollbackId));
+        await EnsureInitializedAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE recommendation_rollbacks SET consumed=1 WHERE id=$id";
+        Add(command, "$id", rollbackId);
+        if (await command.ExecuteNonQueryAsync(ct) != 1)
+            throw new KeyNotFoundException($"Recommendation rollback '{rollbackId}' does not exist.");
+    }
+
     public async Task<IReadOnlyList<RecommendationDecisionRecord>> QueryDecisionsAsync(
         string? recommendationId = null,
         CancellationToken ct = default)

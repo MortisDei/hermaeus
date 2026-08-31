@@ -138,8 +138,24 @@ public partial class App : Application
                 sp.GetRequiredService<SqliteRagStore>().InitializeAsync(),
                 sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
                 sp.GetRequiredService<BenchmarkService>().InitializeAsync(),
-                sp.GetRequiredService<IEvalStore>().InitializeAsync());
+                sp.GetRequiredService<IEvalStore>().InitializeAsync(),
+                sp.GetRequiredService<IRecommendationStore>().InitializeAsync());
             phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
+
+            phaseTimer.Restart();
+            try
+            {
+                await sp.GetRequiredService<RecommendationApplicationService>().ReconcileAsync();
+            }
+            catch (Exception ex)
+            {
+                logs.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Warning,
+                    RuntimeLogCategory.Service,
+                    $"Recommendation startup reconciliation failed: {ex.Message}"));
+            }
+            phases.Add(new StartupPhase("recommendation reconciliation", phaseTimer.ElapsedMilliseconds));
 
             phaseTimer.Restart();
             foreach (var result in await sp.GetRequiredService<ILabRuntimeHost>().RecoverOwnedProcessesAsync())

@@ -166,6 +166,8 @@ public partial class MainWindowViewModel : ViewModelBase
         };
         Chat.RequestNavigate = panel => ActivePanel = panel;
         Models.RequestNavigate = panel => ActivePanel = panel;
+        Services.RequestNavigate = panel => ActivePanel = panel;
+        Benchmarks.RequestNavigate = panel => ActivePanel = panel;
         // r25 follow-up: Services reports whether the speech model is installed and
         // sends the user to Doctor to install it, rather than carrying a second,
         // independent install button that never learned it had succeeded.
@@ -408,6 +410,8 @@ public partial class MainWindowViewModel : ViewModelBase
             TimedStepAsync(children, "RAG datasets", () => Rag.LoadDatasetsAsync()),
             TimedStepAsync(children, "agent", () => Agent.LoadAsync()),
             TimedStepAsync(children, "benchmarks", () => Benchmarks.LoadAsync()));
+        await Services.RefreshRecommendationsAsync();
+        await Doctor.RefreshRecommendationsAsync();
         _startupPhases.Add(new StartupPhase("stores", block.ElapsedMilliseconds,
             children.OrderBy(c => c.Name, StringComparer.Ordinal).ToList(), ChildrenRanConcurrently: true));
 

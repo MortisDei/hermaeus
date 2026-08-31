@@ -89,6 +89,9 @@
                       ToolTip.Tip="Show the exact Services fields for the current correctness-eligible Lab candidate. Nothing is saved by review." />
               <Button Content="Confirm reviewed changes" Command="{Binding ConfirmApplyCommand}"
                       ToolTip.Tip="Save only the fields shown by the reviewed candidate after explicit confirmation and identity rechecks." />
+              <Button Content="Undo applied changes" Command="{Binding UndoAppliedRecommendationCommand}"
+                      IsVisible="{Binding CanUndoAppliedRecommendation}"
+                      ToolTip.Tip="Restore the bounded pre-Apply settings snapshot if the target has not changed since Apply." />
             </StackPanel>
             <TextBlock Text="{Binding ApplyReviewSummary}" TextWrapping="Wrap" FontFamily="Consolas" />
           </StackPanel>
@@ -194,6 +197,9 @@
                           ToolTip.Tip="Show the exact Services fields for the current Lab result. Review does not save anything." />
                   <Button Content="Confirm reviewed changes" Command="{Binding ConfirmApplyCommand}" IsEnabled="{Binding CanConfirmApply}"
                           ToolTip.Tip="Save only the fields shown by the reviewed candidate after explicit confirmation and identity rechecks." />
+                  <Button Content="Undo applied changes" Command="{Binding UndoAppliedRecommendationCommand}"
+                          IsVisible="{Binding CanUndoAppliedRecommendation}"
+                          ToolTip.Tip="Restore the bounded pre-Apply settings snapshot if the target has not changed since Apply." />
                   <TextBlock Text="{Binding ApplyReviewSummary}" TextWrapping="Wrap" FontFamily="Consolas" />
                 </StackPanel>
                 <Expander Header="Execution evidence details">

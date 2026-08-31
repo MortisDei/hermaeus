@@ -514,6 +514,9 @@ public partial class LabViewModel : ViewModelBase
     private readonly ILabRecipeService? _recipes;
     private readonly ISettingsService? _settings;
     private readonly ServicesViewModel? _services;
+    private readonly RecommendationDerivationService? _recommendationDerivation;
+    private readonly RecommendationApplicationService? _recommendationApplication;
+    private string? _reviewRecommendationId;
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts)
         : this(store, toasts, null, null, null)
@@ -522,7 +525,9 @@ public partial class LabViewModel : ViewModelBase
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts,
         ILabExperimentService? experiments, ISettingsService? settings, ILabRecipeService? recipes,
-        ServicesViewModel? services = null)
+        ServicesViewModel? services = null,
+        RecommendationDerivationService? recommendationDerivation = null,
+        RecommendationApplicationService? recommendationApplication = null)
     {
         _store = store;
         _toasts = toasts;
@@ -530,6 +535,8 @@ public partial class LabViewModel : ViewModelBase
         _settings = settings;
         _recipes = recipes;
         _services = services;
+        _recommendationDerivation = recommendationDerivation;
+        _recommendationApplication = recommendationApplication;
         if (_services is not null)
             _services.ServerAvailabilityChanged += OnServicesAvailabilityChanged;
 
@@ -573,6 +580,9 @@ public partial class LabViewModel : ViewModelBase
     [ObservableProperty] private string _recipePrompt = "Reply with exactly: Hermaeus Lab.";
     [ObservableProperty] private bool _isRecipeRunning;
     [ObservableProperty] private string _tradeoffSummary = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUndoAppliedRecommendation))]
+    private string _appliedRecommendationId = string.Empty;
 
     private LabRunSnapshot? _currentRun;
     private LabApplyReview? _applyReview;
@@ -607,6 +617,8 @@ public partial class LabViewModel : ViewModelBase
         { Status: LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded } run
         && run.Comparisons.Any(comparison => comparison.CanShowHeadlineDelta);
     public bool CanConfirmApply => _applyReview?.CanApply == true && ConfirmApply is not null;
+    public bool CanUndoAppliedRecommendation => _recommendationApplication is not null
+        && !string.IsNullOrWhiteSpace(AppliedRecommendationId);
 
     partial void OnSelectedServerChanged(ServerConfig? value)
     {
@@ -997,7 +1009,7 @@ public partial class LabViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void ReviewApply()
+    private async Task ReviewApplyAsync()
     {
         var run = GetReviewRun();
         if (_experiments is null || run is null)
@@ -1019,9 +1031,62 @@ public partial class LabViewModel : ViewModelBase
             }
 
             _applyReview = _experiments.CreateApplyReview(run.Id, candidateId);
+            _reviewRecommendationId = null;
+            try
+            {
+                if (_recommendationDerivation is not null && _recommendationApplication is not null
+                    && _settings is not null && _settings.Settings.ManagedServers.FirstOrDefault(server => server.Id == run.Definition.TargetServerId) is { } current
+                    && run.Definition.Candidates.FirstOrDefault(candidate => candidate.Id == candidateId) is { } candidate
+                    && run.Comparisons.FirstOrDefault(comparison => comparison.CandidateConfigurationId == candidateId) is { } comparison
+                    && comparison.CanShowHeadlineDelta)
+                {
+                    var proposed = _settings.Settings.Clone().ManagedServers.First(server => server.Id == current.Id);
+                    LabConfigurationMapper.ApplyTo(proposed, candidate);
+                    var currentIdentity = ConfigurationIdentityFactory.Create(current);
+                    var evaluatedAt = run.CompletedAtUtc ?? DateTime.UtcNow;
+                    var evidenceId = string.IsNullOrWhiteSpace(run.CompletionEvidenceId)
+                        ? $"lab-completion-{run.Id}"
+                        : run.CompletionEvidenceId;
+                    var recommendation = await _recommendationDerivation.DeriveAsync(new RecommendationProposal(
+                        RecommendationKind.RuntimeConfiguration,
+                        current.Id,
+                        currentIdentity.StableId,
+                        ManagedServerRecommendationPatch.Create(current.Id, current, proposed),
+                        [new RecommendationEvidenceReference(
+                            evidenceId,
+                            "lab-correctness-gated-comparison",
+                            Required: true,
+                            run.Definition.ProfileFingerprint.Completeness == IdentityCompleteness.Complete
+                                ? CapabilityState.Available : CapabilityState.Unknown,
+                            evaluatedAt,
+                            TimeSpan.FromDays(30))],
+                        [new RecommendationCondition("candidate", candidate.Id),
+                            new RecommendationCondition("correctness", "passed")],
+                        [new RecommendationTradeoff("restart", "requires-explicit-restart")],
+                        "review-lab-winner",
+                        1,
+                        "lab-correctness-gated-winner",
+                        evaluatedAt,
+                        currentIdentity.Completeness == IdentityCompleteness.Complete,
+                        TargetExists: true,
+                        RequiredEvidenceRevoked: false,
+                        Contradicted: false,
+                        RequiredEvidenceExpired: false,
+                        MinimumFactsComplete: run.Definition.ProfileFingerprint.Completeness == IdentityCompleteness.Complete,
+                        Actionable: true,
+                        ExpiresAtUtc: evaluatedAt.AddDays(30)));
+                    if (recommendation.Eligibility == RecommendationEligibility.Actionable)
+                        _reviewRecommendationId = recommendation.Id;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or JsonException)
+            {
+                _reviewRecommendationId = null;
+            }
             ApplyReviewSummary = _applyReview.CanApply
                 ? "Review ready. No settings have been saved." + Environment.NewLine
                     + string.Join(Environment.NewLine, _applyReview.Changes.Select(change => $"{change.Field}: {change.CurrentValue} -> {change.ProposedValue}"))
+                    + (_reviewRecommendationId is null ? string.Empty : Environment.NewLine + $"Recommendation {_reviewRecommendationId} is ready for explicit Apply.")
                 : _applyReview.RefusalReason;
             OnPropertyChanged(nameof(CanConfirmApply));
         }
@@ -1051,12 +1116,41 @@ public partial class LabViewModel : ViewModelBase
 
         try
         {
-            await _experiments.ApplyAsync(review);
+            if (_reviewRecommendationId is not null && _recommendationApplication is not null)
+            {
+                var result = await _recommendationApplication.ApplyAsync(_reviewRecommendationId);
+                if (!result.Succeeded)
+                    throw new InvalidOperationException(result.Message);
+                AppliedRecommendationId = _reviewRecommendationId;
+            }
+            else
+            {
+                await _experiments.ApplyAsync(review);
+            }
             ApplyReviewSummary = "Reviewed fields were saved through the normal Settings flow.";
             _applyReview = null;
+            _reviewRecommendationId = null;
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
         }
         catch (Exception ex) { _toasts.Show("Could not apply Lab result", ex.Message, ToastKind.Error, 5000); }
+    }
+
+    [RelayCommand]
+    private async Task UndoAppliedRecommendationAsync()
+    {
+        if (_recommendationApplication is null || string.IsNullOrWhiteSpace(AppliedRecommendationId))
+            return;
+        try
+        {
+            var result = await _recommendationApplication.UndoAsync(AppliedRecommendationId);
+            if (!result.Succeeded)
+                throw new InvalidOperationException(result.Message);
+            AppliedRecommendationId = string.Empty;
+            ApplyReviewSummary = "The reviewed settings were restored. Any running server remains unchanged.";
+            OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
+        }
+        catch (Exception ex) { _toasts.Show("Could not undo Lab result", ex.Message, ToastKind.Error, 5000); }
     }
 
     private LabRunSnapshot? GetReviewRun()

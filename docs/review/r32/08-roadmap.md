@@ -58,7 +58,7 @@ the stores into one schema.
 | 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | Yes |
 | 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | Yes |
 | 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | Yes |
-| 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | No |
+| 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | Yes |
 | 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | No |
 | 10 | Stable watched-root/source identity, staged source revisions and dataset generations, embedding cardinality/dimension validation, source revalidation, atomic RAG publication, exact-revision citations, crash/cancellation preservation, Dataset Manager history | 9 lineage contract, existing RAG | mandatory temporal correctness | No |
 | 11 | Pinned Hugging Face thumbnail metadata, exact-host manual redirects, bounded pre-decode header inspection/cache service, selected repo/download/installed-card presentation, cache management | 2 | mandatory independent | No |
@@ -374,6 +374,39 @@ zero-warning solution build passed; and the full sequential suite passed with
 2,440 passed, 17 skipped, and 2,457 total tests. Test results were written
 outside the checkout. No owner-facing recommendation card or live Apply/Undo
 flow is claimed until Batch 8.
+
+### 8.2.10 Batch 8 evidence
+
+Batch 8 adds the explicit decision layer over the Batch 7 recommendation
+records:
+
+- `ManagedServerRecommendationPatch` is a bounded typed adapter for persisted
+  managed-server changes. It permits only reviewed scalar runtime fields and
+  GPU placement intent, rejects unknown fields and paths, and never includes
+  executable, model, projector, or draft-model paths.
+- `RecommendationApplicationService` validates current target identity and
+  Actionable eligibility before Apply, writes only a cloned `AppSettings`
+  through `ISettingsService`, records pending and completed decisions, and
+  leaves running processes untouched. Undo is another explicit transaction
+  that refuses when the target identity changed after Apply.
+- Startup reconciliation observes the current target identity against the
+  pending operation's expected and post-Apply identities. It records whether
+  the write landed, did not land, or became stale. It never reapplies a patch.
+- Adaptive launches that produce a successful, auditable changed candidate now
+  create a fresh runtime recommendation against the saved configuration.
+  Planned or observed runtime values are not silently written to settings.
+- Lab correctness-gated winner review uses the same recommendation path and
+  exposes explicit Undo. Benchmark usage guidance creates a review-only,
+  path-free model annotation whose only action is Dismiss or opening Models.
+  Services, Benchmarks, Lab, and Doctor use the same review vocabulary and
+  route details to the owning page.
+
+Batch 8 verification: the focused recommendation/transaction filter passed
+15 tests; the zero-warning solution build passed; and the full sequential suite
+passed with 2,443 passed, 17 skipped, and 2,460 total tests. Test results were
+written outside the checkout. Owner live gates remain one Lab-backed Apply and
+Undo, one declined model annotation, one stale Apply refusal, and confirmation
+that no recommendation restarts a server or switches a model.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

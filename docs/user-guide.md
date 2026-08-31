@@ -328,6 +328,18 @@ the Hermaeus window, rechecks the selected server plus runtime/model identity,
 and saves through the normal Settings path. Review is separate from running an
 experiment, and experiment evidence is retained.
 
+Services shows the same review card when an auditable adaptive launch or Lab
+result produces a managed-server recommendation. The card separates current
+and proposed values, evidence, trade-offs, and freshness. **Apply** saves the
+reviewed settings only. It does not restart a running server. **Undo** restores
+the bounded pre-Apply fields only when the target has not changed since Apply;
+otherwise the service refuses without overwriting the later edit.
+
+Benchmark **Insights** may show a model-guidance card when usage and comparable
+benchmark evidence disagree. It is review-only: **Dismiss** suppresses that
+identical proposal, and **Open Models** takes you to the model page. It never
+changes the selected model.
+
 Managed server GPU placement is edited as CPU, Auto, All, or Exact. The setting
 is a request, not a claim about effective runtime placement. Auto is available
 only when the selected runtime proves both automatic placement and fit support;

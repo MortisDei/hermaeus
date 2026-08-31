@@ -208,6 +208,13 @@ links, fingerprints, corrections, redacted export, and confirmed removal.
 Experience is descriptive evidence only. It never grants approval, changes a
 safety decision, or rewrites the analytical GPU Fit prediction.
 
+Successful auditable adaptive changes and correctness-gated Lab winners can
+produce a shared review card. The card shows current and proposed fields,
+evidence, trade-offs, target identity, and freshness. Apply and Undo are
+stale-guarded settings transactions; they never restart a running server.
+Benchmark model guidance is review-only and can be dismissed or opened in
+Models, but it never changes the selected model automatically.
+
 See the [Lab reference](lab.md).
 
 ## Benchmarks

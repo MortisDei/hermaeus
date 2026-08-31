@@ -1,6 +1,8 @@
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using System.Globalization;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -16,6 +18,8 @@ public partial class BenchmarkViewModel : ObservableObject
     private readonly ServicesViewModel? _services;
     private readonly IBenchmarkInsightsService? _insights;
     private readonly IVoiceOrchestrator? _voice;
+    private readonly RecommendationDerivationService? _recommendationDerivation;
+    private readonly RecommendationApplicationService? _recommendationApplication;
     private CancellationTokenSource? _runCts;
     private bool _isLoading;
     /// <summary>Set while the app reassigns SelectedRun itself, so a bookkeeping selection never moves the user's tab.</summary>
@@ -32,6 +36,8 @@ public partial class BenchmarkViewModel : ObservableObject
     public UiBoundCollection<string> InsightsCaveats { get; } = [];
     /// <summary>"Based on your usage" card rows; empty when no activity kind has enough calls yet (r6 2.3).</summary>
     public UiBoundCollection<UsageInsightViewModel> InsightsUsage { get; } = [];
+    public UiBoundCollection<RecommendationReviewViewModel> Recommendations { get; } = [];
+    public bool HasRecommendations => Recommendations.Count > 0;
 
     [ObservableProperty] private bool _isLoadingInsights;
     [ObservableProperty] private string _insightsHeader = string.Empty;
@@ -82,6 +88,7 @@ public partial class BenchmarkViewModel : ObservableObject
     public Func<Task<bool>>? RequestClearRunHistoryConfirmation { get; set; }
     public Func<BenchmarkResultViewModel, Task>? RequestShowCaseInfo { get; set; }
     public Func<BenchmarkRunViewModel, Task>? RequestShowRunInfo { get; set; }
+    public Action<string>? RequestNavigate { get; set; }
 
     [ObservableProperty] private BenchmarkSuite? _selectedSuite;
     [ObservableProperty] private BenchmarkRunViewModel? _selectedRun;
@@ -107,7 +114,9 @@ public partial class BenchmarkViewModel : ObservableObject
         IToastService toasts,
         ServicesViewModel? services = null,
         IBenchmarkInsightsService? insights = null,
-        IVoiceOrchestrator? voice = null)
+        IVoiceOrchestrator? voice = null,
+        RecommendationDerivationService? recommendationDerivation = null,
+        RecommendationApplicationService? recommendationApplication = null)
     {
         _benchmarks = benchmarks;
         _llm = llm;
@@ -117,6 +126,8 @@ public partial class BenchmarkViewModel : ObservableObject
         _services = services;
         _insights = insights;
         _voice = voice;
+        _recommendationDerivation = recommendationDerivation;
+        _recommendationApplication = recommendationApplication;
         InsightsUsage.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasInsightsUsage));
         Runs.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasRuns));
         RankedRuns.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasComparableRankings));
@@ -389,6 +400,7 @@ public partial class BenchmarkViewModel : ObservableObject
             InsightsUsage.Clear();
             foreach (var usage in report.UsageInsightsOrEmpty)
                 InsightsUsage.Add(new UsageInsightViewModel(usage));
+            await RefreshModelRecommendationsAsync(report, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -398,6 +410,65 @@ public partial class BenchmarkViewModel : ObservableObject
         {
             IsLoadingInsights = false;
         }
+    }
+
+    private async Task RefreshModelRecommendationsAsync(BenchmarkInsightsReport report, CancellationToken ct)
+    {
+        Recommendations.Clear();
+        if (_recommendationDerivation is null || _recommendationApplication is null)
+            return;
+
+        foreach (var usage in report.UsageInsightsOrEmpty.Where(value => value.RecommendedModelName is not null))
+        {
+            ct.ThrowIfCancellationRequested();
+            var dominantIdentity = ExperienceJson.Hash($"model|{usage.DominantModelId}");
+            var recommendedIdentity = ExperienceJson.Hash($"model|{usage.RecommendedModelName}");
+            var targetIdentity = $"default-model-{usage.Kind}";
+            var now = DateTime.UtcNow;
+            var patch = RecommendationPatch.Create(
+                "model-guidance",
+                JsonSerializer.Serialize(new
+                {
+                    activity = usage.Kind.ToString(),
+                    currentModelIdentity = dominantIdentity,
+                    recommendedModelIdentity = recommendedIdentity
+                }));
+            var recommendation = await _recommendationDerivation.DeriveAsync(new RecommendationProposal(
+                RecommendationKind.DefaultModel,
+                targetIdentity,
+                ExperienceJson.Hash($"default-model|{usage.Kind}|{dominantIdentity}"),
+                patch,
+                [new RecommendationEvidenceReference(
+                    $"benchmark-insights-{usage.Kind}",
+                    "benchmark-leaderboard",
+                    Required: true,
+                    CapabilityState.Available,
+                    now,
+                    TimeSpan.FromDays(30))],
+                [new RecommendationCondition("activity", usage.Kind.ToString()),
+                    new RecommendationCondition("benchmark-gap-points", usage.RankingGapPoints?.ToString("0.##", CultureInfo.InvariantCulture) ?? "0"),
+                    new RecommendationCondition("usage-calls", usage.TotalCalls.ToString(CultureInfo.InvariantCulture))],
+                [new RecommendationTradeoff("selection", "explicit-model-selection-only")],
+                "review-default-model",
+                1,
+                "benchmark-guidance",
+                now,
+                TargetIdentityComplete: true,
+                TargetExists: true,
+                RequiredEvidenceRevoked: false,
+                Contradicted: false,
+                RequiredEvidenceExpired: false,
+                MinimumFactsComplete: report.HasData,
+                Actionable: false,
+                ExpiresAtUtc: now.AddDays(30)));
+            Recommendations.Add(new RecommendationReviewViewModel(
+                recommendation,
+                _recommendationApplication,
+                currentServer: null,
+                refresh: () => LoadInsightsAsync(),
+                navigate: RequestNavigate));
+        }
+        OnPropertyChanged(nameof(HasRecommendations));
     }
 
     private async Task RefreshInsightsIfLoadedAsync()

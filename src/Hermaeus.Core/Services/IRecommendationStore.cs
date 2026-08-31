@@ -11,6 +11,7 @@ public interface IRecommendationStore
     Task SetStatusAsync(string recommendationId, RecommendationStatus status, CancellationToken ct = default);
     Task<RecommendationDecisionRecord> AddDecisionAsync(RecommendationDecisionRecord decision, CancellationToken ct = default);
     Task<RecommendationRollbackRecord> AddRollbackAsync(RecommendationRollbackRecord rollback, CancellationToken ct = default);
+    Task ConsumeRollbackAsync(string rollbackId, CancellationToken ct = default);
     Task<IReadOnlyList<RecommendationDecisionRecord>> QueryDecisionsAsync(string? recommendationId = null, CancellationToken ct = default);
     Task<IReadOnlyList<RecommendationRollbackRecord>> QueryRollbacksAsync(string? recommendationId = null, CancellationToken ct = default);
 }

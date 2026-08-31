@@ -16,6 +16,8 @@ public partial class DoctorViewModel : ObservableObject
     private readonly ISettingsService _settingsService;
     private readonly IVoiceOrchestrator? _voice;
     private readonly IActivityRecorder? _activity;
+    private readonly IRecommendationStore? _recommendationStore;
+    private readonly RecommendationApplicationService? _recommendationApplication;
     private CancellationTokenSource? _installCts;
 
     [ObservableProperty] private bool _isScanning;
@@ -76,13 +78,34 @@ public partial class DoctorViewModel : ObservableObject
     /// </summary>
     public Action? RequestSyncServerExecutablePaths { get; set; }
 
-    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null, IActivityRecorder? activity = null)
+    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null, IActivityRecorder? activity = null,
+        IRecommendationStore? recommendationStore = null, RecommendationApplicationService? recommendationApplication = null)
     {
         _doctor = doctor;
         _toasts = toasts;
         _settingsService = settings;
         _voice = voice;
         _activity = activity;
+        _recommendationStore = recommendationStore;
+        _recommendationApplication = recommendationApplication;
+    }
+
+    public UiBoundCollection<RecommendationReviewViewModel> Recommendations { get; } = [];
+    public bool HasRecommendations => Recommendations.Count > 0;
+
+    public async Task RefreshRecommendationsAsync(CancellationToken ct = default)
+    {
+        if (_recommendationStore is null || _recommendationApplication is null)
+            return;
+        var rows = await _recommendationStore.QueryAsync(new RecommendationQuery { Limit = 32 }, ct);
+        Recommendations.Clear();
+        foreach (var row in rows.Where(value => value.Status is RecommendationStatus.Current or RecommendationStatus.Accepted
+                     && value.Kind == RecommendationKind.ResourceConflict))
+        {
+            Recommendations.Add(new RecommendationReviewViewModel(
+                row, _recommendationApplication, null, () => RefreshRecommendationsAsync(), RequestNavigate));
+        }
+        OnPropertyChanged(nameof(HasRecommendations));
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>

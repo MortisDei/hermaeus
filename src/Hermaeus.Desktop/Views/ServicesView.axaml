@@ -22,6 +22,42 @@
                            Text="Manage llama-server processes. Paths and config are saved per card with Save Config. Auto-start launches on Hermaeus startup if model path is set." />
             </StackPanel>
 
+            <Border Classes="settings-card" Padding="16" IsVisible="{Binding HasRecommendations}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="Recommendations" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="Review evidence-backed settings changes. Applying one saves settings only and never restarts a running server." FontSize="12" Opacity="0.55" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Recommendations}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:RecommendationReviewViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+                                    <StackPanel Spacing="7">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <TextBlock Text="{Binding Kind}" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Eligibility}" FontSize="12" Opacity="0.6" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding WhyNow}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding CurrentSummary}" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ProposedSummary}" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding EvidenceSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding TradeoffSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding FreshnessSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Apply" Command="{Binding ApplyCommand}" IsVisible="{Binding CanApply}" Padding="12,5" />
+                                            <Button Content="Undo" Command="{Binding UndoCommand}" IsVisible="{Binding CanUndo}" Padding="12,5" />
+                                            <Button Content="Dismiss" Command="{Binding DismissCommand}" IsVisible="{Binding CanDismiss}" Padding="12,5" />
+                                            <Button Content="Open details" Command="{Binding InspectTargetCommand}" Padding="12,5" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
             <Border Classes="settings-card" Padding="16">
                 <StackPanel Spacing="12">
                     <Grid ColumnDefinitions="*,Auto">
