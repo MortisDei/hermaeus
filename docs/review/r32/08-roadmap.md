@@ -49,7 +49,7 @@ the stores into one schema.
 
 | Batch | Deliverable | Depends on | Classification | Landed |
 | ---: | --- | --- | --- | --- |
-| 0 | Verify installed Linux/Windows runtime help/version, exact argument spelling and effective-placement observability against the already-fixed doc 02 contract; inspect pinned reranker graph batch dimensions; capture current build/test/coverage baseline | planning pack | mandatory environment facts | No |
+| 0 | Verify installed Linux/Windows runtime help/version, exact argument spelling and effective-placement observability against the already-fixed doc 02 contract; inspect pinned reranker graph batch dimensions; capture current build/test/coverage baseline | planning pack | mandatory environment facts | Yes |
 | CI | Separate non-required pre-PR branch checks from required PR merge-context checks; preserve main/fork coverage and trusted-push security boundaries; add authority-scoped superseded-run cancellation without changing repository settings | live ruleset re-read, doc 09 | mandatory operational efficiency | No |
 | 1 | Typed CPU/Auto/All/Exact launch intent and exact legacy/tune-profile migration; remove implicit tune-profile-on-Start mutation; canonical managed launch specification, conflict policy for core `ExtraArgs`, one configured/planned/rendered/effective/observed projection and fingerprint, versioned compatibility tests | 0 | mandatory correctness foundation | No |
 | 2 | Services-owned model inventory with bounded scan/GGUF/manifest cache and explicit invalidation; converge simple card fit onto the versioned prediction engine while preserving a labelled pre-download estimate | 0, 1 | mandatory shared foundation | No |
@@ -70,6 +70,53 @@ Unknown. It does not choose a different launch precedence, settings migration,
 admission owner, persistence store, or revision authority. If primary evidence
 actually contradicts one of those fixed contracts, stop and amend the planning
 pack explicitly before implementation.
+
+### 8.2.1 Batch 0 evidence
+
+Observed 2026-08-31 on the managed Linux assets available to the review host:
+
+| Asset | Version identity | Server SHA256 | Help and launch result |
+| --- | --- | --- | --- |
+| Linux b10688 | `0.3.0-dev`, build `10688`, commit `c589f0ed1`, GNU 11.4.0, Linux x86_64 | `03bb2c08cac030cf8ed03df451fff94ee4424e910c362a8bf2a2371a84c8aa34` | 59,017-byte help; `0`, `auto`, `all`, and `17` accepted in the controlled server probe |
+| Linux b10690 | `0.3.0-dev`, build `10690`, commit `bdf395515`, GNU 11.4.0, Linux x86_64 | `23ec6a3727260d051573d8fce9baa57829e47c19545bfd0abf5d90cf3c0b628b` | Byte-identical help to b10688; `0`, `auto`, `all`, and `17` accepted in the controlled server probe |
+| Windows managed runtime | Not installed or mounted in the inspected environment | Unknown | Windows-specific facts remain Unknown, not inferred from Linux |
+
+Both Linux server help responses advertise `--n-gpu-layers` with exact numeric,
+`auto`, and `all` values; `--fit` defaults to on; `--fit-target`, `--fit-ctx`,
+device listing, device selection, layer/row/tensor split syntax, tensor split,
+main GPU, KV offload, host cache RAM, context checkpoints, checkpoint minimum
+step, unified KV, per-slot unified KV, idle-slot cache, and slot-cache output.
+The installed `llama-fit-params` companions print matching placement and fit
+help, plus `--fit-print`, but lack the executable permission in both asset
+trees, so they were inspected through the ELF loader rather than treated as
+normal managed launch executables.
+Both helper files are 15,968 bytes with mode `0664` and SHA256
+`b2ad073a0c093706e5dfdfe2c9864d199ed921e49ea0383a7d0013e2ad8a81c8`; their
+loader-invoked version output matches the corresponding server build.
+
+The controlled probes used the pinned embedding GGUF with `--device none`.
+Each placement value reached a healthy loopback server and clean shutdown on
+both Linux builds. The b10690 Auto fit-on probe with a 512 MiB target and 256
+minimum fit context also reached a healthy server, with a 1,024 context slot.
+No fit adjustment was proven because the host reported no available devices.
+`--list-devices` reported `(none)` for both builds. `/props` and `/slots`
+reported build identity, context, and slot state, but did not expose effective
+GPU-layer placement, fit changes, device ids, split mode, or tensor split.
+Therefore syntax capabilities are Available, while effective placement and
+fit-result reporting remain Unknown.
+
+The pinned reranker asset has SHA256
+`b232c2eeedd97a593edc177e3ce4cbd1d6c8f6d8f61a5c201cd0cdeb8134da18` and its
+graph has dynamic `batch_size` dimensions for `input_ids`, `attention_mask`,
+and `token_type_ids`, with `logits` shaped `[batch_size, 1]`. Genuine graph
+batch support is proven. The current reranker still scores candidates one at
+a time; batching remains the separate Batch 6 experiment and is not part of
+Batch 0.
+
+The pre-change baseline was a zero-warning solution build, 2,354 passed and
+17 skipped out of 2,371 sequential tests, and 38,550 of 60,422 covered lines
+(63.80%). Raw runtime, test, and coverage outputs were kept outside the
+checkout.
 
 The CI batch re-reads the live ruleset but does not modify it. A skipped job
 must never carry either required check name. Branch and PR concurrency groups

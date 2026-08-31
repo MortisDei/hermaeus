@@ -30,7 +30,8 @@ public sealed record LlamaRuntimeCapabilityFacts(
     bool SupportsSpeculativePMin = false,
     bool SupportsSpeculativeDraftGpuLayers = false,
     bool SupportsLoadMode = false,
-    bool SupportsCorsOrigins = false);
+    bool SupportsCorsOrigins = false,
+    IReadOnlyDictionary<string, CapabilityEvidence>? LaunchCapabilities = null);
 
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
@@ -42,6 +43,40 @@ public sealed record LocalModelCapabilityProbe(
 /// <summary>Combines bounded GGUF facts with executable and live /props evidence.</summary>
 public sealed class LocalModelCapabilityService
 {
+    /// <summary>
+    /// Capability ids for the R32 launch contract. The list is deliberately
+    /// fixed and bounded so a runtime cannot create an unreviewed setting by
+    /// printing an arbitrary help token.
+    /// </summary>
+    public static IReadOnlyList<string> LaunchCapabilityIds { get; } =
+    [
+        "runtime.gpu-placement.cpu",
+        "runtime.gpu-placement.auto",
+        "runtime.gpu-placement.all",
+        "runtime.gpu-placement.exact",
+        "runtime.fit",
+        "runtime.fit.target",
+        "runtime.fit.minimum-context",
+        "runtime.fit.report.effective",
+        "runtime.device.list",
+        "runtime.placement.device",
+        "runtime.placement.split",
+        "runtime.placement.split.none",
+        "runtime.placement.split.layer",
+        "runtime.placement.split.row",
+        "runtime.placement.split.tensor",
+        "runtime.placement.tensor-split",
+        "runtime.placement.main-gpu",
+        "runtime.kv-offload",
+        "runtime.cache.host-ram",
+        "runtime.context.checkpoints",
+        "runtime.context.checkpoint-min-step",
+        "runtime.kv-unified",
+        "runtime.kv-unified-per-slot",
+        "runtime.cache.idle-slots",
+        "runtime.cache.slot-save"
+    ];
+
     private readonly ISettingsService _settings;
     private readonly IRuntimeLogService _logs;
     private readonly IActivityRecorder? _activity;
@@ -85,7 +120,79 @@ public sealed class LocalModelCapabilityService
                 || help.Contains("--gpu-layers-draft", StringComparison.Ordinal)
                 || help.Contains("-ngld", StringComparison.Ordinal),
             SupportsLoadMode: help.Contains("--load-mode", StringComparison.Ordinal),
-            SupportsCorsOrigins: help.Contains("--cors-origins", StringComparison.Ordinal));
+            SupportsCorsOrigins: help.Contains("--cors-origins", StringComparison.Ordinal),
+            LaunchCapabilities: ParseLaunchCapabilities(help));
+    }
+
+    /// <summary>
+    /// Parses only the reviewed R32 launch capabilities from an authoritative
+    /// help response. Exact option matching prevents --fit-target from
+    /// accidentally proving --fit, and --n-gpu-layers-draft from proving the
+    /// main placement option.
+    /// </summary>
+    public static IReadOnlyDictionary<string, CapabilityEvidence> ParseLaunchCapabilities(string? help)
+    {
+        var result = new Dictionary<string, CapabilityEvidence>(StringComparer.Ordinal);
+        var placement = HelpOptionWindow(help, "--n-gpu-layers");
+        var exact = HasPhrase(placement, "exact number");
+        var automatic = exact && HasWord(placement, "auto");
+        var all = exact && HasWord(placement, "all");
+        AddPlacement("runtime.gpu-placement.cpu", exact,
+            "The runtime advertises an exact numeric layer count; zero is the explicit CPU form, subject to effective-placement observation.");
+        AddPlacement("runtime.gpu-placement.exact", exact,
+            "The runtime advertises an exact numeric GPU-layer count.");
+        AddPlacement("runtime.gpu-placement.auto", automatic,
+            "The runtime advertises automatic GPU-layer placement.");
+        AddPlacement("runtime.gpu-placement.all", all,
+            "The runtime advertises all-layer GPU placement.");
+
+        AddFlag("runtime.fit", "--fit", "The runtime advertises explicit fit on/off ownership.");
+        AddFlag("runtime.fit.target", "--fit-target", "The runtime advertises a per-device fit target.");
+        AddFlag("runtime.fit.minimum-context", "--fit-ctx", "The runtime advertises a minimum context bound for fit.");
+        AddUnknown("runtime.fit.report.effective",
+            "Help can advertise fit, but cannot prove that effective fit changes are reported.");
+        AddFlag("runtime.device.list", "--list-devices", "The runtime advertises device enumeration.");
+        AddFlag("runtime.placement.device", "--device", "The runtime advertises an explicit offload device list.");
+
+        var split = HelpOptionWindow(help, "--split-mode");
+        AddFlag("runtime.placement.split", "--split-mode", "The runtime advertises explicit split-mode selection.");
+        AddPhrase("runtime.placement.split.none", split, "none",
+            "The runtime advertises no split across devices.");
+        AddPhrase("runtime.placement.split.layer", split, "layer",
+            "The runtime advertises layer splitting across devices.");
+        AddPhrase("runtime.placement.split.row", split, "row",
+            "The runtime advertises row splitting across devices.");
+        AddPhrase("runtime.placement.split.tensor", split, "tensor",
+            "The runtime advertises tensor splitting across devices; upstream marks this experimental.");
+        AddFlag("runtime.placement.tensor-split", "--tensor-split", "The runtime advertises explicit tensor proportions.");
+        AddFlag("runtime.placement.main-gpu", "--main-gpu", "The runtime advertises a main-device index.");
+        AddFlag("runtime.kv-offload", "--kv-offload", "The runtime advertises explicit KV offload control.");
+        AddFlag("runtime.cache.host-ram", "--cache-ram", "The runtime advertises a bounded host prompt-cache RAM control.");
+        AddFlag("runtime.context.checkpoints", "--ctx-checkpoints", "The runtime advertises context checkpoint retention.", "--swa-checkpoints");
+        AddFlag("runtime.context.checkpoint-min-step", "--checkpoint-min-step", "The runtime advertises checkpoint spacing control.");
+        AddFlag("runtime.kv-unified", "--kv-unified", "The runtime advertises unified KV control.");
+        AddFlag("runtime.kv-unified-per-slot", "--kv-unified-per-slot", "The runtime advertises a per-slot unified KV context limit.");
+        AddFlag("runtime.cache.idle-slots", "--cache-idle-slots", "The runtime advertises idle-slot prompt-cache control.");
+        AddFlag("runtime.cache.slot-save", "--slot-save-path", "The runtime advertises persistent slot-cache output.");
+
+        return result;
+
+        void AddFlag(string id, string option, string detail, params string[] aliases)
+        {
+            var supported = HasOption(help, option) || aliases.Any(alias => HasOption(help, alias));
+            result[id] = HelpEvidence(help, supported, option, detail);
+        }
+
+        void AddPhrase(string id, string section, string phrase, string detail) =>
+            result[id] = HelpEvidence(help, !string.IsNullOrWhiteSpace(help) && HasWord(section, phrase), "--split-mode", detail);
+
+        void AddPlacement(string id, bool supported, string detail) =>
+            result[id] = HelpEvidence(help, supported, "--n-gpu-layers", detail);
+
+        void AddUnknown(string id, string detail) =>
+            result[id] = string.IsNullOrWhiteSpace(help)
+                ? Unknown("runtime-help-unknown", "A successful runtime help probe is required.")
+                : Unknown("runtime-effective-placement-unobserved", detail);
     }
 
     /// <summary>
@@ -167,12 +274,21 @@ public sealed class LocalModelCapabilityService
             var modelSpecificMtp = HasPositiveDraftCount(root)
                 || HasCapability(root, "speculative.draft.mtp");
 
+            var launchCapabilities = NormalizeLaunchCapabilities(facts.LaunchCapabilities);
+            var effectiveFields = ParseEffectivePlacementFields(root);
+            launchCapabilities["runtime.fit.report.effective"] = effectiveFields.Count == 0
+                ? Unknown("runtime-effective-placement-unobserved",
+                    "The running server /props response did not expose effective fit or placement fields.")
+                : Available("runtime-effective-placement",
+                    $"The running server /props response exposed bounded effective field(s): {string.Join(", ", effectiveFields)}.");
+
             return facts with
             {
                 PropsProbeSucceeded = true,
                 SupportsPreserveReasoningTemplate = preserve,
                 Modalities = modalities,
-                ModelSpecificMtpConfirmed = modelSpecificMtp
+                ModelSpecificMtpConfirmed = modelSpecificMtp,
+                LaunchCapabilities = launchCapabilities
             };
         }
         catch (JsonException)
@@ -505,6 +621,10 @@ public sealed class LocalModelCapabilityService
         AddRuntimeFlag("runtime.speculative.parameter.p-min", runtime.SupportsSpeculativePMin, "--spec-draft-p-min");
         AddRuntimeFlag("runtime.speculative.parameter.draft-gpu-layers", runtime.SupportsSpeculativeDraftGpuLayers, "--spec-draft-ngl/-ngld");
 
+        var launchCapabilities = NormalizeLaunchCapabilities(runtime.LaunchCapabilities);
+        foreach (var capabilityId in LaunchCapabilityIds)
+            Add(capabilityId, launchCapabilities[capabilityId], null);
+
         return result;
 
         void Add(string id, CapabilityEvidence evidence, ModelIdentityV2? observedModel, IReadOnlyDictionary<string, string>? parameters = null) =>
@@ -581,6 +701,24 @@ public sealed class LocalModelCapabilityService
             drift.Add(new CapabilityDrift("speculative", $"llama-server now advertises speculative type {added}."));
         foreach (var removed in before.Except(after, StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))
             drift.Add(new CapabilityDrift("speculative", $"llama-server no longer advertises speculative type {removed}.", true));
+
+        foreach (var capabilityId in LaunchCapabilityIds)
+        {
+            var previousObservation = previous.Observations?.LastOrDefault(item =>
+                string.Equals(item.CapabilityId, capabilityId, StringComparison.Ordinal));
+            var currentObservation = current.Observations?.LastOrDefault(item =>
+                string.Equals(item.CapabilityId, capabilityId, StringComparison.Ordinal));
+            if (previousObservation is null || currentObservation is null
+                || previousObservation.State == currentObservation.State)
+                continue;
+
+            drift.Add(new CapabilityDrift(
+                capabilityId,
+                $"{capabilityId} changed from {previousObservation.State} to {currentObservation.State}.",
+                previousObservation.State == CapabilityState.Available
+                    && currentObservation.State != CapabilityState.Available));
+        }
+
         return drift;
     }
 
@@ -589,6 +727,57 @@ public sealed class LocalModelCapabilityService
         if (previous is null || current is null || previous.State == current.State)
             return;
         drift.Add(new CapabilityDrift(name, $"{name} changed from {previous.State} to {current.State}.", previous.State == CapabilityState.Available && current.State != CapabilityState.Available));
+    }
+
+    private static CapabilityEvidence HelpEvidence(string? help, bool supported, string option, string detail) =>
+        string.IsNullOrWhiteSpace(help)
+            ? Unknown("runtime-help-unknown", "A successful runtime help probe is required.")
+            : supported
+                ? Available("runtime-help-flag", $"{detail} ({option}).")
+                : Unavailable("runtime-help-no-flag", $"The selected runtime help does not advertise {option}.");
+
+    private static Dictionary<string, CapabilityEvidence> NormalizeLaunchCapabilities(
+        IReadOnlyDictionary<string, CapabilityEvidence>? capabilities)
+    {
+        var normalized = new Dictionary<string, CapabilityEvidence>(StringComparer.Ordinal);
+        foreach (var capabilityId in LaunchCapabilityIds)
+        {
+            normalized[capabilityId] = capabilities is not null && capabilities.TryGetValue(capabilityId, out var evidence)
+                ? evidence
+                : Unknown("runtime-capability-unknown", "No bounded evidence was supplied for this R32 launch capability.");
+        }
+
+        return normalized;
+    }
+
+    private static bool HasOption(string? help, string option) =>
+        !string.IsNullOrWhiteSpace(help)
+        && Regex.IsMatch(help, $@"(?<![A-Za-z0-9_-]){Regex.Escape(option)}(?![A-Za-z0-9_-])", RegexOptions.CultureInvariant);
+
+    private static string HelpOptionWindow(string? help, string option)
+    {
+        if (string.IsNullOrWhiteSpace(help) || !HasOption(help, option))
+            return string.Empty;
+
+        var match = Regex.Match(help, $@"(?<![A-Za-z0-9_-]){Regex.Escape(option)}(?![A-Za-z0-9_-])", RegexOptions.CultureInvariant);
+        return help[match.Index..Math.Min(help.Length, match.Index + 640)];
+    }
+
+    private static bool HasPhrase(string text, string phrase)
+    {
+        var words = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(Regex.Escape);
+        var pattern = $@"(?<![A-Za-z0-9_-]){string.Join(@"\s+", words)}(?![A-Za-z0-9_-])";
+        return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool HasWord(string text, string word) =>
+        Regex.IsMatch(text, $@"(?<![A-Za-z0-9_-])['`]?{Regex.Escape(word)}['`]?(?![A-Za-z0-9_-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static IReadOnlyList<string> ParseEffectivePlacementFields(JsonElement root)
+    {
+        var knownFields = new[] { "n_gpu_layers", "gpu_layers", "split_mode", "tensor_split", "main_gpu", "fit", "fit_target", "fit_ctx" };
+        return knownFields.Where(field => root.TryGetProperty(field, out var value)
+            && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined or JsonValueKind.Object)).ToArray();
     }
 
     private sealed record CapabilityCacheEntry(

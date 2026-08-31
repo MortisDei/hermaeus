@@ -6,14 +6,12 @@ every feature. The selected executable's successful `--help` probe is the gate
 for flags and capability-specific controls, and the check is repeated before
 launch.
 
-The full flag survey was checked against build b10215 on 2026-08-01. The
-selected Windows CUDA runtime was directly observed at b10590 for the R31
-implementation work. The bounded R31 owner-validation gate passed on Windows
-and Pop!_OS with COSMIC. Other Linux environments and untested runtime or
-hardware combinations remain governed by the selected executable's live
-capability probe rather than being inferred from those results. The dated
-upstream investigations are preserved in the [R31 evidence records](review/archived/r31/evidence/r31-batch-15.md)
-and the later batch files beside it.
+Runtime and hardware facts are installation evidence, not a permanent promise
+for every managed asset. The R32 Batch 0 runtime snapshot, including exact
+build identity, is recorded in the [R32 roadmap evidence](review/r32/08-roadmap.md#821-batch-0-evidence).
+Other environments and untested runtime or hardware combinations remain
+governed by the selected executable's live capability probe rather than being
+inferred from a build number, filename, or upstream documentation.
 
 ## The compatibility rule
 
@@ -54,15 +52,42 @@ loopback servers receive the localhost-only CORS origins when that option is
 available. Older runtimes retain their supported forms, and external server
 profiles are not rewritten.
 
+The R32 launch contract distinguishes typed intent from runtime evidence:
+
+| Intent | Contracted launch form | Fit ownership |
+| --- | --- | --- |
+| CPU | explicit zero GPU layers using the selected runtime's proven form | fit off |
+| Auto | placement fields left unset | fit may own placement only |
+| All | explicit `all` or a proven equivalent | fit off |
+| Exact(N) | explicit numeric GPU-layer count | fit off |
+
+Batch 0 only establishes whether the selected executable accepts the relevant
+syntax and whether effective values can be observed. It does not add these
+controls to settings or change the current launch precedence. If syntax is not
+proven, the capability is unavailable. If a failed probe or runtime response
+does not establish effective placement, it remains Unknown.
+
+The bounded R32 launch capability ids include `runtime.gpu-placement.cpu`,
+`runtime.gpu-placement.auto`, `runtime.gpu-placement.all`,
+`runtime.gpu-placement.exact`, `runtime.fit`, `runtime.fit.target`,
+`runtime.fit.minimum-context`, `runtime.fit.report.effective`,
+`runtime.device.list`, the reviewed device and split controls, KV offload,
+host cache, checkpoints, unified KV, idle slots, and slot-cache output. Help
+parsing uses exact option boundaries, so a similarly named draft or future
+flag cannot create a false positive. Effective-placement evidence is accepted
+only from bounded structured fields in the running server response.
+
 ## Capability evidence and identity
 
 Capability observations use stable dotted ids such as
-`runtime.prompt-threads`, `speculative.draft.eagle3`, and
-`reasoning.preserve-template`. Each record retains `Available`, `Unavailable`,
-or `Unknown`, an evidence code and explanation, the exact runtime identity, an
-optional model identity, bounded parsed parameters, and observation time.
-Unknown ids survive cache and JSON round trips without adding a new setting.
-Raw help text is not stored in the parameter map.
+`runtime.prompt-threads`, `runtime.fit.report.effective`,
+`speculative.draft.eagle3`, and `reasoning.preserve-template`. Each record
+retains `Available`, `Unavailable`, or `Unknown`, an evidence code and
+explanation, the exact runtime identity, an optional model identity, bounded
+parsed parameters, and observation time. Unknown ids survive cache and JSON
+round trips without adding a new setting. Raw help text is not stored in the
+parameter map. Changes in the bounded R32 launch matrix are reported as
+capability drift, not as a raw help-text diff.
 
 The runtime identity includes executable hash, size, modification time, parsed
 version/build/compiler/backend facts when available, and managed asset identity.
