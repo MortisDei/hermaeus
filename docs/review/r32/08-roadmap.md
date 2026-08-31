@@ -150,6 +150,40 @@ passed (37); the full sequential suite passed with 2,367 passed and 17
 skipped; the zero-warning solution build passed. Test results were written
 outside the checkout.
 
+The first pushed Batch 1 run exposed four Windows-only lifecycle failures:
+the new fail-closed runtime preflight correctly rejected the tests' deliberate
+`where.exe` fake runtime. The production probe remains the default; the
+Windows fixtures now inject explicit test capability facts so they exercise
+process lifecycle behavior without claiming that `where.exe` is llama-server.
+
+### 8.2.3 Batch 2 evidence
+
+`ModelInventoryService` now owns the model-page local inventory. Its bounded
+scan retains at most 2,048 validated chat GGUF paths, keeps a deterministic
+lexical top set plus an overflow flag, rejects reparse-point paths, and reports
+the cap in the Models status text. It re-enumerates file identity (canonical
+path, size, and UTC mtime) so add, delete, move, and replacement changes are
+seen without a filesystem watcher. GGUF metadata is cached by that identity;
+manifest attachment is cached with the snapshot. Explicit invalidation is
+used by model link, update, delete, companion, and refresh paths, while
+unchanged identities reuse the bounded snapshot.
+
+The Models card now uses the versioned `ModelFitPredictor` for local GGUFs
+with readable shape metadata, including its component and Unknown handling.
+Remote/provider and metadata-unavailable cards use the same predictor's
+clearly labelled `Pre-download estimate` projection. `ModelFitEstimator`
+remains only as a compatibility facade, and its size-only calculation delegates
+to that predictor. The setup wizard and Hugging Face file cards use the same
+label for their pre-download projection, so a rough estimate is not presented
+as a detailed prediction.
+
+Batch 2 verification: bounded inventory, invalidation, manifest refresh,
+fit-facade delegation, and model-page regression tests passed (47 focused);
+the full sequential suite passed with 2,372 passed and 17 skipped out of
+2,389 tests; and the zero-warning solution build passed. Test results were
+written outside the checkout. The corrective CI run for the Windows fixture
+boundary is still the push gate for the next Batch 2 commit.
+
 The pre-change baseline was a zero-warning solution build, 2,354 passed and
 17 skipped out of 2,371 sequential tests, and 38,550 of 60,422 covered lines
 (63.80%). Raw runtime, test, and coverage outputs were kept outside the

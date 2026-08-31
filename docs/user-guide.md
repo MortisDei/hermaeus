@@ -56,7 +56,10 @@ the effective tuned GPU layers, threads, and context directly. Open the card's
 configuration to inspect and intentionally edit those same saved tune values;
 the editor stays within the available window area and scrolls when its bounded
 form does not fit. **Save model profile** persists them with the picker defaults
-and metadata.
+and metadata. Local cards use a detailed GPU-fit prediction when GGUF shape
+metadata is available. Provider and download cards show a clearly labelled
+pre-download estimate until the file is available locally. These are
+projections, not proof of the placement a runtime will eventually select.
 Extra arguments and live process overrides remain on Services, where their
 trust checks and process state are visible. Runtime process settings still use
 **Save Config** on Services.

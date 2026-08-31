@@ -21,6 +21,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly ModelManifestStore _manifest;
     private readonly HuggingFaceClient _hf;
     private readonly ModelDownloadService _downloader;
+    private readonly ModelInventoryService _inventory;
     private readonly IActivityRecorder? _activity;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
     private readonly List<LlmModel> _modelCache = [];
@@ -88,7 +89,8 @@ public partial class ModelManagementViewModel : ObservableObject
     private void OpenServices() => RequestNavigate?.Invoke("services");
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
-        ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null)
+        ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null,
+        ModelInventoryService? inventory = null)
     {
         _activity = activity;
         _llm = llm;
@@ -100,20 +102,23 @@ public partial class ModelManagementViewModel : ObservableObject
         _manifest = manifest;
         _hf = hf;
         _downloader = downloader;
+        _inventory = inventory ?? new ModelInventoryService(manifest);
     }
 
-    private List<LlmModel> DiscoverLocalGgufModels(IReadOnlyList<LlmModel> existingModels)
+    private static List<LlmModel> DiscoverLocalGgufModels(
+        IReadOnlyList<LlmModel> existingModels,
+        ModelInventorySnapshot inventory)
     {
-        return LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot)
-            .Where(path => !existingModels.Any(model => SameLocalModelIdentity(model.Id, path)))
-            .Select(path => new LlmModel
+        return inventory.Entries
+            .Where(entry => !existingModels.Any(model => SameLocalModelIdentity(model.Id, entry.Path)))
+            .Select(entry => new LlmModel
             {
-                Id = path,
-                Name = Path.GetFileNameWithoutExtension(path),
+                Id = entry.Path,
+                Name = Path.GetFileNameWithoutExtension(entry.Path),
                 Provider = "local GGUF",
                 ProviderTag = "llama.cpp",
-                SizeBytes = new FileInfo(path).Length,
-                ModifiedAt = File.GetLastWriteTimeUtc(path)
+                SizeBytes = entry.SizeBytes,
+                ModifiedAt = entry.ModifiedAtUtc
             })
             .ToList();
     }
@@ -136,7 +141,10 @@ public partial class ModelManagementViewModel : ObservableObject
             }
 
             if (cachedModels is null && ForceRefresh)
+            {
                 _llm.InvalidateModelCache();
+                _inventory.Invalidate(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+            }
 
             var reportedModels = cachedModels ?? await _llm.GetModelsAsync();
             if (cachedModels is null)
@@ -151,11 +159,12 @@ public partial class ModelManagementViewModel : ObservableObject
 
             var runningIds = new HashSet<string>(reportedModels.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
             var models = new List<LlmModel>(reportedModels);
-            models.AddRange(DiscoverLocalGgufModels(models));
+            var inventory = await _inventory.ScanAsync(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+            models.AddRange(DiscoverLocalGgufModels(models, inventory));
 
             _profiles.ApplyProfiles(models);
             var hardware = await _system.GetHardwareProfileAsync();
-            var manifestEntries = await _manifest.LoadAsync();
+            var manifestEntries = inventory.ManifestEntries;
             _allModels.Clear();
             foreach (var m in models)
             {
@@ -163,18 +172,19 @@ public partial class ModelManagementViewModel : ObservableObject
                 var item = new ModelProfileItemViewModel(m, profile, runningIds.Contains(m.Id));
                 RefreshTuneSummary(item);
                 var existingTune = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
-                var ggufInfo = item.IsLocalGguf
-                    ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId))
-                    : null;
+                var ggufInfo = item.IsLocalGguf ? inventory.Find(item.ModelId)?.GgufInfo : null;
                 ApplyFit(item, m.SizeBytes, hardware, ggufInfo, ResolveProbeContextSize(item, existingTune), profile.DefaultKvCacheType);
                 ApplyManifestState(item, manifestEntries);
                 _allModels.Add(item);
             }
             ApplyFilter();
 
+            var inventoryLimitMessage = inventory.IsTruncated
+                ? $" (local inventory capped at {_inventory.MaximumEntries:N0} models)"
+                : string.Empty;
             StatusMessage = models.Count == 0
                 ? "No models detected. Add GGUF files to your AI assets root or start a runtime."
-                : $"{models.Count} model(s) detected, {runningIds.Count} currently running{(cachedModels is not null ? " (from cache)" : "")}";
+                : $"{models.Count} model(s) detected, {runningIds.Count} currently running{(cachedModels is not null ? " (from cache)" : "")}{inventoryLimitMessage}";
             ForceRefresh = false;
         }
         catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
@@ -226,6 +236,7 @@ public partial class ModelManagementViewModel : ObservableObject
 
                     foreach (var file in companionFiles)
                         await _manifest.RemoveAsync(file);
+                    InvalidateModelInventory();
                 }
             }
             else if (companionFiles.Count > 0 && !string.IsNullOrWhiteSpace(removalError))
@@ -273,6 +284,7 @@ public partial class ModelManagementViewModel : ObservableObject
             return;
         }
         await _manifest.RemoveAsync(item.ModelId);
+        InvalidateModelInventory();
         _settings.Settings.ModelProfiles.RemoveAll(p => ModelPathSafety.AreSameLocalPath(p.ModelId, item.ModelId));
         foreach (var server in _settings.Settings.ManagedServers.Where(s => ModelPathSafety.AreSameLocalPath(s.ModelPath, item.ModelId)))
             server.ModelPath = string.Empty;
@@ -284,9 +296,31 @@ public partial class ModelManagementViewModel : ObservableObject
 
     private static void ApplyFit(ModelProfileItemViewModel item, long sizeBytes, HardwareProfile hardware, GgufModelInfo? info, int contextSize, string? kvCacheType = null)
     {
-        var fit = ModelFitEstimator.Estimate(sizeBytes, hardware, info, contextSize, kvCacheType ?? "f16");
-        item.FitTier = fit.Tier;
-        item.FitReason = fit.Reason;
+        if (info is null)
+        {
+            var estimate = ModelFitPredictor.EstimatePreDownload(sizeBytes, hardware);
+            item.FitTier = estimate.Tier;
+            item.FitReason = $"Pre-download estimate: {estimate.Reason}";
+            return;
+        }
+
+        var cacheType = string.IsNullOrWhiteSpace(kvCacheType) ? "f16" : kvCacheType;
+        var prediction = ModelFitPredictor.Predict(new ModelFitPredictionRequest(
+            Fingerprint: null,
+            ModelFileBytes: sizeBytes,
+            ContextSize: Math.Max(1, contextSize),
+            GpuLayers: -1,
+            Slots: 1,
+            KvCacheTypeK: cacheType,
+            KvCacheTypeV: cacheType,
+            KvCacheTypeKState: CapabilityState.Available,
+            KvCacheTypeVState: CapabilityState.Available,
+            SwaFull: false,
+            CpuMoeLayers: 0,
+            Hardware: hardware,
+            Companions: []), info);
+        item.FitTier = prediction.Tier;
+        item.FitReason = $"Detailed prediction: {ModelFitPredictor.FormatBreakdown(prediction)}";
     }
 
     private static bool SameLocalModelIdentity(string reportedId, string localPath)
@@ -728,6 +762,7 @@ public partial class ModelManagementViewModel : ObservableObject
             SizeBytes = new FileInfo(fullPath).Length,
             Source = "manual"
         });
+        InvalidateModelInventory();
 
         item.RepoId = repoId;
         item.UpdateStatus = ModelUpdateStatus.NotLinked; // linked but not checked yet; "Check for updates" picks it up
@@ -781,6 +816,7 @@ public partial class ModelManagementViewModel : ObservableObject
                         // network call so a timeout, cancellation, or failed repo lookup
                         // cannot make the next check hash the exact same bytes again.
                         await _manifest.UpsertAsync(entry);
+                        InvalidateModelInventory();
                     }
                 }
 
@@ -818,6 +854,7 @@ public partial class ModelManagementViewModel : ObservableObject
                     }
                     ApplyCompanionState(item, entry);
                     await _manifest.UpsertAsync(entry);
+                    InvalidateModelInventory();
                     item.IsCheckingUpdate = false;
                 }
             }
@@ -858,6 +895,9 @@ public partial class ModelManagementViewModel : ObservableObject
             ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
             : layout.ModelsDirectory;
     }
+
+    private void InvalidateModelInventory() =>
+        _inventory.Invalidate(_settings.Settings.DataManagement.LocalAiAssetsRoot);
 
     private static string CompanionRole(ModelFileRole role) => role switch
     {
@@ -965,6 +1005,7 @@ public partial class ModelManagementViewModel : ObservableObject
         primary.Companions = known;
         primary.RevisionSha = revision;
         await _manifest.UpsertAsync(primary, ct);
+        InvalidateModelInventory();
 
         var updated = 0;
         var missing = 0;
@@ -1016,6 +1057,7 @@ public partial class ModelManagementViewModel : ObservableObject
             updated++;
         }
 
+        InvalidateModelInventory();
         return (updated, missing, messages.Count == 0 ? null : string.Join("; ", messages));
     }
 
@@ -1120,6 +1162,7 @@ public partial class ModelManagementViewModel : ObservableObject
             entry.PendingSizeBytes = null;
             entry.RecordedAtUtc = DateTime.UtcNow;
             await _manifest.UpsertAsync(entry);
+            InvalidateModelInventory();
 
             (int Updated, int Missing, string? Message)? companionResult = null;
             if (item.AutoManageCompanionAssets)
@@ -1305,7 +1348,8 @@ public partial class ModelManagementViewModel : ObservableObject
                     var setBytes = fileSet.Entries
                         .Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard)
                         .Sum(e => e.SizeBytes ?? 0);
-                    var fit = ModelFitEstimator.Estimate(setBytes, hardware);
+                    var fit = ModelFitPredictor.EstimatePreDownload(setBytes, hardware);
+                    fit = fit with { Reason = $"Pre-download estimate: {fit.Reason}" };
                     return (entry.Path, FileSet: (ModelFileSet?)fileSet, Fit: (ModelFitResult?)fit, Error: (string?)null);
                 }
                 catch (OperationCanceledException)

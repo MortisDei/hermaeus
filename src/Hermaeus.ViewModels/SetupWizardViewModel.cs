@@ -251,9 +251,9 @@ public partial class SetupWizardViewModel : ObservableObject
         try
         {
             var hardware = await _systemInfo.GetHardwareProfileAsync();
-            var fit = ModelFitEstimator.Estimate(entry.SizeBytes, hardware);
+            var fit = ModelFitPredictor.EstimatePreDownload(entry.SizeBytes, hardware);
             RecommendedStarterModelFitLabel = ModelFitEstimator.Label(fit.Tier);
-            RecommendedStarterModelFitReason = fit.Reason;
+            RecommendedStarterModelFitReason = $"Pre-download estimate: {fit.Reason}";
         }
         catch
         {

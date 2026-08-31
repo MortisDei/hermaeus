@@ -20,6 +20,17 @@ public sealed class ModelFitEstimatorTests
     }
 
     [Fact]
+    public void Legacy_size_only_estimate_is_owned_by_the_versioned_predictor()
+    {
+        var hardware = new HardwareProfile(32 * OneGb, 8 * OneGb, "Test GPU");
+
+        var legacyFacade = ModelFitEstimator.Estimate(4 * OneGb, hardware);
+        var versionedProjection = ModelFitPredictor.EstimatePreDownload(4 * OneGb, hardware);
+
+        Assert.Equal(versionedProjection, legacyFacade);
+    }
+
+    [Fact]
     public void Estimate_returns_unknown_when_model_size_is_missing_with_metadata()
     {
         var result = ModelFitEstimator.Estimate(0, new HardwareProfile(32 * OneGb, 8 * OneGb, "Test GPU"), Shape(), 8192);

@@ -1,4 +1,5 @@
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 
 namespace Hermaeus.Services;
 
@@ -8,36 +9,13 @@ public sealed record ModelFitResult(ModelFitTier Tier, string Reason);
 
 /// <summary>
 /// What Unsloth shows at download time, for what is already on disk (r13 02-model-library.md
-/// 2.5). The multiplier/headroom constants below are a deliberate rough estimate for KV cache
-/// and compute buffers beyond raw file size, not a measured science.
+/// 2.5). This compatibility facade retains the public result shape while the
+/// versioned <see cref="ModelFitPredictor"/> owns the calculation.
 /// </summary>
 public static class ModelFitEstimator
 {
-    private const double WeightsMultiplier = 1.2;
-    private const long RamHeadroomBytes = 2_147_483_648; // 2 GiB
-
     public static ModelFitResult Estimate(long fileSizeBytes, HardwareProfile hw)
-    {
-        if (fileSizeBytes <= 0)
-            return new ModelFitResult(ModelFitTier.Unknown, "Model file size is unavailable; fit cannot be estimated.");
-
-        if (hw.TotalRamBytes <= 0 && hw.MaxGpuVramBytes <= 0)
-            return new ModelFitResult(ModelFitTier.Unknown, string.Empty);
-
-        var weighted = (long)(fileSizeBytes * WeightsMultiplier);
-
-        if (hw.MaxGpuVramBytes > 0 && weighted + KvCacheMath.GpuHeadroomBytes <= hw.MaxGpuVramBytes)
-            return new ModelFitResult(ModelFitTier.FitsGpu, $"~{FormatGb(fileSizeBytes)} model fits fully in {FormatGb(hw.MaxGpuVramBytes)} VRAM.");
-
-        if (hw.TotalRamBytes > 0 && weighted + RamHeadroomBytes <= hw.TotalRamBytes)
-        {
-            return hw.MaxGpuVramBytes > 0
-                ? new ModelFitResult(ModelFitTier.FitsPartial, $"~{FormatGb(fileSizeBytes)} model vs {FormatGb(hw.MaxGpuVramBytes)} VRAM: needs partial CPU offload.")
-                : new ModelFitResult(ModelFitTier.FitsPartial, $"~{FormatGb(fileSizeBytes)} model runs on CPU/RAM only: no GPU detected.");
-        }
-
-        return new ModelFitResult(ModelFitTier.TooLarge, $"~{FormatGb(fileSizeBytes)} model exceeds available VRAM and RAM headroom.");
-    }
+        => ModelFitPredictor.EstimatePreDownload(fileSizeBytes, hw);
 
     /// <summary>
     /// KV-cache-aware overload (r17 01-gguf-context-and-tuning.md 1.3): when
@@ -60,28 +38,24 @@ public static class ModelFitEstimator
         if (hw.TotalRamBytes <= 0 && hw.MaxGpuVramBytes <= 0)
             return new ModelFitResult(ModelFitTier.Unknown, string.Empty);
 
-        var bpe = KvCacheMath.ResolveBytesPerElement(kvCacheType, string.Empty, isKeyCache: true);
-        var projection = KvCacheMath.Project(fileSizeBytes, info, contextSize, gpuLayers: -1, bpe, bpe);
-        if (projection is null)
-            return Estimate(fileSizeBytes, hw);
-
-        var weightsGb = FormatGb(projection.WeightsBytes);
-        var kvGb = FormatGb(projection.KvBytes);
-
-        if (hw.MaxGpuVramBytes > 0 && projection.TotalBytes + KvCacheMath.GpuHeadroomBytes <= hw.MaxGpuVramBytes)
-            return new ModelFitResult(ModelFitTier.FitsGpu, $"~{weightsGb} weights + ~{kvGb} {kvCacheType} KV cache at {contextSize:N0} context fits {FormatGb(hw.MaxGpuVramBytes)} VRAM.");
-
-        if (hw.TotalRamBytes > 0 && projection.TotalBytes + RamHeadroomBytes <= hw.TotalRamBytes)
-        {
-            return hw.MaxGpuVramBytes > 0
-                ? new ModelFitResult(ModelFitTier.FitsPartial, $"~{weightsGb} weights + ~{kvGb} {kvCacheType} KV cache at {contextSize:N0} context vs {FormatGb(hw.MaxGpuVramBytes)} VRAM: needs partial CPU offload.")
-                : new ModelFitResult(ModelFitTier.FitsPartial, $"~{weightsGb} weights + ~{kvGb} {kvCacheType} KV cache at {contextSize:N0} context runs on CPU/RAM only: no GPU detected.");
-        }
-
-        return new ModelFitResult(ModelFitTier.TooLarge, $"~{weightsGb} weights + ~{kvGb} {kvCacheType} KV cache at {contextSize:N0} context exceeds available VRAM and RAM headroom.");
+        var prediction = ModelFitPredictor.Predict(new ModelFitPredictionRequest(
+            Fingerprint: null,
+            ModelFileBytes: fileSizeBytes,
+            ContextSize: Math.Max(1, contextSize),
+            GpuLayers: -1,
+            Slots: 1,
+            KvCacheTypeK: kvCacheType,
+            KvCacheTypeV: kvCacheType,
+            KvCacheTypeKState: CapabilityState.Available,
+            KvCacheTypeVState: CapabilityState.Available,
+            SwaFull: false,
+            CpuMoeLayers: 0,
+            Hardware: hw,
+            Companions: []), info);
+        return prediction.UnknownComponents.Count > 0
+            ? Estimate(fileSizeBytes, hw)
+            : new ModelFitResult(prediction.Tier, $"KV cache projection: {ModelFitPredictor.FormatBreakdown(prediction)}");
     }
-
-    private static string FormatGb(long bytes) => $"{bytes / 1024d / 1024 / 1024:0.0} GB";
 
     /// <summary>Short chip text for a tier; empty for Unknown so callers render nothing rather
     /// than guessing. Shared between the Models page cards, the HF browser file list, and the

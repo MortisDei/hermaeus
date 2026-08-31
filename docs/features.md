@@ -33,7 +33,9 @@ for Knowledge behavior in Chat.
 
 - Models manages local GGUF files, provider-discovered models, model profiles,
   sampling defaults, visibility, tags, source provenance, updates, deletion,
-  and hardware-fit information. A saved auto-tune profile is shown directly on
+  and hardware-fit information. Its bounded Services-owned inventory rechecks
+  file identity and reuses GGUF metadata until an explicit invalidation or a
+  file change. A saved auto-tune profile is shown directly on
   the model card with its GPU layers, threads, and context. Opening the model
   configuration also hydrates the editable saved tune values from that shared
   profile; saving them remains separate from the runtime Save Config action on
@@ -73,6 +75,9 @@ for Knowledge behavior in Chat.
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are
   separate and comparable only under a compatible fingerprint.
+- Model cards use the detailed versioned prediction when local GGUF shape
+  metadata is available. Remote or pre-download cards retain a clearly labelled
+  rough pre-download estimate until that metadata exists.
 - Settings preferences save automatically, including a pending edit flushed by
   clean shutdown. Process, model, and runtime changes retain explicit
   save/apply actions because they can affect files or running services.

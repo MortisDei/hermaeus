@@ -20,8 +20,20 @@ public sealed record LocalAiAssetLayout(
             : $"Found {FoundCount} asset location(s) under {Root}.";
 }
 
+public sealed record BoundedGgufModelScan(
+    IReadOnlyList<string> Paths,
+    bool IsTruncated);
+
 public static class LocalAiAssetLocator
 {
+    private static EnumerationOptions GgufEnumerationOptions => new()
+    {
+        RecurseSubdirectories = true,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+        IgnoreInaccessible = true,
+        ReturnSpecialDirectories = false
+    };
+
     public static IReadOnlyList<string> FindGgufModels(string root)
     {
         var layout = Detect(root);
@@ -30,7 +42,7 @@ public static class LocalAiAssetLocator
 
         try
         {
-            return Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", SearchOption.AllDirectories)
+            return Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", GgufEnumerationOptions)
                 .Where(path => !IsUnderSpecialModelDirectory(path, layout.ModelsDirectory))
                 .Where(path => !IsCompanionGguf(path))
                 .Order(StringComparer.OrdinalIgnoreCase)
@@ -39,6 +51,58 @@ public static class LocalAiAssetLocator
         catch
         {
             return [];
+        }
+    }
+
+    /// <summary>
+    /// Retains at most <paramref name="maxResults" /> model paths while keeping
+    /// one overflow sentinel, so callers can report a bounded inventory without
+    /// retaining an unbounded list. This deliberately resolves only the model directory and
+    /// does not run the broader asset discovery performed by <see cref="Detect"/>.
+    /// </summary>
+    public static BoundedGgufModelScan FindGgufModelsBounded(string root, int maxResults)
+    {
+        if (maxResults <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxResults));
+
+        root = root.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            return new BoundedGgufModelScan([], false);
+
+        try
+        {
+            root = Path.GetFullPath(root);
+            if (!Directory.Exists(root))
+                return new BoundedGgufModelScan([], false);
+
+            var modelsDirectory = FindModelsDirectory(root, maxResults + 1);
+            if (string.IsNullOrWhiteSpace(modelsDirectory) || !Directory.Exists(modelsDirectory))
+                return new BoundedGgufModelScan([], false);
+            if ((File.GetAttributes(modelsDirectory) & FileAttributes.ReparsePoint) != 0)
+                return new BoundedGgufModelScan([], false);
+
+            var paths = new SortedSet<string>(ModelPathSafety.LocalPathComparer);
+            var sawMore = false;
+            foreach (var path in Directory.EnumerateFiles(modelsDirectory, "*.gguf", GgufEnumerationOptions))
+            {
+                if (IsUnderSpecialModelDirectory(path, modelsDirectory)
+                    || IsCompanionGguf(path)
+                    || !ModelPathSafety.TryResolveFileUnderRoot(root, path, out _, out _))
+                    continue;
+
+                paths.Add(path);
+                if (paths.Count > maxResults)
+                {
+                    sawMore = true;
+                    paths.Remove(paths.Max!);
+                }
+            }
+
+            return new BoundedGgufModelScan(paths.ToList(), sawMore);
+        }
+        catch
+        {
+            return new BoundedGgufModelScan([], false);
         }
     }
 
@@ -225,7 +289,7 @@ public static class LocalAiAssetLocator
     private static string FirstExistingDirectory(params string[] candidates) =>
         candidates.FirstOrDefault(Directory.Exists) ?? string.Empty;
 
-    private static string FindModelsDirectory(string root)
+    private static string FindModelsDirectory(string root, int countLimit = 10_000)
     {
         // Actual on-disk directories go first so case-insensitive dedup keeps
         // the real casing instead of a guessed "Models"/"models" variant.
@@ -257,7 +321,7 @@ public static class LocalAiAssetLocator
 
         var withGguf = candidates
             .Where(Directory.Exists)
-            .Select(path => new { Path = path, Count = CountGgufFiles(path) })
+            .Select(path => new { Path = path, Count = CountGgufFiles(path, countLimit) })
             .Where(x => x.Count > 0)
             .OrderByDescending(x => x.Count)
             .ThenBy(x => string.Equals(Path.GetFileName(x.Path), "Models", StringComparison.Ordinal) ? 0 : 1)
@@ -269,11 +333,11 @@ public static class LocalAiAssetLocator
         return candidates.FirstOrDefault(Directory.Exists) ?? string.Empty;
     }
 
-    private static int CountGgufFiles(string path)
+    private static int CountGgufFiles(string path, int countLimit = 10_000)
     {
         try
         {
-            return Directory.EnumerateFiles(path, "*.gguf", SearchOption.AllDirectories).Count();
+            return Directory.EnumerateFiles(path, "*.gguf", GgufEnumerationOptions).Take(countLimit).Count();
         }
         catch
         {
