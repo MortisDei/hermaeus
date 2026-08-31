@@ -79,7 +79,9 @@ for Knowledge behavior in Chat.
   through the reviewed Hugging Face host and delivery-host policy, and
   independently checked for MIME, magic, format, animation, dimensions, and
   size before Avalonia decode. The artwork cache is bounded, LRU-evictable,
-  excluded from Data Root backups, and has a separate Clear action.
+  excluded from Data Root backups, and has a separate Clear action. A model
+  update check may backfill artwork when its verified manifest revision matches
+  the fetched card and tree; decoration failures never fail the update check.
 - GPU Fit is a deterministic prediction over the current editor values. It
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are

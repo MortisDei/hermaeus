@@ -861,10 +861,11 @@ public partial class ModelManagementViewModel : ObservableObject
 
                 IReadOnlyList<HfTreeEntry>? tree;
                 var revision = "main";
+                HfModelCard? card = null;
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    var card = await _hf.GetModelCardAsync(group.Key, cts.Token);
+                    card = await _hf.GetModelCardAsync(group.Key, cts.Token);
                     revision = !string.IsNullOrWhiteSpace(card?.Sha) ? card.Sha : "main";
                     tree = await _hf.GetTreeAsync(group.Key, revision, cts.Token);
                 }
@@ -896,6 +897,23 @@ public partial class ModelManagementViewModel : ObservableObject
                     InvalidateModelInventory();
                     item.IsCheckingUpdate = false;
                 }
+
+                // Update Check already has the exact repository card and tree
+                // for this group. Backfill optional artwork only when the
+                // installed file's manifest pins that same immutable revision;
+                // never use the current branch to decorate an older model.
+                if (card is not null && tree is not null)
+                {
+                    var artworkItems = group
+                        .Where(candidate => string.Equals(candidate.Entry.RevisionSha, revision, StringComparison.OrdinalIgnoreCase)
+                            && IsVerifiedManifest(candidate.Entry)
+                            && !candidate.Item.HasCustomAvatar
+                            && !candidate.Item.HasArtworkForDisplay)
+                        .Select(candidate => candidate.Item)
+                        .ToList();
+                    if (artworkItems.Count > 0)
+                        _ = BackfillArtworkAsync(group.Key, card, tree, revision, artworkItems);
+                }
             }
 
             var upToDate = candidates.Count(c => c.Item.UpdateStatus == ModelUpdateStatus.UpToDate);
@@ -911,6 +929,39 @@ public partial class ModelManagementViewModel : ObservableObject
         finally
         {
             IsCheckingUpdates = false;
+        }
+    }
+
+    private async Task BackfillArtworkAsync(
+        string repoId,
+        HfModelCard card,
+        IReadOnlyList<HfTreeEntry> tree,
+        string revision,
+        IReadOnlyList<ModelProfileItemViewModel> items)
+    {
+        try
+        {
+            var result = await _artwork.FetchAsync(
+                repoId,
+                card,
+                tree,
+                HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)));
+            foreach (var item in items)
+            {
+                if (!item.HasCustomAvatar && !item.HasArtworkForDisplay)
+                    item.ApplyArtwork(result.CachePath, result.State, result.FailureCode, revision);
+            }
+
+            if (result.State is not HfArtworkState.Available)
+                _activity.RecordSafe("models.artwork", repoId, ActivityOutcome.Failed,
+                    "Repository artwork unavailable", $"{result.State}:{result.FailureCode} rev={revision}");
+        }
+        catch (Exception ex)
+        {
+            // Artwork is decoration. A failed backfill must never turn a
+            // completed update check into a failed model-management action.
+            _activity.RecordSafe("models.artwork", repoId, ActivityOutcome.Failed,
+                "Repository artwork unavailable", $"Unavailable:{ex.GetType().Name} rev={revision}");
         }
     }
 

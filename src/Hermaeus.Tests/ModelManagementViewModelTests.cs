@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using Hermaeus.Core.Models;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
@@ -272,6 +273,34 @@ public sealed class ModelManagementViewModelTests
         }
     }
 
+    private sealed class UpdateArtworkHandler(string revision, string modelHash, int modelSize, byte[] image) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var url = request.RequestUri!.ToString();
+            if (url.Contains("/tree/", StringComparison.Ordinal))
+            {
+                var tree = "[{\"path\":\"model.gguf\",\"size\":" + modelSize + ",\"lfs\":{\"oid\":\"" + modelHash + "\"}},{\"path\":\"art.png\",\"size\":" + image.Length + "}]";
+                return Task.FromResult(Response(tree));
+            }
+            if (url.Contains("/api/models/", StringComparison.Ordinal))
+                return Task.FromResult(Response("{\"sha\":\"" + revision + "\",\"cardData\":{\"thumbnail\":\"art.png\"}}"));
+
+            var artwork = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(image)
+            };
+            artwork.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            artwork.Content.Headers.ContentLength = image.Length;
+            return Task.FromResult(artwork);
+        }
+    }
+
+    private static HttpResponseMessage Response(string json) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(json, Encoding.UTF8, "application/json")
+    };
+
     private static (string Metadata, string MetadataHash, string ModelHash, string CompanionHash) CompanionFixture(
         byte[] modelBytes, byte[] companionBytes)
     {
@@ -349,6 +378,56 @@ public sealed class ModelManagementViewModelTests
 
         var entry = await manifest.FindAsync(modelPath);
         Assert.Equal("new-oid", entry!.PendingSha256);
+    }
+
+    [Fact]
+    public async Task CheckForUpdates_backfills_revision_pinned_artwork_without_changing_update_state()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor(Path.Combine("assets", "Models"));
+        Directory.CreateDirectory(assets);
+        var modelPath = Path.Combine(assets, "model.gguf");
+        var modelBytes = Encoding.UTF8.GetBytes("fake model");
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("assets");
+
+        const string revision = "0123456789abcdef0123456789abcdef01234567";
+        var modelHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(modelBytes));
+        var image = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = "org/repo",
+            RepoFile = "model.gguf",
+            RevisionSha = revision,
+            Sha256 = modelHash,
+            SizeBytes = modelBytes.Length,
+            Source = "hf-browser"
+        });
+
+        using var http = new HttpClient(new UpdateArtworkHandler(revision, modelHash, modelBytes.Length, image));
+        var vm = new ModelManagementViewModel(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            NewServicesViewModel(settings),
+            manifest,
+            new HuggingFaceClient(http),
+            new ModelDownloadService(),
+            artwork: new HuggingFaceArtworkService(http));
+
+        await vm.RefreshAsync();
+        await vm.CheckForUpdatesCommand.ExecuteAsync(null);
+
+        var item = Assert.Single(vm.Models);
+        Assert.Equal(ModelUpdateStatus.UpToDate, item.UpdateStatus);
+        await WaitForAsync(() => item.ArtworkState == HfArtworkState.Available, "revision-pinned artwork backfill");
+        Assert.NotNull(item.ArtworkPath);
+        Assert.Contains(revision, item.ArtworkTooltip, StringComparison.Ordinal);
     }
 
     [Fact]
