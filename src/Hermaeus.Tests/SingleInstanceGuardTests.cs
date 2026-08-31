@@ -7,9 +7,9 @@ internal static class SingleInstanceGuardTests
 {
     public static Task SecondNormalLaunchStopsBeforeDesktopStartup()
     {
-        False(Hermaeus.Desktop.Program.ShouldContinueStartup(ownsInstance: false, isPackageIntegration: false),
-            "a second normal launch must exit before Avalonia constructs a window or owner services");
-        True(Hermaeus.Desktop.Program.ShouldContinueStartup(ownsInstance: true, isPackageIntegration: false),
+        False(Hermaeus.Desktop.Program.ShouldContinueStartup(ownsInstance: false),
+            "a second launch must exit before Avalonia constructs a window or owner services");
+        True(Hermaeus.Desktop.Program.ShouldContinueStartup(ownsInstance: true),
             "the lock owner may continue to desktop startup");
         return Task.CompletedTask;
     }

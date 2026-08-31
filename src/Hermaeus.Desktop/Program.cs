@@ -85,11 +85,8 @@ class Program
         // A second instance would write to the same SQLite data root with no
         // cross-process coordination; refuse to start rather than risk it.
         var ownsInstance = SingleInstanceGuard.TryAcquire();
-        if (!ShouldContinueStartup(ownsInstance, PackageIntegrationLaunch is not null))
+        if (!ShouldContinueStartup(ownsInstance))
             return;
-
-        if (PackageIntegrationLaunch is not null)
-            PackageIntegrationLaunch = PackageIntegrationLaunch with { CanRun = ownsInstance };
 
         try
         {
@@ -115,12 +112,10 @@ class Program
     }
 
     /// <summary>
-    /// Normal desktop startup requires the process to own the application
-    /// lock. Package integration helpers are separate one-shot utilities and
-    /// may continue through their own window when they do not own that lock.
+    /// Every executable entry point, including package integration helpers,
+    /// requires ownership of the application lock before Avalonia startup.
     /// </summary>
-    internal static bool ShouldContinueStartup(bool ownsInstance, bool isPackageIntegration) =>
-        ownsInstance || isPackageIntegration;
+    internal static bool ShouldContinueStartup(bool ownsInstance) => ownsInstance;
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
