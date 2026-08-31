@@ -85,6 +85,8 @@ internal sealed class WhisperOnnxModel : IDisposable
 
     public WhisperOnnxModel(Func<string> assetsRootProvider) => _assetsRootProvider = assetsRootProvider;
 
+    public bool IsLoaded => _encoder is not null && _decoder is not null && _vocab is not null;
+
     public static string PathFor(string assetsRoot, WhisperAsset asset) =>
         Path.Combine(assetsRoot, asset.LocalName);
 

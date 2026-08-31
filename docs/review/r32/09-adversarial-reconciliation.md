@@ -125,7 +125,9 @@ Only environment-dependent facts remain:
 - real artwork responses across current Hugging Face delivery backends, within
   the exact primary-source host set;
 - desktop layout/accessibility and platform cache-clear behavior;
-- a live CI event/ruleset exercise after the workflow-only change is authorized.
+- a post-change required-check attachment exercise for a same-repository pull
+  request; the owner-authorized branch-without-PR exercise passed as run
+  `33359135717`.
 
 Batch 0 may narrow a capability or mark it Unknown when these facts fail. It
 may not reopen launch precedence, mutation authority, admission, revision

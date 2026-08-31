@@ -42,6 +42,14 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<PrivacyAuditService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IRuntimeTelemetrySource, ProcessRuntimeTelemetrySource>();
+        s.AddSingleton<IResourceSnapshotStore, SqliteResourceSnapshotStore>();
+        s.AddSingleton<IResourceConsumerAdapter>(sp => ResourceConsumerAdapters.Reranker(
+            () => (sp.GetRequiredService<IReranker>() as OnnxCrossEncoderReranker)?.IsLoaded == true));
+        s.AddSingleton<IResourceConsumerAdapter>(sp => ResourceConsumerAdapters.Whisper(
+            () => sp.GetRequiredService<NativeSpeechRecognitionProvider>().IsLoaded));
+        s.AddSingleton<IResourceConsumerAdapter>(sp => ResourceConsumerAdapters.Kokoro(
+            () => sp.GetRequiredService<NativeKokoroVoiceProvider>().IsLoaded));
+        s.AddSingleton<IResourceConsumerRegistry, ResourceConsumerRegistry>();
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
         s.AddSingleton<GpuFitExperienceService>();

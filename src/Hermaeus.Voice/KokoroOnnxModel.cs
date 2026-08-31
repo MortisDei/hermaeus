@@ -49,6 +49,8 @@ internal sealed class KokoroOnnxModel : IDisposable
         _journal = journal;
     }
 
+    public bool IsLoaded => _session is not null;
+
     public static string ModelPath(string assetsRoot) => Path.Combine(assetsRoot, ModelFileName);
     public static string VoicePath(string assetsRoot, string voice) => Path.Combine(assetsRoot, "voices", $"{voice}.bin");
 

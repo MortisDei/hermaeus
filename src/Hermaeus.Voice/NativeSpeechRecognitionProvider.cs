@@ -52,6 +52,7 @@ public sealed class NativeSpeechRecognitionProvider : ISpeechRecognitionService,
     }
 
     public bool IsInstalled => _model.AssetsPresent();
+    public bool IsLoaded => _model.IsLoaded;
 
     public VoiceProviderDetection Detect()
     {

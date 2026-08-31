@@ -53,7 +53,7 @@ the stores into one schema.
 | CI | Separate non-required pre-PR branch checks from required PR merge-context checks; preserve main/fork coverage and trusted-push security boundaries; add authority-scoped superseded-run cancellation without changing repository settings | live ruleset re-read, doc 09 | mandatory operational efficiency | No |
 | 1 | Typed CPU/Auto/All/Exact launch intent and exact legacy/tune-profile migration; remove implicit tune-profile-on-Start mutation; canonical managed launch specification, conflict policy for core `ExtraArgs`, one configured/planned/rendered/effective/observed projection and fingerprint, versioned compatibility tests | 0 | mandatory correctness foundation | Yes |
 | 2 | Services-owned model inventory with bounded scan/GGUF/manifest cache and explicit invalidation; converge simple card fit onto the versioned prediction engine while preserving a labelled pre-download estimate | 0, 1 | mandatory shared foundation | Yes |
-| 3 | Resource consumer registry, allocation owner/component/per-device model, immutable snapshots, local/remote/owned identity, authoritative per-device and Unknown observations, in-process adapters, bounded persistence | 1, 2 | mandatory resource spine | No |
+| 3 | Resource consumer registry, allocation owner/component/per-device model, immutable snapshots, local/remote/owned identity, authoritative per-device and Unknown observations, in-process adapters, bounded persistence | 1, 2 | mandatory resource spine | Yes |
 | 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | No |
 | 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | No |
 | 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | No |
@@ -202,11 +202,12 @@ skipped non-required branch job cannot satisfy protection accidentally.
 
 Static workflow guards pass (5 tests), and the live ruleset was re-read before
 editing: the required check names and pull-request requirement remain as
-documented. A required-check attachment exercise against a draft pull request
-was not performed because this round is not authorized to open or modify a
-pull request. The CI row therefore remains `No` pending that owner-only live
-gate, even though the workflow implementation and branch-push exercise are
-ready for review.
+documented. The owner-authorized branch-without-PR exercise `33359135717`
+passed its lookup gate and Linux and Windows branch matrices. A required-check
+attachment exercise against a draft pull request was not performed because
+this round is not authorized to open or modify a pull request. The CI row
+therefore remains `No` pending that owner-only live gate, even though the
+workflow implementation and branch-push exercise passed.
 
 The pre-change baseline was a zero-warning solution build, 2,354 passed and
 17 skipped out of 2,371 sequential tests, and 38,550 of 60,422 covered lines
@@ -217,6 +218,37 @@ The CI batch re-reads the live ruleset but does not modify it. A skipped job
 must never carry either required check name. Branch and PR concurrency groups
 are separate so a non-authoritative push cannot cancel an authoritative PR
 merge-context run.
+
+### 8.2.5 Batch 3 evidence
+
+The Services-owned resource registry now keeps immutable consumer descriptors
+separate from mutable allocation state. Owners are explicitly classified as
+Hermaeus-owned processes, Hermaeus in-process components, configured external
+endpoints, or unrelated/unknown device use. Consumer ids cannot be reused for
+a different owner, allocations require registration, component ids are unique,
+and lifecycle updates preserve the allocation owner and refuse terminal-state
+resurrection.
+
+Snapshots defensively copy bounded consumers, allocations, observations,
+Unknowns, and device totals. Consumer and allocation observations are selected
+by the fixed trust order without summing corroborating evidence; whole-device
+totals remain device-scoped and cannot be attributed to a consumer. The
+reranker, Whisper, and native Kokoro adapters report only resident sessions,
+and loaded in-process sessions retain explicit Unknown byte usage until a
+trustworthy measurement exists.
+
+`SqliteResourceSnapshotStore` persists only an explicit, path-free projection
+of a snapshot in `experience.db`, with stable identity references and a
+32-snapshot retention bound. It does not record continuous sampling telemetry.
+The `adaptive-launch` empirical domain and codec are registered for the later
+launch-result writer; Batch 3 does not add admission, reservations, planning,
+or automatic eviction.
+
+Batch 3 verification: resource model, registry, adapters, observation authority,
+lifecycle, persistence projection, cancellation, and SQLite retention tests
+passed (23 focused); the full sequential suite passed with 2,400 passed and 17
+skipped out of 2,417 tests; and the zero-warning solution build passed. Test
+results were written outside the checkout.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

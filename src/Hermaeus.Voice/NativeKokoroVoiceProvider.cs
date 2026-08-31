@@ -59,6 +59,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     }
 
     public bool IsInstalled => _model.AssetsPresent(NormalizeVoice(_settings.Settings.Tts.Speaker));
+    public bool IsLoaded => _model.IsLoaded;
 
     public VoiceProviderDetection Detect()
     {

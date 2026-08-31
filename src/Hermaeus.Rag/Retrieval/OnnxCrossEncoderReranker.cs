@@ -32,6 +32,9 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         _journal = journal;
     }
 
+    /// <summary>True only while the verified ONNX session and tokenizer are resident.</summary>
+    public bool IsLoaded => _session is not null && _tokenizer is not null;
+
     public async Task<List<ScoredChunk>> RerankAsync(
         string query,
         IReadOnlyList<ScoredChunk> candidates,
