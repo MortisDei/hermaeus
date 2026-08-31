@@ -54,6 +54,14 @@
             </Grid>
             <TextBlock Text="{Binding LlamaRuntimeVariantStatus}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="Artwork cache" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <TextBlock Grid.Column="1" Text="{Binding ArtworkCacheStatus}" VerticalAlignment="Center"
+                           FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                <Button Grid.Column="2" Command="{Binding ClearArtworkCacheCommand}"
+                        Content="Clear" FontSize="12" Padding="10,4" CornerRadius="6"
+                        ToolTip.Tip="Removes cached Hugging Face artwork only. Downloaded models and manifests are not touched." />
+            </Grid>
+            <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="Backup to" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                 <TextBox Grid.Column="1" Text="{Binding BackupDirectory}" Watermark="Backup folder"
                          FontSize="13" CornerRadius="6" Padding="10,6" />

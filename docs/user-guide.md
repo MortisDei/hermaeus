@@ -134,6 +134,17 @@ the current repository revision and hash-verified compatible candidates, but it
 never changes a server's configured projector or draft path. Selecting a
 replacement in Services remains an explicit user action.
 
+When the model card declares a Hugging Face thumbnail, the selected repository
+and its download cards may show it as optional repository artwork. Hermaeus
+reads only the bounded `cardData.thumbnail` value, requires an exact immutable
+repository revision, blocks arbitrary external hosts, and falls back to the
+generic mark for missing, invalid, unavailable, or unsafe artwork. Artwork
+does not affect model identity, fit, trust, ranking, or download selection.
+The cache is rebuildable and excluded from Data Root backups. Settings >
+Data Storage shows its size and provides a confirmed Clear action that does
+not remove models or manifests. A custom model avatar remains separate and
+takes precedence over cached repository artwork.
+
 When a repository is selected, known GGUF variants appear immediately while
 fit and companion checks complete independently per row. A row remains
 download-disabled while its compatibility check is still running.

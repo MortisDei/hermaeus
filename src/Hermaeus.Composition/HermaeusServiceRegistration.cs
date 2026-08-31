@@ -94,6 +94,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<ModelProfileService>();
         s.AddSingleton<ModelManifestStore>();
         s.AddSingleton<HuggingFaceClient>();
+        s.AddSingleton<HuggingFaceArtworkService>();
         s.AddSingleton<ModelDownloadService>();
         s.AddSingleton<XttsV2VoiceProvider>();
         s.AddSingleton<KokoroVoiceProvider>();

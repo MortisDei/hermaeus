@@ -29,7 +29,8 @@ public sealed class BackupService
             {
                 var name = Path.GetFileName(f.SourcePath);
                 return !name.Equals("secrets.local.json", StringComparison.OrdinalIgnoreCase)
-                    && !name.Equals("secrets.local.key", StringComparison.OrdinalIgnoreCase);
+                    && !name.Equals("secrets.local.key", StringComparison.OrdinalIgnoreCase)
+                    && !IsRebuildableArtwork(f.RelativePath);
             })
             // WAL/rollback-journal sidecars describe a database file that is
             // about to be replaced by a consistent snapshot (below); zipping
@@ -74,6 +75,12 @@ public sealed class BackupService
 
     private static bool IsSqliteDatabaseFile(string path) =>
         path.EndsWith(".db", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRebuildableArtwork(string relativePath)
+    {
+        var normalized = relativePath.Replace('\\', '/').TrimStart('/');
+        return normalized.StartsWith("cache/huggingface-artwork/", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsSqliteSidecarFile(string path) =>
         path.EndsWith("-wal", StringComparison.OrdinalIgnoreCase)

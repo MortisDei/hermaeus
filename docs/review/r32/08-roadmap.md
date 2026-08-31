@@ -61,7 +61,7 @@ the stores into one schema.
 | 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | Yes |
 | 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | Yes |
 | 10 | Stable watched-root/source identity, staged source revisions and dataset generations, embedding cardinality/dimension validation, source revalidation, atomic RAG publication, exact-revision citations, crash/cancellation preservation, Dataset Manager history | 9 lineage contract, existing RAG | mandatory temporal correctness | Yes |
-| 11 | Pinned Hugging Face thumbnail metadata, exact-host manual redirects, bounded pre-decode header inspection/cache service, selected repo/download/installed-card presentation, cache management | 2 | mandatory independent | No |
+| 11 | Pinned Hugging Face thumbnail metadata, exact-host manual redirects, bounded pre-decode header inspection/cache service, selected repo/download/installed-card presentation, cache management | 2 | mandatory independent | Yes |
 | 12 | Only the already-selected targeted hardening from doc 06 that was not naturally completed by its owning batch; cross-batch integration tests; authoritative feature/workflow/security/privacy docs; CHANGELOG only for landed behavior | 1-11 changed batches | mandatory close-out, not a catch-all | No |
 | 13 | Full automated gates, canonical coverage, public diff/security/privacy audit, Linux/COSMIC and Windows live matrix, deferred ledger close-out | all landed batches | mandatory release-readiness evidence | No |
 
@@ -480,6 +480,46 @@ native Windows root-identity path was compiled but not executed in this Linux
 run, so its runtime behavior remains an owner Windows live gate. Owner live
 gates remain a changed watched source, exact old/new citation revision, and a
 cancelled or failed reindex that preserves the prior complete version.
+
+### 8.2.13 Batch 11 evidence
+
+Batch 11 keeps Hugging Face artwork as optional decoration with independent
+provenance and failure handling:
+
+- The existing selected model-card request reads only the bounded string
+  `cardData.thumbnail`. Relative repository paths and canonical resolve URLs
+  must exist in the exact immutable tree revision. External hosts, unsafe
+  authorities, traversal, encoded separators/dot segments, declared queries,
+  and missing or malformed revisions do not start an artwork request.
+- Artwork fetches use an anonymous HTTPS client with automatic redirects
+  disabled, at most five manual hops, and the exact source-controlled Hub
+  delivery-host set. Same-Hub redirects stay on `huggingface.co`; a delivery
+  host cannot change origin. Response bodies are header-streamed and bounded at
+  2 MiB, with declared MIME, magic, PNG/JPEG/WebP header, animation,
+  dimension, pixel, decoded-byte, and post-Avalonia dimension checks.
+- Cache entries are atomically written under the resolved Data Root cache,
+  keyed by normalized repository, exact revision, source identity, and content
+  hash. Cache hits are offline; metadata records MIME, size, dimensions, ETag,
+  fetched time, and last access. The cache has byte/count LRU limits, a
+  confirmed Data Management Clear action, and is excluded from Data Root
+  backups. Installed-card reuse requires a size-consistent manifest with
+  verified repo, exact revision, and SHA256 provenance. Custom avatars remain
+  separate and take precedence.
+- Selected repository artwork is published to its file cards through the same
+  cancellable selection generation. A publication race regression replays
+  already-available artwork into rows created afterward, and stale selections
+  cannot replace the current repository. Search and download behavior remains
+  usable when artwork fails.
+
+Batch 11 verification: the focused artwork, client, and model-management
+filters passed 80 tests, including 38 artwork and cache/integration cases; the
+zero-warning solution build passed with 0 warnings and 0 errors; and the full
+sequential suite passed with 2,534 passed, 17 skipped, and 2,551 total tests.
+Test results were written outside the checkout. Owner live gates remain valid,
+missing, blocked, and malformed thumbnail repositories, slow/offline artwork
+while metadata and downloads remain usable, restart/cache-clear behavior,
+high-DPI and narrow-window layout, keyboard selection, and screen-reader/
+tooltip text on Linux/COSMIC and Windows.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

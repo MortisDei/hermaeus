@@ -105,6 +105,17 @@ public partial class SettingsView : UserControl
             return await dialog.ShowDialog<bool>(owner);
         };
 
+        vm.Data.RequestArtworkCacheClearConfirmation = async () =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+
+            var dialog = new ConfirmActionDialog(
+                "Clear artwork cache",
+                "Remove cached Hugging Face artwork only? Downloaded models and model manifests will not be changed.");
+            return await dialog.ShowDialog<bool>(owner);
+        };
+
         // Voice's own file pickers (Python/script/model/output/voice-sample) are wired
         // from ServicesView now that the "Voice providers" card lives there; Tts is a
         // shared singleton so either view wiring them is equally valid.

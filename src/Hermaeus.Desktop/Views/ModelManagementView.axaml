@@ -94,44 +94,84 @@
                     <ItemsControl ItemsSource="{Binding HfSearchResults}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:HfRepoResultViewModel">
-                                <Button Content="{Binding RepoId}"
-                                        Command="{Binding $parent[ItemsControl].DataContext.SelectHfRepoCommand}"
+                                <Button Command="{Binding $parent[ItemsControl].DataContext.SelectHfRepoCommand}"
                                         CommandParameter="{Binding}"
                                         HorizontalAlignment="Stretch"
                                         HorizontalContentAlignment="Left"
                                         Background="Transparent"
                                         BorderThickness="0"
                                         Padding="6,4"
-                                        ToolTip.Tip="{Binding Downloads, StringFormat='{}{0:N0} downloads'}" />
+                                        ToolTip.Tip="{Binding Downloads, StringFormat='{}{0:N0} downloads'}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Border Width="30" Height="30" CornerRadius="5"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                            <TextBlock Text="HF" HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" FontSize="10"
+                                                       FontWeight="SemiBold" />
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding RepoId}" />
+                                            <TextBlock Text="{Binding Downloads, StringFormat='{}{0:N0} downloads'}"
+                                                       FontSize="10" Opacity="0.55" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
 
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedHfRepo, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
-                    <TextBlock FontSize="13" FontWeight="SemiBold">
-                        <Run Text="Files in" /> <Run Text="{Binding SelectedHfRepo.RepoId}" /> <Run Text="(license:" /> <Run Text="{Binding SelectedHfRepo.License}" /> <Run Text=")" />
-                    </TextBlock>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                        <Border Grid.Column="0" Width="42" Height="42" CornerRadius="6"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                ToolTip.Tip="{Binding SelectedHfRepo.ArtworkTooltip}">
+                            <Grid>
+                                <TextBlock Text="HF" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" FontSize="11"
+                                           FontWeight="SemiBold" />
+                                <Image Source="{Binding SelectedHfRepo.ArtworkPath, Converter={x:Static views:ArtworkFileToBitmapConverter.Instance}}"
+                                       IsVisible="{Binding SelectedHfRepo.HasArtwork}"
+                                       Stretch="UniformToFill" />
+                            </Grid>
+                        </Border>
+                        <TextBlock Grid.Column="1" FontSize="13" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" TextWrapping="Wrap">
+                            <Run Text="Files in " /> <Run Text="{Binding SelectedHfRepo.RepoId}" /> <Run Text=" (license: " /> <Run Text="{Binding SelectedHfRepo.License}" /> <Run Text=")" />
+                        </TextBlock>
+                    </Grid>
                     <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding HfFiles}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="vm:HfFileResultViewModel">
                                   <StackPanel Spacing="2" Margin="0,4">
-                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
-                                        <TextBlock Grid.Column="0" Text="{Binding FileName}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
-                                        <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="10">
+                                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="5"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                ToolTip.Tip="{Binding ArtworkTooltip}">
+                                            <Grid>
+                                                <TextBlock Text="HF" HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" FontSize="10"
+                                                           FontWeight="SemiBold" />
+                                                <Image Source="{Binding ArtworkPath, Converter={x:Static views:ArtworkFileToBitmapConverter.Instance}}"
+                                                       IsVisible="{Binding HasArtwork}"
+                                                       Stretch="UniformToFill" />
+                                            </Grid>
+                                        </Border>
+                                        <TextBlock Grid.Column="1" Text="{Binding FileName}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                                        <Border Grid.Column="3" CornerRadius="4" Padding="6,1"
                                                 VerticalAlignment="Center"
                                                 IsVisible="{Binding FitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
                                                 Background="{Binding FitTier, Converter={x:Static views:FitTierBrushConverter.Instance}}"
                                                 ToolTip.Tip="{Binding FitReason}">
                                             <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
                                         </Border>
-                                        <TextBlock Grid.Column="2" Text="{Binding CheckingLabel}"
+                                        <TextBlock Grid.Column="3" Text="{Binding CheckingLabel}"
                                                    IsVisible="{Binding IsChecking}"
                                                    FontSize="10" Opacity="0.65"
                                                    VerticalAlignment="Center" />
-                                        <Button Grid.Column="3"
+                                        <Button Grid.Column="4"
                                                 Content="{Binding DownloadStateLabel}"
                                                 Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
                                                 CommandParameter="{Binding}"
@@ -220,14 +260,31 @@
                                 <StackPanel Spacing="6">
 
                                     <!-- Name row -->
-                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
-                                        <TextBlock Grid.Column="0"
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6">
+                                        <Border Grid.Column="0" Width="34" Height="34" CornerRadius="5"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                ToolTip.Tip="{Binding ArtworkTooltip}">
+                                            <Grid>
+                                                <TextBlock Text="AI" HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" FontSize="10"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Avatar}"
+                                                           IsVisible="{Binding HasCustomAvatar}"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           FontSize="10" FontWeight="SemiBold" />
+                                                <Image Source="{Binding ArtworkPath, Converter={x:Static views:ArtworkFileToBitmapConverter.Instance}}"
+                                                       IsVisible="{Binding HasArtworkForDisplay}"
+                                                       Stretch="UniformToFill" />
+                                            </Grid>
+                                        </Border>
+                                        <TextBlock Grid.Column="1"
                                                    Text="{Binding EffectiveName}"
                                                    FontSize="15" FontWeight="SemiBold"
                                                    TextWrapping="Wrap" MaxLines="2"
                                                    TextTrimming="CharacterEllipsis"
                                                    VerticalAlignment="Center" />
-                                        <Border Grid.Column="1" CornerRadius="4" Padding="6,1"
+                                        <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
                                                 VerticalAlignment="Center"
                                                 IsVisible="{Binding IsRunning}"
                                                 Background="{DynamicResource SystemFillColorSuccessBrush}">
@@ -238,7 +295,7 @@
                                              third-party trademark and this repository is going
                                              public; a second provider gets its own glyph and
                                              label in the same slot. -->
-                                        <Border Grid.Column="2" CornerRadius="4" Padding="5,1"
+                                        <Border Grid.Column="3" CornerRadius="4" Padding="5,1"
                                                 VerticalAlignment="Center"
                                                 IsVisible="{Binding HasKnownSource}"
                                                 ToolTip.Tip="{Binding SourceTooltip}"

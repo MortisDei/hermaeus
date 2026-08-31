@@ -23,6 +23,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [ObservableProperty] private string _localAiAssetsStatus = "Choose a local AI assets folder first.";
     [ObservableProperty] private LlamaRuntimeVariant _llamaRuntimeVariant = LlamaRuntimeVariant.Auto;
     [ObservableProperty] private string _llamaRuntimeVariantStatus = "No managed llama.cpp build has been installed yet.";
+    [ObservableProperty] private string _artworkCacheStatus = "Artwork cache: 0 B";
 
     /// <summary>Selectable llama.cpp build variants for the Services/data settings (r14 1.1).</summary>
     public IReadOnlyList<LlamaRuntimeVariant> LlamaRuntimeVariantOptions { get; } =
@@ -40,6 +41,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     public Action? RequestBackupDirectoryPicker { get; set; }
     public Action? RequestRestoreBackupPicker { get; set; }
     public Func<Task<bool>>? RequestRestoreBackupConfirmation { get; set; }
+    public Func<Task<bool>>? RequestArtworkCacheClearConfirmation { get; set; }
     public Func<DataMigrationPlan, Task<bool>>? RequestDataRootMigrationConfirmation { get; set; }
     public Func<Task>? CommitDataRootMigration { get; set; }
     public event Action? LocalAiAssetsRootChanged;
@@ -67,6 +69,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         UpdateLlamaRuntimeVariantStatus(settings);
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
+        _ = RefreshArtworkCacheStatusAsync();
     }
 
     /// <summary>
@@ -107,6 +110,42 @@ public partial class DataManagementSettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenLocalAiAssetsRoot() => OpenFolder(LocalAiAssetsRoot);
+
+    [RelayCommand]
+    private async Task ClearArtworkCacheAsync()
+    {
+        if (RequestArtworkCacheClearConfirmation is not null
+            && !await RequestArtworkCacheClearConfirmation())
+            return;
+
+        try
+        {
+            var root = HuggingFaceArtworkCache.ResolveRoot(_resolveDataRoot());
+            await HuggingFaceArtworkCache.ClearAsync(root);
+            ArtworkCacheStatus = "Artwork cache cleared. Downloaded models and manifests were not changed.";
+            _toasts.Show("Artwork cache cleared", "Downloaded models and manifests were not changed.", ToastKind.Success);
+        }
+        catch (Exception ex)
+        {
+            ArtworkCacheStatus = $"Artwork cache could not be cleared: {ex.Message}";
+            _toasts.Show("Artwork cache clear failed", ex.Message, ToastKind.Warning);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefreshArtworkCacheStatusAsync()
+    {
+        try
+        {
+            var info = await HuggingFaceArtworkCache.GetInfoAsync(
+                HuggingFaceArtworkCache.ResolveRoot(_resolveDataRoot()));
+            ArtworkCacheStatus = $"Artwork cache: {SystemInfoService.FormatBytes(info.ByteCount)} in {info.EntryCount} entr{(info.EntryCount == 1 ? "y" : "ies")}.";
+        }
+        catch
+        {
+            ArtworkCacheStatus = "Artwork cache: unavailable.";
+        }
+    }
 
     private void OpenFolder(string path)
     {
@@ -243,6 +282,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     {
         _dataRootEditVersion++;
         UpdateMigrationPreview();
+        _ = RefreshArtworkCacheStatusAsync();
     }
     partial void OnLocalAiAssetsRootChanged(string value) => UpdateLocalAiAssetsStatus();
 }

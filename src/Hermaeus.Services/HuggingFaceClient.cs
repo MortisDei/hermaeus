@@ -4,7 +4,12 @@ using System.Net.Http.Headers;
 
 namespace Hermaeus.Services;
 
-public sealed record HfModelCard(string Sha, DateTimeOffset? LastModified, string? License, long? Downloads);
+public sealed record HfModelCard(
+    string Sha,
+    DateTimeOffset? LastModified,
+    string? License,
+    long? Downloads,
+    string? Thumbnail = null);
 
 public sealed record HfTreeEntry(string Path, long? SizeBytes, string? LfsSha256, string Revision = "");
 
@@ -70,9 +75,16 @@ public sealed class HuggingFaceClient
             string? license = root.TryGetProperty("cardData", out var cardEl)
                 && cardEl.ValueKind == JsonValueKind.Object
                 && cardEl.TryGetProperty("license", out var licenseEl) ? licenseEl.GetString() : null;
+            string? thumbnail = root.TryGetProperty("cardData", out cardEl)
+                && cardEl.ValueKind == JsonValueKind.Object
+                && cardEl.TryGetProperty("thumbnail", out var thumbnailEl)
+                && thumbnailEl.ValueKind == JsonValueKind.String
+                && IsBoundedThumbnail(thumbnailEl.GetString())
+                ? thumbnailEl.GetString()
+                : null;
             long? downloads = root.TryGetProperty("downloads", out var dlEl) && dlEl.TryGetInt64(out var dl) ? dl : null;
 
-            return new HfModelCard(sha, lastModified, license, downloads);
+            return new HfModelCard(sha, lastModified, license, downloads, thumbnail);
         }
         catch
         {
@@ -504,4 +516,7 @@ public sealed class HuggingFaceClient
 
     private static bool IsImmutableRevision(string revision) =>
         revision.Length == 40 && revision.All(Uri.IsHexDigit);
+
+    private static bool IsBoundedThumbnail(string? value) =>
+        value is not null && System.Text.Encoding.UTF8.GetByteCount(value) <= 2048;
 }

@@ -51,6 +51,10 @@ limit.
   publication, generation-aware query caches, exact-revision citations, and
   Dataset Manager generation history. Missing-source removal now publishes a
   replacement generation and cancellation cannot expose a partial ingest.
+- R32 Batch 11 adds bounded, revision-pinned Hugging Face repository artwork
+  with strict host and redirect validation, independent PNG/JPEG/WebP
+  preflight, atomic bounded LRU cache storage, installed-card cache reuse only
+  for verified manifests, and a confirmed Data Management clear action.
 
 ## [0.38.0-beta] - 2026-08-30
 
