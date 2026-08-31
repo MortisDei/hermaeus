@@ -57,7 +57,7 @@ the stores into one schema.
 | 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | Yes |
 | 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | Yes |
 | 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | Yes |
-| 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | No |
+| 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | Yes |
 | 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | No |
 | 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | No |
 | 10 | Stable watched-root/source identity, staged source revisions and dataset generations, embedding cardinality/dimension validation, source revalidation, atomic RAG publication, exact-revision citations, crash/cancellation preservation, Dataset Manager history | 9 lineage contract, existing RAG | mandatory temporal correctness | No |
@@ -342,6 +342,38 @@ solution build passed; and the full sequential suite passed with 2,433 passed,
 17 skipped, and 2,450 total tests. Test results were written outside the
 checkout. The cache/checkpoint and multi-device owner hardware gates remain
 open and are not represented as shipped controls.
+
+### 8.2.9 Batch 7 evidence
+
+Batch 7 adds the Services-owned recommendation foundation without adding an
+automatic model, profile, workload, or restart decision:
+
+- Core owns typed recommendation kind, eligibility, status, evidence,
+  conditions, trade-offs, bounded path-free patches, decisions, and rollback
+  records. Patch content is canonicalized and rejects secret field names and
+  path values before persistence.
+- Eligibility uses deterministic precedence: incomplete or missing targets are
+  `Stale`, revoked evidence is `InsufficientEvidence`, contradiction is
+  `Contradicted`, expired evidence is `Stale`, missing required facts are
+  `InsufficientEvidence`, and only then can a proposal be `ReviewOnly` or
+  `Actionable`. Required evidence state and age are evaluated at one explicit
+  evidence time.
+- The fixed rule registry names the seven R32 rule families and their
+  derivation versions. Unknown or model-supplied rule ids are refused.
+- `SqliteRecommendationStore` uses additive `experience.db` migrations with
+  normalized recommendation, evidence, condition, trade-off, decision, and
+  rollback tables. The uniqueness key deduplicates identical target/current/
+  patch/derivation proposals, so dismissal is not recreated as a new row.
+- Pending Apply, Dismiss, and Undo decisions plus bounded rollback pre-images
+  survive restart as records. This batch does not apply them or reapply them
+  during recovery; stale-guarded Settings ownership and UI review remain Batch
+  8 work.
+
+Batch 7 verification: focused recommendation tests passed (7); the
+zero-warning solution build passed; and the full sequential suite passed with
+2,440 passed, 17 skipped, and 2,457 total tests. Test results were written
+outside the checkout. No owner-facing recommendation card or live Apply/Undo
+flow is claimed until Batch 8.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

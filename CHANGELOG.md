@@ -27,6 +27,10 @@ limit.
   adds a bounded diagnostic for dynamic ONNX batch equivalence without changing
   sequential query ranking. Host-cache, checkpoint, per-slot, and multi-device
   controls remain unshipped without their required measured evidence.
+- R32 Batch 7 adds the Services-owned, normalized recommendation persistence
+  foundation with deterministic eligibility, fixed rule identities,
+  deduplication, and durable pending decision and rollback records. It does not
+  add automatic application or model/workload routing.
 - Fixed a transient Settings autosave race by publishing direct-save settings
   only after their atomic file replacement completes, preserving the existing
   autosave and direct-save lifecycle behavior.
