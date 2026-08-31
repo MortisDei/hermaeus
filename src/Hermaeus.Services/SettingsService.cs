@@ -267,23 +267,40 @@ public sealed class SettingsService : ISettingsService
     }
 
     public async Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
+        => await SaveCandidateAsync(Settings, previousDataRootDirectory, replaceLiveSettings: false);
+
+    public async Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
+        => await SaveCandidateAsync(settings, previousDataRootDirectory, replaceLiveSettings: true);
+
+    /// <summary>
+    /// Writes and validates a candidate before publishing it as the live
+    /// settings object. Publishing earlier let observers see new in-memory
+    /// values while a reload could still read the previous file from disk.
+    /// </summary>
+    private async Task<SettingsSaveResult> SaveCandidateAsync(
+        AppSettings candidate,
+        string? previousDataRootDirectory,
+        bool replaceLiveSettings)
     {
+        ArgumentNullException.ThrowIfNull(candidate);
         DataRootMigration? migration = null;
         var currentDataRoot = string.Empty;
         await _gate.WaitAsync();
         try
         {
-            NormalizeSettings(Settings);
-            currentDataRoot = ResolveDataRoot(Settings);
+            NormalizeSettings(candidate);
+            currentDataRoot = ResolveDataRoot(candidate);
             ValidateDataRoot(currentDataRoot);
 
             migration = previousDataRootDirectory is null
                 ? null
-                : MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
+                : MigrateDataRoot(previousDataRootDirectory, candidate.DataManagement.DataRootDirectory);
 
             Directory.CreateDirectory(currentDataRoot);
-            await WriteTextAtomicAsync(_path, JsonSerializer.Serialize(Settings, Opts));
+            await WriteTextAtomicAsync(_path, JsonSerializer.Serialize(candidate, Opts));
             migration?.Commit();
+            if (replaceLiveSettings)
+                Settings = candidate;
         }
         catch (Exception ex)
         {
@@ -301,7 +318,7 @@ public sealed class SettingsService : ISettingsService
             }
 
             if (previousDataRootDirectory is not null)
-                Settings.DataManagement.DataRootDirectory = previousDataRootDirectory;
+                candidate.DataManagement.DataRootDirectory = previousDataRootDirectory;
             throw;
         }
         finally
@@ -311,21 +328,6 @@ public sealed class SettingsService : ISettingsService
 
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         return migration?.Result ?? new SettingsSaveResult(false, null, currentDataRoot, null, 0);
-    }
-
-    public async Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
-    {
-        var previous = Settings;
-        Settings = settings;
-        try
-        {
-            return await SaveAsync(previousDataRootDirectory);
-        }
-        catch
-        {
-            Settings = previous;
-            throw;
-        }
     }
 
     public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory)
