@@ -39,6 +39,12 @@ limit.
 - Fixed a transient Settings autosave race by publishing direct-save settings
   only after their atomic file replacement completes, preserving the existing
   autosave and direct-save lifecycle behavior.
+- R32 Batch 9 adds lazy legacy memory lineage, immutable revision/update/
+  correction/dispute/restore commands with stale guards, current/as-of/history
+  retrieval, exact revision context identities, timeline diffs, review-only
+  contradiction proposals, transactional hard deletion, and bounded redacted
+  versioned memory history export. Existing CSV export remains
+  current-projection-only.
 
 ## [0.38.0-beta] - 2026-08-30
 

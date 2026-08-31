@@ -35,16 +35,6 @@ public interface IMemoryStore
     Task<List<Memory>> GetByScopeAsync(MemoryScope scope, string? scopeId = null, bool includeArchived = false, CancellationToken ct = default);
 
     /// <summary>
-    /// Save or update a memory.
-    /// </summary>
-    Task SaveAsync(Memory memory, CancellationToken ct = default);
-
-    /// <summary>
-    /// Delete a memory permanently.
-    /// </summary>
-    Task DeleteAsync(string id, CancellationToken ct = default);
-
-    /// <summary>
     /// Search memories by query (full-text search across content, tags, category).
     /// </summary>
     Task<List<Memory>> SearchAsync(string query, CancellationToken ct = default);

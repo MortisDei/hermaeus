@@ -9,9 +9,10 @@ namespace Hermaeus.Services;
 /// <summary>
 /// SQLite-based implementation of memory persistence.
 /// </summary>
-public sealed class MemoryStore : IMemoryStore
+public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
 {
     private const int SchemaVersion = 6;
+    private const int KnowledgeSchemaVersion = 2;
     private const int MaxBackfillAttemptsPerRow = 5;
     /// <summary>
     /// r9 01-send-path-latency.md 1.3: how long the query and save paths wait
@@ -142,6 +143,97 @@ public sealed class MemoryStore : IMemoryStore
                 new SqliteMigration(5, (db, token) => EnsureColumnAsync(db, "embedding_dim", "INTEGER", token)),
                 new SqliteMigration(6, (db, token) => EnsureColumnAsync(db, "typed_relationships_json", "TEXT DEFAULT '[]'", token))
             ], ct);
+            await SqliteMigrationRunner.ApplyAsync(c, "knowledge-revisions", KnowledgeSchemaVersion,
+            [
+                new SqliteMigration(1, async (db, token) =>
+                {
+                    await using var knowledge = db.CreateCommand();
+                    knowledge.CommandText = @"
+                        CREATE TABLE IF NOT EXISTS knowledge_assertions (
+                            assertion_id TEXT PRIMARY KEY,
+                            current_revision_id TEXT,
+                            created_at TEXT NOT NULL
+                        );
+                        CREATE TABLE IF NOT EXISTS knowledge_revisions (
+                            assertion_id TEXT NOT NULL,
+                            revision_id TEXT PRIMARY KEY,
+                            previous_revision_id TEXT,
+                            content TEXT NOT NULL,
+                            scope TEXT NOT NULL,
+                            scope_id TEXT NOT NULL,
+                            category TEXT NOT NULL,
+                            recorded_at TEXT NOT NULL,
+                            effective_from TEXT,
+                            effective_to TEXT,
+                            temporal_origin TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            metadata_json TEXT NOT NULL,
+                            embedding BLOB,
+                            embedding_dim INTEGER
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_knowledge_current
+                            ON knowledge_assertions(current_revision_id);
+                        CREATE INDEX IF NOT EXISTS idx_knowledge_revision_assertion
+                            ON knowledge_revisions(assertion_id, recorded_at DESC);
+                        CREATE TABLE IF NOT EXISTS knowledge_revision_sources (
+                            revision_id TEXT NOT NULL,
+                            ordinal INTEGER NOT NULL,
+                            kind TEXT NOT NULL,
+                            title TEXT NOT NULL,
+                            locator TEXT,
+                            snippet TEXT,
+                            score REAL,
+                            timestamp TEXT,
+                            evidence_origin TEXT NOT NULL,
+                            PRIMARY KEY (revision_id, ordinal)
+                        );
+                        CREATE TABLE IF NOT EXISTS knowledge_revision_decisions (
+                            decision_id TEXT PRIMARY KEY,
+                            assertion_id TEXT NOT NULL,
+                            revision_id TEXT NOT NULL,
+                            kind TEXT NOT NULL,
+                            actor TEXT NOT NULL,
+                            reason TEXT NOT NULL,
+                            recorded_at TEXT NOT NULL
+                        );";
+                    await knowledge.ExecuteNonQueryAsync(token);
+                    return true;
+                }),
+                new SqliteMigration(2, async (db, token) =>
+                {
+                    await using var proposals = db.CreateCommand();
+                    proposals.CommandText = @"
+                        CREATE TABLE IF NOT EXISTS knowledge_contradiction_proposals (
+                            proposal_id TEXT PRIMARY KEY,
+                            left_assertion_id TEXT NOT NULL,
+                            left_revision_id TEXT NOT NULL,
+                            right_assertion_id TEXT NOT NULL,
+                            right_revision_id TEXT NOT NULL,
+                            explanation TEXT NOT NULL,
+                            origin TEXT NOT NULL,
+                            source_comparison TEXT NOT NULL,
+                            effective_time_comparison TEXT NOT NULL,
+                            proposed_disposition TEXT NOT NULL,
+                            missing_evidence TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            created_at TEXT NOT NULL
+                        );
+                        CREATE INDEX IF NOT EXISTS idx_knowledge_contradiction_status
+                            ON knowledge_contradiction_proposals(status, created_at DESC);
+                        CREATE INDEX IF NOT EXISTS idx_knowledge_contradiction_assertions
+                            ON knowledge_contradiction_proposals(left_assertion_id, right_assertion_id);
+                        CREATE TABLE IF NOT EXISTS knowledge_contradiction_decisions (
+                            proposal_id TEXT PRIMARY KEY,
+                            decision_id TEXT NOT NULL,
+                            kind TEXT NOT NULL,
+                            actor TEXT NOT NULL,
+                            reason TEXT NOT NULL,
+                            recorded_at TEXT NOT NULL
+                        );";
+                    await proposals.ExecuteNonQueryAsync(token);
+                    return true;
+                })
+            ], ct);
             if (!ftsExisted)
                 await RebuildFtsAsync(c, ct);
             _initializedPath = dbPath;
@@ -185,10 +277,11 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = includeArchived
-            ? "SELECT * FROM memories ORDER BY is_pinned DESC, importance_score DESC, updated_at DESC"
-            : "SELECT * FROM memories WHERE is_archived = 0 ORDER BY is_pinned DESC, importance_score DESC, updated_at DESC";
+            ? CurrentProjectionSql("ORDER BY m.is_pinned DESC, m.importance_score DESC, m.updated_at DESC")
+            : CurrentProjectionSql("AND m.is_archived = 0 ORDER BY m.is_pinned DESC, m.importance_score DESC, m.updated_at DESC");
         var r = new List<Memory>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct)) r.Add(Map(rd));
@@ -200,8 +293,14 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE id = $id";
+        cmd.CommandText = @"
+            SELECT m.*, r.revision_id AS current_revision_id
+            FROM memories m
+            JOIN knowledge_assertions a ON a.assertion_id = m.id
+            JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+            WHERE r.status IN ('Current', 'Archived', 'Disputed') AND m.id = $id";
         cmd.Parameters.AddWithValue("$id", id);
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         return await rd.ReadAsync(ct) ? Map(rd) : null;
@@ -212,8 +311,9 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE category = $cat AND is_archived = 0 ORDER BY is_pinned DESC, importance_score DESC, updated_at DESC";
+        cmd.CommandText = CurrentProjectionSql("AND m.category = $cat AND m.is_archived = 0 ORDER BY m.is_pinned DESC, m.importance_score DESC, m.updated_at DESC");
         cmd.Parameters.AddWithValue("$cat", category);
         var r = new List<Memory>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -226,11 +326,12 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        var archived = includeArchived ? "" : " AND is_archived = 0";
+        var archived = includeArchived ? "" : " AND m.is_archived = 0";
         cmd.CommandText = scopeId is null
-            ? $"SELECT * FROM memories WHERE scope = $scope{archived} ORDER BY is_pinned DESC, updated_at DESC"
-            : $"SELECT * FROM memories WHERE scope = $scope AND scope_id = $scopeId{archived} ORDER BY is_pinned DESC, updated_at DESC";
+            ? CurrentProjectionSql($"AND m.scope = $scope{archived} ORDER BY m.is_pinned DESC, m.updated_at DESC")
+            : CurrentProjectionSql($"AND m.scope = $scope AND m.scope_id = $scopeId{archived} ORDER BY m.is_pinned DESC, m.updated_at DESC");
         cmd.Parameters.AddWithValue("$scope", scope.ToString());
         if (scopeId is not null)
             cmd.Parameters.AddWithValue("$scopeId", scopeId);
@@ -240,7 +341,1091 @@ public sealed class MemoryStore : IMemoryStore
         return r;
     }
 
-    public async Task SaveAsync(Memory memory, CancellationToken ct = default)
+    public async Task<KnowledgeAssertionRevision> CreateAssertionAsync(
+        KnowledgeRevisionDraft draft,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(draft.Memory);
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var memory = PrepareMemoryForWrite(draft.Memory, now);
+        var sources = NormalizeSources(ResolveSources(draft.SourceReferences, memory));
+        memory.Source = sources.FirstOrDefault();
+        var (embedding, embeddingDim) = await TryEmbedAsync(memory.Content, ct);
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+
+        var existing = await ScalarStringAsync(c, tx,
+            "SELECT current_revision_id FROM knowledge_assertions WHERE assertion_id = $id",
+            ct, ("$id", memory.Id));
+        if (existing is not null)
+            throw new InvalidOperationException($"Knowledge assertion '{memory.Id}' already exists.");
+
+        var revisionId = NewRevisionId();
+        var decision = NormalizeDecision(draft.Decision, "create", now);
+        await InsertRevisionAsync(c, tx, memory.Id, revisionId, null, memory,
+            now, draft.EffectiveFromUtc, draft.EffectiveToUtc,
+            draft.TemporalOrigin, sources, decision, embedding, embeddingDim, KnowledgeRevisionStatus.Current, ct);
+        await InsertAssertionAsync(c, tx, memory.Id, revisionId, memory.CreatedAt, ct);
+        await UpsertMemoryProjectionAsync(c, tx, memory, embedding, embeddingDim, replaceEmbedding: true, ct);
+        await tx.CommitAsync(ct);
+
+        return ToPublicRevision(memory.Id, revisionId, null, memory, now,
+            draft.EffectiveFromUtc, draft.EffectiveToUtc, draft.TemporalOrigin, sources,
+            KnowledgeRevisionStatus.Current, decision);
+    }
+
+    public Task<KnowledgeAssertionRevision> ReviseAssertionAsync(
+        string assertionId,
+        string expectedCurrentRevisionId,
+        KnowledgeRevisionDraft draft,
+        CancellationToken ct = default) =>
+        CreateSuccessorAsync(assertionId, expectedCurrentRevisionId, draft, "revise", ct);
+
+    public Task<KnowledgeAssertionRevision> CorrectAssertionAsync(
+        string assertionId,
+        string expectedCurrentRevisionId,
+        KnowledgeRevisionDraft draft,
+        CancellationToken ct = default) =>
+        CreateSuccessorAsync(assertionId, expectedCurrentRevisionId, draft, "correct", ct);
+
+    public async Task<KnowledgeAssertionRevision> SetDisputeAsync(
+        string assertionId,
+        string expectedCurrentRevisionId,
+        bool disputed,
+        KnowledgeRevisionDecision decision,
+        CancellationToken ct = default)
+    {
+        var normalizedDecision = NormalizeDecision(decision, disputed ? "mark-disputed" : "clear-dispute",
+            _timeProvider.GetUtcNow().UtcDateTime);
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        var currentId = await RequireExpectedCurrentAsync(c, tx, assertionId, expectedCurrentRevisionId, ct);
+        var memory = await LoadMemoryAsync(c, tx, assertionId, ct)
+            ?? throw new InvalidOperationException($"Knowledge assertion '{assertionId}' has no projection.");
+        var status = disputed
+            ? KnowledgeRevisionStatus.Disputed
+            : memory.IsArchived ? KnowledgeRevisionStatus.Archived : KnowledgeRevisionStatus.Current;
+        await UpdateRevisionStatusAsync(c, tx, currentId, status, ct);
+        await InsertDecisionAsync(c, tx, assertionId, currentId, normalizedDecision, ct);
+        await tx.CommitAsync(ct);
+
+        return await GetCurrentRevisionAsync(assertionId, ct)
+            ?? throw new InvalidOperationException($"Knowledge assertion '{assertionId}' disappeared after dispute update.");
+    }
+
+    public async Task<KnowledgeAssertionRevision> MutatePresentationAsync(
+        string assertionId,
+        string expectedCurrentRevisionId,
+        KnowledgePresentationMutation mutation,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        var currentId = await RequireExpectedCurrentAsync(c, tx, assertionId, expectedCurrentRevisionId, ct);
+        var existing = await LoadMemoryAsync(c, tx, assertionId, ct)
+            ?? throw new InvalidOperationException($"Knowledge assertion '{assertionId}' has no projection.");
+        var updated = ApplyPresentation(existing, mutation, _timeProvider.GetUtcNow().UtcDateTime);
+        await UpsertMemoryProjectionAsync(c, tx, updated, null, null, replaceEmbedding: false, ct);
+
+        var currentRevision = await LoadStoredRevisionAsync(c, tx, currentId, ct)
+            ?? throw new InvalidOperationException($"Current revision '{currentId}' was not found.");
+        var status = currentRevision.Public.Status == KnowledgeRevisionStatus.Disputed
+            ? KnowledgeRevisionStatus.Disputed
+            : updated.IsArchived ? KnowledgeRevisionStatus.Archived : KnowledgeRevisionStatus.Current;
+        if (status != currentRevision.Public.Status)
+            await UpdateRevisionStatusAsync(c, tx, currentId, status, ct);
+        await tx.CommitAsync(ct);
+
+        return (await GetCurrentRevisionAsync(assertionId, ct))!;
+    }
+
+    public async Task<KnowledgeAssertionRevision> RestoreRevisionAsync(
+        string assertionId,
+        string expectedCurrentRevisionId,
+        string revisionId,
+        KnowledgeRevisionDecision decision,
+        CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        var currentId = await RequireExpectedCurrentAsync(c, tx, assertionId, expectedCurrentRevisionId, ct);
+        var source = await LoadStoredRevisionAsync(c, tx, revisionId, ct)
+            ?? throw new InvalidOperationException($"Revision '{revisionId}' was not found.");
+        if (!string.Equals(source.Public.AssertionId, assertionId, StringComparison.Ordinal))
+            throw new InvalidOperationException("A revision can only be restored into its own assertion.");
+
+        var currentMemory = await LoadMemoryAsync(c, tx, assertionId, ct)
+            ?? throw new InvalidOperationException($"Knowledge assertion '{assertionId}' has no projection.");
+        var restored = source.Metadata.ToMemory(assertionId, source.Public.Content, source.Public.Scope,
+            source.Public.ScopeId, source.Public.Category, currentMemory.CreatedAt,
+            _timeProvider.GetUtcNow().UtcDateTime);
+        var sources = NormalizeSources(source.Public.SourceReferences);
+        restored.Source ??= sources.FirstOrDefault();
+        var (embedding, embeddingDim) = await TryEmbedAsync(restored.Content, ct);
+        var normalizedDecision = NormalizeDecision(decision, "restore", _timeProvider.GetUtcNow().UtcDateTime);
+        var newRevisionId = NewRevisionId();
+        await UpdateRevisionStatusAsync(c, tx, currentId, KnowledgeRevisionStatus.Superseded, ct);
+        await InsertRevisionAsync(c, tx, assertionId, newRevisionId, currentId, restored,
+            _timeProvider.GetUtcNow().UtcDateTime, source.Public.EffectiveFromUtc, source.Public.EffectiveToUtc,
+            source.Public.TemporalOrigin, sources, normalizedDecision, embedding, embeddingDim,
+            KnowledgeRevisionStatus.Current, ct);
+        await UpdateCurrentRevisionAsync(c, tx, assertionId, newRevisionId, ct);
+        await UpsertMemoryProjectionAsync(c, tx, restored, embedding, embeddingDim, replaceEmbedding: true, ct);
+        await tx.CommitAsync(ct);
+
+        return ToPublicRevision(assertionId, newRevisionId, currentId, restored,
+            _timeProvider.GetUtcNow().UtcDateTime, source.Public.EffectiveFromUtc, source.Public.EffectiveToUtc,
+            source.Public.TemporalOrigin, sources, KnowledgeRevisionStatus.Current, normalizedDecision);
+    }
+
+    public async Task HardDeleteAsync(
+        string assertionId,
+        string expectedCurrentRevisionId,
+        CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        _ = await RequireExpectedCurrentAsync(c, tx, assertionId, expectedCurrentRevisionId, ct);
+        foreach (var sql in new[]
+        {
+            "DELETE FROM knowledge_contradiction_decisions WHERE proposal_id IN (SELECT proposal_id FROM knowledge_contradiction_proposals WHERE left_assertion_id = $id OR right_assertion_id = $id)",
+            "DELETE FROM knowledge_contradiction_proposals WHERE left_assertion_id = $id OR right_assertion_id = $id",
+            "DELETE FROM knowledge_revision_sources WHERE revision_id IN (SELECT revision_id FROM knowledge_revisions WHERE assertion_id = $id)",
+            "DELETE FROM knowledge_revision_decisions WHERE assertion_id = $id",
+            "DELETE FROM knowledge_revisions WHERE assertion_id = $id",
+            "DELETE FROM knowledge_assertions WHERE assertion_id = $id",
+            "DELETE FROM memories_fts WHERE id = $id",
+            "DELETE FROM memories WHERE id = $id"
+        })
+        {
+            await ExecuteAsync(c, tx, sql, ct, ("$id", assertionId));
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
+    public async Task<KnowledgeAssertionRevision?> GetCurrentRevisionAsync(
+        string assertionId,
+        CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        var revisionId = await ScalarStringAsync(c, null,
+            "SELECT current_revision_id FROM knowledge_assertions WHERE assertion_id = $id",
+            ct, ("$id", assertionId));
+        return revisionId is null ? null : (await LoadStoredRevisionAsync(c, null, revisionId, ct))?.Public;
+    }
+
+    public async Task<IReadOnlyList<KnowledgeAssertionRevision>> QueryAsync(
+        KnowledgeTimeQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+
+        var conditions = new List<string>();
+        var cmd = c.CreateCommand();
+        switch (query.Mode)
+        {
+            case KnowledgeTimeQueryMode.Current:
+                conditions.Add("r.revision_id = a.current_revision_id");
+                conditions.Add(query.IncludeDisputed
+                    ? "r.status IN ('Current', 'Archived', 'Disputed')"
+                    : "r.status IN ('Current', 'Archived')");
+                break;
+            case KnowledgeTimeQueryMode.AsOf:
+                if (query.AsOfUtc is null)
+                    throw new ArgumentException("As-of queries require AsOfUtc.", nameof(query));
+                conditions.Add("r.effective_from IS NOT NULL");
+                conditions.Add("r.effective_from <= $asOf");
+                conditions.Add("(r.effective_to IS NULL OR r.effective_to > $asOf)");
+                if (!query.IncludeDisputed)
+                    conditions.Add("r.status <> 'Disputed'");
+                cmd.Parameters.AddWithValue("$asOf", query.AsOfUtc.Value.ToUniversalTime().ToString("O"));
+                break;
+            case KnowledgeTimeQueryMode.History:
+                if (!query.IncludeDisputed)
+                    conditions.Add("r.status <> 'Disputed'");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(query.Mode));
+        }
+
+        if (query.Scope is not null)
+        {
+            conditions.Add("r.scope = $scope");
+            cmd.Parameters.AddWithValue("$scope", query.Scope.Value.ToString());
+        }
+        if (query.ScopeId is not null)
+        {
+            conditions.Add("r.scope_id = $scopeId");
+            cmd.Parameters.AddWithValue("$scopeId", query.ScopeId);
+        }
+
+        var where = conditions.Count == 0 ? "1 = 1" : string.Join(" AND ", conditions);
+        cmd.CommandText = $"SELECT r.revision_id FROM knowledge_revisions r JOIN knowledge_assertions a ON a.assertion_id = r.assertion_id WHERE {where} ORDER BY r.recorded_at DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$limit", Math.Clamp(query.Limit, 1, 500));
+        var ids = new List<string>();
+        await using (var rd = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await rd.ReadAsync(ct))
+                ids.Add(rd.GetString(0));
+        }
+
+        var result = new List<KnowledgeAssertionRevision>(ids.Count);
+        foreach (var id in ids)
+        {
+            var revision = await LoadStoredRevisionAsync(c, null, id, ct);
+            if (revision is not null)
+                result.Add(revision.Public);
+        }
+        return result;
+    }
+
+    public async Task<IReadOnlyList<KnowledgeAssertionRevision>> GetHistoryAsync(
+        string assertionId,
+        CancellationToken ct = default) =>
+        await QueryAsync(new KnowledgeTimeQuery(KnowledgeTimeQueryMode.History, IncludeDisputed: true, Limit: 500), assertionId, ct);
+
+    public async Task<KnowledgeContradictionProposal> CreateContradictionProposalAsync(
+        KnowledgeContradictionProposalDraft draft,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        if (string.IsNullOrWhiteSpace(draft.LeftAssertionId)
+            || string.IsNullOrWhiteSpace(draft.LeftRevisionId)
+            || string.IsNullOrWhiteSpace(draft.RightAssertionId)
+            || string.IsNullOrWhiteSpace(draft.RightRevisionId))
+            throw new ArgumentException("Both exact assertion and revision identities are required.", nameof(draft));
+        if (string.Equals(draft.LeftRevisionId, draft.RightRevisionId, StringComparison.Ordinal))
+            throw new ArgumentException("A contradiction proposal requires two different revisions.", nameof(draft));
+        if (string.IsNullOrWhiteSpace(draft.Explanation))
+            throw new ArgumentException("A contradiction proposal requires an explanation.", nameof(draft));
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        var left = await LoadStoredRevisionAsync(c, tx, draft.LeftRevisionId, ct)
+            ?? throw new KeyNotFoundException($"Revision '{draft.LeftRevisionId}' was not found.");
+        var right = await LoadStoredRevisionAsync(c, tx, draft.RightRevisionId, ct)
+            ?? throw new KeyNotFoundException($"Revision '{draft.RightRevisionId}' was not found.");
+        if (!string.Equals(left.Public.AssertionId, draft.LeftAssertionId, StringComparison.Ordinal)
+            || !string.Equals(right.Public.AssertionId, draft.RightAssertionId, StringComparison.Ordinal))
+            throw new ArgumentException("Each revision must belong to its named assertion.", nameof(draft));
+
+        var proposalId = NewRevisionId();
+        var created = _timeProvider.GetUtcNow().UtcDateTime;
+        var origin = draft.Origin == KnowledgeTemporalOrigin.DeterministicRule
+            ? KnowledgeTemporalOrigin.DeterministicRule
+            : KnowledgeTemporalOrigin.ModelInference;
+        await ExecuteAsync(c, tx, @"
+            INSERT INTO knowledge_contradiction_proposals (
+                proposal_id, left_assertion_id, left_revision_id, right_assertion_id,
+                right_revision_id, explanation, origin, source_comparison,
+                effective_time_comparison, proposed_disposition, missing_evidence,
+                status, created_at)
+            VALUES ($proposal, $leftAssertion, $leftRevision, $rightAssertion,
+                $rightRevision, $explanation, $origin, $sourceComparison,
+                $effectiveTimeComparison, $disposition, $missingEvidence,
+                'Pending', $created)", ct,
+            ("$proposal", proposalId),
+            ("$leftAssertion", draft.LeftAssertionId),
+            ("$leftRevision", draft.LeftRevisionId),
+            ("$rightAssertion", draft.RightAssertionId),
+            ("$rightRevision", draft.RightRevisionId),
+            ("$explanation", Bound(draft.Explanation, 4096)),
+            ("$origin", origin.ToString()),
+            ("$sourceComparison", Bound(draft.SourceComparison, 2048)),
+            ("$effectiveTimeComparison", Bound(draft.EffectiveTimeComparison, 2048)),
+            ("$disposition", draft.ProposedDisposition.ToString()),
+            ("$missingEvidence", Bound(draft.MissingEvidence, 2048)),
+            ("$created", created.ToString("O")));
+        await tx.CommitAsync(ct);
+
+        return new KnowledgeContradictionProposal(
+            proposalId,
+            draft.LeftAssertionId,
+            draft.LeftRevisionId,
+            draft.RightAssertionId,
+            draft.RightRevisionId,
+            Bound(draft.Explanation, 4096),
+            origin,
+            Bound(draft.SourceComparison, 2048),
+            Bound(draft.EffectiveTimeComparison, 2048),
+            draft.ProposedDisposition,
+            Bound(draft.MissingEvidence, 2048),
+            KnowledgeContradictionProposalStatus.Pending,
+            created,
+            null);
+    }
+
+    public async Task<IReadOnlyList<KnowledgeContradictionProposal>> GetContradictionProposalsAsync(
+        string? assertionId = null,
+        bool includeReviewed = false,
+        CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        var command = c.CreateCommand();
+        var conditions = new List<string>();
+        if (!includeReviewed)
+            conditions.Add("status = 'Pending'");
+        if (!string.IsNullOrWhiteSpace(assertionId))
+        {
+            conditions.Add("(left_assertion_id = $assertion OR right_assertion_id = $assertion)");
+            command.Parameters.AddWithValue("$assertion", assertionId);
+        }
+        var where = conditions.Count == 0 ? "1 = 1" : string.Join(" AND ", conditions);
+        command.CommandText = $@"
+            SELECT proposal_id, left_assertion_id, left_revision_id, right_assertion_id,
+                   right_revision_id, explanation, origin, source_comparison,
+                   effective_time_comparison, proposed_disposition, missing_evidence,
+                   status, created_at
+            FROM knowledge_contradiction_proposals
+            WHERE {where}
+            ORDER BY created_at DESC LIMIT 100";
+        var proposals = new List<KnowledgeContradictionProposal>();
+        var stored = new List<(string ProposalId, string LeftAssertionId, string LeftRevisionId,
+            string RightAssertionId, string RightRevisionId, string Explanation, string Origin,
+            string SourceComparison, string EffectiveTimeComparison, string Disposition,
+            string MissingEvidence, string Status, string CreatedAt)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            stored.Add((
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetString(7),
+                reader.GetString(8), reader.GetString(9), reader.GetString(10), reader.GetString(11),
+                reader.GetString(12)));
+        }
+        foreach (var row in stored)
+        {
+            var origin = Enum.TryParse<KnowledgeTemporalOrigin>(row.Origin, out var parsedOrigin)
+                ? parsedOrigin : KnowledgeTemporalOrigin.ModelInference;
+            var disposition = Enum.TryParse<KnowledgeContradictionDisposition>(row.Disposition, out var parsedDisposition)
+                ? parsedDisposition : KnowledgeContradictionDisposition.NoRelationship;
+            var status = Enum.TryParse<KnowledgeContradictionProposalStatus>(row.Status, out var parsedStatus)
+                ? parsedStatus : KnowledgeContradictionProposalStatus.Pending;
+            var decision = await LoadContradictionDecisionAsync(c, row.ProposalId, ct);
+            proposals.Add(new KnowledgeContradictionProposal(
+                row.ProposalId,
+                row.LeftAssertionId,
+                row.LeftRevisionId,
+                row.RightAssertionId,
+                row.RightRevisionId,
+                row.Explanation,
+                origin,
+                row.SourceComparison,
+                row.EffectiveTimeComparison,
+                disposition,
+                row.MissingEvidence,
+                status,
+                SqliteDateTime.Parse(row.CreatedAt),
+                decision));
+        }
+        return proposals;
+    }
+
+    public async Task RejectContradictionProposalAsync(
+        string proposalId,
+        KnowledgeRevisionDecision decision,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(proposalId))
+            throw new ArgumentException("Proposal id is required.", nameof(proposalId));
+        var normalized = NormalizeDecision(decision, "reject-contradiction", _timeProvider.GetUtcNow().UtcDateTime);
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        var status = await ScalarStringAsync(c, tx,
+            "SELECT status FROM knowledge_contradiction_proposals WHERE proposal_id = $id",
+            ct, ("$id", proposalId));
+        if (status is null)
+            throw new KeyNotFoundException($"Contradiction proposal '{proposalId}' was not found.");
+        if (!string.Equals(status, KnowledgeContradictionProposalStatus.Pending.ToString(), StringComparison.Ordinal))
+            throw new InvalidOperationException("Only a pending contradiction proposal can be rejected.");
+
+        await ExecuteAsync(c, tx,
+            "UPDATE knowledge_contradiction_proposals SET status = 'Rejected' WHERE proposal_id = $id",
+            ct, ("$id", proposalId));
+        await ExecuteAsync(c, tx, @"
+            INSERT INTO knowledge_contradiction_decisions (
+                proposal_id, decision_id, kind, actor, reason, recorded_at)
+            VALUES ($proposal, $decision, $kind, $actor, $reason, $recorded)", ct,
+            ("$proposal", proposalId), ("$decision", normalized.DecisionId ?? NewRevisionId()),
+            ("$kind", normalized.Kind), ("$actor", normalized.Actor),
+            ("$reason", normalized.Reason), ("$recorded", normalized.RecordedAtUtc.ToString("O")));
+        await tx.CommitAsync(ct);
+    }
+
+    private static async Task<KnowledgeRevisionDecision?> LoadContradictionDecisionAsync(
+        SqliteConnection c,
+        string proposalId,
+        CancellationToken ct)
+    {
+        await using var command = c.CreateCommand();
+        command.CommandText = @"
+            SELECT decision_id, kind, actor, reason, recorded_at
+            FROM knowledge_contradiction_decisions
+            WHERE proposal_id = $proposal";
+        command.Parameters.AddWithValue("$proposal", proposalId);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct)
+            ? new KnowledgeRevisionDecision(reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                SqliteDateTime.Parse(reader.GetString(4)), reader.GetString(0))
+            : null;
+    }
+
+    private async Task<IReadOnlyList<KnowledgeAssertionRevision>> QueryAsync(
+        KnowledgeTimeQuery query,
+        string assertionId,
+        CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        var cmd = c.CreateCommand();
+        var status = query.IncludeDisputed ? "" : " AND r.status <> 'Disputed'";
+        cmd.CommandText = $"SELECT r.revision_id FROM knowledge_revisions r WHERE r.assertion_id = $id{status} ORDER BY r.recorded_at DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$id", assertionId);
+        cmd.Parameters.AddWithValue("$limit", Math.Clamp(query.Limit, 1, 500));
+        var ids = new List<string>();
+        await using (var rd = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await rd.ReadAsync(ct)) ids.Add(rd.GetString(0));
+        }
+        var result = new List<KnowledgeAssertionRevision>(ids.Count);
+        foreach (var id in ids)
+        {
+            var revision = await LoadStoredRevisionAsync(c, null, id, ct);
+            if (revision is not null) result.Add(revision.Public);
+        }
+        return result;
+    }
+
+    private async Task<KnowledgeAssertionRevision> CreateSuccessorAsync(
+        string assertionId,
+        string expectedCurrentRevisionId,
+        KnowledgeRevisionDraft draft,
+        string decisionKind,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(draft.Memory);
+        if (!string.Equals(assertionId, draft.Memory.Id, StringComparison.Ordinal))
+            throw new ArgumentException("The draft memory id must match the assertion id.", nameof(draft));
+
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var memory = PrepareMemoryForWrite(draft.Memory, now);
+        var (embedding, embeddingDim) = await TryEmbedAsync(memory.Content, ct);
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        var currentId = await RequireExpectedCurrentAsync(c, tx, assertionId, expectedCurrentRevisionId, ct);
+        var previous = await LoadStoredRevisionAsync(c, tx, currentId, ct)
+            ?? throw new InvalidOperationException($"Current revision '{currentId}' was not found.");
+        var sources = NormalizeSources(ResolveSources(draft.SourceReferences, memory, previous.Public.SourceReferences));
+        memory.Source = sources.FirstOrDefault();
+        var revisionId = NewRevisionId();
+        var decision = NormalizeDecision(draft.Decision, decisionKind, now);
+
+        await UpdateRevisionStatusAsync(c, tx, currentId, KnowledgeRevisionStatus.Superseded, ct);
+        await InsertRevisionAsync(c, tx, assertionId, revisionId, currentId, memory, now,
+            draft.EffectiveFromUtc, draft.EffectiveToUtc, draft.TemporalOrigin, sources, decision,
+            embedding, embeddingDim, KnowledgeRevisionStatus.Current, ct);
+        await UpdateCurrentRevisionAsync(c, tx, assertionId, revisionId, ct);
+        await UpsertMemoryProjectionAsync(c, tx, memory, embedding, embeddingDim, replaceEmbedding: true, ct);
+        await tx.CommitAsync(ct);
+
+        return ToPublicRevision(assertionId, revisionId, currentId, memory, now,
+            draft.EffectiveFromUtc, draft.EffectiveToUtc, draft.TemporalOrigin, sources,
+            KnowledgeRevisionStatus.Current, decision);
+    }
+
+    private async Task<string> RequireExpectedCurrentAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        string assertionId,
+        string expectedCurrentRevisionId,
+        CancellationToken ct)
+    {
+        var actual = await ScalarStringAsync(c, tx,
+            "SELECT current_revision_id FROM knowledge_assertions WHERE assertion_id = $id",
+            ct, ("$id", assertionId));
+        if (!string.Equals(actual, expectedCurrentRevisionId, StringComparison.Ordinal))
+            throw new KnowledgeRevisionConflictException(assertionId, expectedCurrentRevisionId, actual);
+        return actual!;
+    }
+
+    private static Memory PrepareMemoryForWrite(Memory memory, DateTime now)
+    {
+        if (string.IsNullOrWhiteSpace(memory.Id))
+            throw new ArgumentException("Memory id is required.", nameof(memory));
+        if (memory.CreatedAt == default)
+            memory.CreatedAt = now;
+        memory.UpdatedAt = now;
+        memory.Tags = NormalizeTags(memory.Tags);
+        var relationships = KnowledgeRelationshipSemantics.Normalize(memory.Relationships, memory.RelatedMemoryIds);
+        memory.Relationships = relationships;
+        memory.RelatedMemoryIds = relationships
+            .Where(r => r.Kind == KnowledgeRelationshipKind.RelatedTo && r.Target.Kind == KnowledgeEntityKind.Memory)
+            .Select(r => r.Target.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return memory;
+    }
+
+    private static Memory ApplyPresentation(Memory existing, KnowledgePresentationMutation mutation, DateTime now)
+    {
+        existing.Title = mutation.Title;
+        existing.Scope = mutation.Scope;
+        existing.ScopeId = mutation.ScopeId;
+        existing.Category = mutation.Category;
+        existing.Tags = NormalizeTags(mutation.Tags);
+        existing.ImportanceScore = mutation.ImportanceScore;
+        existing.IsPinned = mutation.IsPinned;
+        existing.IsArchived = mutation.IsArchived;
+        existing.FrequencyCount = mutation.FrequencyCount;
+        existing.LastMergeTime = mutation.LastMergeTime;
+        existing.ExpirationDate = mutation.ExpirationDate;
+        existing.Relationships = KnowledgeRelationshipSemantics.Normalize(mutation.Relationships, mutation.RelatedMemoryIds);
+        existing.RelatedMemoryIds = existing.Relationships
+            .Where(r => r.Kind == KnowledgeRelationshipKind.RelatedTo && r.Target.Kind == KnowledgeEntityKind.Memory)
+            .Select(r => r.Target.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        existing.IsEncrypted = mutation.IsEncrypted;
+        existing.SourceConversationId = mutation.SourceConversationId;
+        existing.UpdatedAt = now;
+        return existing;
+    }
+
+    private async Task<(byte[]? Blob, int? Dimension)> TryEmbedAsync(string content, CancellationToken ct)
+    {
+        if (_embeddings is null || string.IsNullOrWhiteSpace(content))
+            return (null, null);
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(_queryEmbedTimeout);
+            var vector = await _embeddings.EmbedAsync(content, timeoutCts.Token);
+            return (ToBlob(vector), vector.Length);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private static string CurrentProjectionSql(string tail) => $@"
+        SELECT m.*, r.revision_id AS current_revision_id
+        FROM memories m
+        JOIN knowledge_assertions a ON a.assertion_id = m.id
+        JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+        WHERE r.status IN ('Current', 'Archived')
+          {tail}";
+
+    private static string NewRevisionId() => Guid.NewGuid().ToString("N");
+
+    private static IReadOnlyList<SourceReference> ResolveSources(
+        IReadOnlyList<SourceReference>? sources,
+        Memory memory,
+        IReadOnlyList<SourceReference>? fallback = null)
+    {
+        if (sources is not null)
+            return sources;
+        if (memory.Source is not null)
+            return [memory.Source];
+        return fallback ?? [];
+    }
+
+    private static IReadOnlyList<SourceReference> NormalizeSources(IEnumerable<SourceReference> sources) =>
+        sources.Select(source => new SourceReference(
+            source.Kind,
+            Bound(source.Title, 512),
+            BoundNullable(source.Locator, 2048),
+            BoundNullable(source.Snippet, 4096),
+            source.Score is { } score && double.IsFinite(score) ? score : null,
+            source.Timestamp?.ToUniversalTime(),
+            source.EvidenceOrigin)).ToList();
+
+    private static KnowledgeRevisionDecision NormalizeDecision(
+        KnowledgeRevisionDecision? decision,
+        string defaultKind,
+        DateTime now)
+    {
+        if (decision is null)
+            return new KnowledgeRevisionDecision(defaultKind, "system", "Accepted by the owning writer.", now, NewRevisionId());
+        return decision with
+        {
+            Kind = Bound(decision.Kind, 128),
+            Actor = Bound(decision.Actor, 128),
+            Reason = Bound(decision.Reason, 2048),
+            RecordedAtUtc = decision.RecordedAtUtc == default ? now : decision.RecordedAtUtc.ToUniversalTime(),
+            DecisionId = string.IsNullOrWhiteSpace(decision.DecisionId) ? NewRevisionId() : Bound(decision.DecisionId, 128)
+        };
+    }
+
+    private static KnowledgeAssertionRevision ToPublicRevision(
+        string assertionId,
+        string revisionId,
+        string? previousRevisionId,
+        Memory memory,
+        DateTime recordedAt,
+        DateTime? effectiveFrom,
+        DateTime? effectiveTo,
+        KnowledgeTemporalOrigin temporalOrigin,
+        IReadOnlyList<SourceReference> sources,
+        KnowledgeRevisionStatus status,
+        KnowledgeRevisionDecision? decision) =>
+        new(assertionId, revisionId, previousRevisionId, memory.Content, memory.Scope, memory.ScopeId,
+            memory.Category, recordedAt, effectiveFrom, effectiveTo, temporalOrigin, sources, status, decision);
+
+    private static async Task InsertAssertionAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        string assertionId,
+        string revisionId,
+        DateTime createdAt,
+        CancellationToken ct)
+    {
+        await ExecuteAsync(c, tx, @"
+            INSERT INTO knowledge_assertions (assertion_id, current_revision_id, created_at)
+            VALUES ($id, $revision, $created)", ct,
+            ("$id", assertionId), ("$revision", revisionId), ("$created", createdAt.ToString("O")));
+    }
+
+    private static async Task UpdateCurrentRevisionAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        string assertionId,
+        string revisionId,
+        CancellationToken ct) =>
+        await ExecuteAsync(c, tx,
+            "UPDATE knowledge_assertions SET current_revision_id = $revision WHERE assertion_id = $id",
+            ct, ("$id", assertionId), ("$revision", revisionId));
+
+    private static async Task UpdateRevisionStatusAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        string revisionId,
+        KnowledgeRevisionStatus status,
+        CancellationToken ct) =>
+        await ExecuteAsync(c, tx,
+            "UPDATE knowledge_revisions SET status = $status WHERE revision_id = $revision",
+            ct, ("$revision", revisionId), ("$status", status.ToString()));
+
+    private static async Task InsertRevisionAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        string assertionId,
+        string revisionId,
+        string? previousRevisionId,
+        Memory memory,
+        DateTime recordedAt,
+        DateTime? effectiveFrom,
+        DateTime? effectiveTo,
+        KnowledgeTemporalOrigin temporalOrigin,
+        IReadOnlyList<SourceReference> sources,
+        KnowledgeRevisionDecision decision,
+        byte[]? embedding,
+        int? embeddingDim,
+        KnowledgeRevisionStatus status,
+        CancellationToken ct)
+    {
+        if (effectiveFrom is not null && effectiveTo is not null && effectiveTo <= effectiveFrom)
+            throw new ArgumentException("EffectiveToUtc must be after EffectiveFromUtc.");
+
+        await ExecuteAsync(c, tx, @"
+            INSERT INTO knowledge_revisions (
+                assertion_id, revision_id, previous_revision_id, content, scope,
+                scope_id, category, recorded_at, effective_from, effective_to,
+                temporal_origin, status, metadata_json, embedding, embedding_dim)
+            VALUES ($assertion, $revision, $previous, $content, $scope, $scopeId,
+                $category, $recorded, $effectiveFrom, $effectiveTo, $origin,
+                $status, $metadata, $embedding, $embeddingDim)", ct,
+            ("$assertion", assertionId), ("$revision", revisionId), ("$previous", previousRevisionId),
+            ("$content", memory.Content), ("$scope", memory.Scope.ToString()), ("$scopeId", memory.ScopeId),
+            ("$category", memory.Category), ("$recorded", recordedAt.ToString("O")),
+            ("$effectiveFrom", effectiveFrom?.ToUniversalTime().ToString("O")),
+            ("$effectiveTo", effectiveTo?.ToUniversalTime().ToString("O")),
+            ("$origin", temporalOrigin.ToString()), ("$status", status.ToString()),
+            ("$metadata", JsonSerializer.Serialize(MemoryRevisionMetadata.FromMemory(memory))),
+            ("$embedding", embedding), ("$embeddingDim", embeddingDim));
+
+        for (var i = 0; i < sources.Count; i++)
+        {
+            var source = sources[i];
+            await ExecuteAsync(c, tx, @"
+                INSERT INTO knowledge_revision_sources (
+                    revision_id, ordinal, kind, title, locator, snippet, score,
+                    timestamp, evidence_origin)
+                VALUES ($revision, $ordinal, $kind, $title, $locator, $snippet,
+                    $score, $timestamp, $origin)", ct,
+                ("$revision", revisionId), ("$ordinal", i), ("$kind", source.Kind.ToString()),
+                ("$title", Bound(source.Title, 512)), ("$locator", BoundNullable(source.Locator, 2048)),
+                ("$snippet", BoundNullable(source.Snippet, 4096)), ("$score", source.Score),
+                ("$timestamp", source.Timestamp?.ToUniversalTime().ToString("O")),
+                ("$origin", source.EvidenceOrigin.ToString()));
+        }
+
+        await InsertDecisionAsync(c, tx, assertionId, revisionId, decision, ct);
+    }
+
+    private static async Task InsertDecisionAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        string assertionId,
+        string revisionId,
+        KnowledgeRevisionDecision? decision,
+        CancellationToken ct)
+    {
+        if (decision is null) return;
+        await ExecuteAsync(c, tx, @"
+            INSERT INTO knowledge_revision_decisions (
+                decision_id, assertion_id, revision_id, kind, actor, reason, recorded_at)
+            VALUES ($decision, $assertion, $revision, $kind, $actor, $reason, $recorded)", ct,
+            ("$decision", decision.DecisionId ?? NewRevisionId()), ("$assertion", assertionId),
+            ("$revision", revisionId), ("$kind", Bound(decision.Kind, 128)),
+            ("$actor", Bound(decision.Actor, 128)), ("$reason", Bound(decision.Reason, 2048)),
+            ("$recorded", decision.RecordedAtUtc.ToUniversalTime().ToString("O")));
+    }
+
+    private async Task EnsureLegacyAssertionsAsync(SqliteConnection c, CancellationToken ct)
+    {
+        var legacy = new List<(Memory Memory, byte[]? Embedding, int? EmbeddingDimension)>();
+        await using (var select = c.CreateCommand())
+        {
+            select.CommandText = @"
+                SELECT m.*, a.current_revision_id AS current_revision_id
+                FROM memories m
+                LEFT JOIN knowledge_assertions a ON a.assertion_id = m.id
+                WHERE a.assertion_id IS NULL";
+            await using var reader = await select.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var embeddingOrdinal = reader.GetOrdinal("embedding");
+                var embedding = reader.IsDBNull(embeddingOrdinal) ? null : (byte[])reader[embeddingOrdinal];
+                var dimensionOrdinal = reader.GetOrdinal("embedding_dim");
+                var dimension = reader.IsDBNull(dimensionOrdinal) ? (int?)null : reader.GetInt32(dimensionOrdinal);
+                legacy.Add((Map(reader), embedding, dimension));
+            }
+        }
+
+        if (legacy.Count == 0) return;
+        await using var tx = (SqliteTransaction)await c.BeginTransactionAsync(ct);
+        foreach (var (memory, embedding, embeddingDimension) in legacy)
+        {
+            var revisionId = LegacyRevisionId(memory.Id);
+            var source = memory.Source is null ? Array.Empty<SourceReference>() : new[] { memory.Source };
+            var decision = new KnowledgeRevisionDecision(
+                "legacy-import", "migration", "Existing memory row represented without synthetic history.",
+                memory.UpdatedAt, $"legacy:{memory.Id}:decision");
+            await ExecuteAsync(c, tx, @"
+                INSERT OR IGNORE INTO knowledge_assertions (assertion_id, current_revision_id, created_at)
+                VALUES ($id, $revision, $created)", ct,
+                ("$id", memory.Id), ("$revision", revisionId), ("$created", memory.CreatedAt.ToString("O")));
+            await ExecuteAsync(c, tx, @"
+                INSERT OR IGNORE INTO knowledge_revisions (
+                    assertion_id, revision_id, previous_revision_id, content, scope,
+                    scope_id, category, recorded_at, effective_from, effective_to,
+                    temporal_origin, status, metadata_json, embedding, embedding_dim)
+                VALUES ($assertion, $revision, NULL, $content, $scope, $scopeId,
+                    $category, $recorded, NULL, NULL, 'Unknown', $status, $metadata,
+                    $embedding, $embeddingDim)", ct,
+                ("$assertion", memory.Id), ("$revision", revisionId), ("$content", memory.Content),
+                ("$scope", memory.Scope.ToString()), ("$scopeId", memory.ScopeId),
+                ("$category", memory.Category), ("$recorded", memory.UpdatedAt.ToString("O")),
+                ("$status", memory.IsArchived ? KnowledgeRevisionStatus.Archived.ToString() : KnowledgeRevisionStatus.Current.ToString()),
+                ("$metadata", JsonSerializer.Serialize(MemoryRevisionMetadata.FromMemory(memory))),
+                ("$embedding", embedding), ("$embeddingDim", embeddingDimension));
+            for (var i = 0; i < source.Length; i++)
+                await InsertSourceAsync(c, tx, revisionId, i, source[i], ct);
+            await InsertDecisionAsync(c, tx, memory.Id, revisionId, decision, ct);
+        }
+        await tx.CommitAsync(ct);
+    }
+
+    private static string LegacyRevisionId(string assertionId) => $"legacy:{assertionId}";
+
+    private static async Task UpsertMemoryProjectionAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        Memory memory,
+        byte[]? embedding,
+        int? embeddingDim,
+        bool replaceEmbedding,
+        CancellationToken ct)
+    {
+        var tagsJson = JsonSerializer.Serialize(NormalizeTags(memory.Tags));
+        var relationships = KnowledgeRelationshipSemantics.Normalize(memory.Relationships, memory.RelatedMemoryIds);
+        var relationshipsJson = JsonSerializer.Serialize(relationships
+            .Where(r => r.Kind == KnowledgeRelationshipKind.RelatedTo && r.Target.Kind == KnowledgeEntityKind.Memory)
+            .Select(r => r.Target.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList());
+        var typedRelationshipsJson = JsonSerializer.Serialize(relationships);
+        var sourceJson = memory.Source is null ? null : JsonSerializer.Serialize(memory.Source);
+        await ExecuteAsync(c, tx, @"
+            INSERT INTO memories (
+                id, category, content, created_at, updated_at, source_conversation_id,
+                importance_score, tags_json, is_pinned, is_archived, frequency_count,
+                last_merge_time, expiration_date, relationships_json,
+                typed_relationships_json, is_encrypted, scope, scope_id, title,
+                source_json, embedding, embedding_dim)
+            VALUES ($id, $category, $content, $created, $updated, $sourceConversation,
+                $importance, $tags, $pinned, $archived, $frequency, $merge, $expiration,
+                $relationships, $typedRelationships, $encrypted, $scope, $scopeId,
+                $title, $sourceJson, $embedding, $embeddingDim)
+            ON CONFLICT(id) DO UPDATE SET
+                category = excluded.category,
+                content = excluded.content,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
+                source_conversation_id = excluded.source_conversation_id,
+                importance_score = excluded.importance_score,
+                tags_json = excluded.tags_json,
+                is_pinned = excluded.is_pinned,
+                is_archived = excluded.is_archived,
+                frequency_count = excluded.frequency_count,
+                last_merge_time = excluded.last_merge_time,
+                expiration_date = excluded.expiration_date,
+                relationships_json = excluded.relationships_json,
+                typed_relationships_json = excluded.typed_relationships_json,
+                is_encrypted = excluded.is_encrypted,
+                scope = excluded.scope,
+                scope_id = excluded.scope_id,
+                title = excluded.title,
+                source_json = excluded.source_json,
+                embedding = CASE WHEN $replaceEmbedding = 1 THEN excluded.embedding ELSE memories.embedding END,
+                embedding_dim = CASE WHEN $replaceEmbedding = 1 THEN excluded.embedding_dim ELSE memories.embedding_dim END", ct,
+            ("$id", memory.Id), ("$category", memory.Category), ("$content", memory.Content),
+            ("$created", memory.CreatedAt.ToString("O")), ("$updated", memory.UpdatedAt.ToString("O")),
+            ("$sourceConversation", memory.SourceConversationId), ("$importance", memory.ImportanceScore),
+            ("$tags", tagsJson), ("$pinned", memory.IsPinned ? 1 : 0), ("$archived", memory.IsArchived ? 1 : 0),
+            ("$frequency", memory.FrequencyCount), ("$merge", memory.LastMergeTime?.ToString("O")),
+            ("$expiration", memory.ExpirationDate?.ToString("O")), ("$relationships", relationshipsJson),
+            ("$typedRelationships", typedRelationshipsJson), ("$encrypted", memory.IsEncrypted ? 1 : 0),
+            ("$scope", memory.Scope.ToString()), ("$scopeId", memory.ScopeId), ("$title", memory.Title),
+            ("$sourceJson", sourceJson), ("$embedding", embedding), ("$embeddingDim", embeddingDim),
+            ("$replaceEmbedding", replaceEmbedding ? 1 : 0));
+        await UpsertFtsAsync(c, memory, tagsJson, ct, tx);
+    }
+
+    private static async Task InsertSourceAsync(
+        SqliteConnection c,
+        SqliteTransaction tx,
+        string revisionId,
+        int ordinal,
+        SourceReference source,
+        CancellationToken ct) =>
+        await ExecuteAsync(c, tx, @"
+            INSERT OR IGNORE INTO knowledge_revision_sources (
+                revision_id, ordinal, kind, title, locator, snippet, score,
+                timestamp, evidence_origin)
+            VALUES ($revision, $ordinal, $kind, $title, $locator, $snippet,
+                $score, $timestamp, $origin)", ct,
+            ("$revision", revisionId), ("$ordinal", ordinal), ("$kind", source.Kind.ToString()),
+            ("$title", Bound(source.Title, 512)), ("$locator", BoundNullable(source.Locator, 2048)),
+            ("$snippet", BoundNullable(source.Snippet, 4096)), ("$score", source.Score),
+            ("$timestamp", source.Timestamp?.ToUniversalTime().ToString("O")),
+            ("$origin", source.EvidenceOrigin.ToString()));
+
+    private static async Task<Memory?> LoadMemoryAsync(
+        SqliteConnection c,
+        SqliteTransaction? tx,
+        string id,
+        CancellationToken ct)
+    {
+        await using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"
+            SELECT m.*, a.current_revision_id AS current_revision_id
+            FROM memories m
+            JOIN knowledge_assertions a ON a.assertion_id = m.id
+            WHERE m.id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? Map(reader) : null;
+    }
+
+    private static async Task<string?> ScalarStringAsync(
+        SqliteConnection c,
+        SqliteTransaction? tx,
+        string sql,
+        CancellationToken ct,
+        params (string Name, string? Value)[] parameters)
+    {
+        await using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql;
+        foreach (var (name, value) in parameters)
+            cmd.Parameters.AddWithValue(name, (object?)value ?? DBNull.Value);
+        var valueResult = await cmd.ExecuteScalarAsync(ct);
+        return valueResult is null or DBNull ? null : Convert.ToString(valueResult, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task ExecuteAsync(
+        SqliteConnection c,
+        SqliteTransaction? tx,
+        string sql,
+        CancellationToken ct,
+        params (string Name, object? Value)[] parameters)
+    {
+        await using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql;
+        foreach (var (name, value) in parameters)
+            cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static Task ExecuteAsync(
+        SqliteConnection c,
+        SqliteTransaction? tx,
+        string sql,
+        CancellationToken ct,
+        params (string Name, string? Value)[] parameters) =>
+        ExecuteAsync(c, tx, sql, ct,
+            parameters.Select(parameter => (parameter.Name, (object?)parameter.Value)).ToArray());
+
+    private static async Task<StoredRevision?> LoadStoredRevisionAsync(
+        SqliteConnection c,
+        SqliteTransaction? tx,
+        string revisionId,
+        CancellationToken ct)
+    {
+        StoredRevision? stored = null;
+        await using (var cmd = c.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT * FROM knowledge_revisions WHERE revision_id = $revision";
+            cmd.Parameters.AddWithValue("$revision", revisionId);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                var scope = Enum.TryParse<MemoryScope>(GetString(reader, "scope", "Global"), out var parsedScope)
+                    ? parsedScope : MemoryScope.Global;
+                var status = Enum.TryParse<KnowledgeRevisionStatus>(GetString(reader, "status"), out var parsedStatus)
+                    ? parsedStatus : KnowledgeRevisionStatus.Superseded;
+                var origin = Enum.TryParse<KnowledgeTemporalOrigin>(GetString(reader, "temporal_origin"), out var parsedOrigin)
+                    ? parsedOrigin : KnowledgeTemporalOrigin.Unknown;
+                var metadataJson = GetString(reader, "metadata_json", "{}");
+                var metadata = JsonSerializer.Deserialize<MemoryRevisionMetadata>(metadataJson)
+                    ?? MemoryRevisionMetadata.Empty;
+                stored = new StoredRevision(
+                    new KnowledgeAssertionRevision(
+                        GetString(reader, "assertion_id"),
+                        GetString(reader, "revision_id"),
+                        GetStringNullable(reader, "previous_revision_id"),
+                        GetString(reader, "content"),
+                        scope,
+                        GetString(reader, "scope_id"),
+                        GetString(reader, "category", "facts"),
+                        SqliteDateTime.Parse(GetString(reader, "recorded_at")),
+                        GetDateTimeNullable(reader, "effective_from"),
+                        GetDateTimeNullable(reader, "effective_to"),
+                        origin,
+                        [],
+                        status,
+                        null),
+                    metadata);
+            }
+        }
+
+        if (stored is null) return null;
+        var sources = new List<SourceReference>();
+        await using (var sourceCommand = c.CreateCommand())
+        {
+            sourceCommand.Transaction = tx;
+            sourceCommand.CommandText = "SELECT * FROM knowledge_revision_sources WHERE revision_id = $revision ORDER BY ordinal";
+            sourceCommand.Parameters.AddWithValue("$revision", revisionId);
+            await using var reader = await sourceCommand.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var kind = Enum.TryParse<ProvenanceKind>(GetString(reader, "kind"), out var parsedKind)
+                    ? parsedKind : ProvenanceKind.Memory;
+                var evidence = Enum.TryParse<EvidenceOrigin>(GetString(reader, "evidence_origin"), out var parsedEvidence)
+                    ? parsedEvidence : EvidenceOrigin.Extracted;
+                sources.Add(new SourceReference(
+                    kind,
+                    GetString(reader, "title"),
+                    GetStringNullable(reader, "locator"),
+                    GetStringNullable(reader, "snippet"),
+                    GetDoubleNullable(reader, "score"),
+                    GetDateTimeNullable(reader, "timestamp"),
+                    evidence));
+            }
+        }
+
+        KnowledgeRevisionDecision? decision = null;
+        await using (var decisionCommand = c.CreateCommand())
+        {
+            decisionCommand.Transaction = tx;
+            decisionCommand.CommandText = @"
+                SELECT * FROM knowledge_revision_decisions
+                WHERE revision_id = $revision
+                ORDER BY recorded_at DESC LIMIT 1";
+            decisionCommand.Parameters.AddWithValue("$revision", revisionId);
+            await using var reader = await decisionCommand.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                decision = new KnowledgeRevisionDecision(
+                    GetString(reader, "kind"), GetString(reader, "actor"), GetString(reader, "reason"),
+                    SqliteDateTime.Parse(GetString(reader, "recorded_at")), GetString(reader, "decision_id"));
+            }
+        }
+
+        return stored with
+        {
+            Public = stored.Public with { SourceReferences = sources, Decision = decision }
+        };
+    }
+
+    /// <summary>
+    /// Legacy fixture adapter. Production composition exposes the read
+    /// projection and <see cref="IKnowledgeRevisionStore"/> separately; this
+    /// upsert remains internal so old database fixtures can be exercised while
+    /// they are lazily assigned one initial revision.
+    /// </summary>
+    internal async Task SaveAsync(Memory memory, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
         memory.UpdatedAt = DateTime.UtcNow;
@@ -333,6 +1518,14 @@ public sealed class MemoryStore : IMemoryStore
 
         await cmd.ExecuteNonQueryAsync(ct);
         await UpsertFtsAsync(c, memory, tagsJson, ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
+        await ExecuteAsync(c, null, @"
+            UPDATE knowledge_revisions
+            SET status = CASE WHEN $archived = 1 THEN 'Archived' ELSE 'Current' END
+            WHERE revision_id = (
+                SELECT current_revision_id FROM knowledge_assertions WHERE assertion_id = $id)
+              AND status <> 'Disputed'", ct,
+            ("$id", memory.Id), ("$archived", memory.IsArchived ? 1 : 0));
 
         // Backfill runs off the send path (r9 01-send-path-latency.md 1.2): a
         // write is the other trigger point besides the startup pass, so a
@@ -343,21 +1536,12 @@ public sealed class MemoryStore : IMemoryStore
             _ = Task.Run(() => RunEmbeddingBackfillAsync(CancellationToken.None));
     }
 
-    public async Task DeleteAsync(string id, CancellationToken ct = default)
+    /// <summary>Legacy fixture adapter for permanent deletion.</summary>
+    internal async Task DeleteAsync(string id, CancellationToken ct = default)
     {
-        await EnsureInitializedAsync(ct);
-        await using var c = new SqliteConnection(Cs);
-        await c.OpenAsync(ct);
-
-        var cmd = c.CreateCommand();
-        cmd.CommandText = "DELETE FROM memories WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        await cmd.ExecuteNonQueryAsync(ct);
-
-        await using var fts = c.CreateCommand();
-        fts.CommandText = "DELETE FROM memories_fts WHERE id = $id";
-        fts.Parameters.AddWithValue("$id", id);
-        await fts.ExecuteNonQueryAsync(ct);
+        var current = await GetCurrentRevisionAsync(id, ct);
+        if (current is not null)
+            await HardDeleteAsync(id, current.RevisionId, ct);
     }
 
     public async Task<List<Memory>> SearchAsync(string q, CancellationToken ct = default)
@@ -365,6 +1549,7 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
 
         List<Memory> ftsResults;
         var ftsQuery = BuildFtsQuery(q);
@@ -383,10 +1568,13 @@ public sealed class MemoryStore : IMemoryStore
             // downstream (MemoryInjectionService.EffectiveScore and its
             // pinned-first ordering), where it belongs.
             cmd.CommandText = @"
-                SELECT m.*
+                SELECT m.*, kr.revision_id AS current_revision_id
                 FROM memories m
                 JOIN memories_fts f ON f.id = m.id
+                JOIN knowledge_assertions a ON a.assertion_id = m.id
+                JOIN knowledge_revisions kr ON kr.revision_id = a.current_revision_id
                 WHERE memories_fts MATCH $q AND m.is_archived = 0
+                  AND kr.status = 'Current'
                 ORDER BY f.rank
                 LIMIT 100";
             cmd.Parameters.AddWithValue("$q", ftsQuery);
@@ -464,10 +1652,14 @@ public sealed class MemoryStore : IMemoryStore
             var parameterNames = ids.Select((_, i) => $"$related{i}").ToList();
             var cmd = c.CreateCommand();
             cmd.CommandText = $@"
-                SELECT * FROM memories
-                WHERE id IN ({string.Join(",", parameterNames)})
-                  AND is_archived = 0
-                  AND (is_pinned = 1 OR expiration_date IS NULL OR expiration_date > $now)";
+                SELECT m.*, r.revision_id AS current_revision_id
+                FROM memories m
+                JOIN knowledge_assertions a ON a.assertion_id = m.id
+                JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+                WHERE m.id IN ({string.Join(",", parameterNames)})
+                  AND m.is_archived = 0
+                  AND r.status = 'Current'
+                  AND (m.is_pinned = 1 OR m.expiration_date IS NULL OR m.expiration_date > $now)";
             cmd.Parameters.AddWithValue("$now", now.ToString("O"));
             for (var i = 0; i < ids.Count; i++)
                 cmd.Parameters.AddWithValue(parameterNames[i], ids[i]);
@@ -534,11 +1726,18 @@ public sealed class MemoryStore : IMemoryStore
         // keyword overlap can still surface (that is the entire point of
         // hybrid recall).
         var nonFtsScores = new List<(string Id, double Score)>();
-        var cmd = c.CreateCommand();
-        // Excludes an expired-but-not-yet-archived row too (r16
+            var cmd = c.CreateCommand();
+            // Excludes an expired-but-not-yet-archived row too (r16
         // 02-memory-integrity.md 2.3), pinned rows exempt like everywhere
         // else in the lifecycle.
-        cmd.CommandText = "SELECT id, embedding FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL AND (is_pinned = 1 OR expiration_date IS NULL OR expiration_date > $now)";
+        cmd.CommandText = @"
+            SELECT m.id, m.embedding
+            FROM memories m
+            JOIN knowledge_assertions a ON a.assertion_id = m.id
+            JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+            WHERE m.is_archived = 0 AND r.status = 'Current'
+              AND m.embedding IS NOT NULL
+              AND (m.is_pinned = 1 OR m.expiration_date IS NULL OR m.expiration_date > $now)";
         cmd.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
         var mismatchCount = 0;
         await using (var rd = await cmd.ExecuteReaderAsync(ct))
@@ -582,7 +1781,12 @@ public sealed class MemoryStore : IMemoryStore
             var scoreById = nonFtsScores.ToDictionary(s => s.Id, s => s.Score, StringComparer.Ordinal);
             var hydrateCmd = c.CreateCommand();
             var paramNames = idsToHydrate.Select((_, i) => $"$p{i}").ToList();
-            hydrateCmd.CommandText = $"SELECT * FROM memories WHERE id IN ({string.Join(",", paramNames)})";
+            hydrateCmd.CommandText = $@"
+                SELECT m.*, r.revision_id AS current_revision_id
+                FROM memories m
+                JOIN knowledge_assertions a ON a.assertion_id = m.id
+                JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+                WHERE r.status = 'Current' AND m.id IN ({string.Join(",", paramNames)})";
             for (var i = 0; i < idsToHydrate.Count; i++)
                 hydrateCmd.Parameters.AddWithValue(paramNames[i], idsToHydrate[i]);
 
@@ -628,10 +1832,17 @@ public sealed class MemoryStore : IMemoryStore
             await EnsureInitializedAsync(ct);
             await using var c = new SqliteConnection(Cs);
             await c.OpenAsync(ct);
+            await EnsureLegacyAssertionsAsync(c, ct);
 
             var pending = new List<(string Id, string Content)>();
             var select = c.CreateCommand();
-            select.CommandText = "SELECT id, content FROM memories WHERE embedding IS NULL AND is_archived = 0 AND length(content) > 0 LIMIT 200";
+            select.CommandText = @"
+                SELECT m.id, m.content
+                FROM memories m
+                JOIN knowledge_assertions a ON a.assertion_id = m.id
+                JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+                WHERE m.embedding IS NULL AND m.is_archived = 0 AND r.status = 'Current'
+                  AND length(m.content) > 0 LIMIT 200";
             await using (var rd = await select.ExecuteReaderAsync(ct))
             {
                 while (await rd.ReadAsync(ct))
@@ -739,8 +1950,15 @@ public sealed class MemoryStore : IMemoryStore
 
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(1) FROM memories WHERE embedding IS NOT NULL AND length(embedding) != $bytes";
+        cmd.CommandText = @"
+            SELECT COUNT(1)
+            FROM memories m
+            JOIN knowledge_assertions a ON a.assertion_id = m.id
+            JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+            WHERE r.status = 'Current' AND m.embedding IS NOT NULL
+              AND length(m.embedding) != $bytes";
         cmd.Parameters.AddWithValue("$bytes", currentDim.Value * sizeof(float));
         var count = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0);
         if (count > 0)
@@ -765,8 +1983,18 @@ public sealed class MemoryStore : IMemoryStore
 
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "UPDATE memories SET embedding = NULL, embedding_dim = NULL WHERE embedding IS NOT NULL AND length(embedding) != $bytes";
+        cmd.CommandText = @"
+            UPDATE memories
+            SET embedding = NULL, embedding_dim = NULL
+            WHERE id IN (
+                SELECT m.id
+                FROM memories m
+                JOIN knowledge_assertions a ON a.assertion_id = m.id
+                JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+                WHERE r.status = 'Current' AND m.embedding IS NOT NULL
+                  AND length(m.embedding) != $bytes)";
         cmd.Parameters.AddWithValue("$bytes", currentDim.Value * sizeof(float));
         var cleared = await cmd.ExecuteNonQueryAsync(ct);
 
@@ -807,11 +2035,20 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var now = DateTime.UtcNow.ToString("O");
         foreach (var id in idList)
         {
             var cmd = c.CreateCommand();
-            cmd.CommandText = "UPDATE memories SET recall_count = recall_count + 1, last_recalled_at = $now WHERE id = $id";
+            cmd.CommandText = @"
+                UPDATE memories
+                SET recall_count = recall_count + 1, last_recalled_at = $now
+                WHERE id IN (
+                    SELECT m.id
+                    FROM memories m
+                    JOIN knowledge_assertions a ON a.assertion_id = m.id
+                    JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id
+                    WHERE r.status = 'Current' AND m.id = $id)";
             cmd.Parameters.AddWithValue("$now", now);
             cmd.Parameters.AddWithValue("$id", id);
             await cmd.ExecuteNonQueryAsync(ct);
@@ -827,6 +2064,7 @@ public sealed class MemoryStore : IMemoryStore
 
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
 
         foreach (var memory in candidates)
         {
@@ -851,7 +2089,11 @@ public sealed class MemoryStore : IMemoryStore
             // content/tags/title are unchanged, so the FTS index needs no
             // rewrite either.
             var cmd = c.CreateCommand();
-            cmd.CommandText = "UPDATE memories SET is_archived = 1, updated_at = $ua WHERE id = $id";
+            cmd.CommandText = @"
+                UPDATE memories SET is_archived = 1, updated_at = $ua WHERE id = $id;
+                UPDATE knowledge_revisions
+                SET status = 'Archived'
+                WHERE revision_id = (SELECT current_revision_id FROM knowledge_assertions WHERE assertion_id = $id)";
             cmd.Parameters.AddWithValue("$ua", now.ToString("O"));
             cmd.Parameters.AddWithValue("$id", memory.Id);
             await cmd.ExecuteNonQueryAsync(ct);
@@ -894,8 +2136,9 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE importance_score >= $score AND is_archived = 0 ORDER BY importance_score DESC, updated_at DESC";
+        cmd.CommandText = CurrentProjectionSql("AND m.importance_score >= $score AND m.is_archived = 0 ORDER BY m.importance_score DESC, m.updated_at DESC");
         cmd.Parameters.AddWithValue("$score", minScore);
         var r = new List<Memory>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -908,8 +2151,9 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE is_archived = 0 ORDER BY updated_at DESC LIMIT $limit";
+        cmd.CommandText = CurrentProjectionSql("AND m.is_archived = 0 ORDER BY m.updated_at DESC LIMIT $limit");
         cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));
         var r = new List<Memory>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -922,8 +2166,9 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE source_conversation_id = $src AND is_archived = 0 ORDER BY updated_at DESC LIMIT $limit";
+        cmd.CommandText = CurrentProjectionSql("AND m.source_conversation_id = $src AND m.is_archived = 0 ORDER BY m.updated_at DESC LIMIT $limit");
         cmd.Parameters.AddWithValue("$src", conversationId);
         cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));
         var r = new List<Memory>();
@@ -937,10 +2182,11 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = includeArchived
-            ? "SELECT COUNT(1) FROM memories WHERE source_conversation_id = $src"
-            : "SELECT COUNT(1) FROM memories WHERE source_conversation_id = $src AND is_archived = 0";
+            ? "SELECT COUNT(1) FROM memories m JOIN knowledge_assertions a ON a.assertion_id = m.id JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id WHERE r.status IN ('Current', 'Archived') AND m.source_conversation_id = $src"
+            : "SELECT COUNT(1) FROM memories m JOIN knowledge_assertions a ON a.assertion_id = m.id JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id WHERE r.status = 'Current' AND m.source_conversation_id = $src AND m.is_archived = 0";
         cmd.Parameters.AddWithValue("$src", conversationId ?? (object)DBNull.Value);
         var scalar = await cmd.ExecuteScalarAsync(ct);
         return Convert.ToInt32(scalar ?? 0);
@@ -955,14 +2201,15 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        await EnsureLegacyAssertionsAsync(c, ct);
         var cmd = c.CreateCommand();
 
         // build parameter list: $p0, $p1, ...
         var paramNames = ids.Select((id, idx) => "$p" + idx).ToList();
         var inClause = string.Join(',', paramNames);
         cmd.CommandText = includeArchived
-            ? $"SELECT source_conversation_id, COUNT(1) as cnt FROM memories WHERE source_conversation_id IN ({inClause}) GROUP BY source_conversation_id"
-            : $"SELECT source_conversation_id, COUNT(1) as cnt FROM memories WHERE source_conversation_id IN ({inClause}) AND is_archived = 0 GROUP BY source_conversation_id";
+            ? $"SELECT m.source_conversation_id, COUNT(1) as cnt FROM memories m JOIN knowledge_assertions a ON a.assertion_id = m.id JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id WHERE r.status IN ('Current', 'Archived') AND m.source_conversation_id IN ({inClause}) GROUP BY m.source_conversation_id"
+            : $"SELECT m.source_conversation_id, COUNT(1) as cnt FROM memories m JOIN knowledge_assertions a ON a.assertion_id = m.id JOIN knowledge_revisions r ON r.revision_id = a.current_revision_id WHERE r.status = 'Current' AND m.source_conversation_id IN ({inClause}) AND m.is_archived = 0 GROUP BY m.source_conversation_id";
 
         for (var i = 0; i < ids.Count; i++)
             cmd.Parameters.AddWithValue(paramNames[i], ids[i]);
@@ -986,14 +2233,17 @@ public sealed class MemoryStore : IMemoryStore
         SqliteConnection c,
         Memory memory,
         string tagsJson,
-        CancellationToken ct)
+        CancellationToken ct,
+        SqliteTransaction? tx = null)
     {
         await using var delete = c.CreateCommand();
+        delete.Transaction = tx;
         delete.CommandText = "DELETE FROM memories_fts WHERE id = $id";
         delete.Parameters.AddWithValue("$id", memory.Id);
         await delete.ExecuteNonQueryAsync(ct);
 
         await using var insert = c.CreateCommand();
+        insert.Transaction = tx;
         insert.CommandText = @"
             INSERT INTO memories_fts (id, category, content, tags)
             VALUES ($id, $cat, $content, $tags)";
@@ -1016,7 +2266,7 @@ public sealed class MemoryStore : IMemoryStore
     private static async Task<List<Memory>> SearchLikeAsync(SqliteConnection c, string q, CancellationToken ct)
     {
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE (content LIKE $q OR category LIKE $q OR tags_json LIKE $q) AND is_archived = 0 ORDER BY is_pinned DESC, importance_score DESC, updated_at DESC LIMIT 100";
+        cmd.CommandText = CurrentProjectionSql("AND (m.content LIKE $q OR m.category LIKE $q OR m.tags_json LIKE $q) AND m.is_archived = 0 ORDER BY m.is_pinned DESC, m.importance_score DESC, m.updated_at DESC LIMIT 100");
         cmd.Parameters.AddWithValue("$q", $"%{q}%");
         var r = new List<Memory>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -1051,6 +2301,7 @@ public sealed class MemoryStore : IMemoryStore
         return new Memory
         {
             Id = GetString(r, "id"),
+            RevisionId = GetStringNullable(r, "current_revision_id"),
             Category = GetString(r, "category", "facts"),
             Content = GetString(r, "content"),
             CreatedAt = SqliteDateTime.Parse(GetString(r, "created_at")),
@@ -1148,6 +2399,12 @@ public sealed class MemoryStore : IMemoryStore
         return r.IsDBNull(ordinal) ? fallback : r.GetDouble(ordinal);
     }
 
+    private static double? GetDoubleNullable(SqliteDataReader r, string name)
+    {
+        var ordinal = r.GetOrdinal(name);
+        return r.IsDBNull(ordinal) ? null : r.GetDouble(ordinal);
+    }
+
     private static DateTime? GetDateTimeNullable(SqliteDataReader r, string name)
     {
         var ordinal = r.GetOrdinal(name);
@@ -1161,4 +2418,95 @@ public sealed class MemoryStore : IMemoryStore
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private static string Bound(string value, int maximum) =>
+        (value ?? string.Empty).Trim()[..Math.Min((value ?? string.Empty).Trim().Length, maximum)];
+
+    private static string? BoundNullable(string? value, int maximum) =>
+        string.IsNullOrWhiteSpace(value) ? null : Bound(value, maximum);
+
+    private sealed record StoredRevision(
+        KnowledgeAssertionRevision Public,
+        MemoryRevisionMetadata Metadata);
+
+    private sealed record MemoryRevisionMetadata(
+        string Title,
+        DateTime CreatedAt,
+        DateTime UpdatedAt,
+        string? SourceConversationId,
+        double ImportanceScore,
+        List<string> Tags,
+        bool IsPinned,
+        bool IsArchived,
+        int FrequencyCount,
+        DateTime? LastMergeTime,
+        DateTime? ExpirationDate,
+        List<string> RelatedMemoryIds,
+        List<KnowledgeRelationship> Relationships,
+        bool IsEncrypted,
+        int RecallCount,
+        DateTime? LastRecalledAt)
+    {
+        public static MemoryRevisionMetadata Empty => new(
+            string.Empty, DateTime.UtcNow, DateTime.UtcNow, null, 0.5, [], false, false, 1,
+            null, null, [], [], false, 0, null);
+
+        public static MemoryRevisionMetadata FromMemory(Memory memory) => new(
+            memory.Title,
+            memory.CreatedAt,
+            memory.UpdatedAt,
+            memory.SourceConversationId,
+            memory.ImportanceScore,
+            NormalizeTags(memory.Tags),
+            memory.IsPinned,
+            memory.IsArchived,
+            memory.FrequencyCount,
+            memory.LastMergeTime,
+            memory.ExpirationDate,
+            memory.RelatedMemoryIds.ToList(),
+            memory.Relationships.ToList(),
+            memory.IsEncrypted,
+            memory.RecallCount,
+            memory.LastRecalledAt);
+
+        public Memory ToMemory(
+            string id,
+            string content,
+            MemoryScope scope,
+            string scopeId,
+            string category,
+            DateTime createdAt,
+            DateTime updatedAt)
+        {
+            var relationships = KnowledgeRelationshipSemantics.Normalize(Relationships, RelatedMemoryIds);
+            return new Memory
+            {
+                Id = id,
+                Scope = scope,
+                ScopeId = scopeId,
+                Title = Title,
+                Category = category,
+                Content = content,
+                CreatedAt = createdAt,
+                UpdatedAt = updatedAt,
+                SourceConversationId = SourceConversationId,
+                ImportanceScore = ImportanceScore,
+                Tags = NormalizeTags(Tags),
+                IsPinned = IsPinned,
+                IsArchived = IsArchived,
+                FrequencyCount = FrequencyCount,
+                LastMergeTime = LastMergeTime,
+                ExpirationDate = ExpirationDate,
+                RelatedMemoryIds = relationships
+                    .Where(r => r.Kind == KnowledgeRelationshipKind.RelatedTo && r.Target.Kind == KnowledgeEntityKind.Memory)
+                    .Select(r => r.Target.Id)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList(),
+                Relationships = relationships,
+                IsEncrypted = IsEncrypted,
+                RecallCount = RecallCount,
+                LastRecalledAt = LastRecalledAt
+            };
+        }
+    }
 }

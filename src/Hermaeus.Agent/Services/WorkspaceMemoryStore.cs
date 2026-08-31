@@ -17,14 +17,20 @@ public sealed class WorkspaceMemoryStore : IAgentWorkspaceMemoryStore
     private const string Category = "workspace";
 
     private readonly IMemoryStore _memories;
+    private readonly IKnowledgeRevisionStore _knowledge;
     private readonly ISettingsService _settings;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private bool _initialized;
 
-    public WorkspaceMemoryStore(IMemoryStore memories, ISettingsService settings)
+    public WorkspaceMemoryStore(
+        IMemoryStore memories,
+        ISettingsService settings,
+        IKnowledgeRevisionStore? knowledge = null)
     {
         _memories = memories;
         _settings = settings;
+        _knowledge = knowledge ?? memories as IKnowledgeRevisionStore
+            ?? throw new ArgumentException("The memory store must expose knowledge revision writes.", nameof(memories));
     }
 
     private string AgentRoot
@@ -83,7 +89,24 @@ public sealed class WorkspaceMemoryStore : IAgentWorkspaceMemoryStore
         if (entry.CreatedAt == default)
             entry.CreatedAt = entry.UpdatedAt;
 
-        await _memories.SaveAsync(ToMemory(entry), ct);
+        var memory = ToMemory(entry);
+        var current = await _memories.GetByIdAsync(entry.Id, ct);
+        if (current is null)
+        {
+            await _knowledge.CreateAssertionAsync(new KnowledgeRevisionDraft(
+                memory,
+                TemporalOrigin: KnowledgeTemporalOrigin.UserProvided,
+                SourceReferences: memory.Source is null ? [] : [memory.Source]), ct);
+        }
+        else
+        {
+            var revision = await _knowledge.GetCurrentRevisionAsync(entry.Id, ct)
+                ?? throw new InvalidOperationException($"Workspace memory '{entry.Id}' has no current revision.");
+            await _knowledge.ReviseAssertionAsync(entry.Id, revision.RevisionId, new KnowledgeRevisionDraft(
+                memory,
+                TemporalOrigin: KnowledgeTemporalOrigin.UserProvided,
+                SourceReferences: memory.Source is null ? null : [memory.Source]), ct);
+        }
         return entry;
     }
 
@@ -93,7 +116,11 @@ public sealed class WorkspaceMemoryStore : IAgentWorkspaceMemoryStore
         var normalized = NormalizeWorkspaceRoot(workspaceRoot);
         var existing = await _memories.GetByIdAsync(id, ct);
         if (existing is { Scope: MemoryScope.Workspace } && string.Equals(existing.ScopeId, normalized, StringComparison.OrdinalIgnoreCase))
-            await _memories.DeleteAsync(id, ct);
+        {
+            var revision = await _knowledge.GetCurrentRevisionAsync(id, ct);
+            if (revision is not null)
+                await _knowledge.HardDeleteAsync(id, revision.RevisionId, ct);
+        }
     }
 
     private async Task ImportLegacyFilesAsync(CancellationToken ct)
@@ -113,7 +140,11 @@ public sealed class WorkspaceMemoryStore : IAgentWorkspaceMemoryStore
                     if (await _memories.GetByIdAsync(entry.Id, ct) is not null)
                         continue;
                     entry.WorkspaceRoot = NormalizeWorkspaceRoot(entry.WorkspaceRoot);
-                    await _memories.SaveAsync(ToMemory(entry), ct);
+                    var memory = ToMemory(entry);
+                    await _knowledge.CreateAssertionAsync(new KnowledgeRevisionDraft(
+                        memory,
+                        TemporalOrigin: KnowledgeTemporalOrigin.UserProvided,
+                        SourceReferences: memory.Source is null ? [] : [memory.Source]), ct);
                 }
 
                 File.Move(file, file + ".migrated", overwrite: true);
@@ -135,7 +166,14 @@ public sealed class WorkspaceMemoryStore : IAgentWorkspaceMemoryStore
         Category = Category,
         Tags = entry.Tags.ToList(),
         CreatedAt = entry.CreatedAt,
-        UpdatedAt = entry.UpdatedAt
+        UpdatedAt = entry.UpdatedAt,
+        Source = new SourceReference(
+            ProvenanceKind.Workspace,
+            string.IsNullOrWhiteSpace(entry.Title) ? "Workspace memory" : entry.Title,
+            Locator: entry.WorkspaceRoot,
+            Snippet: entry.Body,
+            Timestamp: entry.UpdatedAt,
+            EvidenceOrigin: EvidenceOrigin.UserProvided)
     };
 
     private static AgentWorkspaceMemoryEntry ToEntry(Memory memory) => new()

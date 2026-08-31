@@ -244,6 +244,19 @@ palette can search the local Recall index even when Recall injection into Chat
 is disabled. A pinned memory remains visibly marked in its row and exposes
 **Unpin** directly, so the state does not depend on a toast.
 
+Open **History** on a memory to inspect its immutable revisions. Recorded time
+and established effective time are shown separately, alongside adjacent
+content diffs, sources, decisions, and status. **Revise fact** and **Correct
+fact** create successors; pinning, tags, archive, and scope changes remain
+presentation edits. **Restore as new revision** copies selected historical
+content only after an explicit review. A contradiction proposal records two
+exact revisions for review and can be rejected without changing either one.
+Normal Chat uses only the accepted current projection and names its exact
+revision in the context receipt. **Export history** writes bounded, redacted,
+versioned JSON containing the visible memories' revision, source, effective-time,
+and decision structure. The older CSV action remains a current-projection-only
+export, and files exported before deletion remain user-owned copies.
+
 ## Agent workspaces
 
 The **Agent** is separate from normal Chat. Select a workspace root, review its

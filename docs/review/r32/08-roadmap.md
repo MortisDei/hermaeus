@@ -59,7 +59,7 @@ the stores into one schema.
 | 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | Yes |
 | 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | Yes |
 | 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | Yes |
-| 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | No |
+| 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | Yes |
 | 10 | Stable watched-root/source identity, staged source revisions and dataset generations, embedding cardinality/dimension validation, source revalidation, atomic RAG publication, exact-revision citations, crash/cancellation preservation, Dataset Manager history | 9 lineage contract, existing RAG | mandatory temporal correctness | No |
 | 11 | Pinned Hugging Face thumbnail metadata, exact-host manual redirects, bounded pre-decode header inspection/cache service, selected repo/download/installed-card presentation, cache management | 2 | mandatory independent | No |
 | 12 | Only the already-selected targeted hardening from doc 06 that was not naturally completed by its owning batch; cross-batch integration tests; authoritative feature/workflow/security/privacy docs; CHANGELOG only for landed behavior | 1-11 changed batches | mandatory close-out, not a catch-all | No |
@@ -407,6 +407,43 @@ passed with 2,443 passed, 17 skipped, and 2,460 total tests. Test results were
 written outside the checkout. Owner live gates remain one Lab-backed Apply and
 Undo, one declined model annotation, one stale Apply refusal, and confirmation
 that no recommendation restarts a server or switches a model.
+
+### 8.2.11 Batch 9 evidence
+
+Batch 9 moves memory content changes behind one revision authority while
+retaining the existing `IMemoryStore` read projection:
+
+- `memories.db` has an additive `knowledge-revisions` migration with normalized
+  assertion, revision, source, decision, contradiction-proposal, and proposal-
+  decision tables. Existing rows are assigned one `legacy:<memory-id>` current
+  revision lazily, without synthetic history or a startup rewrite.
+- Create, revise, correct, dispute, presentation mutation, restore-as-new,
+  and hard-delete commands compare the expected current revision inside their
+  transaction. Content revisions retain source and decision identity, while
+  presentation changes do not create content history. Hard delete removes
+  revision content, sources, decisions, proposals, FTS, embeddings, and the
+  current projection without promoting an older revision.
+- Current, AsOf, and History retrieval are explicit. Unknown effective time is
+  not treated as a precise as-of interval. Current memory projections carry the
+  exact revision identity into context-source locators; superseded and disputed
+  content is excluded from ordinary injection. Contradiction proposals retain
+  two exact revisions and their evidence comparison for review only. Rejecting
+  a proposal records a decision and changes neither revision.
+- Memories now shows a linear timeline with adjacent bounded diffs, separate
+  recorded/effective times, sources, decisions, revise/correct/dispute/restore
+  actions, and explicit contradiction proposal review. Export history writes
+  bounded redacted versioned JSON; the existing CSV remains
+  current-projection-only. Memory content remains plaintext, and prior exports,
+  backups, snapshots, and physical storage remanence remain explicit deletion
+  limits.
+
+Batch 9 verification: the focused revision and Memories filters passed 50
+tests; the zero-warning solution build passed; the full sequential suite passed
+with 2,489 passed, 17 skipped, and 2,506 total tests; and the canonical 60%
+line-coverage gate passed. Test and coverage results were written outside the
+checkout. Owner live gates remain a real memory revise/timeline/current/as-of
+flow, rejection of one contradiction proposal, and forget/delete followed by
+restart and export verification.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

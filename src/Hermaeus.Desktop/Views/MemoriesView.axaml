@@ -56,7 +56,7 @@
                     </Grid>
 
                     <!-- Conversation Filter (per-conversation memory triage) -->
-                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="12">
                         <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="6">
                             <TextBlock Text="Filter by conversation" FontSize="12" Opacity="0.6" />
                             <ComboBox ItemsSource="{Binding ConversationFilters}"
@@ -82,6 +82,12 @@
                                     Command="{Binding ExportConversationCsvCommand}"
                                     FontSize="12" Padding="10,8"
                                     ToolTip.Tip="Exports the currently filtered memories to a CSV file." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Orientation="Vertical" Spacing="6" VerticalAlignment="Bottom">
+                            <Button Content="Export history"
+                                    Command="{Binding ExportMemoryHistoryJsonCommand}"
+                                    FontSize="12" Padding="10,8"
+                                    ToolTip.Tip="Exports the visible memories with versioned revisions, sources, decisions, and effective times." />
                         </StackPanel>
                     </Grid>
 
@@ -164,6 +170,12 @@
                                                     Content="Delete"
                                                     FontSize="11" Padding="8,5" CornerRadius="6"
                                                     ToolTip.Tip="Permanently deletes this memory. This cannot be undone." />
+
+                                            <Button Command="{Binding #Root.DataContext.InspectMemoryCommand}"
+                                                    CommandParameter="{Binding Id}"
+                                                    Content="History"
+                                                    FontSize="11" Padding="8,5" CornerRadius="6"
+                                                    ToolTip.Tip="Inspect this memory's revision timeline and explicit review actions." />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -171,6 +183,114 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+            </Border>
+
+            <!-- R32 assertion lineage review -->
+            <Border Classes="settings-card" Padding="14" IsVisible="{Binding HasSelectedMemory}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Text="Memory revision review" FontSize="15" FontWeight="SemiBold" />
+                        <Button Grid.Column="1" Content="Close" Command="{Binding ClearMemoryInspectionCommand}"
+                                FontSize="11" Padding="8,5"
+                                ToolTip.Tip="Close the revision timeline." />
+                    </Grid>
+                    <TextBlock Text="{Binding SelectedMemory.Content}" TextWrapping="Wrap" FontSize="13" />
+                    <TextBlock Text="Draft a new fact revision. Presentation changes such as pinning stay separate."
+                               FontSize="11" Opacity="0.6" />
+                    <TextBox Text="{Binding RevisionDraftContent}"
+                             AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70"
+                             IsEnabled="{Binding !IsRevisionBusy}"
+                             ToolTip.Tip="The text saved by Revise or Correct becomes a new immutable content revision." />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Revise fact" Command="{Binding ReviseSelectedCommand}"
+                                IsEnabled="{Binding !IsRevisionBusy}"
+                                ToolTip.Tip="Create a successor revision while retaining the previous evidence." />
+                        <Button Content="Correct fact" Command="{Binding CorrectSelectedCommand}"
+                                IsEnabled="{Binding !IsRevisionBusy}"
+                                ToolTip.Tip="Create an explicit correction without inventing effective time." />
+                        <Button Content="Mark disputed" Command="{Binding MarkSelectedDisputedCommand}"
+                                IsEnabled="{Binding !IsRevisionBusy}"
+                                ToolTip.Tip="Keep the revision but exclude it from ordinary memory injection until reviewed." />
+                    </StackPanel>
+                    <TextBlock Text="Revision timeline" FontSize="13" FontWeight="SemiBold" />
+                    <ItemsControl ItemsSource="{Binding RevisionTimeline}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:MemoryRevisionItemViewModel">
+                                <Border Padding="10" Margin="0,0,0,8"
+                                        BorderThickness="1"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                    <StackPanel Spacing="4">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <TextBlock Text="{Binding StatusDisplay}" FontSize="11" FontWeight="SemiBold" />
+                                            <Button Grid.Column="1" Content="Restore as new revision"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.RestoreRevisionCommand}"
+                                                    CommandParameter="{Binding RevisionId}"
+                                                    IsEnabled="{Binding !$parent[ItemsControl].DataContext.IsRevisionBusy}"
+                                                    FontSize="10" Padding="7,4"
+                                                    ToolTip.Tip="Create a new current revision from this historical content. It never promotes history in place." />
+                                        </Grid>
+                                        <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontSize="12" />
+                                        <TextBlock Text="{Binding DiffDisplay}" TextWrapping="Wrap" FontSize="10" Opacity="0.65" />
+                                        <TextBlock Text="{Binding RecordedDisplay}" FontSize="10" Opacity="0.55" />
+                                        <TextBlock Text="{Binding EffectiveDisplay}" FontSize="10" Opacity="0.55" />
+                                        <TextBlock Text="{Binding Sources, StringFormat='Sources: {0}'}" FontSize="10" Opacity="0.55" />
+                                        <TextBlock Text="{Binding Decision, StringFormat='Decision: {0}'}" TextWrapping="Wrap" FontSize="10" Opacity="0.55" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Separator />
+                    <TextBlock Text="Contradiction review" FontSize="13" FontWeight="SemiBold" />
+                    <TextBlock Text="Select another visible memory to record a review-only proposal. Neither revision changes until an explicit decision is made."
+                               TextWrapping="Wrap" FontSize="11" Opacity="0.6" />
+                    <ComboBox ItemsSource="{Binding Memories}"
+                              SelectedItem="{Binding ContradictionTarget}"
+                              PlaceholderText="Select another memory"
+                              IsEnabled="{Binding !IsRevisionBusy}"
+                              ToolTip.Tip="Select the second exact current assertion for a bounded contradiction review.">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="vm:MemoryItemViewModel">
+                                <TextBlock Text="{Binding Content}" TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBox Text="{Binding ContradictionExplanation}"
+                             Watermark="Why do these two assertions appear incompatible?"
+                             IsEnabled="{Binding !IsRevisionBusy}"
+                             ToolTip.Tip="Describe the suspected contradiction. This records a proposal and does not change either assertion." />
+                    <Button Content="Record contradiction proposal"
+                            Command="{Binding ProposeContradictionCommand}"
+                            IsEnabled="{Binding !IsRevisionBusy}"
+                            HorizontalAlignment="Left"
+                            ToolTip.Tip="Record a review-only proposal with the two exact revision identities." />
+                    <ItemsControl ItemsSource="{Binding ContradictionProposals}"
+                                  IsVisible="{Binding HasContradictionProposals}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:KnowledgeContradictionProposalViewModel">
+                                <Border Padding="10" Margin="0,0,0,8"
+                                        BorderThickness="1"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding StatusDisplay}" FontSize="11" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding LeftRevision, StringFormat='Left: {0}'}" TextWrapping="Wrap" FontSize="10" />
+                                        <TextBlock Text="{Binding RightRevision, StringFormat='Right: {0}'}" TextWrapping="Wrap" FontSize="10" />
+                                        <TextBlock Text="{Binding Explanation}" TextWrapping="Wrap" FontSize="12" />
+                                        <TextBlock Text="{Binding SourceComparison}" TextWrapping="Wrap" FontSize="10" Opacity="0.6" />
+                                        <TextBlock Text="{Binding EffectiveTimeComparison}" TextWrapping="Wrap" FontSize="10" Opacity="0.6" />
+                                        <TextBlock Text="{Binding MissingEvidence, StringFormat='Missing evidence: {0}'}" TextWrapping="Wrap" FontSize="10" Opacity="0.6" />
+                                        <Button Content="Reject proposal"
+                                                Command="{Binding $parent[ItemsControl].DataContext.RejectContradictionProposalCommand}"
+                                                CommandParameter="{Binding ProposalId}"
+                                                IsEnabled="{Binding !$parent[ItemsControl].DataContext.IsRevisionBusy}"
+                                                HorizontalAlignment="Left" FontSize="10" Padding="7,4"
+                                                ToolTip.Tip="Reject this proposal without changing either exact revision." />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
             </Border>
 
             <!-- Empty State -->

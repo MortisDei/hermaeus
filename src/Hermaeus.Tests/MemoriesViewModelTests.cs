@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -105,5 +106,82 @@ public sealed class MemoriesViewModelTests
         Assert.True(Directory.Exists(exportDir));
         var file = Directory.GetFiles(exportDir, "memories-conv-A-*.csv").Single();
         Assert.Contains("alpha content", File.ReadAllText(file));
+    }
+
+    [Fact]
+    public async Task ExportMemoryHistoryJson_writes_versioned_redacted_lineage()
+    {
+        using var temp = new TempDir();
+        var (vm, conversations, memories, settings) = NewViewModel(temp);
+        await conversations.InitializeAsync();
+        await memories.InitializeAsync();
+        var first = await memories.CreateAssertionAsync(new KnowledgeRevisionDraft(
+            new Memory { Id = "memory-versioned", Content = "api_key=secret-value" },
+            SourceReferences: [new SourceReference(ProvenanceKind.Memory, "Memory source")],
+            Decision: new KnowledgeRevisionDecision("create", "owner", "accepted", DateTime.UtcNow)));
+        await memories.ReviseAssertionAsync("memory-versioned", first.RevisionId,
+            new KnowledgeRevisionDraft(new Memory { Id = "memory-versioned", Content = "updated fact" }));
+
+        await vm.InitializeAsync();
+        await vm.ExportMemoryHistoryJsonAsync();
+
+        var exportDir = Path.Combine(SettingsService.ResolveDataRoot(settings.Settings), "exports");
+        var file = Directory.GetFiles(exportDir, "memories-history-*.json").Single();
+        var json = File.ReadAllText(file);
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal(1, document.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal(1, document.RootElement.GetProperty("assertions").GetArrayLength());
+        Assert.Contains("updated fact", json);
+        Assert.Contains("[redacted]", json);
+        Assert.DoesNotContain("secret-value", json);
+        Assert.Contains(first.RevisionId, json);
+    }
+
+    [Fact]
+    public async Task InspectMemory_exposes_a_bounded_diff_for_adjacent_revisions()
+    {
+        using var temp = new TempDir();
+        var (vm, conversations, memories, _) = NewViewModel(temp);
+        await conversations.InitializeAsync();
+        await memories.InitializeAsync();
+        var first = await memories.CreateAssertionAsync(new KnowledgeRevisionDraft(
+            new Memory { Id = "memory-diff", Content = "old content" }));
+        await memories.ReviseAssertionAsync("memory-diff", first.RevisionId,
+            new KnowledgeRevisionDraft(new Memory { Id = "memory-diff", Content = "new content" }));
+
+        await vm.InitializeAsync();
+        await vm.InspectMemoryAsync("memory-diff");
+
+        Assert.Equal(2, vm.RevisionTimeline.Count);
+        Assert.Contains("- old content + new content", vm.RevisionTimeline[0].DiffDisplay);
+        Assert.Equal("Diff: initial revision", vm.RevisionTimeline[1].DiffDisplay);
+    }
+
+    [Fact]
+    public async Task Contradiction_review_records_and_rejects_without_mutating_memories()
+    {
+        using var temp = new TempDir();
+        var (vm, conversations, memories, _) = NewViewModel(temp);
+        await conversations.InitializeAsync();
+        await memories.InitializeAsync();
+        await memories.CreateAssertionAsync(new KnowledgeRevisionDraft(
+            new Memory { Id = "review-left", Content = "left fact" }));
+        await memories.CreateAssertionAsync(new KnowledgeRevisionDraft(
+            new Memory { Id = "review-right", Content = "right fact" }));
+
+        await vm.InitializeAsync();
+        await vm.InspectMemoryAsync("review-left");
+        vm.ContradictionTarget = vm.Memories.Single(item => item.Id == "review-right");
+        vm.ContradictionExplanation = "These facts need an owner review.";
+        await vm.ProposeContradictionAsync();
+
+        var proposal = Assert.Single(vm.ContradictionProposals);
+        Assert.Contains("review-left", proposal.LeftRevision);
+        Assert.Contains("review-right", proposal.RightRevision);
+        await vm.RejectContradictionProposalAsync(proposal.ProposalId);
+
+        Assert.Empty(vm.ContradictionProposals);
+        Assert.Equal("left fact", (await memories.GetByIdAsync("review-left"))!.Content);
+        Assert.Equal("right fact", (await memories.GetByIdAsync("review-right"))!.Content);
     }
 }

@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Hermaeus.Services;
 
 namespace Hermaeus.ViewModels;
 
@@ -10,7 +12,9 @@ namespace Hermaeus.ViewModels;
 /// </summary>
 public partial class MemoriesViewModel : ViewModelBase
 {
+    private static readonly RedactionService ExportRedactor = new();
     private readonly IMemoryStore _store;
+    private readonly IKnowledgeRevisionStore _knowledge;
     private readonly IConversationStore _conversations;
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
@@ -18,6 +22,8 @@ public partial class MemoriesViewModel : ViewModelBase
     private CancellationTokenSource? _searchTextCts;
 
     public UiBoundCollection<MemoryItemViewModel> Memories { get; } = [];
+    public UiBoundCollection<MemoryRevisionItemViewModel> RevisionTimeline { get; } = [];
+    public UiBoundCollection<KnowledgeContradictionProposalViewModel> ContradictionProposals { get; } = [];
 
     /// <summary>Per-conversation memory counts, for triaging where memory sprawl is
     /// coming from. Replaces the standalone Session Usage panel (Feature Audit: Merge).</summary>
@@ -30,23 +36,38 @@ public partial class MemoriesViewModel : ViewModelBase
     [ObservableProperty] private int _totalCount;
     [ObservableProperty] private int _embeddingMismatchCount;
     [ObservableProperty] private bool _isReembedding;
+    [ObservableProperty] private MemoryItemViewModel? _selectedMemory;
+    [ObservableProperty] private string _revisionDraftContent = string.Empty;
+    [ObservableProperty] private bool _isRevisionBusy;
+    [ObservableProperty] private MemoryItemViewModel? _contradictionTarget;
+    [ObservableProperty] private string _contradictionExplanation = string.Empty;
 
     public List<string> AvailableCategories { get; } = ["All", "facts", "preferences", "learned_behaviors", "interests"];
     public Func<MemoryItemViewModel, Task<bool>>? RequestDeleteConfirmation { get; set; }
 
-    public MemoriesViewModel(IMemoryStore store, IConversationStore conversations, ISettingsService settings, IToastService toasts,
-        IActivityRecorder? activity = null)
+    public MemoriesViewModel(
+        IMemoryStore store,
+        IConversationStore conversations,
+        ISettingsService settings,
+        IToastService toasts,
+        IActivityRecorder? activity = null,
+        IKnowledgeRevisionStore? knowledge = null)
     {
         _activity = activity;
         _store = store;
+        _knowledge = knowledge ?? store as IKnowledgeRevisionStore
+            ?? throw new ArgumentException("The memory store must expose knowledge revision writes.", nameof(store));
         _conversations = conversations;
         _settings = settings;
         _toasts = toasts;
         _selectedCategory = "All";
         Memories.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoMemories));
+        ContradictionProposals.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasContradictionProposals));
     }
 
     public bool HasNoMemories => Memories.Count == 0;
+    public bool HasSelectedMemory => SelectedMemory is not null;
+    public bool HasContradictionProposals => ContradictionProposals.Count > 0;
 
     [RelayCommand]
     public async Task InitializeAsync()
@@ -73,6 +94,7 @@ public partial class MemoriesViewModel : ViewModelBase
         await LoadMemoriesAsync();
         await RefreshConversationFiltersAsync();
         await RefreshEmbeddingMismatchAsync();
+        await RefreshContradictionProposalsAsync();
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
@@ -235,6 +257,30 @@ public partial class MemoriesViewModel : ViewModelBase
     private bool CanExportConversationCsv() => SelectedConversationFilter is not null;
 
     [RelayCommand]
+    public async Task ExportMemoryHistoryJsonAsync()
+    {
+        var assertions = new List<VersionedMemoryAssertionExport>();
+        foreach (var memory in Memories)
+        {
+            var history = await _knowledge.GetHistoryAsync(memory.Id);
+            if (history.Count == 0) continue;
+            assertions.Add(new VersionedMemoryAssertionExport(
+                memory.Id,
+                history.Select(ToVersionedMemoryRevisionExport).ToList()));
+        }
+
+        var export = new VersionedMemoryExport(1, DateTime.UtcNow, assertions);
+        var outDir = Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "exports");
+        var file = Path.Combine(outDir, $"memories-history-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.json");
+        var json = JsonSerializer.Serialize(export, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true
+        });
+        await AtomicFile.WriteAllTextAsync(file, json);
+        _toasts.Show("Exported", $"Wrote {assertions.Count} memory histories to {file}", ToastKind.Success);
+    }
+
+    [RelayCommand]
     public void ClearConversationFilter()
     {
         SelectedConversationFilter = null;
@@ -248,13 +294,199 @@ public partial class MemoriesViewModel : ViewModelBase
             var item = Memories.FirstOrDefault(m => m.Id == memoryId);
             if (item is null || RequestDeleteConfirmation is null || !await RequestDeleteConfirmation(item))
                 return;
-            await _store.DeleteAsync(memoryId);
+            var revision = await _knowledge.GetCurrentRevisionAsync(memoryId);
+            if (revision is not null)
+                await _knowledge.HardDeleteAsync(memoryId, revision.RevisionId);
             Memories.Remove(item);
             _toasts.Show("Memory deleted", "The memory has been removed.", ToastKind.Info);
         }
         catch (Exception ex)
         {
             _toasts.Show("Error", $"Failed to delete memory: {ex.Message}", ToastKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    public async Task InspectMemoryAsync(string memoryId)
+    {
+        var memory = await _store.GetByIdAsync(memoryId);
+        if (memory is null)
+        {
+            SelectedMemory = null;
+            RevisionTimeline.Clear();
+            return;
+        }
+
+        var revision = await _knowledge.GetCurrentRevisionAsync(memoryId);
+        if (revision is null) return;
+        var history = await _knowledge.GetHistoryAsync(memoryId);
+        SelectedMemory = ToViewModel(memory);
+        RevisionDraftContent = memory.Content;
+        RevisionTimeline.Clear();
+        for (var index = 0; index < history.Count; index++)
+        {
+            var previous = index + 1 < history.Count ? history[index + 1] : null;
+            RevisionTimeline.Add(ToRevisionViewModel(history[index], previous));
+        }
+        OnPropertyChanged(nameof(HasSelectedMemory));
+    }
+
+    [RelayCommand]
+    public async Task RefreshContradictionProposalsAsync()
+    {
+        try
+        {
+            var proposals = await _knowledge.GetContradictionProposalsAsync();
+            ContradictionProposals.Clear();
+            foreach (var proposal in proposals)
+                ContradictionProposals.Add(ToContradictionProposalViewModel(proposal));
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Error", $"Failed to load contradiction proposals: {ex.Message}", ToastKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    public async Task ProposeContradictionAsync()
+    {
+        if (SelectedMemory is null || ContradictionTarget is null
+            || string.Equals(SelectedMemory.Id, ContradictionTarget.Id, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(ContradictionExplanation))
+            return;
+
+        IsRevisionBusy = true;
+        try
+        {
+            var left = await _knowledge.GetCurrentRevisionAsync(SelectedMemory.Id);
+            var right = await _knowledge.GetCurrentRevisionAsync(ContradictionTarget.Id);
+            if (left is null || right is null) return;
+            await _knowledge.CreateContradictionProposalAsync(new KnowledgeContradictionProposalDraft(
+                left.AssertionId,
+                left.RevisionId,
+                right.AssertionId,
+                right.RevisionId,
+                ContradictionExplanation.Trim(),
+                "Compare the exact source references shown in each revision timeline.",
+                "Compare the exact recorded and effective times shown in each revision timeline.",
+                KnowledgeContradictionDisposition.Coexist,
+                "Owner review is required before either assertion can be changed."));
+            ContradictionExplanation = string.Empty;
+            await RefreshContradictionProposalsAsync();
+            _toasts.Show("Proposal recorded", "Neither memory was changed. Review the pending contradiction below.", ToastKind.Info);
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task RejectContradictionProposalAsync(string proposalId)
+    {
+        IsRevisionBusy = true;
+        try
+        {
+            await _knowledge.RejectContradictionProposalAsync(proposalId,
+                new KnowledgeRevisionDecision("reject-contradiction", "owner",
+                    "Rejected from Memories review; neither assertion was changed.", DateTime.UtcNow));
+            await RefreshContradictionProposalsAsync();
+            _toasts.Show("Proposal rejected", "Both exact revisions remain available in their timelines.", ToastKind.Info);
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task ReviseSelectedAsync()
+    {
+        await WriteSelectedRevisionAsync(correct: false);
+    }
+
+    [RelayCommand]
+    public async Task CorrectSelectedAsync()
+    {
+        await WriteSelectedRevisionAsync(correct: true);
+    }
+
+    [RelayCommand]
+    public async Task MarkSelectedDisputedAsync()
+    {
+        if (SelectedMemory is null) return;
+        IsRevisionBusy = true;
+        try
+        {
+            var current = await _knowledge.GetCurrentRevisionAsync(SelectedMemory.Id);
+            if (current is null) return;
+            await _knowledge.SetDisputeAsync(SelectedMemory.Id, current.RevisionId, true,
+                new KnowledgeRevisionDecision("dispute", "owner", "Marked disputed from Memories review.", DateTime.UtcNow));
+            await InspectMemoryAsync(SelectedMemory.Id);
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task RestoreRevisionAsync(string revisionId)
+    {
+        if (SelectedMemory is null) return;
+        IsRevisionBusy = true;
+        try
+        {
+            var current = await _knowledge.GetCurrentRevisionAsync(SelectedMemory.Id);
+            if (current is null) return;
+            await _knowledge.RestoreRevisionAsync(SelectedMemory.Id, current.RevisionId, revisionId,
+                new KnowledgeRevisionDecision("restore", "owner", "Restored from Memories review.", DateTime.UtcNow));
+            await SearchAsync();
+            await InspectMemoryAsync(SelectedMemory.Id);
+        }
+        finally
+        {
+            IsRevisionBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public void ClearMemoryInspection()
+    {
+        SelectedMemory = null;
+        RevisionTimeline.Clear();
+        RevisionDraftContent = string.Empty;
+        OnPropertyChanged(nameof(HasSelectedMemory));
+    }
+
+    private async Task WriteSelectedRevisionAsync(bool correct)
+    {
+        if (SelectedMemory is null || string.IsNullOrWhiteSpace(RevisionDraftContent)) return;
+        IsRevisionBusy = true;
+        try
+        {
+            var memory = await _store.GetByIdAsync(SelectedMemory.Id);
+            var current = await _knowledge.GetCurrentRevisionAsync(SelectedMemory.Id);
+            if (memory is null || current is null) return;
+            memory.Content = RevisionDraftContent.Trim();
+            var draft = new KnowledgeRevisionDraft(
+                memory,
+                TemporalOrigin: KnowledgeTemporalOrigin.UserProvided,
+                Decision: new KnowledgeRevisionDecision(
+                    correct ? "correction" : "revision",
+                    "owner",
+                    correct ? "Corrected from Memories review." : "Revised from Memories review.",
+                    DateTime.UtcNow));
+            if (correct)
+                await _knowledge.CorrectAssertionAsync(memory.Id, current.RevisionId, draft);
+            else
+                await _knowledge.ReviseAssertionAsync(memory.Id, current.RevisionId, draft);
+            await SearchAsync();
+            await InspectMemoryAsync(memory.Id);
+        }
+        finally
+        {
+            IsRevisionBusy = false;
         }
     }
 
@@ -267,7 +499,10 @@ public partial class MemoriesViewModel : ViewModelBase
             if (memory is null) return;
 
             memory.IsPinned = !memory.IsPinned;
-            await _store.SaveAsync(memory);
+            var revision = await _knowledge.GetCurrentRevisionAsync(memoryId);
+            if (revision is null) return;
+            await _knowledge.MutatePresentationAsync(memoryId, revision.RevisionId,
+                KnowledgePresentationMutation.FromMemory(memory));
 
             var item = Memories.FirstOrDefault(m => m.Id == memoryId);
             if (item is not null)
@@ -290,7 +525,10 @@ public partial class MemoriesViewModel : ViewModelBase
             if (memory is null) return;
 
             memory.IsArchived = !memory.IsArchived;
-            await _store.SaveAsync(memory);
+            var revision = await _knowledge.GetCurrentRevisionAsync(memoryId);
+            if (revision is null) return;
+            await _knowledge.MutatePresentationAsync(memoryId, revision.RevisionId,
+                KnowledgePresentationMutation.FromMemory(memory));
 
             var item = Memories.FirstOrDefault(m => m.Id == memoryId);
             if (item is not null)
@@ -375,6 +613,135 @@ public partial class MemoriesViewModel : ViewModelBase
         Tags = string.Join(", ", memory.Tags),
         FrequencyCount = memory.FrequencyCount
     };
+
+    private static MemoryRevisionItemViewModel ToRevisionViewModel(
+        KnowledgeAssertionRevision revision,
+        KnowledgeAssertionRevision? previous) => new()
+    {
+        RevisionId = revision.RevisionId,
+        PreviousRevisionId = revision.PreviousRevisionId,
+        Content = revision.Content,
+        Status = revision.Status,
+        RecordedAt = revision.RecordedAtUtc,
+        EffectiveFrom = revision.EffectiveFromUtc,
+        EffectiveTo = revision.EffectiveToUtc,
+        DiffDisplay = BuildRevisionDiff(revision.Content, previous?.Content),
+        Decision = revision.Decision is null
+            ? "No decision recorded"
+            : $"{revision.Decision.Kind} by {revision.Decision.Actor}: {revision.Decision.Reason}",
+        Sources = revision.SourceReferences.Count == 0
+            ? "No source references"
+            : string.Join(", ", revision.SourceReferences.Select(source => source.Title))
+    };
+
+    private static string BuildRevisionDiff(string current, string? previous)
+    {
+        if (previous is null)
+            return "Diff: initial revision";
+        if (string.Equals(current, previous, StringComparison.Ordinal))
+            return "Diff: content unchanged";
+
+        static string Preview(string value)
+        {
+            var compact = value.ReplaceLineEndings(" ").Trim();
+            return compact.Length <= 180 ? compact : $"{compact[..180]}...";
+        }
+
+        return $"Diff: - {Preview(previous)} + {Preview(current)}";
+    }
+
+    private static VersionedMemoryRevisionExport ToVersionedMemoryRevisionExport(KnowledgeAssertionRevision revision) =>
+        new(
+            revision.RevisionId,
+            revision.PreviousRevisionId,
+            RedactAndBound(revision.Content, 65536),
+            revision.Scope,
+            RedactAndBound(revision.ScopeId, 2048),
+            RedactAndBound(revision.Category, 128),
+            revision.RecordedAtUtc,
+            revision.EffectiveFromUtc,
+            revision.EffectiveToUtc,
+            revision.TemporalOrigin,
+            revision.SourceReferences.Select(source => new VersionedMemorySourceExport(
+                source.Kind,
+                RedactAndBound(source.Title, 512),
+                RedactAndBound(source.Locator, 2048),
+                RedactAndBound(source.Snippet, 4096),
+                source.Score,
+                source.Timestamp,
+                source.EvidenceOrigin)).ToList(),
+            revision.Status,
+            revision.Decision is null
+                ? null
+                : new VersionedMemoryDecisionExport(
+                    RedactAndBound(revision.Decision.Kind, 128),
+                    RedactAndBound(revision.Decision.Actor, 128),
+                    RedactAndBound(revision.Decision.Reason, 2048),
+                    revision.Decision.RecordedAtUtc,
+                    revision.Decision.DecisionId));
+
+    private static KnowledgeContradictionProposalViewModel ToContradictionProposalViewModel(
+        KnowledgeContradictionProposal proposal) => new()
+        {
+            ProposalId = proposal.ProposalId,
+            LeftRevision = $"{proposal.LeftAssertionId} / {proposal.LeftRevisionId}",
+            RightRevision = $"{proposal.RightAssertionId} / {proposal.RightRevisionId}",
+            Explanation = proposal.Explanation,
+            SourceComparison = proposal.SourceComparison,
+            EffectiveTimeComparison = proposal.EffectiveTimeComparison,
+            MissingEvidence = proposal.MissingEvidence,
+            Status = proposal.Status,
+            Decision = proposal.Decision is null
+                ? "Pending owner review"
+                : $"{proposal.Decision.Kind} by {proposal.Decision.Actor}: {proposal.Decision.Reason}"
+        };
+
+    private static string? RedactAndBound(string? value, int maximum)
+    {
+        if (value is null) return null;
+        var redacted = ExportRedactor.Redact(value);
+        return redacted[..Math.Min(redacted.Length, maximum)];
+    }
+
+    private sealed record VersionedMemoryExport(
+        int Version,
+        DateTime ExportedAtUtc,
+        IReadOnlyList<VersionedMemoryAssertionExport> Assertions);
+
+    private sealed record VersionedMemoryAssertionExport(
+        string AssertionId,
+        IReadOnlyList<VersionedMemoryRevisionExport> Revisions);
+
+    private sealed record VersionedMemoryRevisionExport(
+        string RevisionId,
+        string? PreviousRevisionId,
+        string? Content,
+        MemoryScope Scope,
+        string? ScopeId,
+        string? Category,
+        DateTime RecordedAtUtc,
+        DateTime? EffectiveFromUtc,
+        DateTime? EffectiveToUtc,
+        KnowledgeTemporalOrigin TemporalOrigin,
+        IReadOnlyList<VersionedMemorySourceExport> Sources,
+        KnowledgeRevisionStatus Status,
+        VersionedMemoryDecisionExport? Decision);
+
+    private sealed record VersionedMemorySourceExport(
+        ProvenanceKind Kind,
+        string? Title,
+        string? Locator,
+        string? Snippet,
+        double? Score,
+        DateTime? Timestamp,
+        EvidenceOrigin EvidenceOrigin);
+
+    private sealed record VersionedMemoryDecisionExport(
+        string? Kind,
+        string? Actor,
+        string? Reason,
+        DateTime RecordedAtUtc,
+        string? DecisionId);
 }
 
 /// <summary>
@@ -440,6 +807,41 @@ public partial class MemoryItemViewModel : ObservableObject
         OnPropertyChanged(nameof(PinButtonLabel));
         OnPropertyChanged(nameof(PinStateLabel));
     }
+}
+
+public sealed class MemoryRevisionItemViewModel
+{
+    public required string RevisionId { get; init; }
+    public string? PreviousRevisionId { get; init; }
+    public required string Content { get; init; }
+    public required KnowledgeRevisionStatus Status { get; init; }
+    public required DateTime RecordedAt { get; init; }
+    public DateTime? EffectiveFrom { get; init; }
+    public DateTime? EffectiveTo { get; init; }
+    public required string DiffDisplay { get; init; }
+    public required string Decision { get; init; }
+    public required string Sources { get; init; }
+    public string StatusDisplay => Status.ToString();
+    public string RecordedDisplay => $"Recorded {RecordedAt.ToLocalTime():g}";
+    public string EffectiveDisplay => EffectiveFrom is null
+        ? "Effective time: Unknown"
+        : EffectiveTo is null
+            ? $"Effective from {EffectiveFrom.Value.ToLocalTime():g}"
+            : $"Effective {EffectiveFrom.Value.ToLocalTime():g} to {EffectiveTo.Value.ToLocalTime():g}";
+}
+
+public sealed class KnowledgeContradictionProposalViewModel
+{
+    public required string ProposalId { get; init; }
+    public required string LeftRevision { get; init; }
+    public required string RightRevision { get; init; }
+    public required string Explanation { get; init; }
+    public required string SourceComparison { get; init; }
+    public required string EffectiveTimeComparison { get; init; }
+    public required string MissingEvidence { get; init; }
+    public required KnowledgeContradictionProposalStatus Status { get; init; }
+    public required string Decision { get; init; }
+    public string StatusDisplay => Status.ToString();
 }
 
 /// <summary>

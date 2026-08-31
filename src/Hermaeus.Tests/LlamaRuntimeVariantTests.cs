@@ -276,12 +276,14 @@ public sealed class LlamaRuntimeVariantTests
     [Fact]
     public void Managed_llama_install_path_is_derived_from_the_configured_AI_assets_root()
     {
+        using var temp = new TempDir();
         var setup = new LlamaServerSetupService();
+        var assetsRoot = temp.PathFor("ai-assets");
 
         Assert.Equal(
-            Path.Combine("/mnt/Gaming/AI", "llama-server"),
-            setup.GetDefaultInstallPath("/mnt/Gaming/AI"));
-        Assert.DoesNotContain("Data", setup.GetDefaultInstallPath("/mnt/Gaming/AI"), StringComparison.OrdinalIgnoreCase);
+            Path.Combine(assetsRoot, "llama-server"),
+            setup.GetDefaultInstallPath(assetsRoot));
+        Assert.DoesNotContain("Data", setup.GetDefaultInstallPath(assetsRoot), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

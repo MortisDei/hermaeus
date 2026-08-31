@@ -80,7 +80,9 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IProjectStateStore>(provider => provider.GetRequiredService<ProjectStore>());
         s.AddSingleton<ConversationExportService>();
         s.AddSingleton<ChatArtifactService>();
-        s.AddSingleton<IMemoryStore, MemoryStore>();
+        s.AddSingleton<MemoryStore>();
+        s.AddSingleton<IMemoryStore>(provider => provider.GetRequiredService<MemoryStore>());
+        s.AddSingleton<IKnowledgeRevisionStore>(provider => provider.GetRequiredService<MemoryStore>());
         s.AddSingleton<MemoryExtractionService>();
         s.AddSingleton<MemoryInjectionService>();
                 s.AddSingleton<IConversationMemoryService, ConversationMemoryService>();

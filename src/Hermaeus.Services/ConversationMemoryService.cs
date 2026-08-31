@@ -20,6 +20,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
     private readonly ISettingsService _settings;
     private readonly IConversationStore _conversations;
     private readonly IMemoryStore _memories;
+    private readonly IKnowledgeRevisionStore _knowledge;
     private readonly MemoryExtractionService _extractor;
     private readonly ILlmService _llm;
     private readonly IRuntimeLogService _logs;
@@ -33,11 +34,14 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         IMemoryStore memories,
         MemoryExtractionService extractor,
         ILlmService llm,
-        IRuntimeLogService logs)
+        IRuntimeLogService logs,
+        IKnowledgeRevisionStore? knowledge = null)
     {
         _settings = settings;
         _conversations = conversations;
         _memories = memories;
+        _knowledge = knowledge ?? memories as IKnowledgeRevisionStore
+            ?? throw new ArgumentException("The memory store must expose knowledge revision writes.", nameof(memories));
         _extractor = extractor;
         _llm = llm;
         _logs = logs;
@@ -101,8 +105,14 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             var memory = await _memories.GetByIdAsync(id, ct);
             if (memory is null) continue;
             memory.Content = newContent;
-            memory.UpdatedAt = DateTime.UtcNow;
-            await _memories.SaveAsync(memory, ct);
+            var revision = await _knowledge.GetCurrentRevisionAsync(id, ct);
+            if (revision is null) continue;
+            await _knowledge.ReviseAssertionAsync(id, revision.RevisionId, new KnowledgeRevisionDraft(
+                memory,
+                TemporalOrigin: KnowledgeTemporalOrigin.UserProvided,
+                SourceReferences: memory.Source is null ? null : [memory.Source],
+                Decision: new KnowledgeRevisionDecision(
+                    "memory-update", "model", "Accepted from an injected memory update marker.", DateTime.UtcNow)), ct);
         }
 
         foreach (var id in _extractor.ExtractForgetMarkers(responseText))
@@ -117,7 +127,10 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             var memory = await _memories.GetByIdAsync(id, ct);
             if (memory is null || memory.IsPinned) continue;
             memory.IsArchived = true;
-            await _memories.SaveAsync(memory, ct);
+            var revision = await _knowledge.GetCurrentRevisionAsync(id, ct);
+            if (revision is not null)
+                await _knowledge.MutatePresentationAsync(id, revision.RevisionId,
+                    KnowledgePresentationMutation.FromMemory(memory), ct);
         }
     }
 
@@ -381,7 +394,12 @@ public sealed class ConversationMemoryService : IConversationMemoryService
 
             if (duplicate is null)
             {
-                await _memories.SaveAsync(memory, ct);
+                await _knowledge.CreateAssertionAsync(new KnowledgeRevisionDraft(
+                    memory,
+                    TemporalOrigin: KnowledgeTemporalOrigin.ModelInference,
+                    SourceReferences: memory.Source is null ? [] : [memory.Source],
+                    Decision: new KnowledgeRevisionDecision(
+                        "memory-extraction", "model", "Accepted extracted durable memory.", DateTime.UtcNow)), ct);
                 existing.Add(memory);
                 continue;
             }
@@ -396,7 +414,10 @@ public sealed class ConversationMemoryService : IConversationMemoryService
                 .ToList();
             duplicate.SourceConversationId ??= conversationId;
             duplicate.Source ??= new SourceReference(ProvenanceKind.Memory, MemoryExtractionService.TitleFrom(duplicate.Content), Locator: conversationId, Snippet: duplicate.Content, Timestamp: DateTime.UtcNow);
-            await _memories.SaveAsync(duplicate, ct);
+            var revision = await _knowledge.GetCurrentRevisionAsync(duplicate.Id, ct)
+                ?? throw new InvalidOperationException($"Memory '{duplicate.Id}' has no current revision.");
+            await _knowledge.MutatePresentationAsync(duplicate.Id, revision.RevisionId,
+                KnowledgePresentationMutation.FromMemory(duplicate), ct);
         }
     }
 
@@ -434,7 +455,10 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         foreach (var memory in scoped.Skip(maxMemoriesPerConversation).Where(m => !m.IsPinned && !m.IsArchived))
         {
             memory.IsArchived = true;
-            await _memories.SaveAsync(memory, ct);
+            var revision = await _knowledge.GetCurrentRevisionAsync(memory.Id, ct);
+            if (revision is not null)
+                await _knowledge.MutatePresentationAsync(memory.Id, revision.RevisionId,
+                    KnowledgePresentationMutation.FromMemory(memory), ct);
         }
 
         _logs.Add(new RuntimeLogEntry(

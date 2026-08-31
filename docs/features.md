@@ -142,6 +142,16 @@ See the [RAG reference](rag.md).
 - Auto-summary extracts structured memory metadata in the background. Providers
   that can enforce the required response shape use that constraint, while the
   existing parse-and-repair fallback remains for other providers.
+- Each memory keeps a stable assertion id and immutable content revisions with
+  recorded time, optional established effective time, source references,
+  decisions, and explicit Current, Superseded, Disputed, or Archived state.
+  Current Chat receipts identify the exact revision; superseded and disputed
+  revisions are excluded from ordinary injection.
+- Memories offers a linear revision timeline with adjacent content diffs,
+  source and decision details, explicit revise/correct/dispute/restore actions,
+  and review-only contradiction proposals. A versioned redacted JSON export
+  preserves assertion, revision, effective-time, source, and decision
+  structure. The existing CSV export remains current-projection-only.
 - Agent lessons are a separate, reviewable store. Optional read-only use of
   Global-scope lessons in Chat never changes the Agent safety gate.
 
