@@ -12,27 +12,34 @@ public partial class SystemOverviewViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly PrivacyAuditService _privacyAudit;
     private readonly IStartupTimingService? _startupTiming;
+    private readonly IResourceCoordinator? _resourceCoordinator;
 
     public UiBoundCollection<SystemMetricViewModel> Metrics { get; } = [];
     public UiBoundCollection<GpuInfoViewModel> Gpus { get; } = [];
     public UiBoundCollection<ComponentStatusViewModel> Components { get; } = [];
     public UiBoundCollection<PrivacyAuditItemViewModel> PrivacyAuditItems { get; } = [];
+    public UiBoundCollection<ResourceConsumerReceiptViewModel> ResourceConsumers { get; } = [];
+    public UiBoundCollection<ResourceDeviceReceiptViewModel> ResourceDevices { get; } = [];
+    public UiBoundCollection<ResourceUnknownViewModel> ResourceUnknowns { get; } = [];
 
     [ObservableProperty] private string _privacyAuditSummary = string.Empty;
     [ObservableProperty] private string _status = "Ready.";
     [ObservableProperty] private bool _isRefreshing;
     [ObservableProperty] private SystemSnapshot? _snapshot;
+    [ObservableProperty] private string _resourceStatus = "No workload resource snapshot captured.";
 
     public SystemOverviewViewModel(
         ISystemInfoService system,
         IToastService toasts,
         PrivacyAuditService privacyAudit,
-        IStartupTimingService? startupTiming = null)
+        IStartupTimingService? startupTiming = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _system = system;
         _toasts = toasts;
         _privacyAudit = privacyAudit;
         _startupTiming = startupTiming;
+        _resourceCoordinator = resourceCoordinator;
         if (_startupTiming is not null)
             _startupTiming.Changed += RefreshStartupBreakdown;
         RefreshStartupBreakdown();
@@ -127,6 +134,8 @@ public partial class SystemOverviewViewModel : ObservableObject
             foreach (var component in Snapshot.Components)
                 Components.Add(new ComponentStatusViewModel(component));
 
+            await RefreshResourceSnapshotAsync();
+
             await RefreshPrivacyAuditAsync();
 
             Status = $"Updated {Snapshot.CapturedAt.ToLocalTime():T}.";
@@ -141,6 +150,58 @@ public partial class SystemOverviewViewModel : ObservableObject
             IsRefreshing = false;
         }
     }
+
+    private async Task RefreshResourceSnapshotAsync()
+    {
+        ResourceConsumers.Clear();
+        ResourceDevices.Clear();
+        ResourceUnknowns.Clear();
+        if (_resourceCoordinator is null)
+        {
+            ResourceStatus = "Workload resource admission is unavailable.";
+            return;
+        }
+
+        var resourceSnapshot = await _resourceCoordinator.CaptureSnapshotAsync();
+        foreach (var consumer in resourceSnapshot.Consumers)
+        {
+            var allocations = resourceSnapshot.Allocations
+                .Where(allocation => string.Equals(allocation.ConsumerId, consumer.ConsumerId, StringComparison.Ordinal))
+                .ToArray();
+            var knownComponents = allocations.SelectMany(allocation => allocation.Components)
+                .Where(component => component.ObservedBytes.HasValue || component.ReservedBytes.HasValue || component.PredictedBytes.HasValue)
+                .ToArray();
+            var gpuBytes = knownComponents.Where(component => component.ResourceKind == ResourceKind.DeviceMemory)
+                .Sum(ComponentBytes);
+            var systemBytes = knownComponents.Where(component => component.ResourceKind == ResourceKind.SystemResidentMemory)
+                .Sum(ComponentBytes);
+            var unknownCount = allocations.SelectMany(allocation => allocation.Components)
+                .Count(component => !component.ObservedBytes.HasValue && !component.ReservedBytes.HasValue && !component.PredictedBytes.HasValue);
+            ResourceConsumers.Add(new ResourceConsumerReceiptViewModel(
+                consumer.ConsumerId,
+                consumer.Kind.ToString(),
+                allocations.Length == 0 ? "Registered, not resident" : string.Join(", ", allocations.Select(a => a.LifecycleState)),
+                gpuBytes == 0 && !knownComponents.Any(component => component.ResourceKind == ResourceKind.DeviceMemory) ? "Unknown" : FormatBytes(gpuBytes),
+                systemBytes == 0 && !knownComponents.Any(component => component.ResourceKind == ResourceKind.SystemResidentMemory) ? "Unknown" : FormatBytes(systemBytes),
+                unknownCount == 0 ? "" : $"{unknownCount} component(s) Unknown"));
+        }
+
+        foreach (var device in resourceSnapshot.DeviceTotals)
+            ResourceDevices.Add(new ResourceDeviceReceiptViewModel(
+                device.DeviceId,
+                FormatOptionalBytes(device.UsedBytes),
+                FormatOptionalBytes(device.CapacityBytes)));
+
+        foreach (var unknown in resourceSnapshot.Unknowns)
+            ResourceUnknowns.Add(new ResourceUnknownViewModel(unknown.Code, unknown.Detail, unknown.ConsumerId));
+
+        ResourceStatus = $"Updated {resourceSnapshot.CapturedAtUtc.ToLocalTime():T}; {resourceSnapshot.Consumers.Count} consumer(s), {resourceSnapshot.Unknowns.Count} Unknown observation(s).";
+    }
+
+    private static long ComponentBytes(ResourceAllocationComponent component) =>
+        component.ObservedBytes ?? component.ReservedBytes ?? component.PredictedBytes ?? 0;
+
+    private static string FormatOptionalBytes(long? bytes) => bytes.HasValue ? FormatBytes(bytes.Value) : "Unknown";
 
     [RelayCommand]
     private async Task RefreshPrivacyAuditAsync()
@@ -174,6 +235,18 @@ public partial class SystemOverviewViewModel : ObservableObject
 public sealed record SystemMetricViewModel(string Name, string Value);
 
 public sealed record PrivacyAuditItemViewModel(string Name, string Status, string Detail);
+
+public sealed record ResourceConsumerReceiptViewModel(
+    string ConsumerId,
+    string Kind,
+    string State,
+    string DeviceMemory,
+    string SystemMemory,
+    string Unknown);
+
+public sealed record ResourceDeviceReceiptViewModel(string DeviceId, string Used, string Capacity);
+
+public sealed record ResourceUnknownViewModel(string Code, string Detail, string? ConsumerId);
 
 public sealed class GpuInfoViewModel
 {

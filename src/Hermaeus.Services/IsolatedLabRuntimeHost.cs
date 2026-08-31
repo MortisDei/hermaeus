@@ -15,12 +15,21 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
     private readonly RedactionService _redaction;
     private readonly SemaphoreSlim _manifestGate = new(1, 1);
     private readonly IRuntimeLogService? _runtimeLogs;
+    private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly IManagedRuntimeProcessFactory? _runtimeFactory;
 
-    public IsolatedLabRuntimeHost(ISettingsService settings, RedactionService redaction, IRuntimeLogService? runtimeLogs = null)
+    public IsolatedLabRuntimeHost(
+        ISettingsService settings,
+        RedactionService redaction,
+        IRuntimeLogService? runtimeLogs = null,
+        IResourceCoordinator? resourceCoordinator = null,
+        IManagedRuntimeProcessFactory? runtimeFactory = null)
     {
         _settings = settings;
         _redaction = redaction;
         _runtimeLogs = runtimeLogs;
+        _resourceCoordinator = resourceCoordinator;
+        _runtimeFactory = runtimeFactory;
     }
 
     private string ManifestPath => Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "lab", "runtime-ownership.json");
@@ -31,11 +40,23 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         LabDefinitionValidator.ValidateConfiguration(configuration, source.ExtraArgs);
         LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
         var port = ReserveLoopbackPort();
-        var manager = new ServerProcessManager(_redaction);
+        if (_runtimeFactory is null)
+            throw new InvalidOperationException("Managed runtime admission is unavailable; the isolated Lab runtime was not started.");
+        var manager = _runtimeFactory.Create();
         var isolated = LabConfigurationMapper.Apply(source, configuration, port);
+        IResourceAdmissionLease? lease = null;
         try
         {
-            await manager.StartAsync(isolated, ct);
+            if (_resourceCoordinator is null)
+                throw new InvalidOperationException("Resource admission is unavailable; the isolated Lab runtime was not started.");
+            _resourceCoordinator.RegisterConsumer(ResourceAllocationFactory.LabConsumer(runId));
+            var request = new ResourceAdmissionRequest(
+                ResourceAllocationFactory.LabConsumerId(runId),
+                ResourceAllocationFactory.LabProposal(runId, isolated),
+                callerId: $"lab.{runId}",
+                allowUnknown: true);
+            lease = await _resourceCoordinator.AcquireAsync(request, ct);
+            await manager.StartAsync(isolated, lease, ct);
             if (manager.Status != ServerStatus.Running || manager.CurrentProcessIdentity is not { } process)
             {
                 var error = string.IsNullOrWhiteSpace(manager.ErrorMessage)
@@ -72,6 +93,8 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
             finally
             {
                 manager.Dispose();
+                if (lease is not null)
+                    await lease.DisposeAsync();
             }
             throw;
         }

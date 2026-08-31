@@ -30,6 +30,7 @@ public sealed class MemoryStore : IMemoryStore
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _backfillCooldown;
     private readonly TimeSpan _queryEmbedTimeout;
+    private readonly IResourceCoordinator? _resourceCoordinator;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly SemaphoreSlim _backfillGate = new(1, 1);
@@ -54,7 +55,8 @@ public sealed class MemoryStore : IMemoryStore
         IRuntimeLogService? runtimeLogs = null,
         TimeProvider? timeProvider = null,
         TimeSpan? backfillCooldown = null,
-        TimeSpan? queryEmbedTimeout = null)
+        TimeSpan? queryEmbedTimeout = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _settings = settings;
         _embeddings = embeddings;
@@ -62,6 +64,7 @@ public sealed class MemoryStore : IMemoryStore
         _timeProvider = timeProvider ?? TimeProvider.System;
         _backfillCooldown = backfillCooldown ?? TimeSpan.FromMinutes(10);
         _queryEmbedTimeout = queryEmbedTimeout ?? DefaultQueryEmbedTimeout;
+        _resourceCoordinator = resourceCoordinator;
     }
 
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -618,8 +621,10 @@ public sealed class MemoryStore : IMemoryStore
         if (_embeddings is null) return;
         if (!await _backfillGate.WaitAsync(0, ct)) return;
 
+        IResourceAdmissionLease? lease = null;
         try
         {
+            lease = await AcquireBackfillLeaseAsync("rag.memory-backfill", nameof(MemoryStore), ct);
             await EnsureInitializedAsync(ct);
             await using var c = new SqliteConnection(Cs);
             await c.OpenAsync(ct);
@@ -668,8 +673,27 @@ public sealed class MemoryStore : IMemoryStore
         }
         finally
         {
+            if (lease is not null && !lease.IsReleased)
+                await lease.ReleaseAsync("memory embedding backfill completed");
             _backfillGate.Release();
         }
+    }
+
+    private async Task<IResourceAdmissionLease?> AcquireBackfillLeaseAsync(
+        string consumerId,
+        string lifecycleService,
+        CancellationToken ct)
+    {
+        if (_resourceCoordinator is null)
+            return null;
+        _resourceCoordinator.RegisterConsumer(
+            ResourceAllocationFactory.EmbeddingBackfillConsumer(consumerId, lifecycleService));
+        return await _resourceCoordinator.AcquireAsync(
+            new ResourceAdmissionRequest(
+                consumerId,
+                ResourceAllocationFactory.EmbeddingBackfillProposal(consumerId),
+                callerId: $"{consumerId}.start",
+                allowUnknown: true), ct);
     }
 
     private void LogQueryEmbedFallbackOnce(Exception ex)

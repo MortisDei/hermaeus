@@ -54,7 +54,7 @@ the stores into one schema.
 | 1 | Typed CPU/Auto/All/Exact launch intent and exact legacy/tune-profile migration; remove implicit tune-profile-on-Start mutation; canonical managed launch specification, conflict policy for core `ExtraArgs`, one configured/planned/rendered/effective/observed projection and fingerprint, versioned compatibility tests | 0 | mandatory correctness foundation | Yes |
 | 2 | Services-owned model inventory with bounded scan/GGUF/manifest cache and explicit invalidation; converge simple card fit onto the versioned prediction engine while preserving a labelled pre-download estimate | 0, 1 | mandatory shared foundation | Yes |
 | 3 | Resource consumer registry, allocation owner/component/per-device model, immutable snapshots, local/remote/owned identity, authoritative per-device and Unknown observations, in-process adapters, bounded persistence | 1, 2 | mandatory resource spine | Yes |
-| 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | No |
+| 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | Yes |
 | 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | No |
 | 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | No |
 | 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | No |
@@ -249,6 +249,31 @@ lifecycle, persistence projection, cancellation, and SQLite retention tests
 passed (23 focused); the full sequential suite passed with 2,400 passed and 17
 skipped out of 2,417 tests; and the zero-warning solution build passed. Test
 results were written outside the checkout.
+
+### 8.2.6 Batch 4 evidence
+
+`ResourceCoordinator` now captures a fresh immutable snapshot for each plan or
+acquire decision, applies explicit device and system headroom policy, retains
+negative headroom as `DoesNotFit`, and reports missing attribution or capacity
+as `Unknown`. Short-lived reservations are serialized, expire, honor
+cancellation, and release on owner failure or completion. They do not stop,
+unload, kill, or rewrite another consumer.
+
+Production composition passes admission through the managed server owner,
+the injected Lab managed-runtime factory, local XTTS and Python Kokoro process
+owners, in-process reranker, Whisper, and native Kokoro ONNX owners, and the
+Memory and Recall embedding backfill owners. The Services and System Overview
+receipts show feasibility, headroom, active allocations, device totals, and
+Unknown reasons without persisting raw paths or attributing whole-device totals
+to a process. Adapter discovery and lifecycle publication use one allocation
+identity, so a concurrent adapter read is not false-positive duplicate state.
+
+Batch 4 verification: focused admission and registry tests passed (31); the
+full sequential suite passed with 2,408 passed and 17 skipped out of 2,425
+tests; the zero-warning solution build passed; and version bump CI run
+`33360884985` passed on Ubuntu and Windows. Required PR-check attachment and
+the Linux/COSMIC and Windows owner live resource-pressure gates remain
+operational follow-up, not simulated evidence.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

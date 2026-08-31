@@ -25,10 +25,10 @@ public sealed class NativeSpeechRecognitionProvider : ISpeechRecognitionService,
     public string ProviderName => "Speech recognition (native)";
     public bool IsAvailable => _model.AssetsPresent();
 
-    public NativeSpeechRecognitionProvider(ISettingsService settings)
+    public NativeSpeechRecognitionProvider(ISettingsService settings, IResourceCoordinator? resourceCoordinator = null)
     {
         _settings = settings;
-        _model = new WhisperOnnxModel(() => ResolveAssetsDirectory(_settings.Settings));
+        _model = new WhisperOnnxModel(() => ResolveAssetsDirectory(_settings.Settings), resourceCoordinator);
     }
 
     public static string ResolveAssetsDirectory(AppSettings settings) =>

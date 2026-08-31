@@ -25,6 +25,8 @@ public sealed class ServerProcessManager : IDisposable
     private readonly IProcessJobObject _jobObject;
     private readonly IPortOwnerLookup _portOwnerLookup;
     private readonly Func<string, CancellationToken, Task<LlamaRuntimeCapabilityFacts>> _runtimeProbe;
+    private readonly IResourceCoordinator? _resourceCoordinator;
+    private string? _resourceAllocationId;
     private volatile bool _stopRequested;
     private const int MaxLogLines = 300;
 
@@ -62,17 +64,57 @@ public sealed class ServerProcessManager : IDisposable
         RedactionService? redactor = null,
         IProcessJobObject? jobObject = null,
         IPortOwnerLookup? portOwnerLookup = null,
-        Func<string, CancellationToken, Task<LlamaRuntimeCapabilityFacts>>? runtimeProbe = null)
+        Func<string, CancellationToken, Task<LlamaRuntimeCapabilityFacts>>? runtimeProbe = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _redactor = redactor;
         _jobObject = jobObject ?? ProcessJobObject.Default;
         _portOwnerLookup = portOwnerLookup ?? PortOwnerLookup.Default;
         _runtimeProbe = runtimeProbe ?? LocalModelCapabilityService.ProbeRuntimeAsync;
+        _resourceCoordinator = resourceCoordinator;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    public async Task StartAsync(ServerConfig cfg, CancellationToken ct = default)
+    public Task StartAsync(ServerConfig cfg, IResourceAdmissionLease lease, CancellationToken ct = default) =>
+        StartCoreAsync(cfg, lease, ct);
+
+    /// <summary>
+    /// Explicit test/bootstrap boundary for legacy lifecycle tests. Production
+    /// composition calls the lease-bearing overload above; this overload is
+    /// internal so a production caller cannot allocate a process without
+    /// admission.
+    /// </summary>
+    internal Task StartAsync(ServerConfig cfg, CancellationToken ct = default) =>
+        StartCoreAsync(cfg, null, ct);
+
+    private async Task StartCoreAsync(ServerConfig cfg, IResourceAdmissionLease? lease, CancellationToken ct)
+    {
+        if (lease is not null && lease.IsReleased)
+            throw new InvalidOperationException("The resource admission lease has already been released.");
+
+        try
+        {
+            await StartCoreBodyAsync(cfg, ct);
+            if (lease is not null && Status == ServerStatus.Running)
+            {
+                var process = CurrentProcessIdentity
+                    ?? throw new InvalidOperationException("The managed process identity was unavailable after health became ready.");
+                var proposal = lease.Plan.ProposedAllocations.FirstOrDefault()
+                    ?? throw new InvalidOperationException("The admission plan did not contain a proposed allocation.");
+                var active = ResourceAllocationFactory.ActiveFromProcess(proposal, process);
+                await lease.CompleteAsync(active);
+                _resourceAllocationId = active.AllocationId;
+            }
+        }
+        finally
+        {
+            if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
+                await lease.ReleaseAsync("managed start did not complete");
+        }
+    }
+
+    private async Task StartCoreBodyAsync(ServerConfig cfg, CancellationToken ct)
     {
         if (Status is ServerStatus.Running or ServerStatus.Starting) return;
 
@@ -203,6 +245,7 @@ public sealed class ServerProcessManager : IDisposable
         _stopRequested = true;
         Emit("[hermaeus] Stopping...");
         KillProcess();
+        ReleaseResourceAllocation();
         SetStatus(ServerStatus.Stopped);
     }
 
@@ -236,6 +279,7 @@ public sealed class ServerProcessManager : IDisposable
             if (ReferenceEquals(_process, process))
                 _process = null;
             process?.Dispose();
+            ReleaseResourceAllocation();
             SetStatus(ServerStatus.Stopped);
         }
     }
@@ -272,6 +316,7 @@ public sealed class ServerProcessManager : IDisposable
         _monitorCts?.Cancel();
         _monitorCts?.Dispose();
         KillProcess();
+        ReleaseResourceAllocation();
     }
 
     public static async Task<ServerTuneResult> AutoTuneAsync(
@@ -1223,11 +1268,13 @@ public sealed class ServerProcessManager : IDisposable
         Emit($"[hermaeus] Process exited with code {code}.");
         if (_stopRequested)
         {
+            ReleaseResourceAllocation();
             SetStatus(ServerStatus.Stopped);
             return;
         }
         if (Status == ServerStatus.Running)
         {
+            ReleaseResourceAllocation();
             SetStatus(GetProcessExitStatus(stopRequested: false, code));
         }
         else if (Status == ServerStatus.Starting)
@@ -1238,6 +1285,7 @@ public sealed class ServerProcessManager : IDisposable
             // instead of leaving Starting stuck for up to one poll interval.
             ErrorMessage = BuildErrorMessage(
                 new InvalidOperationException($"llama-server exited before it became ready. Exit code: {code}."));
+            ReleaseResourceAllocation();
             SetStatus(ServerStatus.Error);
         }
     }
@@ -1252,6 +1300,13 @@ public sealed class ServerProcessManager : IDisposable
         catch { }
         _process?.Dispose();
         _process = null;
+    }
+
+    private void ReleaseResourceAllocation()
+    {
+        var allocationId = Interlocked.Exchange(ref _resourceAllocationId, null);
+        if (allocationId is not null)
+            _resourceCoordinator?.ReleaseAllocation(allocationId);
     }
 
     private static int TryGetExitCode(Process? process)

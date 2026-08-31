@@ -471,6 +471,11 @@
                                                TextWrapping="Wrap"
                                                Opacity="0.62" FontSize="11"
                                                ToolTip.Tip="Analytical GPU Fit breakdown. Prediction only; runtime observations remain separate." />
+                                    <TextBlock Text="{Binding AdmissionReceipt}"
+                                               IsVisible="{Binding HasAdmissionReceipt}"
+                                               TextWrapping="Wrap"
+                                               Opacity="0.62" FontSize="11"
+                                               ToolTip.Tip="Whole-workload admission receipt. Unknown components are not treated as zero." />
                                 </StackPanel>
 
                                 <!-- ── Advanced engine options ───────────── -->

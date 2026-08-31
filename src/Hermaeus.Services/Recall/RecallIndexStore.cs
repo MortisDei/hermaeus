@@ -1,4 +1,5 @@
 using Hermaeus.Core.Services;
+using Hermaeus.Core.Models;
 using Hermaeus.Rag.Embeddings;
 using Hermaeus.Services;
 using Microsoft.Data.Sqlite;
@@ -38,6 +39,7 @@ public sealed class RecallIndexStore
 
     private readonly ISettingsService _settings;
     private readonly IEmbeddingService? _embeddings;
+    private readonly IResourceCoordinator? _resourceCoordinator;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly SemaphoreSlim _backfillGate = new(1, 1);
@@ -54,10 +56,14 @@ public sealed class RecallIndexStore
     }
     private string Cs => $"Data Source={DbPath}";
 
-    public RecallIndexStore(ISettingsService settings, IEmbeddingService? embeddings = null)
+    public RecallIndexStore(
+        ISettingsService settings,
+        IEmbeddingService? embeddings = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _settings = settings;
         _embeddings = embeddings;
+        _resourceCoordinator = resourceCoordinator;
     }
 
     public async Task InitializeAsync(CancellationToken ct = default) => await EnsureInitializedAsync(ct);
@@ -422,8 +428,10 @@ public sealed class RecallIndexStore
         if (_embeddings is null) return;
         if (!await _backfillGate.WaitAsync(0, ct)) return;
 
+        IResourceAdmissionLease? lease = null;
         try
         {
+            lease = await AcquireBackfillLeaseAsync(ct);
             await EnsureInitializedAsync(ct);
             await using var c = new SqliteConnection(Cs);
             await c.OpenAsync(ct);
@@ -466,8 +474,25 @@ public sealed class RecallIndexStore
         }
         finally
         {
+            if (lease is not null && !lease.IsReleased)
+                await lease.ReleaseAsync("recall embedding backfill completed");
             _backfillGate.Release();
         }
+    }
+
+    private async Task<IResourceAdmissionLease?> AcquireBackfillLeaseAsync(CancellationToken ct)
+    {
+        if (_resourceCoordinator is null)
+            return null;
+        const string consumerId = "rag.recall-backfill";
+        _resourceCoordinator.RegisterConsumer(
+            ResourceAllocationFactory.EmbeddingBackfillConsumer(consumerId, nameof(RecallIndexStore)));
+        return await _resourceCoordinator.AcquireAsync(
+            new ResourceAdmissionRequest(
+                consumerId,
+                ResourceAllocationFactory.EmbeddingBackfillProposal(consumerId),
+                callerId: "rag.recall-backfill.start",
+                allowUnknown: true), ct);
     }
 
     private static RecallEntry Map(SqliteDataReader r) => new()

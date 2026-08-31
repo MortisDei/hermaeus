@@ -32,10 +32,14 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
     public (int Major, int Minor)? RequiredPythonVersion => null;
 
-    public NativeKokoroVoiceProvider(ISettingsService settings, AppLifecycleJournalService? journal = null, IRuntimeLogService? runtimeLogs = null)
+    public NativeKokoroVoiceProvider(
+        ISettingsService settings,
+        AppLifecycleJournalService? journal = null,
+        IRuntimeLogService? runtimeLogs = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _settings = settings;
-        _model = new KokoroOnnxModel(() => ResolveAssetsDirectory(_settings.Settings), journal);
+        _model = new KokoroOnnxModel(() => ResolveAssetsDirectory(_settings.Settings), journal, resourceCoordinator);
         _runtimeLogs = runtimeLogs;
     }
 

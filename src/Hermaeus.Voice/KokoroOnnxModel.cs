@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -34,6 +35,7 @@ internal sealed class KokoroOnnxModel : IDisposable
     private string? _loadedAssetsRoot;
     private readonly Dictionary<string, float[]> _voiceStyleCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _unavailable;
+    private readonly IResourceCoordinator? _resourceCoordinator;
 
     /// <summary>
     /// Re-resolved on every access rather than captured once, so a
@@ -43,10 +45,14 @@ internal sealed class KokoroOnnxModel : IDisposable
     /// </summary>
     private string AssetsRoot => _assetsRootProvider();
 
-    public KokoroOnnxModel(Func<string> assetsRootProvider, AppLifecycleJournalService? journal = null)
+    public KokoroOnnxModel(
+        Func<string> assetsRootProvider,
+        AppLifecycleJournalService? journal = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _assetsRootProvider = assetsRootProvider;
         _journal = journal;
+        _resourceCoordinator = resourceCoordinator;
     }
 
     public bool IsLoaded => _session is not null;
@@ -77,12 +83,7 @@ internal sealed class KokoroOnnxModel : IDisposable
                 return false;
             }
 
-            LogPreflight("about to load InferenceSession from EnsureLoadedAsync");
-            _journal?.RecordOperation("loading Kokoro native ONNX session (EnsureLoadedAsync)");
-            _session = new InferenceSession(modelPath, BuildSessionOptions());
-            _loadedAssetsRoot = AssetsRoot;
-            _journal?.RecordOperation("Kokoro native ONNX session loaded");
-            return true;
+            return await LoadSessionAsync(modelPath, ct);
         }
         catch
         {
@@ -138,12 +139,9 @@ internal sealed class KokoroOnnxModel : IDisposable
             // managed exception handling and kills the process; this line is flushed
             // to disk immediately before the risky call so a crash still leaves a
             // record of exactly where it happened.
-            LogPreflight("about to load InferenceSession after install");
-            _journal?.RecordOperation("loading Kokoro native ONNX session (InstallAssetsAsync)");
-            _session = new InferenceSession(ModelPath(AssetsRoot), BuildSessionOptions());
-            _loadedAssetsRoot = AssetsRoot;
+            if (!await LoadSessionAsync(ModelPath(AssetsRoot), ct))
+                throw new InvalidOperationException("Kokoro assets were present but the ONNX session was not admitted.");
             _unavailable = false;
-            _journal?.RecordOperation("Kokoro native ONNX session loaded");
             progress?.Report("Kokoro native voice assets installed.");
         }
         catch (Exception ex)
@@ -156,6 +154,88 @@ internal sealed class KokoroOnnxModel : IDisposable
         {
             _gate.Release();
         }
+    }
+
+    private async Task<bool> LoadSessionAsync(string modelPath, CancellationToken ct)
+    {
+        IResourceAdmissionLease? lease = null;
+        try
+        {
+            lease = await AcquireAdmissionAsync(ct);
+            LogPreflight("about to load InferenceSession");
+            _journal?.RecordOperation("loading Kokoro native ONNX session (EnsureLoadedAsync)");
+            _session = new InferenceSession(modelPath, BuildSessionOptions());
+            _loadedAssetsRoot = AssetsRoot;
+            if (lease is not null)
+            {
+                var proposal = lease.Plan.ProposedAllocations.Single();
+                await lease.CompleteAsync(new ResourceAllocation(
+                    proposal.AllocationId,
+                    proposal.ConsumerId,
+                    proposal.AttemptId,
+                    ResourceLifecycleState.Active,
+                    proposal.RuntimeIdentity,
+                    proposal.ModelIdentities,
+                    proposal.ConfigurationIdentity,
+                    proposal.ProcessIdentity,
+                    proposal.Components,
+                    DateTime.UtcNow,
+                    proposal.Evidence));
+            }
+            _journal?.RecordOperation("Kokoro native ONNX session loaded");
+            return true;
+        }
+        catch
+        {
+            _session?.Dispose();
+            _session = null;
+            return false;
+        }
+        finally
+        {
+            if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
+                await lease.DisposeAsync();
+        }
+    }
+
+    private async Task<IResourceAdmissionLease?> AcquireAdmissionAsync(CancellationToken ct)
+    {
+        if (_resourceCoordinator is null)
+            return null;
+        const string consumerId = "tts.kokoro";
+        _resourceCoordinator.RegisterConsumer(new ResourceConsumerDescriptor(
+            consumerId,
+            ResourceConsumerKind.TextToSpeech,
+            ResourceOwnerIdentity.InProcess(consumerId),
+            nameof(KokoroOnnxModel),
+            ResourcePriorityClass.Foreground,
+            ResourceReclaimability.Cooperative,
+            [ResourceKind.SystemResidentMemory, ResourceKind.DeviceMemory]));
+        var proposal = new ResourceAllocation(
+            "inprocess-tts.kokoro",
+            consumerId,
+            null,
+            ResourceLifecycleState.Planned,
+            null,
+            null,
+            null,
+            null,
+            [new ResourceAllocationComponent(
+                "onnx-session",
+                ResourceComponentKind.OnnxSession,
+                null,
+                null,
+                null,
+                null,
+                ResourceEvidenceState.Unknown,
+                ResourceKind.SystemResidentMemory)],
+            null,
+            null);
+        return await _resourceCoordinator.AcquireAsync(new ResourceAdmissionRequest(
+            consumerId,
+            proposal,
+            callerId: "tts.kokoro.load",
+            allowUnknown: true), ct);
     }
 
     /// <summary>
@@ -275,6 +355,7 @@ internal sealed class KokoroOnnxModel : IDisposable
 
         _session?.Dispose();
         _session = null;
+        _resourceCoordinator?.ReleaseAllocation("inprocess-tts.kokoro");
         _unavailable = false;
         _voiceStyleCache.Clear();
         _loadedAssetsRoot = null;
@@ -300,6 +381,7 @@ internal sealed class KokoroOnnxModel : IDisposable
     public void Dispose()
     {
         _session?.Dispose();
+        _resourceCoordinator?.ReleaseAllocation("inprocess-tts.kokoro");
         _gate.Dispose();
     }
 }

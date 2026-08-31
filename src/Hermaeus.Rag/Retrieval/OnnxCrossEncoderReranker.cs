@@ -25,11 +25,16 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
     private InferenceSession? _session;
     private BertTokenizer? _tokenizer;
     private bool _unavailable;
+    private readonly IResourceCoordinator? _resourceCoordinator;
 
-    public OnnxCrossEncoderReranker(ISettingsService settings, AppLifecycleJournalService? journal = null)
+    public OnnxCrossEncoderReranker(
+        ISettingsService settings,
+        AppLifecycleJournalService? journal = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _settings = settings;
         _journal = journal;
+        _resourceCoordinator = resourceCoordinator;
     }
 
     /// <summary>True only while the verified ONNX session and tokenizer are resident.</summary>
@@ -99,12 +104,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
                 return false;
             }
 
-            // assets present - load tokenizer and session
-            _tokenizer = BertTokenizer.Create(vocabPath);
-            _journal?.RecordOperation("loading reranker ONNX session (EnsureLoadedAsync)");
-            _session = new InferenceSession(modelPath);
-            _journal?.RecordOperation("reranker ONNX session loaded");
-            return true;
+            return await LoadSessionAsync(modelPath, vocabPath, ct);
         }
         catch
         {
@@ -136,13 +136,12 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             progress?.Report("Downloading reranker vocabulary...");
             await DownloadIfMissingAsync(vocabPath, VocabUrl, VocabSha256, progress, ct);
             progress?.Report("Loading reranker model...");
-            // load after download
-            _tokenizer = BertTokenizer.Create(vocabPath);
             _session?.Dispose();
-            _journal?.RecordOperation("loading reranker ONNX session (InstallAssetsAsync)");
-            _session = new InferenceSession(modelPath);
+            _session = null;
+            _tokenizer = null;
+            if (!await LoadSessionAsync(modelPath, vocabPath, ct))
+                throw new InvalidOperationException("Reranker assets were present but the ONNX session was not admitted.");
             _unavailable = false;
-            _journal?.RecordOperation("reranker ONNX session loaded");
             progress?.Report("Reranker installed");
             return true;
         }
@@ -159,6 +158,88 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         {
             _gate.Release();
         }
+    }
+
+    private async Task<bool> LoadSessionAsync(string modelPath, string vocabPath, CancellationToken ct)
+    {
+        IResourceAdmissionLease? lease = null;
+        try
+        {
+            lease = await AcquireAdmissionAsync(ct);
+            _tokenizer = BertTokenizer.Create(vocabPath);
+            _journal?.RecordOperation("loading reranker ONNX session (EnsureLoadedAsync)");
+            _session = new InferenceSession(modelPath);
+            _journal?.RecordOperation("reranker ONNX session loaded");
+            if (lease is not null)
+            {
+                var proposal = lease.Plan.ProposedAllocations.Single();
+                await lease.CompleteAsync(new ResourceAllocation(
+                    proposal.AllocationId,
+                    proposal.ConsumerId,
+                    proposal.AttemptId,
+                    ResourceLifecycleState.Active,
+                    proposal.RuntimeIdentity,
+                    proposal.ModelIdentities,
+                    proposal.ConfigurationIdentity,
+                    proposal.ProcessIdentity,
+                    proposal.Components,
+                    DateTime.UtcNow,
+                    proposal.Evidence));
+            }
+            return true;
+        }
+        catch
+        {
+            _session?.Dispose();
+            _session = null;
+            _tokenizer = null;
+            return false;
+        }
+        finally
+        {
+            if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
+                await lease.DisposeAsync();
+        }
+    }
+
+    private async Task<IResourceAdmissionLease?> AcquireAdmissionAsync(CancellationToken ct)
+    {
+        if (_resourceCoordinator is null)
+            return null;
+        const string consumerId = "rag.reranker";
+        _resourceCoordinator.RegisterConsumer(new ResourceConsumerDescriptor(
+            consumerId,
+            ResourceConsumerKind.Reranker,
+            ResourceOwnerIdentity.InProcess(consumerId),
+            nameof(OnnxCrossEncoderReranker),
+            ResourcePriorityClass.Background,
+            ResourceReclaimability.Cooperative,
+            [ResourceKind.SystemResidentMemory, ResourceKind.DeviceMemory]));
+        var proposal = new ResourceAllocation(
+            "inprocess-rag.reranker",
+            consumerId,
+            null,
+            ResourceLifecycleState.Planned,
+            null,
+            null,
+            null,
+            null,
+            [new ResourceAllocationComponent(
+                "onnx-session",
+                ResourceComponentKind.OnnxSession,
+                null,
+                null,
+                null,
+                null,
+                ResourceEvidenceState.Unknown,
+                ResourceKind.SystemResidentMemory)],
+            null,
+            null);
+        return await _resourceCoordinator.AcquireAsync(new ResourceAdmissionRequest(
+            consumerId,
+            proposal,
+            callerId: "rag.reranker.load",
+            allowUnknown: true), ct);
     }
 
     private float ScorePair(string query, string passage, int maxLength)
@@ -307,6 +388,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
     public void Dispose()
     {
         _session?.Dispose();
+        _resourceCoordinator?.ReleaseAllocation("inprocess-rag.reranker");
         _gate.Dispose();
         // HttpClient is static and shared; do not dispose
     }

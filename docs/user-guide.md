@@ -145,6 +145,13 @@ or trustworthy measurement is missing; it is not treated as zero. Runtime
 observations remain separate and are comparable only under the exact v2
 runtime/model/hardware/configuration fingerprint.
 
+**System Overview** also shows a whole-workload resource snapshot. It lists
+registered consumers and their active allocations, whole-device memory totals,
+and Unknown observations that prevent false precision. Each managed server's
+Services card shows the admission receipt used for its start. Reservations are
+short-lived concurrency guards only. They do not stop or unload another
+consumer, change settings, or attribute a whole-device total to one process.
+
 If onboarding is already complete and Chat reports that no chat model is set
 up, go to **Services** to configure or start the current model server. A stopped
 server does not reset onboarding. The setup wizard remains available from

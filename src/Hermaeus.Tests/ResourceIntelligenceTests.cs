@@ -187,16 +187,16 @@ public sealed class ResourceIntelligenceTests
     }
 
     [Fact]
-    public async Task Registry_rejects_an_adapter_allocation_that_collides_with_a_registered_allocation()
+    public async Task Registry_suppresses_an_adapter_allocation_that_matches_a_registered_allocation()
     {
         var adapter = new InProcessResourceConsumerAdapter(
             Descriptor(ResourceOwnerIdentity.InProcess("component-a")), () => true);
         var registry = new ResourceConsumerRegistry([adapter]);
-        registry.RegisterAllocation(Allocation("consumer-a:allocation", "consumer-a", [Component("registered")])) ;
+        registry.RegisterAllocation(Allocation("inprocess-consumer-a", "consumer-a", [Component("registered")])) ;
 
         var snapshot = await registry.CaptureSnapshotAsync(new ResourceSnapshotCapture(Hardware()));
 
-        Assert.Contains(snapshot.Unknowns, unknown => unknown.Code == "resource-allocation-duplicate");
+        Assert.DoesNotContain(snapshot.Unknowns, unknown => unknown.Code == "resource-allocation-duplicate");
         Assert.Single(snapshot.Allocations);
     }
 

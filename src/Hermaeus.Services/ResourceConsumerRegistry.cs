@@ -6,8 +6,9 @@ namespace Hermaeus.Services;
 /// <summary>
 /// Services-owned registry for logical local-AI consumers and their resident
 /// allocations. It composes current allocations with read-only in-process
-/// adapters when a snapshot is requested. Admission and reservations belong to
-/// the next R32 batch.
+/// adapters when a snapshot is requested. Admission and reservations are kept
+/// in the separate resource coordinator so this registry remains lifecycle
+/// state, not a planner.
 /// </summary>
 public sealed class ResourceConsumerRegistry : IResourceConsumerRegistry
 {
@@ -96,6 +97,34 @@ public sealed class ResourceConsumerRegistry : IResourceConsumerRegistry
         }
     }
 
+    public bool TryReleaseAllocation(string allocationId)
+    {
+        if (string.IsNullOrWhiteSpace(allocationId))
+            return false;
+        lock (_gate)
+        {
+            if (!_allocations.TryGetValue(allocationId, out var allocation))
+                return false;
+            if (allocation.LifecycleState is not (ResourceLifecycleState.Released or ResourceLifecycleState.Failed or ResourceLifecycleState.Unavailable))
+            {
+                var released = new ResourceAllocation(
+                    allocation.AllocationId,
+                    allocation.ConsumerId,
+                    allocation.AttemptId,
+                    ResourceLifecycleState.Released,
+                    allocation.RuntimeIdentity,
+                    allocation.ModelIdentities,
+                    allocation.ConfigurationIdentity,
+                    allocation.ProcessIdentity,
+                    allocation.Components,
+                    allocation.StartedAtUtc,
+                    allocation.Evidence);
+                _allocations[allocationId] = released;
+            }
+            return _allocations.Remove(allocationId);
+        }
+    }
+
     public async Task<ResourceSnapshot> CaptureSnapshotAsync(ResourceSnapshotCapture capture, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(capture);
@@ -108,7 +137,7 @@ public sealed class ResourceConsumerRegistry : IResourceConsumerRegistry
         }
 
         var allocations = registeredAllocations.ToList();
-        var unknowns = new List<ResourceUnknown>();
+        var unknowns = new List<ResourceUnknown>(capture.Unknowns);
         foreach (var adapter in _adapters)
         {
             ct.ThrowIfCancellationRequested();
@@ -150,10 +179,10 @@ public sealed class ResourceConsumerRegistry : IResourceConsumerRegistry
 
             if (allocations.Any(existing => string.Equals(existing.AllocationId, allocation.AllocationId, StringComparison.Ordinal)))
             {
-                unknowns.Add(new ResourceUnknown(
-                    "resource-allocation-duplicate",
-                    "An adapter allocation collided with a registered allocation and was not composed.",
-                    allocation.ConsumerId));
+                // A lifecycle owner publishes the authoritative allocation
+                // after admission. The adapter is a discovery fallback for
+                // sessions loaded outside that owner, so the same identity is
+                // not false-positive duplicate evidence.
                 continue;
             }
             allocations.Add(allocation);

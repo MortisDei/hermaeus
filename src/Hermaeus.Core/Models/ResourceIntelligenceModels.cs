@@ -174,6 +174,7 @@ public sealed record ResourceAllocationComponent
 {
     public string ComponentId { get; }
     public ResourceComponentKind Kind { get; }
+    public ResourceKind ResourceKind { get; }
     public string? DeviceId { get; }
     public long? PredictedBytes { get; }
     public long? ReservedBytes { get; }
@@ -188,6 +189,20 @@ public sealed record ResourceAllocationComponent
         long? reservedBytes,
         long? observedBytes,
         ResourceEvidenceState evidenceState)
+        : this(componentId, kind, deviceId, predictedBytes, reservedBytes, observedBytes, evidenceState,
+            ResourceKind.DeviceMemory)
+    {
+    }
+
+    public ResourceAllocationComponent(
+        string componentId,
+        ResourceComponentKind kind,
+        string? deviceId,
+        long? predictedBytes,
+        long? reservedBytes,
+        long? observedBytes,
+        ResourceEvidenceState evidenceState,
+        ResourceKind resourceKind)
     {
         ComponentId = ResourceModelValidation.Opaque(componentId, nameof(componentId));
         DeviceId = ResourceModelValidation.NullableOpaque(deviceId, nameof(deviceId));
@@ -195,6 +210,7 @@ public sealed record ResourceAllocationComponent
         ReservedBytes = ResourceModelValidation.NonNegative(reservedBytes, nameof(reservedBytes));
         ObservedBytes = ResourceModelValidation.NonNegative(observedBytes, nameof(observedBytes));
         Kind = kind;
+        ResourceKind = resourceKind;
         EvidenceState = evidenceState;
     }
 }
@@ -443,7 +459,8 @@ public sealed record PersistedResourceComponent(
     long? PredictedBytes,
     long? ReservedBytes,
     long? ObservedBytes,
-    ResourceEvidenceState EvidenceState);
+    ResourceEvidenceState EvidenceState,
+    ResourceKind ResourceKind = ResourceKind.DeviceMemory);
 
 public sealed record PersistedResourceObservation(
     string ObservationId,
@@ -475,7 +492,7 @@ public static class ResourceSnapshotPersistenceProjection
             allocation.ConfigurationIdentity?.StableId,
             allocation.Components.Select(component => new PersistedResourceComponent(
                 component.ComponentId, component.Kind, component.DeviceId, component.PredictedBytes,
-                component.ReservedBytes, component.ObservedBytes, component.EvidenceState)).ToArray())).ToArray(),
+                component.ReservedBytes, component.ObservedBytes, component.EvidenceState, component.ResourceKind)).ToArray())).ToArray(),
         snapshot.Observations.Select(observation => new PersistedResourceObservation(
             observation.ObservationId, observation.ResourceKind, observation.ValueBytes, observation.CapacityBytes,
             observation.Scope, observation.ConsumerId, observation.DeviceId, observation.Source,

@@ -109,6 +109,58 @@
                 </Border>
             </Grid>
 
+            <Expander Header="Whole-workload resources" IsExpanded="True">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding ResourceStatus}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding ResourceConsumers}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ResourceConsumerReceiptViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="0,0,0,1" Padding="0,8">
+                                    <StackPanel Spacing="2">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{Binding ConsumerId}" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="{Binding State}" FontSize="12" Opacity="0.65" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding Kind}" FontSize="11" Opacity="0.5" />
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <TextBlock Text="GPU" FontSize="12" />
+                                            <TextBlock Text="{Binding DeviceMemory}" FontSize="12" />
+                                            <TextBlock Text="RAM" FontSize="12" Margin="6,0,0,0" />
+                                            <TextBlock Text="{Binding SystemMemory}" FontSize="12" />
+                                            <TextBlock Text="{Binding Unknown}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="Device totals are whole-device observations, not process attribution."
+                               FontSize="11" Opacity="0.5" />
+                    <ItemsControl ItemsSource="{Binding ResourceDevices}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ResourceDeviceReceiptViewModel">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{Binding DeviceId}" FontSize="12" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding Used}" FontSize="12" />
+                                        <TextBlock Text="/" FontSize="12" />
+                                        <TextBlock Text="{Binding Capacity}" FontSize="12" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <ItemsControl ItemsSource="{Binding ResourceUnknowns}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ResourceUnknownViewModel">
+                                <TextBlock Text="{Binding Detail}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
+
             <!-- r27 01 1.5: the startup breakdown was already measured and already
                  formatted into one Info line in the runtime log, which nobody
                  reads. It is the only evidence a round changed startup at all. -->

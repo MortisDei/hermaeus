@@ -22,6 +22,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly ModelProfileService?  _modelProfiles;
     private readonly IActivityRecorder?    _activity;
     private readonly LocalModelCapabilityService? _capabilityService;
+    private readonly IResourceCoordinator? _resourceCoordinator;
     private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
@@ -174,6 +175,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string       _contextFitNote = string.Empty;
     [ObservableProperty] private bool         _hasContextFitWarning;
     [ObservableProperty] private string       _gpuFitBreakdown = string.Empty;
+    [ObservableProperty] private string       _admissionReceipt = string.Empty;
+    public bool HasAdmissionReceipt => !string.IsNullOrWhiteSpace(AdmissionReceipt);
     public bool HasGpuFitBreakdown => !string.IsNullOrWhiteSpace(GpuFitBreakdown);
     partial void OnGpuFitBreakdownChanged(string value) => OnPropertyChanged(nameof(HasGpuFitBreakdown));
 
@@ -524,9 +527,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         HardwareProfile? hardwareProfile = null,
         ModelProfileService? modelProfiles = null,
         IActivityRecorder? activity = null,
-        LocalModelCapabilityService? capabilityService = null)
+        LocalModelCapabilityService? capabilityService = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
-        _mgr = new ServerProcessManager(redactor);
+        _mgr = new ServerProcessManager(redactor, resourceCoordinator: resourceCoordinator);
         _config   = config;
         _settings = settings;
         _trust = trust;
@@ -537,6 +541,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _modelProfiles = modelProfiles;
         _activity = activity;
         _capabilityService = capabilityService;
+        _resourceCoordinator = resourceCoordinator;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -905,9 +910,49 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         SyncToConfig();
         await SaveConfigAsync();
-        if (BeforeStartAsync is not null)
-            await BeforeStartAsync(this);
-        await _mgr.StartAsync(BuildConfig(), ct);
+        if (_resourceCoordinator is null)
+        {
+            ErrorMessage = "Resource admission is unavailable; the managed server was not started.";
+            Status = ServerStatus.Error;
+            NotifyStatusProps();
+            return;
+        }
+
+        var config = BuildConfig();
+        _resourceCoordinator.RegisterConsumer(ResourceAllocationFactory.ManagedServerConsumer(config));
+            var request = new ResourceAdmissionRequest(
+                config.Id,
+                ResourceAllocationFactory.ManagedServerProposal(config),
+                callerId: $"services.server.{config.Id}",
+                allowUnknown: true);
+        try
+        {
+            await using var lease = await _resourceCoordinator.AcquireAsync(request, ct);
+            AdmissionReceipt = FormatAdmissionReceipt(lease.Plan);
+            if (BeforeStartAsync is not null)
+                await BeforeStartAsync(this);
+            await _mgr.StartAsync(config, lease, ct);
+        }
+        catch (ResourceAdmissionException ex)
+        {
+            AdmissionReceipt = FormatAdmissionReceipt(ex.Plan);
+            ErrorMessage = ex.Message;
+            Status = ServerStatus.Error;
+            NotifyStatusProps();
+        }
+    }
+
+    private static string FormatAdmissionReceipt(ResourceWorkloadPlan plan)
+    {
+        var unknown = plan.UnknownComponents.Count == 0 ? "none" : $"{plan.UnknownComponents.Count} Unknown";
+        var system = plan.SystemRemainingBytes.HasValue
+            ? SystemOverviewViewModel.FormatBytes(plan.SystemRemainingBytes.Value)
+            : "Unknown";
+        var devices = plan.DeviceHeadroom.Count == 0
+            ? "no device total"
+            : string.Join(", ", plan.DeviceHeadroom.Select(device =>
+                $"{device.DeviceId}: {(device.RemainingBytes.HasValue ? SystemOverviewViewModel.FormatBytes(device.RemainingBytes.Value) : "Unknown")} remaining"));
+        return $"Workload fit: {plan.Feasibility}; system headroom {system}; {devices}; {unknown} component(s). Snapshot {plan.SnapshotId}.";
     }
 
     [RelayCommand]
@@ -1783,6 +1828,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly ISystemInfoService? _systemInfo;
     private readonly IActivityRecorder? _activity;
     private readonly ModelProfileService _modelProfiles;
+    private readonly IResourceCoordinator? _resourceCoordinator;
     private HardwareProfile? _hardwareProfile;
 
     /// <summary>Shared (DI singleton) with <see cref="SettingsViewModel.Tts"/> - voice
@@ -1899,7 +1945,8 @@ public partial class ServicesViewModel : ViewModelBase
         IActivityRecorder? activity = null,
         SttSettingsViewModel? stt = null,
         IStartupTimingService? startupTiming = null,
-        LocalModelCapabilityService? capabilityService = null)
+        LocalModelCapabilityService? capabilityService = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _startupTiming = startupTiming;
         _settings = settings;
@@ -1914,6 +1961,7 @@ public partial class ServicesViewModel : ViewModelBase
         _systemInfo = systemInfo;
         _activity = activity;
         _capabilityService = capabilityService;
+        _resourceCoordinator = resourceCoordinator;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
         _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
@@ -2052,7 +2100,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };

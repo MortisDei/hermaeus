@@ -32,7 +32,7 @@ public sealed class InProcessResourceConsumerAdapter : IResourceConsumerAdapter
             return Task.FromResult<ResourceAllocation?>(null);
 
         var allocation = new ResourceAllocation(
-            $"{Descriptor.ConsumerId}:allocation",
+            $"inprocess-{Descriptor.ConsumerId}",
             Descriptor.ConsumerId,
             null,
             ResourceLifecycleState.Active,
@@ -41,13 +41,14 @@ public sealed class InProcessResourceConsumerAdapter : IResourceConsumerAdapter
             null,
             null,
             [new ResourceAllocationComponent(
-                $"{Descriptor.ConsumerId}:session",
+                "onnx-session",
                 _componentKind,
                 null,
                 null,
                 null,
                 null,
-                ResourceEvidenceState.Unknown)],
+                ResourceEvidenceState.Unknown,
+                ResourceKind.SystemResidentMemory)],
             DateTime.UtcNow,
             []);
         return Task.FromResult<ResourceAllocation?>(allocation);

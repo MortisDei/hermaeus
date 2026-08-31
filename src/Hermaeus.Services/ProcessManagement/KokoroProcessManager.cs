@@ -12,6 +12,8 @@ public sealed class KokoroProcessManager : IDisposable
     private string? _serverScriptPath;
     private readonly IProcessJobObject _jobObject;
     private readonly IRuntimeLogService? _runtimeLogs;
+    private readonly IResourceCoordinator? _resourceCoordinator;
+    private string? _resourceAllocationId;
     /// <summary>
     /// r28 doc 03 3.3: the managed voice process is one of the four sources
     /// r24 named and never wired. Fire-and-forget at points where the outcome
@@ -19,11 +21,16 @@ public sealed class KokoroProcessManager : IDisposable
     /// </summary>
     private readonly IActivityRecorder? _activity;
 
-    public KokoroProcessManager(IProcessJobObject? jobObject = null, IRuntimeLogService? runtimeLogs = null, IActivityRecorder? activity = null)
+    public KokoroProcessManager(
+        IProcessJobObject? jobObject = null,
+        IRuntimeLogService? runtimeLogs = null,
+        IActivityRecorder? activity = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _jobObject = jobObject ?? ProcessJobObject.Default;
         _runtimeLogs = runtimeLogs;
         _activity = activity;
+        _resourceCoordinator = resourceCoordinator;
     }
 
     public bool IsRunning => _process is { HasExited: false };
@@ -79,11 +86,26 @@ public sealed class KokoroProcessManager : IDisposable
         _process.Exited += (_, _) =>
         {
             StatusLabel = "Stopped";
+            ReleaseResourceAllocation();
             StatusChanged?.Invoke();
         };
 
+        IResourceAdmissionLease? lease = null;
         try
         {
+            if (_resourceCoordinator is not null)
+            {
+                const string consumerId = "tts.kokoro-process";
+                _resourceCoordinator.RegisterConsumer(
+                    ResourceAllocationFactory.LocalVoiceProcessConsumer(consumerId, nameof(KokoroProcessManager)));
+                lease = await _resourceCoordinator.AcquireAsync(
+                    new ResourceAdmissionRequest(
+                        consumerId,
+                        ResourceAllocationFactory.LocalVoiceProcessProposal(consumerId),
+                        callerId: "voice.kokoro-process.start",
+                        allowUnknown: true), ct);
+            }
+
             if (!_process.Start())
                 throw new InvalidOperationException("Failed to start Kokoro voice service.");
 
@@ -95,6 +117,16 @@ public sealed class KokoroProcessManager : IDisposable
             await WaitForHealthAsync(settings.Tts.ServiceUrl, _healthCts.Token);
             StatusLabel = "Running";
             StatusChanged?.Invoke();
+            if (lease is not null)
+            {
+                var process = _process ?? throw new InvalidOperationException("The Kokoro process disappeared after health became ready.");
+                var active = ResourceAllocationFactory.ActiveFromProcess(
+                    lease.Plan.ProposedAllocations.Single(),
+                    $"pid-{process.Id}-kokoro",
+                    GetProcessStartUtc(process));
+                await lease.CompleteAsync(active, ct);
+                _resourceAllocationId = active.AllocationId;
+            }
             _activity.RecordSafe("voice.backend-start", "kokoro", ActivityOutcome.Succeeded, "Kokoro voice service started");
         }
         catch (Exception ex)
@@ -102,6 +134,11 @@ public sealed class KokoroProcessManager : IDisposable
             _activity.RecordSafe("voice.backend-start", "kokoro", ActivityOutcome.Failed, "Kokoro voice service failed to start", ex.Message);
             Stop();
             throw;
+        }
+        finally
+        {
+            if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
+                await lease.ReleaseAsync("Kokoro start did not complete");
         }
     }
 
@@ -123,8 +160,24 @@ public sealed class KokoroProcessManager : IDisposable
 
         _process?.Dispose();
         _process = null;
+        ReleaseResourceAllocation();
         StatusLabel = "Stopped";
         StatusChanged?.Invoke();
+    }
+
+    private void ReleaseResourceAllocation()
+    {
+        if (_resourceAllocationId is not { } allocationId)
+            return;
+        _resourceCoordinator?.ReleaseAllocation(allocationId);
+        _resourceAllocationId = null;
+    }
+
+    private static DateTime GetProcessStartUtc(Process process)
+    {
+        try { return process.StartTime.ToUniversalTime(); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        { return DateTime.UtcNow; }
     }
 
     private static async Task WaitForHealthAsync(string baseUrl, CancellationToken ct)

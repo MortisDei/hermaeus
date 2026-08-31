@@ -75,6 +75,13 @@ for Knowledge behavior in Chat.
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are
   separate and comparable only under a compatible fingerprint.
+- System Overview shows the current whole-workload resource snapshot: registered
+  Chat, embeddings, Lab, voice, and in-process consumers; predicted or observed
+  device and system allocations; whole-device totals; and explicit Unknown
+  reasons. Services shows the admission receipt for each managed start.
+  Admission uses short-lived reservations to prevent concurrent approvals from
+  relying on the same stale headroom. It never stops, unloads, or changes
+  another consumer, and Unknown is never treated as zero.
 - Model cards use the detailed versioned prediction when local GGUF shape
   metadata is available. Remote or pre-download cards retain a clearly labelled
   rough pre-download estimate until that metadata exists.

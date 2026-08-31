@@ -50,6 +50,9 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IResourceConsumerAdapter>(sp => ResourceConsumerAdapters.Kokoro(
             () => sp.GetRequiredService<NativeKokoroVoiceProvider>().IsLoaded));
         s.AddSingleton<IResourceConsumerRegistry, ResourceConsumerRegistry>();
+        s.AddSingleton<IResourceSnapshotSource, SystemResourceSnapshotSource>();
+        s.AddSingleton<IResourceCoordinator, ResourceCoordinator>();
+        s.AddSingleton<IManagedRuntimeProcessFactory, ManagedRuntimeProcessFactory>();
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
         s.AddSingleton<GpuFitExperienceService>();

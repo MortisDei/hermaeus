@@ -15,6 +15,9 @@ limit.
 
 - R32 development is prepared as `0.39.0-beta`; no release or tag is created
   by this work.
+- R32 Batch 4 adds whole-workload resource admission receipts in Services and
+  System Overview, with expiring reservations and explicit Unknown resource
+  state across managed runtimes, Lab, voice, ONNX, and embedding backfill.
 
 ## [0.38.0-beta] - 2026-08-30
 

@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -80,10 +82,15 @@ internal sealed class WhisperOnnxModel : IDisposable
     private WhisperDecoderBinding? _binding;
     private string? _loadedAssetsRoot;
     private bool _unavailable;
+    private readonly IResourceCoordinator? _resourceCoordinator;
 
     private string AssetsRoot => _assetsRootProvider();
 
-    public WhisperOnnxModel(Func<string> assetsRootProvider) => _assetsRootProvider = assetsRootProvider;
+    public WhisperOnnxModel(Func<string> assetsRootProvider, IResourceCoordinator? resourceCoordinator = null)
+    {
+        _assetsRootProvider = assetsRootProvider;
+        _resourceCoordinator = resourceCoordinator;
+    }
 
     public bool IsLoaded => _encoder is not null && _decoder is not null && _vocab is not null;
 
@@ -115,15 +122,7 @@ internal sealed class WhisperOnnxModel : IDisposable
                 }
             }
 
-            _encoder = new InferenceSession(PathFor(root, Encoder), BuildSessionOptions());
-            _decoder = new InferenceSession(PathFor(root, Decoder), BuildSessionOptions());
-            _binding = WhisperDecoderBinding.Discover(_decoder);
-            _vocab = WhisperVocabulary.Load(
-                await File.ReadAllTextAsync(PathFor(root, Vocab), ct),
-                await File.ReadAllTextAsync(PathFor(root, AddedTokens), ct),
-                await File.ReadAllTextAsync(PathFor(root, GenerationConfig), ct));
-            _loadedAssetsRoot = root;
-            return true;
+            return await LoadSessionsAsync(root, ct);
         }
         catch
         {
@@ -135,6 +134,90 @@ internal sealed class WhisperOnnxModel : IDisposable
         {
             _gate.Release();
         }
+    }
+
+    private async Task<bool> LoadSessionsAsync(string root, CancellationToken ct)
+    {
+        IResourceAdmissionLease? lease = null;
+        try
+        {
+            lease = await AcquireAdmissionAsync(ct);
+            _encoder = new InferenceSession(PathFor(root, Encoder), BuildSessionOptions());
+            _decoder = new InferenceSession(PathFor(root, Decoder), BuildSessionOptions());
+            _binding = WhisperDecoderBinding.Discover(_decoder);
+            _vocab = WhisperVocabulary.Load(
+                await File.ReadAllTextAsync(PathFor(root, Vocab), ct),
+                await File.ReadAllTextAsync(PathFor(root, AddedTokens), ct),
+                await File.ReadAllTextAsync(PathFor(root, GenerationConfig), ct));
+            _loadedAssetsRoot = root;
+            if (lease is not null)
+            {
+                var proposal = lease.Plan.ProposedAllocations.Single();
+                await lease.CompleteAsync(new ResourceAllocation(
+                    proposal.AllocationId,
+                    proposal.ConsumerId,
+                    proposal.AttemptId,
+                    ResourceLifecycleState.Active,
+                    proposal.RuntimeIdentity,
+                    proposal.ModelIdentities,
+                    proposal.ConfigurationIdentity,
+                    proposal.ProcessIdentity,
+                    proposal.Components,
+                    DateTime.UtcNow,
+                    proposal.Evidence));
+            }
+            return true;
+        }
+        catch
+        {
+            DisposeSessions();
+            return false;
+        }
+        finally
+        {
+            if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
+                await lease.DisposeAsync();
+        }
+    }
+
+    private async Task<IResourceAdmissionLease?> AcquireAdmissionAsync(CancellationToken ct)
+    {
+        if (_resourceCoordinator is null)
+            return null;
+        const string consumerId = "stt.whisper";
+        _resourceCoordinator.RegisterConsumer(new ResourceConsumerDescriptor(
+            consumerId,
+            ResourceConsumerKind.SpeechToText,
+            ResourceOwnerIdentity.InProcess(consumerId),
+            nameof(WhisperOnnxModel),
+            ResourcePriorityClass.Foreground,
+            ResourceReclaimability.Cooperative,
+            [ResourceKind.SystemResidentMemory, ResourceKind.DeviceMemory]));
+        var proposal = new ResourceAllocation(
+            "inprocess-stt.whisper",
+            consumerId,
+            null,
+            ResourceLifecycleState.Planned,
+            null,
+            null,
+            null,
+            null,
+            [new ResourceAllocationComponent(
+                "onnx-session",
+                ResourceComponentKind.OnnxSession,
+                null,
+                null,
+                null,
+                null,
+                ResourceEvidenceState.Unknown,
+                ResourceKind.SystemResidentMemory)],
+            null,
+            null);
+        return await _resourceCoordinator.AcquireAsync(new ResourceAdmissionRequest(
+            consumerId,
+            proposal,
+            callerId: "stt.whisper.load",
+            allowUnknown: true), ct);
     }
 
     /// <summary>Downloads and SHA256-verifies every asset. Never called from the
@@ -283,6 +366,7 @@ internal sealed class WhisperOnnxModel : IDisposable
         _decoder = null;
         _vocab = null;
         _binding = null;
+        _resourceCoordinator?.ReleaseAllocation("inprocess-stt.whisper");
     }
 
     public void Dispose()
