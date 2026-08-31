@@ -109,6 +109,9 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
 - Retrieval combines planned query variants, keyword search, embeddings,
   optional ONNX reranking, structural boosts, confidence-aware refusal, and
   budget-aware context packing.
+- The pinned ONNX reranker is loaded only from verified assets. Asset changes
+  invalidate the old session cleanly, while normal ranking remains sequential;
+  a separate bounded batch diagnostic does not silently change query behavior.
 - Watched sources use cancellable drift scans. Refresh applies only new and
   changed files by default; removing missing sources remains a separate,
   explicitly confirmed action. Automatic refresh is off by default.

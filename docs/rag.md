@@ -256,6 +256,14 @@ outcome without holding anything open for the life of the process.
   SHA256 before the ONNX session or tokenizer loads.
 - This prevents heavy network activity during queries and makes reranker
   installation an explicit, observable action.
+- The loaded session is keyed to the selected model and vocabulary asset set.
+  Changing that set releases the old session and resource allocation, and a
+  failed asset set does not poison a different selected set for the rest of the
+  process.
+- Reranking remains sequential by default. An explicit bounded diagnostic can
+  compare sequential and dynamic-graph batches, proving score/order
+  equivalence, cancellation boundaries, and its tensor working-set cap. A
+  dynamic ONNX dimension alone does not enable production batching.
 - The in-memory query cache is bounded by dataset count and an approximate
   byte ceiling. A single dataset that exceeds the byte ceiling is queried but
   not retained in cache, so very large embedding sets cannot grow memory use

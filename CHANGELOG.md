@@ -23,6 +23,10 @@ limit.
   conservative structured effective-launch observations, fresh admission for
   retries, compatible recent-success preference, and transient overlays that
   never overwrite saved settings.
+- R32 Batch 6 scopes reranker load failures to the selected asset identity and
+  adds a bounded diagnostic for dynamic ONNX batch equivalence without changing
+  sequential query ranking. Host-cache, checkpoint, per-slot, and multi-device
+  controls remain unshipped without their required measured evidence.
 - Fixed a transient Settings autosave race by publishing direct-save settings
   only after their atomic file replacement completes, preserving the existing
   autosave and direct-save lifecycle behavior.

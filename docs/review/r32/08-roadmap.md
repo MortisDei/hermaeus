@@ -56,7 +56,7 @@ the stores into one schema.
 | 3 | Resource consumer registry, allocation owner/component/per-device model, immutable snapshots, local/remote/owned identity, authoritative per-device and Unknown observations, in-process adapters, bounded persistence | 1, 2 | mandatory resource spine | Yes |
 | 4 | Whole-workload composition, headroom, priorities, reservations, concurrency, mandatory lease-bearing admission at every production start/restart/resume/lazy-load owner, System Overview/Services receipts | 3 | mandatory resource spine | Yes |
 | 5 | Adaptive envelope, deterministic candidates, upstream fit target/min-context integration, effective-launch observation, bounded recovery, hysteresis, and no-settings-mutation behavior | 4 | mandatory adaptive inference | Yes |
-| 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | No |
+| 6 | Capability-gated host cache/checkpoint/per-slot work and multi-device plans; reranker identity recovery and bounded batch experiment; ship individual controls only when their evidence gates pass | 3, 4, 5 | conditional measured optimization | Yes |
 | 7 | Services-owned normalized recommendation tables in `experience.db`, rule registry, deterministic evidence compatibility/freshness, deduplication/dismissal, pending apply/reconcile/undo records, target projections | 1, 2, R31 experience | mandatory guidance spine | No |
 | 8 | Recommendation review cards, stale-guarded Apply/Undo, adaptive-result proposal, model guidance annotations, and consistent Services/Models/Lab/Benchmarks/Doctor links | 5, 6 as available, 7 | mandatory explicit decision layer | No |
 | 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | No |
@@ -308,6 +308,40 @@ checkout. Installed-runtime effective placement and fit reporting remains
 Unknown in the reviewed environment, so the constrained Linux/COSMIC and
 Windows live adaptive-start gates remain owner validation rather than claimed
 automation.
+
+### 8.2.8 Batch 6 evidence
+
+Batch 6 closes its conditional investigations without promoting unsupported
+optimizations to normal production behavior:
+
+- Reranker asset recovery is keyed to the resolved model and vocabulary paths
+  plus bounded file identity metadata. A missing or invalid asset set no longer
+  makes every later asset set unavailable for the lifetime of the process. A
+  changed set releases the old ONNX allocation before loading the replacement.
+- The explicit reranker batch experiment is bounded to 20 candidate pairs, a
+  batch size of 2-8, and a sequence length of 64-512. It requires dynamic batch
+  dimensions on all three inputs and `[batch, 1]` logits, compares scores and
+  stable order within a `1e-5` tolerance, checks cancellation between work,
+  and reports the exact maximum input-tensor working-set cap. It is diagnostic
+  evidence only; ordinary reranking remains one invocation per candidate.
+- The pinned graph's dynamic-batch shape was established in Batch 0, but the
+  review host has no verified copy of the pinned ONNX asset, so this run's
+  experiment result is `Unknown`. No production batch switch is claimed.
+- The selected Linux help advertises host cache RAM, context checkpoints,
+  per-slot cache, and related controls, but there is no repeated-prefix Lab
+  benefit, restart/correctness, retention, or backup evidence. Those controls
+  remain absent from the user-facing launch surface. Help advertisement is
+  retained as runtime evidence only.
+- Multi-device enumeration and split flags remain runtime facts. The adaptive
+  planner still returns `Unknown` because no production overlay owns device
+  correlation, per-device margins, and a real correctness/performance gate.
+  No tensor split or other multi-device launch is emitted.
+
+Batch 6 verification: focused reranker tests passed (3); the zero-warning
+solution build passed; and the full sequential suite passed with 2,433 passed,
+17 skipped, and 2,450 total tests. Test results were written outside the
+checkout. The cache/checkpoint and multi-device owner hardware gates remain
+open and are not represented as shipped controls.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest

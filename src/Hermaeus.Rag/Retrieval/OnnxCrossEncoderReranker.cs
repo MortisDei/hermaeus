@@ -4,12 +4,17 @@ using Hermaeus.Rag.Models;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using Microsoft.ML.Tokenizers;
+using System.Diagnostics;
 using System.Security.Cryptography;
 
 namespace Hermaeus.Rag.Retrieval;
 
 public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 {
+    public const int MaximumExperimentBatchSize = 8;
+    public const int MaximumExperimentCandidates = 20;
+    public const float ScoreEquivalenceTolerance = 0.00001f;
+
     private const string ModelCommit = "eeed17e3bfc6fa06a790f2d12a9501fec587fccf";
     private const string ModelUrl = $"https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/{ModelCommit}/onnx/model_O4.onnx";
     private const string VocabUrl = $"https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/{ModelCommit}/vocab.txt";
@@ -24,7 +29,8 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private InferenceSession? _session;
     private BertTokenizer? _tokenizer;
-    private bool _unavailable;
+    private string? _loadedAssetKey;
+    private string? _unavailableAssetKey;
     private readonly IResourceCoordinator? _resourceCoordinator;
 
     public OnnxCrossEncoderReranker(
@@ -46,7 +52,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         int topK,
         CancellationToken ct = default)
     {
-        if (!_settings.Settings.Rag.RerankerEnabled || _unavailable || candidates.Count == 0)
+        if (!_settings.Settings.Rag.RerankerEnabled || candidates.Count == 0)
             return candidates.Take(topK).ToList();
 
         var loaded = await EnsureLoadedAsync(ct);
@@ -77,41 +83,58 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 
     private async Task<bool> EnsureLoadedAsync(CancellationToken ct)
     {
-        if (_session is not null && _tokenizer is not null)
-            return true;
-
         await _gate.WaitAsync(ct);
+        string? assetKey = null;
         try
         {
-            if (_session is not null && _tokenizer is not null)
-                return true;
-
             var modelDir = ResolveModelDirectory(_settings.Settings);
             var modelPath = Path.Combine(modelDir, ModelFileName);
             var vocabPath = Path.Combine(modelDir, VocabFileName);
+            assetKey = CreateAssetIdentityKey(modelPath, vocabPath);
+
+            if (_session is not null && _tokenizer is not null
+                && string.Equals(_loadedAssetKey, assetKey, StringComparison.Ordinal))
+                return true;
+
+            if (!ShouldAttemptAssetLoad(assetKey, _loadedAssetKey, _unavailableAssetKey))
+                return false;
+
+            if (_loadedAssetKey is not null || _session is not null || _tokenizer is not null)
+                ReleaseLoadedSession();
 
             // Do not perform heavy downloads during query path. Only initialize if assets already exist.
             if (!File.Exists(modelPath) || !File.Exists(vocabPath))
             {
-                _unavailable = true;
+                _unavailableAssetKey = assetKey;
                 return false;
             }
 
             if (!await VerifyFileSha256Async(modelPath, ModelSha256, ct)
                 || !await VerifyFileSha256Async(vocabPath, VocabSha256, ct))
             {
-                _unavailable = true;
+                _unavailableAssetKey = assetKey;
                 return false;
             }
 
-            return await LoadSessionAsync(modelPath, vocabPath, ct);
+            if (!await LoadSessionAsync(modelPath, vocabPath, ct))
+            {
+                _unavailableAssetKey = assetKey;
+                return false;
+            }
+
+            _loadedAssetKey = assetKey;
+            _unavailableAssetKey = null;
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            ReleaseLoadedSession();
+            throw;
         }
         catch
         {
-            _unavailable = true;
-            _session?.Dispose();
-            _session = null;
-            _tokenizer = null;
+            _unavailableAssetKey = assetKey;
+            ReleaseLoadedSession();
             return false;
         }
         finally
@@ -136,22 +159,23 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             progress?.Report("Downloading reranker vocabulary...");
             await DownloadIfMissingAsync(vocabPath, VocabUrl, VocabSha256, progress, ct);
             progress?.Report("Loading reranker model...");
-            _session?.Dispose();
-            _session = null;
-            _tokenizer = null;
+            ReleaseLoadedSession();
             if (!await LoadSessionAsync(modelPath, vocabPath, ct))
                 throw new InvalidOperationException("Reranker assets were present but the ONNX session was not admitted.");
-            _unavailable = false;
+            _loadedAssetKey = CreateAssetIdentityKey(modelPath, vocabPath);
+            _unavailableAssetKey = null;
             progress?.Report("Reranker installed");
             return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            ReleaseLoadedSession();
+            throw;
         }
         catch (Exception ex)
         {
             progress?.Report($"Reranker install failed: {ex.Message}");
-            _unavailable = true;
-            _session?.Dispose();
-            _session = null;
-            _tokenizer = null;
+            ReleaseLoadedSession();
             return false;
         }
         finally
@@ -187,6 +211,13 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
                     proposal.Evidence));
             }
             return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _session?.Dispose();
+            _session = null;
+            _tokenizer = null;
+            throw;
         }
         catch
         {
@@ -256,6 +287,186 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         using var results = _session!.Run(inputs);
         var output = results.First().AsEnumerable<float>().FirstOrDefault();
         return Sigmoid(output);
+    }
+
+    private float[] ScoreBatch(IReadOnlyList<EncodedPair> encoded)
+    {
+        if (encoded.Count == 0)
+            return [];
+
+        var maxLength = encoded[0].InputIds.Length;
+        var inputIds = new long[encoded.Count * maxLength];
+        var attentionMask = new long[inputIds.Length];
+        var tokenTypeIds = new long[inputIds.Length];
+        for (var index = 0; index < encoded.Count; index++)
+        {
+            var offset = index * maxLength;
+            Array.Copy(encoded[index].InputIds, 0, inputIds, offset, maxLength);
+            Array.Copy(encoded[index].AttentionMask, 0, attentionMask, offset, maxLength);
+            Array.Copy(encoded[index].TokenTypeIds, 0, tokenTypeIds, offset, maxLength);
+        }
+
+        var shape = new[] { encoded.Count, maxLength };
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("input_ids", new DenseTensor<long>(inputIds, shape)),
+            NamedOnnxValue.CreateFromTensor("attention_mask", new DenseTensor<long>(attentionMask, shape)),
+            NamedOnnxValue.CreateFromTensor("token_type_ids", new DenseTensor<long>(tokenTypeIds, shape))
+        };
+
+        using var results = _session!.Run(inputs);
+        var logits = results.First().AsEnumerable<float>().ToArray();
+        if (logits.Length != encoded.Count)
+            throw new InvalidOperationException($"Reranker batch returned {logits.Length} logits for {encoded.Count} pairs.");
+
+        return logits.Select(Sigmoid).ToArray();
+    }
+
+    /// <summary>
+    /// Runs a bounded, explicit experiment against the verified pinned model.
+    /// Normal queries remain sequential until a separately reviewed production
+    /// decision enables batching.
+    /// </summary>
+    public async Task<RerankerBatchExperimentResult> RunBatchExperimentAsync(
+        string query,
+        IReadOnlyList<ScoredChunk> candidates,
+        int batchSize = MaximumExperimentBatchSize,
+        int maxLength = 256,
+        CancellationToken ct = default)
+    {
+        if (batchSize is < 2 or > MaximumExperimentBatchSize)
+            return RerankerBatchExperimentResult.Unavailable(
+                "reranker-batch-bounds",
+                $"Batch size must be between 2 and {MaximumExperimentBatchSize}.");
+        if (maxLength is < 64 or > 512)
+            return RerankerBatchExperimentResult.Unavailable(
+                "reranker-batch-bounds",
+                "Maximum sequence length must be between 64 and 512.");
+        if (candidates.Count < 2)
+            return RerankerBatchExperimentResult.Unavailable(
+                "reranker-batch-input",
+                "At least two candidates are required for a batch comparison.");
+
+        if (!await EnsureLoadedAsync(ct) || _session is null || _tokenizer is null)
+            return RerankerBatchExperimentResult.Unknown(
+                "reranker-batch-assets-unknown",
+                "A verified pinned ONNX session is not available in the selected asset set.");
+
+        if (!HasDynamicBatchGraph(_session, maxLength, out var graphDetail))
+            return RerankerBatchExperimentResult.Unavailable("reranker-batch-fixed-graph", graphDetail);
+
+        var pairs = candidates
+            .Take(MaximumExperimentCandidates)
+            .Select(candidate => EncodePair(query, candidate.Chunk.Content, maxLength))
+            .ToArray();
+        var maximumTensorBytes = checked((long)batchSize * maxLength * sizeof(long) * 3);
+
+        var sequentialScores = new float[pairs.Length];
+        var sequentialStart = Stopwatch.GetTimestamp();
+        for (var index = 0; index < pairs.Length; index++)
+        {
+            ct.ThrowIfCancellationRequested();
+            sequentialScores[index] = ScorePair(query, candidates[index].Chunk.Content, maxLength);
+        }
+        var sequentialDuration = Stopwatch.GetElapsedTime(sequentialStart);
+
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var batchedScores = new float[pairs.Length];
+        var batchedStart = Stopwatch.GetTimestamp();
+        for (var offset = 0; offset < pairs.Length; offset += batchSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var count = Math.Min(batchSize, pairs.Length - offset);
+            var batch = pairs.AsSpan(offset, count).ToArray();
+            var scores = ScoreBatch(batch);
+            Array.Copy(scores, 0, batchedScores, offset, count);
+        }
+        var batchedDuration = Stopwatch.GetElapsedTime(batchedStart);
+        var allocatedBytes = Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+
+        var maximumDifference = sequentialScores
+            .Zip(batchedScores, (sequential, batched) => MathF.Abs(sequential - batched))
+            .DefaultIfEmpty()
+            .Max();
+        var orderEquivalent = RankingOrder(sequentialScores).SequenceEqual(RankingOrder(batchedScores));
+        var equivalent = maximumDifference <= ScoreEquivalenceTolerance && orderEquivalent;
+        var benefitObserved = batchedDuration < sequentialDuration;
+        var evidenceCode = equivalent
+            ? benefitObserved ? "reranker-batch-equivalent-benefit" : "reranker-batch-equivalent-no-benefit"
+            : "reranker-batch-equivalence-failed";
+        var state = equivalent ? CapabilityState.Available : CapabilityState.Unavailable;
+        var detail = $"Dynamic batch graph; {pairs.Length} pairs; max batch {batchSize}; "
+            + $"score delta {maximumDifference:R}; ordering equivalent={orderEquivalent}; "
+            + $"batch benefit observed={benefitObserved}; tensor working-set cap={maximumTensorBytes} bytes.";
+
+        return new RerankerBatchExperimentResult(
+            state,
+            evidenceCode,
+            detail,
+            pairs.Length,
+            batchSize,
+            maxLength,
+            true,
+            orderEquivalent,
+            maximumDifference,
+            sequentialDuration,
+            batchedDuration,
+            allocatedBytes,
+            maximumTensorBytes,
+            benefitObserved);
+    }
+
+    internal static string CreateAssetIdentityKey(string modelPath, string vocabPath) =>
+        $"{Path.GetFullPath(modelPath)}|{FileSignature(modelPath)}|{Path.GetFullPath(vocabPath)}|{FileSignature(vocabPath)}";
+
+    internal static bool ShouldAttemptAssetLoad(string assetKey, string? loadedAssetKey, string? unavailableAssetKey) =>
+        !string.Equals(assetKey, loadedAssetKey, StringComparison.Ordinal)
+        && !string.Equals(assetKey, unavailableAssetKey, StringComparison.Ordinal);
+
+    private static bool HasDynamicBatchGraph(InferenceSession session, int maxLength, out string detail)
+    {
+        foreach (var name in new[] { "input_ids", "attention_mask", "token_type_ids" })
+        {
+            if (!session.InputMetadata.TryGetValue(name, out var metadata)
+                || !metadata.IsTensor
+                || metadata.Dimensions.Length != 2
+                || metadata.Dimensions[0] >= 0
+                || (metadata.Dimensions[1] > 0 && metadata.Dimensions[1] != maxLength))
+            {
+                detail = $"The pinned ONNX graph does not expose a dynamic batch dimension for {name}.";
+                return false;
+            }
+        }
+
+        var output = session.OutputMetadata.Values.FirstOrDefault();
+        if (output is null || !output.IsTensor || output.Dimensions.Length != 2
+            || output.Dimensions[0] >= 0 || output.Dimensions[1] != 1)
+        {
+            detail = "The pinned ONNX graph does not expose dynamic [batch, 1] logits.";
+            return false;
+        }
+
+        detail = "The pinned ONNX graph exposes dynamic batch inputs and [batch, 1] logits.";
+        return true;
+    }
+
+    private static int[] RankingOrder(IReadOnlyList<float> scores) =>
+        Enumerable.Range(0, scores.Count)
+            .OrderByDescending(index => scores[index])
+            .ThenBy(index => index)
+            .ToArray();
+
+    private static string FileSignature(string path)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+            return file.Exists ? $"{file.Length}:{file.LastWriteTimeUtc.Ticks}" : "missing";
+        }
+        catch
+        {
+            return "unreadable";
+        }
     }
 
     private EncodedPair EncodePair(string query, string passage, int maxLength)
@@ -387,10 +598,18 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 
     public void Dispose()
     {
-        _session?.Dispose();
-        _resourceCoordinator?.ReleaseAllocation("inprocess-rag.reranker");
+        ReleaseLoadedSession();
         _gate.Dispose();
         // HttpClient is static and shared; do not dispose
+    }
+
+    private void ReleaseLoadedSession()
+    {
+        _session?.Dispose();
+        _session = null;
+        _tokenizer = null;
+        _loadedAssetKey = null;
+        _resourceCoordinator?.ReleaseAllocation("inprocess-rag.reranker");
     }
 
     private sealed record EncodedPair(long[] InputIds, long[] AttentionMask, long[] TokenTypeIds);

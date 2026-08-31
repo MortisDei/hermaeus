@@ -158,33 +158,37 @@ Evidence:
 - they expose domain-specific load/dispose behavior but no shared resource
   identity, approximate/observed memory, active/idle state, or cooperative
   release contract.
-- `OnnxCrossEncoderReranker` makes `_unavailable` sticky after missing assets or
-  a load failure; changing the configured model path does not invalidate that
-  state unless the explicit install path succeeds.
+- `OnnxCrossEncoderReranker` previously made `_unavailable` sticky after missing
+  assets or a load failure; the R32 Batch 6 repair now keys that state to the
+  resolved model/vocabulary asset identity and releases the old allocation on
+  replacement.
 
 Risk: whole-workload fit cannot distinguish resident in-process consumers, and
 a repaired or changed reranker configuration can remain unavailable for the
 rest of the process.
 
-Disposition: R32 doc 01 consumer adapters must include lifecycle state and
-optional explicit cooperative release. Fix reranker invalidation keyed to asset
-identity while adding the adapter. Automatic idle eviction remains out until
-cold-start and memory evidence justify a user-controlled policy.
+Disposition: R32 doc 01 consumer adapters include lifecycle state and optional
+explicit cooperative release. Batch 6 fixes reranker invalidation keyed to
+asset identity while retaining the adapter. Automatic idle eviction remains
+out until cold-start and memory evidence justify a user-controlled policy.
 
 ### H. Reranking performs one ONNX invocation per candidate
 
-Evidence: `OnnxCrossEncoderReranker.RerankAsync` loops over up to 100 candidates
-and `ScorePair` runs an input shaped `[1, maxLength]` for each.
+Evidence: ordinary `OnnxCrossEncoderReranker.RerankAsync` still loops over up
+to 100 candidates and `ScorePair` runs an input shaped `[1, maxLength]` for
+each. Batch 6 adds a separate bounded diagnostic that accepts at most 20
+candidates and batch size 8.
 
 Risk: repeated session invocation and allocation can dominate query latency and
 CPU use. The current default cap is 20, so ordinary queries may pay 20 separate
 runs.
 
-Disposition: include a bounded investigation in the R32 resource/performance
-batch because the same adapter is already changing. Inspect the pinned ONNX
-graph's batch dimensions, implement one bounded batch only if supported, and
-prove score/order equivalence plus cancellation/memory bounds. If the graph is
-fixed-batch or measured benefit is negligible, record that result and stop.
+Disposition: Batch 6 includes the bounded investigation. The diagnostic
+requires dynamic input batch dimensions and `[batch, 1]` logits, proves
+score/order equivalence, checks cancellation between bounded work units, and
+reports its tensor working-set cap. It does not change the sequential
+production path. The current review host has no verified pinned asset, so the
+experiment remains Unknown and no optimization is claimed.
 
 ### I. Recommendation machinery is fragmented
 

@@ -163,6 +163,9 @@ exposed because there is no bounded, evidence-backed single-user workflow:
 | `-kvu`, `--kv-unified` | Not exposed for the single-slot managed-server design. |
 | `-ot`, `--override-tensor` | General placement remains an explicit advanced argument; the reviewed MoE case has a dedicated control. |
 | `--no-op-offload`, `--no-host` | Debugging and low-level placement switches, not user-facing settings. |
+| `--ctx-checkpoints`, `--checkpoint-min-step` | Not exposed without measured repeated-prefix benefit and restart/correctness evidence. |
+| `--cache-idle-slots`, `--slot-save-path` | Not exposed without explicit retention, privacy, backup, and restart semantics. |
+| `--device`, split modes, `--tensor-split`, `--main-gpu` | Not exposed as multi-device launch controls without correlated per-device observations and a real correctness/performance gate. |
 | `--jinja`, `--no-jinja` | Upstream default is sufficient. |
 | `--lora`, `--lora-scaled` | No complete adapter storage, selection, and per-conversation workflow exists. |
 
