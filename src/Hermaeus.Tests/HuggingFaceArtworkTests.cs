@@ -369,6 +369,57 @@ public sealed class HuggingFaceArtworkTests
     }
 
     [Fact]
+    public async Task Verified_manifest_artwork_reuse_is_offline_during_model_inventory_refresh()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelPath = Path.Combine(assets, "Models", "llm", "org__repo", "model.gguf");
+        var modelBytes = Encoding.UTF8.GetBytes("model");
+        Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+
+        var cache = HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(settings.Settings));
+        var card = new HfModelCard(Revision, null, null, null, "art.png");
+        var tree = new[] { new HfTreeEntry("art.png", 10, null) };
+        var online = new HuggingFaceArtworkService(new HttpClient(new RecordingHandler(_ =>
+            Bytes(OnePixelPng(), "image/png"))));
+        var stored = await online.FetchAsync(Repo, card, tree, cache);
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = Repo,
+            RepoFile = "model.gguf",
+            RevisionSha = Revision,
+            Sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(modelBytes)),
+            SizeBytes = modelBytes.Length,
+            Source = "hf-browser"
+        });
+
+        var offlineHandler = new RecordingHandler(_ => throw new InvalidOperationException("network was not expected"));
+        var vm = new ModelManagementViewModel(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            Helpers.NewServicesViewModel(settings),
+            manifest,
+            new HuggingFaceClient(),
+            new ModelDownloadService(),
+            artwork: new HuggingFaceArtworkService(new HttpClient(offlineHandler)));
+
+        await vm.RefreshAsync();
+
+        var item = Assert.Single(vm.Models);
+        Assert.Equal(HfArtworkState.Available, item.ArtworkState);
+        Assert.Equal(stored.CachePath, item.ArtworkPath);
+        Assert.Empty(offlineHandler.RequestedUrls);
+    }
+
+    [Fact]
     public async Task Clear_artwork_cache_leaves_model_and_manifest_siblings_untouched()
     {
         using var temp = new TempDir();

@@ -62,7 +62,7 @@ the stores into one schema.
 | 9 | Memory assertion/revision schema and sole production mutation authority, lazy legacy projection, correction/update/dispute/explicit-restore decisions, hard-delete dependency handling and plaintext/prior-copy truth, timeline UI, current/as-of/history retrieval | R31 provenance | mandatory temporal spine | Yes |
 | 10 | Stable watched-root/source identity, staged source revisions and dataset generations, embedding cardinality/dimension validation, source revalidation, atomic RAG publication, exact-revision citations, crash/cancellation preservation, Dataset Manager history | 9 lineage contract, existing RAG | mandatory temporal correctness | Yes |
 | 11 | Pinned Hugging Face thumbnail metadata, exact-host manual redirects, bounded pre-decode header inspection/cache service, selected repo/download/installed-card presentation, cache management | 2 | mandatory independent | Yes |
-| 12 | Only the already-selected targeted hardening from doc 06 that was not naturally completed by its owning batch; cross-batch integration tests; authoritative feature/workflow/security/privacy docs; CHANGELOG only for landed behavior | 1-11 changed batches | mandatory close-out, not a catch-all | No |
+| 12 | Only the already-selected targeted hardening from doc 06 that was not naturally completed by its owning batch; cross-batch integration tests; authoritative feature/workflow/security/privacy docs; CHANGELOG only for landed behavior | 1-11 changed batches | mandatory close-out, not a catch-all | Yes |
 | 13 | Full automated gates, canonical coverage, public diff/security/privacy audit, Linux/COSMIC and Windows live matrix, deferred ledger close-out | all landed batches | mandatory release-readiness evidence | No |
 
 Batch 0 may mark a runtime spelling/capability/observation unavailable or
@@ -520,6 +520,37 @@ missing, blocked, and malformed thumbnail repositories, slow/offline artwork
 while metadata and downloads remain usable, restart/cache-clear behavior,
 high-DPI and narrow-window layout, keyboard selection, and screen-reader/
 tooltip text on Linux/COSMIC and Windows.
+
+### 8.2.14 Batch 12 evidence
+
+Batch 12 closes only the selected audit and integration work that was not
+already completed by its owning batch:
+
+- The existing settings lifecycle guard remains the boundary for the reported
+  data-root reset class. Ordinary autosave does not migrate an unconfirmed
+  root, and reload/direct-save/stale-completion cases remain covered. A new
+  cross-batch regression joins the configured Data Root, model manifest,
+  Services-owned model inventory, and verified offline artwork cache. It proves
+  an installed model can reuse its exact-revision artwork without a network
+  request after inventory refresh.
+- The authoritative feature, user-guide, RAG, llama.cpp, security/privacy,
+  testing, workflow, and CHANGELOG documentation was reviewed against the
+  landed behavior. The deferred ledger records landed R32 items as closed,
+  keeps conditional cache/checkpoint and multi-device execution explicitly
+  selected or Unknown, and retains the owner-only required-PR CI attachment
+  gate.
+- No new subsystem, dependency, settings authority, migration runner, or
+  release claim was added. Batch 12 leaves platform artwork/layout,
+  effective-runtime, hardware, required-PR, and final public release gates to
+  the documented Batch 13 boundary.
+
+Batch 12 verification: the focused artwork, client, and model-management
+filters passed 81 tests, including 39 artwork and cache/integration cases; the
+canonical coverage gate passed at the configured 60% line floor with results
+outside the checkout; the zero-warning solution build passed with 0 warnings
+and 0 errors; and the full sequential suite passed with 2,535 passed, 17
+skipped, and 2,552 total tests. Batch 11 branch CI run `33391762243` passed on
+Ubuntu and Windows.
 
 Batch 6 is not one all-or-nothing umbrella. Cache/checkpoints, multi-device,
 and reranker batching each require their own acceptance result. An honest
