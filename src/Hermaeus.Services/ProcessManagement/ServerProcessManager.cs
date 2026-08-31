@@ -24,6 +24,7 @@ public sealed class ServerProcessManager : IDisposable
     private readonly RedactionService? _redactor;
     private readonly IProcessJobObject _jobObject;
     private readonly IPortOwnerLookup _portOwnerLookup;
+    private readonly Func<string, CancellationToken, Task<LlamaRuntimeCapabilityFacts>> _runtimeProbe;
     private volatile bool _stopRequested;
     private const int MaxLogLines = 300;
 
@@ -57,11 +58,16 @@ public sealed class ServerProcessManager : IDisposable
     private static readonly Regex FitLayersRegex =
         new(@"Vulkan\d+.*:\s+(?<used>\d+)\s+layers", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public ServerProcessManager(RedactionService? redactor = null, IProcessJobObject? jobObject = null, IPortOwnerLookup? portOwnerLookup = null)
+    public ServerProcessManager(
+        RedactionService? redactor = null,
+        IProcessJobObject? jobObject = null,
+        IPortOwnerLookup? portOwnerLookup = null,
+        Func<string, CancellationToken, Task<LlamaRuntimeCapabilityFacts>>? runtimeProbe = null)
     {
         _redactor = redactor;
         _jobObject = jobObject ?? ProcessJobObject.Default;
         _portOwnerLookup = portOwnerLookup ?? PortOwnerLookup.Default;
+        _runtimeProbe = runtimeProbe ?? LocalModelCapabilityService.ProbeRuntimeAsync;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -99,7 +105,7 @@ public sealed class ServerProcessManager : IDisposable
         // prompt-processing threads. A saved config may outlive an executable
         // update, so do not let an old UI assumption silently become an ignored
         // flag on a new server.
-        var runtime = await LocalModelCapabilityService.ProbeRuntimeAsync(cfg.ExecutablePath, ct);
+        var runtime = await _runtimeProbe(cfg.ExecutablePath, ct);
         cfg.RuntimeHelpProbed = runtime.HelpProbeSucceeded;
         cfg.RuntimeSpeculativeTypes = runtime.SpeculativeTypes;
         cfg.RuntimeSupportsPromptThreads = runtime.SupportsPromptThreads;
