@@ -27,6 +27,31 @@ namespace Hermaeus.Tests
             Equal("Kokoro (native)", vm.SelectedVoiceProvider, "provider without TTS should not become active");
         }
 
+        public static async Task NativeKokoroHealthFailureStaysVisibleAndOpensDoctor()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            var vm = new TtsSettingsViewModel(
+                new CapturingTts(),
+                new UnhealthyNativeRegistry(settings),
+                new FakeToasts(),
+                new XttsProcessManager(),
+                new KokoroProcessManager(),
+                new FakeSecretStore(),
+                settings);
+            vm.ReloadFrom(settings.Settings);
+
+            string? destination = null;
+            vm.RequestNavigate = value => destination = value;
+            await vm.ProbeActiveProviderHealthAsync();
+
+            Equal("Kokoro native model failed to load", vm.TtsStatus,
+                "the native provider health summary must not be overwritten by a generic process status");
+            True(vm.CanOpenDoctor, "a native Kokoro load failure must expose the Doctor route");
+            vm.OpenDoctorCommand.Execute(null);
+            Equal("doctor", destination, "the native Kokoro repair action must route directly to Doctor");
+        }
+
         public static async Task VoiceProviderXttsV2RequiresLocalAndTts()
         {
             using var temp = new TempDir();
@@ -86,6 +111,51 @@ namespace Hermaeus.Tests
 
             public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default) =>
                 Task.FromResult<IReadOnlyList<string>>(new List<string> { "default" });
+        }
+
+        private sealed class UnhealthyNativeRegistry(ISettingsService settings) : IVoiceProviderRegistry
+        {
+            private readonly UnhealthyNativeProvider _provider = new();
+
+            public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>
+            [
+                new(VoiceProvider.KokoroNative, "Kokoro (native)", "Native voice.",
+                    VoiceProviderCategory.Recommended, true, VoiceCapability.TextToSpeech | VoiceCapability.Local)
+            ];
+
+            public VoiceProvider GetActiveProvider() => VoiceProvider.KokoroNative;
+            public IVoiceProvider GetActiveVoiceProvider() => _provider;
+            public IVoiceProvider GetVoiceProvider(VoiceProvider provider) => _provider;
+            public Task SetActiveProviderAsync(VoiceProvider provider)
+            {
+                settings.Settings.Tts.VoiceProvider = provider.ToString();
+                return Task.CompletedTask;
+            }
+            public VoiceProviderConfig? GetProviderConfig(VoiceProvider provider) => new(provider.ToString());
+            public Task SetProviderConfigAsync(VoiceProvider provider, VoiceProviderConfig config) => Task.CompletedTask;
+            public ITtsService GetActiveTtsService() => new CapturingTts();
+        }
+
+        private sealed class UnhealthyNativeProvider : IVoiceProvider
+        {
+            public VoiceProvider Id => VoiceProvider.KokoroNative;
+            public string DisplayName => "Kokoro (native)";
+            public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
+            public (int Major, int Minor)? RequiredPythonVersion => null;
+            public bool IsInstalled => true;
+            public VoiceProviderDetection Detect() => new(true, "Ready", "Installed");
+            public VoiceInstallPlan InstallPlan() => new("Already installed", [], "Low");
+            public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
+            public Task StopAsync(CancellationToken ct = default) => Task.CompletedTask;
+            public Task<VoiceHealth> HealthCheckAsync(CancellationToken ct = default) =>
+                Task.FromResult(new VoiceHealth(
+                    VoiceHealthStatus.Unhealthy,
+                    "Kokoro native model failed to load",
+                    "Installed assets failed SHA256 verification or failed to load; reinstall."));
+            public Task<IReadOnlyList<VoiceDefinition>> ListVoicesAsync(CancellationToken ct = default) =>
+                Task.FromResult<IReadOnlyList<VoiceDefinition>>([]);
+            public Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default) =>
+                Task.FromResult(new VoiceSynthesisResult(false, "Unavailable"));
         }
     }
 }

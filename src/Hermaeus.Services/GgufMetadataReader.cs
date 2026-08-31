@@ -29,6 +29,8 @@ public sealed record GgufModelInfo(
     /// </summary>
     int? VocabularySize = null,
     int? NextnPredictLayers = null,
+    int? ExpertCount = null,
+    int? ExpertUsedCount = null,
     bool HasChatTemplate = false,
     string Name = "",
     string RepositoryUrl = "",
@@ -155,6 +157,8 @@ public static class GgufMetadataReader
             long? slidingWindow = null;
             long? vocabularySize = null;
             long? nextnPredictLayers = null;
+            long? expertCount = null;
+            long? expertUsedCount = null;
             var hasChatTemplate = false;
             var name = string.Empty;
             var repositoryUrl = string.Empty;
@@ -209,6 +213,10 @@ public static class GgufMetadataReader
                     vocabularySize = ToScalarLong(ReadValue(reader, valueType, 0));
                 else if (key.EndsWith(".nextn_predict_layers", StringComparison.Ordinal))
                     nextnPredictLayers = ToScalarLong(ReadValue(reader, valueType, 0));
+                else if (key.EndsWith(".expert_count", StringComparison.Ordinal))
+                    expertCount = ToScalarLong(ReadValue(reader, valueType, 0));
+                else if (key.EndsWith(".expert_used_count", StringComparison.Ordinal))
+                    expertUsedCount = ToScalarLong(ReadValue(reader, valueType, 0));
                 else if (key == "tokenizer.chat_template")
                 {
                     _ = ReadValue(reader, valueType, 0);
@@ -246,6 +254,8 @@ public static class GgufMetadataReader
                 SlidingWindowPattern: slidingWindowPattern,
                 VocabularySize: ToInt(vocabularySize),
                 NextnPredictLayers: ToInt(nextnPredictLayers),
+                ExpertCount: ToInt(expertCount),
+                ExpertUsedCount: ToInt(expertUsedCount),
                 HasChatTemplate: hasChatTemplate,
                 Name: name,
                 RepositoryUrl: repositoryUrl,

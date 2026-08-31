@@ -15,11 +15,20 @@ limit.
 
 - Corrective hardening now recognizes Linux GPU shared libraries in Doctor,
   keeps typed Auto placement out of CPU-only advisories, separates installed
-  llama.cpp identity from an Unknown latest-release comparison, and activates
-  the existing desktop instance when a second normal launch is attempted.
+  llama.cpp identity from an Unknown latest-release comparison. A second
+  normal launch remains a strict lock rejection and does not contact the
+  existing instance.
 - Corrective model-management hardening backfills Hugging Face artwork after an
   update check only when the verified manifest, card, and immutable tree agree;
   artwork remains optional and cannot fail the update result.
+- The Models catalog now groups Chat & Generation, Embeddings, and Rerankers;
+  proven companions stay on their primary card, with factual capability badges
+  kept separate from configured and ready state.
+- New installs show toolbar labels by default while preserving an explicitly
+  saved choice to keep them hidden. Chat's compact settings flyout projects
+  the same managed GPU-placement owner shown on Services.
+- Native Kokoro health failures in Services now link directly to Doctor, which
+  owns the verified asset diagnosis and repair action.
 - R32 development is prepared as `0.39.0-beta`; no release or tag is created
   by this work.
 - R32 Batch 4 adds whole-workload resource admission receipts in Services and

@@ -247,6 +247,7 @@ public static class HarnessCases
     public static IEnumerable<object[]> Tts =>
     [
         [new HarnessCase("voice provider capability gating prevents unsupported providers", TtsTests.VoiceProviderCapabilityGating)],
+        [new HarnessCase("native Kokoro health failure stays visible and opens Doctor", TtsTests.NativeKokoroHealthFailureStaysVisibleAndOpensDoctor)],
         [new HarnessCase("voice provider XTTS v2 requires local and TTS", TtsTests.VoiceProviderXttsV2RequiresLocalAndTts)],
         [new HarnessCase("voice device options include Apple Silicon MPS", TtsTests.VoiceDeviceOptionsIncludeMps)],
         [new HarnessCase("voice preview skips blank text", TtsTests.VoicePreviewSkipsBlankText)]
@@ -474,9 +475,10 @@ public static class HarnessCases
 
     public static IEnumerable<object[]> SingleInstanceGuard =>
     [
-        [new HarnessCase("activation client notifies the owner", SingleInstanceGuardTests.ActivationClientNotifiesTheOwner)],
-        [new HarnessCase("second acquire on the same lock file fails", SingleInstanceGuardTests.SecondAcquireOnTheSameLockFileFails)],
-        [new HarnessCase("release frees the lock for a next acquire", SingleInstanceGuardTests.ReleaseFreesTheLockForANextAcquire)]
+        [new HarnessCase("second normal launch stops before desktop startup", SingleInstanceGuardTests.SecondNormalLaunchStopsBeforeDesktopStartup)],
+        [new HarnessCase("second launch cannot acquire the application lock", SingleInstanceGuardTests.SecondLaunchCannotAcquireTheApplicationLock)],
+        [new HarnessCase("release frees the lock for a next acquire", SingleInstanceGuardTests.ReleaseFreesTheLockForANextAcquire)],
+        [new HarnessCase("repeated acquire in the same process is rejected", SingleInstanceGuardTests.RepeatedAcquireInTheSameProcessIsRejected)]
     ];
 
     public static IEnumerable<object[]> MarkdownViewer =>

@@ -408,7 +408,7 @@
                                                Text="Threads" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
                                     <Grid Grid.Row="4" Grid.Column="1"
-                                          ColumnDefinitions="140,Auto,120,Auto,*"
+                                          ColumnDefinitions="140,Auto,Auto,120,Auto,*"
                                           ColumnSpacing="16">
                                         <NumericUpDown Value="{Binding Threads}"
                                                        Minimum="1" Maximum="128"
@@ -421,15 +421,16 @@
                                             <TextBlock Text="Offload:" Opacity="0.6" FontSize="13" />
                                             <TextBlock Text="{Binding EffectiveOffloadLabel}" FontSize="13" />
                                         </StackPanel>
-                                        <NumericUpDown Grid.Column="2"
+                                        <TextBlock Grid.Column="2" Text="Parallel slots:" Opacity="0.6" FontSize="13" VerticalAlignment="Center" />
+                                        <NumericUpDown Grid.Column="3"
                                                        Value="{Binding Slots}"
                                                        Minimum="1" Maximum="32"
                                                        Increment="1"
                                                        HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
-                                                       ToolTip.Tip="Advanced: parallel request slots (--parallel N). Keep at 1 for a single-user chat app so the whole context belongs to one conversation and every send reuses the KV cache." />
-                                        <CheckBox Grid.Column="3"
+                                                       ToolTip.Tip="Parallel request slots (--parallel N). Each slot can own an in-flight request and its context. Use 1 for one-user chat when you want the full context and KV cache reserved for that conversation." />
+                                        <CheckBox Grid.Column="4"
                                                   IsChecked="{Binding AutoStart}"
                                                   Content="Auto-start"
                                                   FontSize="13"
@@ -509,15 +510,16 @@
                                                            IsEnabled="{Binding CanEdit}" FontSize="12"
                                                            ToolTip.Tip="Minimum context for adaptive reduction. 0 means the configured context is the floor." />
                                         </Grid>
-                                        <Grid ColumnDefinitions="Auto,140,Auto,140" ColumnSpacing="8">
+                                        <Grid ColumnDefinitions="Auto,140,Auto,Auto,140" ColumnSpacing="8">
                                             <TextBlock Text="GPU headroom:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                                             <NumericUpDown Grid.Column="1"
-                                                           Value="{Binding AdaptiveMinimumGpuHeadroomBytes}"
-                                                           Minimum="0" Maximum="9223372036854775807" Increment="67108864"
+                                                           Value="{Binding AdaptiveMinimumGpuHeadroomMiB}"
+                                                           Minimum="0" Maximum="8796093022208" Increment="64" FormatString="N0"
                                                            IsEnabled="{Binding CanEdit}" FontSize="12"
-                                                           ToolTip.Tip="Minimum device headroom reserved for the rest of the workload, in bytes." />
-                                            <TextBlock Grid.Column="2" Text="Evidence days:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
-                                            <NumericUpDown Grid.Column="3"
+                                                           ToolTip.Tip="Minimum device headroom reserved for the rest of the workload, in MiB. The saved setting remains an exact byte value." />
+                                            <TextBlock Grid.Column="2" Text="MiB" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <TextBlock Grid.Column="3" Text="Evidence days:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <NumericUpDown Grid.Column="4"
                                                            Value="{Binding AdaptivePreferredEvidenceAgeDays}"
                                                            Minimum="1" Maximum="30" Increment="1"
                                                            IsEnabled="{Binding CanEdit}" FontSize="12"

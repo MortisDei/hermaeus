@@ -98,7 +98,7 @@ public sealed class ModelInventoryService
                 _snapshots.TryGetValue(root, out previous);
             }
 
-            var scan = LocalAiAssetLocator.FindGgufModelsBounded(root, MaximumEntries);
+            var scan = LocalAiAssetLocator.FindGgufInventoryFilesBounded(root, MaximumEntries);
             var identities = ReadIdentities(root, scan.Paths, ct);
             var now = DateTime.UtcNow;
             if (!explicitlyInvalidated

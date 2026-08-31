@@ -271,7 +271,7 @@ public sealed class DesktopIntegrationService : IDisposable
         return item;
     }
 
-    internal void ShowAndActivate()
+    private void ShowAndActivate()
     {
         if (_window is null)
             return;

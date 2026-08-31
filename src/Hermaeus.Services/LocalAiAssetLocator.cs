@@ -107,6 +107,73 @@ public static class LocalAiAssetLocator
     }
 
     /// <summary>
+    /// Returns every GGUF in the detected models tree, including files in
+    /// embedding folders and companion-looking files. The model catalog uses
+    /// this inventory so role classification can use GGUF metadata and trusted
+    /// manifest ownership instead of treating a filename as proof. Existing
+    /// chat-model selectors continue to use <see cref="FindGgufModelsBounded"/>,
+    /// which intentionally omits non-chat asset folders.
+    /// </summary>
+    public static BoundedGgufModelScan FindGgufInventoryFilesBounded(string root, int maxResults)
+    {
+        if (maxResults <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxResults));
+
+        root = root.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            return new BoundedGgufModelScan([], false);
+
+        try
+        {
+            root = Path.GetFullPath(root);
+            if (!Directory.Exists(root))
+                return new BoundedGgufModelScan([], false);
+
+            var modelsDirectory = FindModelsDirectory(root, maxResults + 1);
+            if (string.IsNullOrWhiteSpace(modelsDirectory) || !Directory.Exists(modelsDirectory))
+                return new BoundedGgufModelScan([], false);
+            if ((File.GetAttributes(modelsDirectory) & FileAttributes.ReparsePoint) != 0)
+                return new BoundedGgufModelScan([], false);
+
+            var paths = new SortedSet<string>(ModelPathSafety.LocalPathComparer);
+            var sawMore = false;
+            foreach (var path in Directory.EnumerateFiles(modelsDirectory, "*.gguf", GgufEnumerationOptions))
+            {
+                if (!ModelPathSafety.TryResolveFileUnderRoot(root, path, out _, out _))
+                    continue;
+
+                paths.Add(path);
+                if (paths.Count > maxResults)
+                {
+                    sawMore = true;
+                    paths.Remove(paths.Max!);
+                }
+            }
+
+            return new BoundedGgufModelScan(paths.ToList(), sawMore);
+        }
+        catch
+        {
+            return new BoundedGgufModelScan([], false);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether a file is below the dedicated embedding model folder
+    /// in the detected Models tree. The directory role is existing asset
+    /// layout evidence, not a filename classification rule.
+    /// </summary>
+    public static bool IsUnderEmbeddingDirectory(string root, string filePath) =>
+        IsUnderDedicatedModelDirectory(root, filePath, "embed", "embedding", "embeddings");
+
+    /// <summary>
+    /// Returns whether a file is below the dedicated reranker model folder in
+    /// the detected Models tree. This is structural discovery evidence only.
+    /// </summary>
+    public static bool IsUnderRerankerDirectory(string root, string filePath) =>
+        IsUnderDedicatedModelDirectory(root, filePath, "rerank", "reranker");
+
+    /// <summary>
     /// r18 03-model-catalog-and-memory-ui.md 3.2: the reported "small model files &lt; ~500 MB
     /// cluttering the list" turned out, verified against a real HF hub cache, not to be sharded
     /// GGUF fragments (no <c>-00001-of-000NN.gguf</c> files were present anywhere) but companion
@@ -463,5 +530,31 @@ public static class LocalAiAssetLocator
                 || firstSegment.Equals("embeddings", StringComparison.OrdinalIgnoreCase)
                 || firstSegment.Equals("rerank", StringComparison.OrdinalIgnoreCase)
                 || firstSegment.Equals("reranker", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsUnderDedicatedModelDirectory(string root, string filePath, params string[] directoryNames)
+    {
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(filePath))
+            return false;
+
+        try
+        {
+            root = Path.GetFullPath(root.Trim());
+            var modelsDirectory = FindModelsDirectory(root);
+            if (string.IsNullOrWhiteSpace(modelsDirectory) || !Directory.Exists(modelsDirectory))
+                return false;
+            if (!ModelPathSafety.TryResolveFileUnderRoot(root, filePath, out var normalized, out _))
+                return false;
+
+            var relative = Path.GetRelativePath(modelsDirectory, normalized);
+            var firstSegment = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .FirstOrDefault();
+            return firstSegment is not null
+                && directoryNames.Any(name => string.Equals(firstSegment, name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
     }
 }

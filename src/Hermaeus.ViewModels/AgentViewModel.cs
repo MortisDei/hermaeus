@@ -854,6 +854,9 @@ public partial class AgentViewModel : ViewModelBase
     [RelayCommand]
     private void ShowChangesTab() => SelectedTabIndex = ChangesTabIndex;
 
+    [RelayCommand]
+    private void ShowRunTab() => SelectedTabIndex = RunTabIndex;
+
     private static readonly HashSet<AgentTaskStatus> RewindEligibleStatuses =
     [
         AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked,
@@ -977,12 +980,13 @@ public partial class AgentViewModel : ViewModelBase
     public bool HasReviewQueue => ReviewQueueCount > 0;
 
     /// <summary>
-    /// Whether the pinned decision strip has anything to show. It sits outside
-    /// the tabs so that what the agent is waiting on is never behind one,
-    /// whether that is an approval, a question, or a blocked run needing an
-    /// instruction.
+    /// Whether the pinned decision strip has anything to show. Approval cards
+    /// remain here; reply and continue actions are summarized here and owned
+    /// by the Run tab beside the response they act on.
     /// </summary>
-    public bool HasDecisionWaiting => HasReviewQueue || IsWaitingForReply || ShowContinueBox;
+    public bool HasNonReviewDecision => IsWaitingForReply || ShowContinueBox;
+    public bool HasDecisionWaiting => HasReviewQueue || HasNonReviewDecision;
+    public string DecisionStripLabel => HasReviewQueue ? ReviewQueueLabel : "Action needed in Run";
 
     /// <summary>Plain-language next step for the normal workbench flow, not an internal state label.</summary>
     public string NextUserActionLabel => DescribeNextUserAction(CurrentTask);
@@ -993,8 +997,8 @@ public partial class AgentViewModel : ViewModelBase
         { Status: AgentTaskStatus.Running } => "Agent is working. You can follow progress above or stop the task.",
         { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: not null } => "Review the requested action above, then approve or reject it.",
         { StepBudgetExhausted: true } => "Step budget exhausted. Add steps or continue the remaining plan, or stop the task.",
-        { Status: AgentTaskStatus.WaitingForUser } => "Agent needs your answer. Reply in the panel above.",
-        { Status: AgentTaskStatus.Blocked } => "Agent is blocked. Read the reason above, then provide an instruction or change the workspace policy.",
+        { Status: AgentTaskStatus.WaitingForUser } => "Agent needs your answer. Reply below its response in the Run tab.",
+        { Status: AgentTaskStatus.Blocked } => "Agent is blocked. Read the reason in Run, then provide an instruction or change the workspace policy.",
         { Status: AgentTaskStatus.Complete } => "Review the outcome below, then inspect Changes or start a follow-up task.",
         { Status: AgentTaskStatus.Failed } => "Review the failure and transcript, then provide a new instruction or start again.",
         { Status: AgentTaskStatus.Cancelled } => "This task was stopped. Review its outcome or start a new task.",
@@ -1194,6 +1198,7 @@ public partial class AgentViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(taskId)) return;
         CurrentTask = await _store.LoadAsync(taskId);
         _openedTaskId = CurrentTask?.TaskId;
+        SelectedTabIndex = RunTabIndex;
 
         // r25 follow-up: r16 1.4 persists the workspace a task was created against,
         // precisely so an approval executes where it was approved. Resuming the task
@@ -2594,7 +2599,9 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasPrematureCompleteNote));
         OnPropertyChanged(nameof(IsWaitingForPlanApproval));
         OnPropertyChanged(nameof(ShowContinueBox));
+        OnPropertyChanged(nameof(HasNonReviewDecision));
         OnPropertyChanged(nameof(HasDecisionWaiting));
+        OnPropertyChanged(nameof(DecisionStripLabel));
         OnPropertyChanged(nameof(PlanRevisedLabel));
         OnPropertyChanged(nameof(HasPlanRevision));
         _ = RefreshQueuedPatchesAsync();
@@ -2663,6 +2670,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReplyWatermark));
         OnPropertyChanged(nameof(ReplyButtonLabel));
         OnPropertyChanged(nameof(ShowReplyBox));
+        OnPropertyChanged(nameof(HasNonReviewDecision));
         OnPropertyChanged(nameof(HasDecisionWaiting));
 
         OnPropertyChanged(nameof(CurrentStepCountLabel));

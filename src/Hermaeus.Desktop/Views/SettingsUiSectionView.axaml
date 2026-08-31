@@ -27,7 +27,7 @@
                          ToolTip.Tip="Font family for code blocks and other technical text. Leave blank to use the OS default monospace font, e.g. Consolas." />
             </Grid>
             <CheckBox IsChecked="{Binding ShowNavLabels}" Content="Show text labels next to toolbar icons" FontSize="13"
-                      ToolTip.Tip="Adds a text caption under each sidebar icon. Off by default." />
+                      ToolTip.Tip="Adds a text caption next to toolbar icons. On by default for new installs; existing saved choices are preserved." />
             <CheckBox IsChecked="{Binding CtrlEnterToSend}" Content="Ctrl+Enter to send (Enter inserts newline)" FontSize="13"
                       ToolTip.Tip="When on, plain Enter adds a newline in the composer and Ctrl+Enter sends." />
             <CheckBox IsChecked="{Binding ShowQuickChat}" Content="Show compact quick-chat surface" FontSize="13"

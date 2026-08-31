@@ -9,6 +9,20 @@ namespace Hermaeus.Tests;
 
 public sealed class ServicesViewModelTests
 {
+    [Fact]
+    public void Adaptive_gpu_headroom_editor_uses_mib_but_preserves_exact_persisted_bytes()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = NewServicesViewModel(settings);
+        var server = Assert.Single(vm.Servers, item => !item.EmbeddingsMode);
+
+        server.AdaptiveMinimumGpuHeadroomMiB = 256;
+
+        Assert.Equal(256 * 1024L * 1024L, server.AdaptiveMinimumGpuHeadroomBytes);
+        Assert.Equal(256, server.AdaptiveMinimumGpuHeadroomMiB);
+    }
+
     private static ServerProcessViewModel NewServerVm(TempDir temp, int contextSize)
     {
         var settings = NewSettings(temp);

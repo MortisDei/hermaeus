@@ -2314,7 +2314,7 @@ namespace Hermaeus.Tests
             var settings = NewSettings(temp);
             settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
             var vm = NewSettingsViewModel(settings, new FakeSecretStore());
-            False(vm.Ui.ShowNavLabels, "toolbar labels should default off, matching the pre-r6 icon-only layout");
+            True(vm.Ui.ShowNavLabels, "toolbar labels should default on for a fresh settings object");
 
             vm.Ui.ShowNavLabels = true;
             await vm.SaveCommand.ExecuteAsync(null);

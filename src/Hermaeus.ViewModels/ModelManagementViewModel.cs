@@ -35,6 +35,14 @@ public partial class ModelManagementViewModel : ObservableObject
     /// from <see cref="_allModels"/> without a refetch (r13 02-model-library.md 2.1).</summary>
     public UiBoundCollection<ModelProfileItemViewModel> Models { get; } = [];
 
+    /// <summary>
+    /// The catalog is grouped by intended use. The flat <see cref="Models"/>
+    /// collection remains for callers and tests, while the view binds to these
+    /// sections so embedding and reranker assets are not mistaken for chat
+    /// models.
+    /// </summary>
+    public UiBoundCollection<ModelCatalogSectionViewModel> ModelSections { get; } = [];
+
     [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private bool   _isError;
@@ -58,12 +66,33 @@ public partial class ModelManagementViewModel : ObservableObject
             : _allModels.Where(m =>
                 m.EffectiveName.Contains(filter, StringComparison.OrdinalIgnoreCase)
                 || m.RawName.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                || m.TagsDisplay.Contains(filter, StringComparison.OrdinalIgnoreCase));
+                || m.TagsDisplay.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || m.RoleLabel.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || m.CapabilityBadges.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || m.CompanionSearchText.Contains(filter, StringComparison.OrdinalIgnoreCase));
 
         Models.Clear();
         foreach (var m in matches)
             Models.Add(m);
+
+        ModelSections.Clear();
+        AddSection("Chat & Generation", ModelCatalogRole.ChatGeneration, matches);
+        AddSection("Embeddings", ModelCatalogRole.Embedding, matches);
+        AddSection("Rerankers", ModelCatalogRole.Reranker, matches);
+        AddSection("Other / Unknown", ModelCatalogRole.Unknown, matches);
         OnPropertyChanged(nameof(HasNoModels));
+    }
+
+    private void AddSection(
+        string title,
+        ModelCatalogRole role,
+        IEnumerable<ModelProfileItemViewModel> matches)
+    {
+        var section = new ModelCatalogSectionViewModel(title);
+        foreach (var item in matches.Where(item => item.CatalogRole == role))
+            section.Models.Add(item);
+        if (section.Models.Count > 0)
+            ModelSections.Add(section);
     }
 
     /// <summary>
@@ -113,6 +142,7 @@ public partial class ModelManagementViewModel : ObservableObject
         ModelInventorySnapshot inventory)
     {
         return inventory.Entries
+            .Where(entry => !IsCatalogCompanion(entry))
             .Where(entry => !existingModels.Any(model => SameLocalModelIdentity(model.Id, entry.Path)))
             .Select(entry => new LlmModel
             {
@@ -125,6 +155,21 @@ public partial class ModelManagementViewModel : ObservableObject
             })
             .ToList();
     }
+
+    /// <summary>
+    /// A catalog row is hidden as a companion only when existing trusted
+    /// provenance or unambiguous GGUF metadata proves that role. Filename
+    /// spelling is intentionally not consulted here.
+    /// </summary>
+    private static bool IsCatalogCompanion(ModelInventoryEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.Manifest?.ParentModelPath)
+        || string.Equals(entry.GgufInfo?.GeneralType, "clip", StringComparison.OrdinalIgnoreCase)
+        || IsMetadataDraftCompanion(entry.GgufInfo);
+
+    private static bool IsMetadataDraftCompanion(GgufModelInfo? info) =>
+        info is not null
+        && info.NextnPredictLayers is > 0
+        && info.Architecture.Trim().ToLowerInvariant() is "eagle" or "eagle2" or "eagle3";
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -164,10 +209,21 @@ public partial class ModelManagementViewModel : ObservableObject
             var models = new List<LlmModel>(reportedModels);
             var inventory = await _inventory.ScanAsync(_settings.Settings.DataManagement.LocalAiAssetsRoot);
             models.AddRange(DiscoverLocalGgufModels(models, inventory));
+            AddConfiguredEmbeddingModels(models);
+            AddDiscoveredRerankerModels(models);
+            AddConfiguredRerankerModel(models);
 
             _profiles.ApplyProfiles(models);
             var hardware = await _system.GetHardwareProfileAsync();
             var manifestEntries = inventory.ManifestEntries;
+            var embeddingPaths = ConfiguredEmbeddingPaths();
+            foreach (var entry in inventory.Entries.Where(entry =>
+                         LocalAiAssetLocator.IsUnderEmbeddingDirectory(inventory.Root, entry.Path)))
+            {
+                try { embeddingPaths.Add(Path.GetFullPath(entry.Path)); }
+                catch (ArgumentException) { }
+            }
+            var rerankerPath = _settings.Settings.Rag.RerankerModelPath.Trim();
             _allModels.Clear();
             foreach (var m in models)
             {
@@ -175,11 +231,15 @@ public partial class ModelManagementViewModel : ObservableObject
                 var item = new ModelProfileItemViewModel(m, profile, runningIds.Contains(m.Id));
                 RefreshTuneSummary(item);
                 var existingTune = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
-                var ggufInfo = item.IsLocalGguf ? inventory.Find(item.ModelId)?.GgufInfo : null;
+                var inventoryEntry = inventory.Find(item.ModelId);
+                var ggufInfo = item.IsLocalGguf ? inventoryEntry?.GgufInfo : null;
+                var manifestEntry = inventoryEntry?.Manifest ?? FindManifestEntry(manifestEntries, item.ModelId);
+                item.ApplyCatalogClassification(
+                    ClassifyCatalogRole(m, ggufInfo, embeddingPaths, rerankerPath),
+                    ggufInfo,
+                    manifestEntry);
                 ApplyFit(item, m.SizeBytes, hardware, ggufInfo, ResolveProbeContextSize(item, existingTune), profile.DefaultKvCacheType);
                 ApplyManifestState(item, manifestEntries);
-                var manifestEntry = manifestEntries.FirstOrDefault(e =>
-                    ModelPathSafety.AreSameLocalPath(e.FilePath, Path.GetFullPath(item.ModelId)));
                 if (string.IsNullOrWhiteSpace(item.Avatar)
                     && manifestEntry is { } verifiedManifest
                     && IsVerifiedManifest(verifiedManifest))
@@ -206,6 +266,154 @@ public partial class ModelManagementViewModel : ObservableObject
         catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
         finally { IsLoading = false; }
     }
+
+    private void AddConfiguredEmbeddingModels(List<LlmModel> models)
+    {
+        foreach (var server in _settings.Settings.ManagedServers.Where(server => server.EmbeddingsMode))
+        {
+            var path = server.ModelPath.Trim();
+            if (path.Length == 0 || models.Any(model => SameLocalModelIdentity(model.Id, path)))
+                continue;
+
+            try
+            {
+                var file = new FileInfo(path);
+                models.Add(new LlmModel
+                {
+                    Id = path,
+                    Name = Path.GetFileNameWithoutExtension(path),
+                    Provider = "Managed embeddings",
+                    ProviderTag = "llama.cpp",
+                    SizeBytes = file.Exists ? file.Length : 0,
+                    ModifiedAt = file.Exists ? file.LastWriteTimeUtc : null
+                });
+            }
+            catch (ArgumentException) { }
+            catch (IOException) { }
+        }
+    }
+
+    private void AddConfiguredRerankerModel(List<LlmModel> models)
+    {
+        var path = _settings.Settings.Rag.RerankerModelPath.Trim();
+        if (path.Length == 0 || models.Any(model => string.Equals(model.Id, path, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (name.Length == 0)
+            name = "Configured reranker";
+        models.Add(new LlmModel
+        {
+            Id = path,
+            Name = name,
+            Provider = "ONNX reranker",
+            ProviderTag = "reranker"
+        });
+    }
+
+    private void AddDiscoveredRerankerModels(List<LlmModel> models)
+    {
+        foreach (var path in LocalAiAssetLocator.FindRerankerDirectories(_settings.Settings.DataManagement.LocalAiAssetsRoot))
+        {
+            if (models.Any(model => ModelPathSafety.AreSameLocalPath(model.Id, path)))
+                continue;
+
+            models.Add(new LlmModel
+            {
+                Id = path,
+                Name = Path.GetFileName(path),
+                Provider = "ONNX reranker",
+                ProviderTag = "reranker",
+                SizeBytes = DirectorySize(path)
+            });
+        }
+    }
+
+    private static long DirectorySize(string path)
+    {
+        try
+        {
+            long total = 0;
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly))
+            {
+                try { total = checked(total + new FileInfo(file).Length); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            return total;
+        }
+        catch (IOException) { return 0; }
+        catch (UnauthorizedAccessException) { return 0; }
+    }
+
+    private HashSet<string> ConfiguredEmbeddingPaths()
+    {
+        var paths = new HashSet<string>(ModelPathSafety.LocalPathComparer);
+        foreach (var server in _settings.Settings.ManagedServers.Where(server =>
+                     server.EmbeddingsMode && !string.IsNullOrWhiteSpace(server.ModelPath)))
+        {
+            try { paths.Add(Path.GetFullPath(server.ModelPath.Trim())); }
+            catch (ArgumentException) { }
+            catch (NotSupportedException) { }
+        }
+        return paths;
+    }
+
+    private static ModelManifestEntry? FindManifestEntry(
+        IReadOnlyList<ModelManifestEntry> entries,
+        string modelPath)
+    {
+        try
+        {
+            var normalized = Path.GetFullPath(modelPath);
+            return entries.FirstOrDefault(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
+        }
+        catch (ArgumentException) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
+
+    private ModelCatalogRole ClassifyCatalogRole(
+        LlmModel model,
+        GgufModelInfo? info,
+        HashSet<string> embeddingPaths,
+        string rerankerPath)
+    {
+        if (string.Equals(model.ProviderTag, "reranker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(model.Id, rerankerPath, StringComparison.OrdinalIgnoreCase))
+            return ModelCatalogRole.Reranker;
+
+        if (IsConfiguredEmbeddingModel(model, embeddingPaths))
+            return ModelCatalogRole.Embedding;
+
+        if (IsKnownEmbeddingArchitecture(info?.Architecture))
+            return ModelCatalogRole.Embedding;
+
+        if (string.Equals(model.ProviderTag, "llama.cpp", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(model.ProviderTag, "ollama", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(model.ProviderTag, "openai", StringComparison.OrdinalIgnoreCase))
+            return ModelCatalogRole.ChatGeneration;
+
+        return info is null ? ModelCatalogRole.Unknown : ModelCatalogRole.ChatGeneration;
+    }
+
+    private bool IsConfiguredEmbeddingModel(LlmModel model, HashSet<string> embeddingPaths)
+    {
+        try
+        {
+            if (embeddingPaths.Contains(Path.GetFullPath(model.Id)))
+                return true;
+        }
+        catch (ArgumentException) { }
+
+        var configuredName = _settings.Settings.Rag.EmbeddingModel.Trim();
+        return configuredName.Length > 0
+            && (string.Equals(model.Id, configuredName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(model.Name, configuredName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsKnownEmbeddingArchitecture(string? architecture) =>
+        architecture?.Trim().ToLowerInvariant() is
+            "bert" or "nomic-bert" or "jina-bert-v2" or "roberta" or "xlm-roberta";
 
     [RelayCommand]
     private async Task SaveProfileAsync(ModelProfileItemViewModel? item)
@@ -378,8 +586,7 @@ public partial class ModelManagementViewModel : ObservableObject
 
     private static void ApplyManifestState(ModelProfileItemViewModel item, IReadOnlyList<ModelManifestEntry> manifestEntries)
     {
-        var normalized = Path.GetFullPath(item.ModelId);
-        var entry = manifestEntries.FirstOrDefault(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
+        var entry = FindManifestEntry(manifestEntries, item.ModelId);
         if (entry is null || string.IsNullOrWhiteSpace(entry.RepoId))
         {
             item.RepoId = string.Empty;
@@ -389,6 +596,7 @@ public partial class ModelManagementViewModel : ObservableObject
             item.HasVerifiedCompanionReplacement = false;
             item.CompanionStatus = string.Empty;
             item.ManualCompanionRepairLabel = string.Empty;
+            item.ApplyCompanionDetails(null);
             return;
         }
 
@@ -401,6 +609,7 @@ public partial class ModelManagementViewModel : ObservableObject
                     ? ModelUpdateStatus.UpToDate
                     : ModelUpdateStatus.NotLinked; // linked but never checked yet
 
+        item.ApplyCompanionDetails(entry);
         ApplyCompanionState(item, entry);
     }
 
@@ -441,7 +650,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 if (HasVerifiedCompanionMetadata(entry, companion))
                     repairable.Add(companion.LocalFilePath);
                 else
-                    manualRoles.Add(CompanionRoleLabel(companion.Role));
+                    manualRoles.Add(CompanionRoleLabelForDisplay(companion.Role));
             }
         }
 
@@ -471,7 +680,7 @@ public partial class ModelManagementViewModel : ObservableObject
         }
     }
 
-    private static string CompanionRoleLabel(string role) => role.Trim().ToLowerInvariant() switch
+    internal static string CompanionRoleLabelForDisplay(string role) => role.Trim().ToLowerInvariant() switch
     {
         "projector" => "projector",
         "draft_head" => "MTP draft head",
@@ -1108,7 +1317,7 @@ public partial class ModelManagementViewModel : ObservableObject
             if (companion.RequiresUserConfirmation)
             {
                 missing++;
-                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} has no verified compatibility evidence; browse or clear the {CompanionRoleLabel(companion.Role)} in Services.");
+                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} has no verified compatibility evidence; browse or clear the {CompanionRoleLabelForDisplay(companion.Role)} in Services.");
                 continue;
             }
 
@@ -2013,6 +2222,70 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     }
 }
 
+public enum ModelCatalogRole
+{
+    Unknown,
+    ChatGeneration,
+    Embedding,
+    Reranker,
+    Companion
+}
+
+public sealed class ModelCatalogSectionViewModel(string title)
+{
+    public string Title { get; } = title;
+    public UiBoundCollection<ModelProfileItemViewModel> Models { get; } = [];
+}
+
+public sealed class ModelCompanionViewModel
+{
+    public string FileName { get; }
+    public string RoleLabel { get; }
+    public string StateLabel { get; }
+    public string StateTooltip { get; }
+
+    public ModelCompanionViewModel(ModelCompanionManifestEntry companion)
+    {
+        FileName = Path.GetFileName(companion.LocalFilePath);
+        RoleLabel = ModelManagementViewModel.CompanionRoleLabelForDisplay(companion.Role);
+        var exists = false;
+        var sizeMatches = false;
+        try
+        {
+            var file = new FileInfo(companion.LocalFilePath);
+            exists = file.Exists;
+            sizeMatches = exists && companion.SizeBytes is > 0 && file.Length == companion.SizeBytes.Value;
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+
+        if (!exists)
+        {
+            StateLabel = companion.RequiresUserConfirmation ? "Unknown" : "Missing";
+            StateTooltip = companion.RequiresUserConfirmation
+                ? "The companion mapping requires review, so absence is not classified as a confirmed missing asset."
+                : "The linked companion file is not present at its recorded local path.";
+        }
+        else if (companion.SizeBytes is > 0 && !sizeMatches)
+        {
+            StateLabel = "Stale";
+            StateTooltip = "The file exists, but its size differs from the trusted manifest. Its current content hash was not inferred.";
+        }
+        else if (companion.SizeBytes is > 0)
+        {
+            StateLabel = "Present";
+            StateTooltip = companion.RequiresUserConfirmation
+                ? "The file is present, but compatibility evidence still requires review."
+                : "The file exists with the size recorded by the trusted manifest. Current content was not re-hashed during this refresh.";
+        }
+        else
+        {
+            StateLabel = "Unknown";
+            StateTooltip = "The file exists, but the manifest has no usable size evidence for a stronger state.";
+        }
+    }
+}
+
 public partial class ModelProfileItemViewModel : ObservableObject
 {
     public static IReadOnlyList<string> KvCacheTypeOptions { get; } =
@@ -2065,6 +2338,26 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private HfArtworkState _artworkState = HfArtworkState.Unavailable;
     [ObservableProperty] private string? _artworkPath;
     [ObservableProperty] private string _artworkFailureCode = string.Empty;
+
+    private GgufModelInfo? _ggufInfo;
+    private ModelCatalogRole _catalogRole = ModelCatalogRole.Unknown;
+    public ModelCatalogRole CatalogRole => _catalogRole;
+    public string RoleLabel => _catalogRole switch
+    {
+        ModelCatalogRole.ChatGeneration => "Chat & Generation",
+        ModelCatalogRole.Embedding => "Embeddings",
+        ModelCatalogRole.Reranker => "Reranker",
+        ModelCatalogRole.Companion => "Companion",
+        _ => "Unknown role"
+    };
+    [ObservableProperty] private string _capabilityBadges = string.Empty;
+    public string CompanionSearchText => string.Join(" ", Companions.Select(companion =>
+        $"{companion.FileName} {companion.RoleLabel} {companion.StateLabel}"));
+    public UiBoundCollection<ModelCompanionViewModel> Companions { get; } = [];
+    public bool HasCompanionDetails => Companions.Count > 0;
+    public string CompanionSummary => !HasCompanionDetails
+        ? string.Empty
+        : $"Companions: {string.Join(", ", Companions.GroupBy(c => c.StateLabel).OrderBy(g => g.Key).Select(g => $"{g.Count()} {g.Key.ToLowerInvariant()}"))}";
 
     public bool HasCustomAvatar => !string.IsNullOrWhiteSpace(Avatar);
     public bool HasArtworkForDisplay => !HasCustomAvatar && !string.IsNullOrWhiteSpace(ArtworkPath);
@@ -2251,6 +2544,63 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private bool _retuneRecommended;
 
     public bool HasRepoLink => !string.IsNullOrWhiteSpace(RepoId);
+
+    public string CatalogSearchText => $"{RoleLabel} {CapabilityBadges} {CompanionSearchText}";
+
+    public void ApplyCatalogClassification(
+        ModelCatalogRole role,
+        GgufModelInfo? info,
+        ModelManifestEntry? manifest)
+    {
+        _catalogRole = role;
+        _ggufInfo = info;
+        RebuildCapabilityBadges(manifest);
+        ApplyCompanionDetails(manifest);
+        OnPropertyChanged(nameof(CatalogRole));
+        OnPropertyChanged(nameof(RoleLabel));
+        OnPropertyChanged(nameof(CatalogSearchText));
+    }
+
+    public void ApplyCompanionDetails(ModelManifestEntry? manifest)
+    {
+        Companions.Clear();
+        if (manifest is not null)
+        {
+            foreach (var companion in manifest.Companions.Where(c => !string.IsNullOrWhiteSpace(c.LocalFilePath)))
+                Companions.Add(new ModelCompanionViewModel(companion));
+        }
+
+        OnPropertyChanged(nameof(HasCompanionDetails));
+        OnPropertyChanged(nameof(CompanionSummary));
+        OnPropertyChanged(nameof(CompanionSearchText));
+        OnPropertyChanged(nameof(CatalogSearchText));
+    }
+
+    private void RebuildCapabilityBadges(ModelManifestEntry? manifest)
+    {
+        var badges = new List<string>();
+        if (_ggufInfo?.ExpertCount is > 0 || _ggufInfo?.GeneralType.Contains("moe", StringComparison.OrdinalIgnoreCase) == true)
+            badges.Add("MoE");
+        if (_ggufInfo?.NextnPredictLayers is > 0 || manifest?.Companions.Any(c =>
+                string.Equals(c.Role, "draft_head", StringComparison.OrdinalIgnoreCase)) == true)
+            badges.Add("MTP");
+        if (_ggufInfo?.NextnPredictLayers is > 0)
+            badges.Add("Draft");
+        if (manifest?.Companions.Any(c => string.Equals(c.Role, "projector", StringComparison.OrdinalIgnoreCase)) == true
+            || IsKnownVisionArchitecture(_ggufInfo?.Architecture))
+            badges.Add("Vision / Projector");
+        if (_catalogRole == ModelCatalogRole.Embedding)
+            badges.Add("Embedding");
+        if (_catalogRole == ModelCatalogRole.Reranker)
+            badges.Add("Reranker");
+        CapabilityBadges = string.Join(" · ", badges.Distinct(StringComparer.Ordinal));
+    }
+
+    private static bool IsKnownVisionArchitecture(string? architecture) =>
+        architecture?.Trim().ToLowerInvariant() is
+            "gemma3" or "gemma4" or "llama4" or "qwen2vl" or "qwen2_5_vl"
+            or "qwen2.5_vl" or "mllama" or "pixtral" or "minicpmv"
+            or "internvl" or "smolvlm" or "molmo" or "phi3v";
 
     /// <summary>Empty for NotLinked/CheckFailed so the UI shows nothing rather than a
     /// permanently-stuck error chip; CheckFailed is surfaced via the page-level status line

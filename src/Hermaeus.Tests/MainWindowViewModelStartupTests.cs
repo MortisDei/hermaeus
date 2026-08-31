@@ -266,6 +266,23 @@ public sealed class MainWindowViewModelStartupTests
     }
 
     [Fact]
+    public async Task Inline_delete_requires_the_visible_confirmation_state()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        await harness.ConvStore.SaveAsync(new Hermaeus.Core.Models.Conversation { Id = "conv-inline", Title = "Inline" });
+        var item = new ConversationItemViewModel { Id = "conv-inline", Title = "Inline", ModelId = "m", UpdatedAt = DateTime.UtcNow, Folder = string.Empty };
+        harness.Main.Conversations.Add(item);
+
+        await harness.Main.DeleteConversationAfterInlineConfirmationAsync(item);
+        Assert.NotNull(await harness.ConvStore.GetByIdAsync("conv-inline"));
+
+        item.IsDeleteConfirmationVisible = true;
+        await harness.Main.DeleteConversationAfterInlineConfirmationAsync(item);
+        Assert.Null(await harness.ConvStore.GetByIdAsync("conv-inline"));
+    }
+
+    [Fact]
     public async Task DeleteConversation_deletes_when_confirmation_returns_true()
     {
         using var temp = new TempDir();

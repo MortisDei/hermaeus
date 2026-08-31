@@ -4,6 +4,7 @@
              xmlns:views="using:Hermaeus.Desktop.Views"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
              xmlns:conv="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
+             x:Name="Root"
              x:Class="Hermaeus.Desktop.Views.ModelManagementView"
              x:DataType="vm:ModelManagementViewModel">
 
@@ -217,11 +218,11 @@
 
         <TextBox DockPanel.Dock="Top"
                  Text="{Binding FilterText}"
-                 Watermark="Filter by name or tag..."
+                 Watermark="Filter by name, role, capability, or companion..."
                  CornerRadius="6"
                  Padding="10,6"
                  Margin="0,0,0,12"
-                 ToolTip.Tip="Narrows the list already loaded below by name or tag. Does not re-query providers." />
+                 ToolTip.Tip="Narrows the list already loaded below by name, role, factual capability, tag, or companion state. Does not re-query providers." />
 
         <!-- Status -->
         <TextBlock DockPanel.Dock="Top"
@@ -242,14 +243,19 @@
                                          Title="No models here yet"
                                          Hint="Start a managed llama-server on the Services page, or browse Hugging Face above, and detected models land here."
                                          Margin="0,20,0,0" />
-                <ItemsControl ItemsSource="{Binding Models}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
+                <ItemsControl ItemsSource="{Binding ModelSections}">
                     <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="vm:ModelProfileItemViewModel">
+                        <DataTemplate DataType="vm:ModelCatalogSectionViewModel">
+                            <StackPanel Spacing="6" Margin="0,8,0,8">
+                                <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+                                <ItemsControl ItemsSource="{Binding Models}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="vm:ModelProfileItemViewModel">
                             <!-- Fixed width, free height: a WrapPanel of variable-width
                                  tiles produces ragged columns. -->
                             <Border Width="340"
@@ -322,8 +328,19 @@
                                     </StackPanel>
 
                                     <!-- Badge row -->
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="{Binding SizeDisplay}"
+                                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding RoleLabel, Converter={x:Static views:NotEmptyConverter.Instance}}">
+                                    <Border CornerRadius="4" Padding="6,1"
+                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                            ToolTip.Tip="Model role derived from the provider route, configured service role, GGUF metadata, or trusted manifest provenance.">
+                                        <TextBlock Text="{Binding RoleLabel}" FontSize="10" FontWeight="SemiBold" />
+                                    </Border>
+                                    <Border CornerRadius="4" Padding="6,1"
+                                            IsVisible="{Binding CapabilityBadges, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                            ToolTip.Tip="Factual architecture or capability metadata. This does not mean the feature is configured or active.">
+                                        <TextBlock Text="{Binding CapabilityBadges}" FontSize="10" FontWeight="SemiBold" />
+                                    </Border>
+                                    <TextBlock Text="{Binding SizeDisplay}"
                                                    FontSize="11" Opacity="0.45"
                                                    VerticalAlignment="Center" />
                                         <Border CornerRadius="4" Padding="6,1"
@@ -352,6 +369,28 @@
                                                FontSize="11" Opacity="0.45"
                                                TextTrimming="CharacterEllipsis" />
 
+                                    <Expander Header="{Binding CompanionSummary}"
+                                              IsVisible="{Binding HasCompanionDetails}"
+                                              IsExpanded="False">
+                                        <ItemsControl ItemsSource="{Binding Companions}" Margin="0,4,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="vm:ModelCompanionViewModel">
+                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,2">
+                                                        <TextBlock Grid.Column="0" Text="{Binding FileName}"
+                                                                   TextTrimming="CharacterEllipsis" FontSize="11" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding RoleLabel}"
+                                                                   FontSize="10" Opacity="0.6" />
+                                                        <Border Grid.Column="2" CornerRadius="4" Padding="5,1"
+                                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                                ToolTip.Tip="{Binding StateTooltip}">
+                                                            <TextBlock Text="{Binding StateLabel}" FontSize="10" FontWeight="SemiBold" />
+                                                        </Border>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Expander>
+
                                     <Border IsVisible="{Binding TuneSummary, Converter={x:Static views:NotEmptyConverter.Instance}}"
                                             CornerRadius="4" Padding="6,3"
                                             Background="{DynamicResource SubtleFillColorSecondaryBrush}"
@@ -372,7 +411,7 @@
                                              should be lost in the move to cards. -->
                                         <Button Grid.Column="1"
                                                 Content="{Binding IsTuning, Converter={x:Static views:BoolToTextConverter.Instance}, ConverterParameter='Tuning...|Auto tune'}"
-                                                Command="{Binding $parent[ItemsControl].DataContext.AutoTuneModelCommand}"
+                                                Command="{Binding DataContext.AutoTuneModelCommand, ElementName=Root}"
                                                 CommandParameter="{Binding}"
                                                 IsVisible="{Binding IsLocalGguf}"
                                                 IsEnabled="{Binding !IsRunning}"
@@ -543,11 +582,11 @@
                                                                             Spacing="8"
                                                                             HorizontalAlignment="Right">
                                                                     <Button Content="Save model profile"
-                                                                            Command="{Binding $parent[ItemsControl].DataContext.SaveProfileCommand}"
+                                                                            Command="{Binding DataContext.SaveProfileCommand, ElementName=Root}"
                                                                             CommandParameter="{Binding}"
                                                                             ToolTip.Tip="Saves this model's picker defaults and metadata. Runtime process settings are saved separately on Services." />
                                                                     <Button Content="Reset"
-                                                                            Command="{Binding $parent[ItemsControl].DataContext.ResetProfileCommand}"
+                                                                            Command="{Binding DataContext.ResetProfileCommand, ElementName=Root}"
                                                                             CommandParameter="{Binding}"
                                                                             ToolTip.Tip="Clears this model's picker defaults and metadata. The saved auto-tune runtime profile remains separate and is shown above." />
                                                                 </StackPanel>
@@ -561,13 +600,13 @@
                                                                                   FontSize="12"
                                                                                   ToolTip.Tip="When enabled, model updates may download or replace only explicitly source-mapped, SHA256-verified projector and MTP files for this model. Disabling prompts before removing existing companion files." />
                                                                         <Button Content="Reacquire known companions"
-                                                                                Command="{Binding $parent[ItemsControl].DataContext.ReacquireCompanionsCommand}"
+                                                                                Command="{Binding DataContext.ReacquireCompanionsCommand, ElementName=Root}"
                                                                                 CommandParameter="{Binding}"
                                                                                 IsVisible="{Binding CanReacquireCompanions}"
                                                                                 FontSize="11" Padding="8,3" CornerRadius="6"
                                                                                 ToolTip.Tip="Reviews and reacquires only hash-verified compatible companions from the linked repository's current revision. It never changes a server's selected draft model; choose any replacement explicitly in Services." />
                                                                         <Button Content="{Binding ManualCompanionRepairLabel}"
-                                                                                Command="{Binding $parent[ItemsControl].DataContext.OpenServicesCommand}"
+                                                                                Command="{Binding DataContext.OpenServicesCommand, ElementName=Root}"
                                                                                 IsVisible="{Binding RequiresManualCompanionRepair}"
                                                                                 FontSize="11" Padding="8,3" CornerRadius="6"
                                                                                 ToolTip.Tip="No verified replacement is available. Open Services to browse or clear the affected companion explicitly." />
@@ -584,12 +623,12 @@
                                                                             Spacing="8"
                                                                             IsVisible="{Binding IsLocalGguf}">
                                                                     <Button Content="{Binding RepoId, Converter={x:Static views:RepoLinkLabelConverter.Instance}}"
-                                                                            Command="{Binding $parent[ItemsControl].DataContext.LinkToHuggingFaceRepoCommand}"
+                                                                            Command="{Binding DataContext.LinkToHuggingFaceRepoCommand, ElementName=Root}"
                                                                             CommandParameter="{Binding}"
                                                                             FontSize="12" Padding="10,4" CornerRadius="6"
                                                                             ToolTip.Tip="Links this model to a Hugging Face repo (org/repo) so &quot;Check for updates&quot; can compare it. Validated against the model-card API before saving." />
                                                                     <Button Content="{Binding IsUpdating, Converter={x:Static views:BoolToTextConverter.Instance}, ConverterParameter='Updating...|Update'}"
-                                                                            Command="{Binding $parent[ItemsControl].DataContext.UpdateModelCommand}"
+                                                                            Command="{Binding DataContext.UpdateModelCommand, ElementName=Root}"
                                                                             CommandParameter="{Binding}"
                                                                             IsVisible="{Binding UpdateStatus, Converter={x:Static views:UpdateAvailableConverter.Instance}}"
                                                                             IsEnabled="{Binding !IsRunning}"
@@ -605,7 +644,7 @@
                                         <Button Grid.Column="3" Classes="icon-btn"
                                                 IsVisible="{Binding IsLocalGguf}"
                                                 ToolTip.Tip="Delete this local model"
-                                                Command="{Binding $parent[ItemsControl].DataContext.DeleteModelCommand}"
+                                                Command="{Binding DataContext.DeleteModelCommand, ElementName=Root}"
                                                 CommandParameter="{Binding}">
                                             <PathIcon Data="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
                                                       Width="14" Height="14" />
@@ -614,6 +653,10 @@
 
                                 </StackPanel>
                             </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

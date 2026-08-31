@@ -12,6 +12,80 @@ namespace Hermaeus.Tests;
 public sealed class ModelManagementViewModelTests
 {
     [Fact]
+    public async Task Refresh_groups_generation_embedding_and_reranker_roles_without_mixing_cards()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var models = Path.Combine(assets, "Models");
+        Directory.CreateDirectory(models);
+        var embeddingPath = Path.Combine(models, "embedding.gguf");
+        File.WriteAllText(embeddingPath, "embedding");
+        var reranker = Path.Combine(models, "reranker");
+        Directory.CreateDirectory(reranker);
+        File.WriteAllText(Path.Combine(reranker, "model_O4.onnx"), "onnx");
+        File.WriteAllText(Path.Combine(reranker, "vocab.txt"), "vocab");
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        settings.Settings.ManagedServers[1].ModelPath = embeddingPath;
+        settings.Settings.ManagedServers[1].EmbeddingsMode = true;
+        settings.Settings.Rag.RerankerModelPath = reranker;
+
+        var llm = new ScriptedModelsLlm(() =>
+        [
+            new LlmModel { Id = "chat", Name = "Chat model", Provider = "llama.cpp", ProviderTag = "llama.cpp" }
+        ]);
+        var vm = new ModelManagementViewModel(llm, new ModelProfileService(settings), new FakeToasts(), settings,
+            new FakeSystemInfo(), NewServicesViewModel(settings), new ModelManifestStore(settings), new HuggingFaceClient(), new ModelDownloadService());
+
+        await vm.RefreshAsync();
+
+        Assert.Equal(3, vm.Models.Count);
+        Assert.Equal("Chat & Generation", Assert.Single(vm.ModelSections, section => section.Title == "Chat & Generation").Title);
+        Assert.Single(vm.ModelSections.Single(section => section.Title == "Chat & Generation").Models);
+        Assert.Single(vm.ModelSections.Single(section => section.Title == "Embeddings").Models);
+        Assert.Single(vm.ModelSections.Single(section => section.Title == "Rerankers").Models);
+        Assert.Equal(ModelCatalogRole.Embedding, vm.Models.Single(model => model.ModelId == embeddingPath).CatalogRole);
+        Assert.Equal(ModelCatalogRole.Reranker, vm.Models.Single(model => model.ModelId == reranker).CatalogRole);
+    }
+
+    [Fact]
+    public void Catalog_classification_keeps_capability_facts_separate_from_readiness()
+    {
+        using var temp = new TempDir();
+        var projectorPath = temp.PathFor("projector.gguf");
+        var draftPath = temp.PathFor("draft.gguf");
+        File.WriteAllBytes(projectorPath, [1, 2]);
+        var primary = new ModelProfileItemViewModel(
+            new LlmModel { Id = temp.PathFor("primary.gguf"), Name = "MoE model", Provider = "local GGUF" },
+            new ModelProfile { ModelId = temp.PathFor("primary.gguf") });
+        var manifest = new ModelManifestEntry
+        {
+            FilePath = primary.ModelId,
+            Companions =
+            [
+                new ModelCompanionManifestEntry { LocalFilePath = projectorPath, Role = "projector", SizeBytes = 2 },
+                new ModelCompanionManifestEntry { LocalFilePath = draftPath, Role = "draft_head", SizeBytes = 2 }
+            ]
+        };
+
+        primary.ApplyCatalogClassification(
+            ModelCatalogRole.ChatGeneration,
+            new GgufModelInfo("mixtral", "Q4_K_M", 32, 8192, 4096, 32, 8, 128, 128,
+                NextnPredictLayers: 4, ExpertCount: 8, ExpertUsedCount: 2),
+            manifest);
+
+        Assert.Equal("Chat & Generation", primary.RoleLabel);
+        Assert.Contains("MoE", primary.CapabilityBadges);
+        Assert.Contains("MTP", primary.CapabilityBadges);
+        Assert.Contains("Draft", primary.CapabilityBadges);
+        Assert.Contains("Vision / Projector", primary.CapabilityBadges);
+        Assert.Equal(2, primary.Companions.Count);
+        Assert.Equal("Present", primary.Companions[0].StateLabel);
+        Assert.Equal("Missing", primary.Companions[1].StateLabel);
+        Assert.Contains("missing", primary.CompanionSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Refresh_does_not_duplicate_a_local_model_reported_with_a_normalized_path()
     {
         using var temp = new TempDir();

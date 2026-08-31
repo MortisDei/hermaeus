@@ -361,6 +361,19 @@ public partial class ChatViewModel : ViewModelBase
     public bool HasNoAvailableModels => AvailableModels.Count == 0;
 
     /// <summary>
+    /// Shared Services-page owner for managed llama.cpp launch settings. Chat
+    /// only projects this row in its compact flyout, so editing placement does
+    /// not create a second configuration or launch authority.
+    /// </summary>
+    public ServicesViewModel? ManagedServices { get; private set; }
+
+    internal void AttachManagedServices(ServicesViewModel services)
+    {
+        ManagedServices = services;
+        OnPropertyChanged(nameof(ManagedServices));
+    }
+
+    /// <summary>
     /// First-run setup is a recovery path only while onboarding is incomplete.
     /// A completed user with no live model belongs in Services instead.
     /// </summary>

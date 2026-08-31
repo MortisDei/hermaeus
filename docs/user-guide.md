@@ -48,8 +48,11 @@ native Kokoro can be installed during onboarding or later through Doctor.
 
 ## Models and Services
 
-**Models** lists GGUF files and models reported by configured providers. A
-Hugging Face source badge means Hermaeus retained download provenance. Open a
+**Models** groups the catalog by purpose: **Chat & Generation**, **Embeddings**,
+and **Rerankers**. GGUF files and models reported by configured providers are
+classified using provider configuration, dedicated asset layout, GGUF metadata,
+and trusted manifest provenance. A Hugging Face source badge means Hermaeus
+retained download provenance. Open a
 model card to edit its display name and per-model defaults or to inspect its
 source. When auto-tune has a current profile for a local GGUF, the card shows
 the effective tuned GPU layers, threads, and context directly. Open the card's
@@ -63,6 +66,15 @@ projections, not proof of the placement a runtime will eventually select.
 Extra arguments and live process overrides remain on Services, where their
 trust checks and process state are visible. Runtime process settings still use
 **Save Config** on Services.
+
+Factual capability badges such as **MoE**, **MTP**, **Draft**, and
+**Vision / Projector** describe model metadata only. They do not mean that a
+feature is configured, available, or active. A primary generation card owns
+its proven projector, draft, MTP, EAGLE, tokenizer, or sidecar companions;
+expand **Companions** to inspect Present, Missing, Stale, or Unknown state.
+Companion files are not promoted to independent cards just because they look
+like model files. The filter also searches role, capability, tag, and
+companion state.
 
 **Services** owns processes and files on disk. A managed llama.cpp server needs
 the resolved `llama-server` executable, a GGUF model, a localhost port, and
@@ -206,7 +218,8 @@ whose executable is nested below the b-numbered directory.
 Choose a model at the top of **Chat**, type a message, and send. Stop cancels an
 active generation. Regenerate creates a branch rather than destroying the
 previous answer. Deleting the active conversation returns Chat to a fresh,
-focused input.
+focused input. Delete from a conversation's details flyout shows its nearby
+confirmation; the context-menu path keeps a full confirmation dialog.
 
 While a response streams, scrolling upward pauses bottom-following. Scroll back
 to the bottom to intentionally re-pin. The telemetry flyout can start bounded
@@ -444,8 +457,10 @@ retained records in the detail pane.
 Native Kokoro runs locally after its verified assets are installed. Other voice
 providers may require Python packages, local services, or an API key. Configure
 the provider in Services or Settings, use Doctor for readiness, and check
-Runtime Logs if synthesis fails. Remote voice providers receive the text sent
-for speech. **Settings > Voice** lists the active provider's discovered names
+Runtime Logs if synthesis fails. A missing, integrity, or load failure from
+native Kokoro exposes **Open Doctor** directly in its Services status row
+because Doctor owns the verified asset diagnosis and repair action. Remote
+voice providers receive the text sent for speech. **Settings > Voice** lists the active provider's discovered names
 for per-channel voice routing, while **Services > Voice** keeps the explicit
 Save Config action for provider, device, speed, and process settings.
 

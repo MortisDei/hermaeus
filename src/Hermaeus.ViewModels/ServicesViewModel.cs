@@ -53,6 +53,26 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private AdaptiveInferenceMode _adaptiveMode = AdaptiveInferenceMode.Fixed;
     [ObservableProperty] private int          _adaptiveMinimumContext;
     [ObservableProperty] private long         _adaptiveMinimumGpuHeadroomBytes = ResourceHeadroomPolicy.DefaultDeviceStabilityBytes;
+
+    /// <summary>
+    /// User-facing MiB projection of the persisted byte headroom value. The
+    /// settings contract stays in bytes so admission math does not lose
+    /// precision, while the editor avoids asking users to enter raw bytes.
+    /// </summary>
+    public double AdaptiveMinimumGpuHeadroomMiB
+    {
+        get => AdaptiveMinimumGpuHeadroomBytes / (1024d * 1024d);
+        set
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
+                value = 0;
+
+            var bytes = value >= long.MaxValue / (1024d * 1024d)
+                ? long.MaxValue
+                : (long)Math.Round(value * 1024d * 1024d, MidpointRounding.AwayFromZero);
+            AdaptiveMinimumGpuHeadroomBytes = bytes;
+        }
+    }
     [ObservableProperty] private bool         _adaptiveAllowGpuLayerReduction;
     [ObservableProperty] private bool         _adaptiveAllowContextReduction;
     [ObservableProperty] private bool         _adaptiveAllowKvPrecisionChange;
@@ -1843,7 +1863,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
     partial void OnAdaptiveModeChanged(AdaptiveInferenceMode value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAdaptiveMinimumContextChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnAdaptiveMinimumGpuHeadroomBytesChanged(long value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveMinimumGpuHeadroomBytesChanged(long value)
+    {
+        OnPropertyChanged(nameof(AdaptiveMinimumGpuHeadroomMiB));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+    }
     partial void OnAdaptiveAllowGpuLayerReductionChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAdaptiveAllowContextReductionChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAdaptiveAllowKvPrecisionChangeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -2183,6 +2207,13 @@ public partial class ServicesViewModel : ViewModelBase
     public bool AnyServerRunning => Servers.Any(s => s.Status == ServerStatus.Running);
 
     /// <summary>
+    /// The non-embedding managed server is the owner of Chat launch settings.
+    /// Chat can expose a compact projection of this row without creating a
+    /// second settings owner or a second launch path.
+    /// </summary>
+    public ServerProcessViewModel? ChatServer => Servers.FirstOrDefault(server => !server.EmbeddingsMode);
+
+    /// <summary>
     /// Identifies a loopback llama.cpp endpoint that belongs to a managed
     /// server currently known to be stopped. Remote endpoints and servers in
     /// Starting remain probeable because this view model cannot establish that
@@ -2418,6 +2449,7 @@ public partial class ServicesViewModel : ViewModelBase
             RuntimeProfiles.Add(new RuntimeProfileViewModel(profile));
 
         OnPropertyChanged(nameof(AnyServerRunning));
+        OnPropertyChanged(nameof(ChatServer));
 
         var fingerprint = BuildAvailabilityFingerprint(configs);
         if (!string.Equals(_lastAvailabilityFingerprint, fingerprint, StringComparison.Ordinal))

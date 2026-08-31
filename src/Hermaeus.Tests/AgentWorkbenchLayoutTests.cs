@@ -95,7 +95,7 @@ public sealed class AgentWorkbenchLayoutTests
             Status = AgentTaskStatus.WaitingForUser,
             PendingToolAction = new AgentPendingToolAction()
         }));
-        Assert.Equal("Agent needs your answer. Reply in the panel above.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.WaitingForUser)));
+        Assert.Equal("Agent needs your answer. Reply below its response in the Run tab.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.WaitingForUser)));
         Assert.Equal("Review the outcome below, then inspect Changes or start a follow-up task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Complete)));
         Assert.Equal("Review the failure and transcript, then provide a new instruction or start again.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Failed)));
         Assert.Equal("This task was stopped. Review its outcome or start a new task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Cancelled)));

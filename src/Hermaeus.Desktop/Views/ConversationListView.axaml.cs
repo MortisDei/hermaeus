@@ -51,10 +51,22 @@ public partial class ConversationListView : UserControl
 
     private void OnDetailsDeleteClick(object? sender, RoutedEventArgs e)
     {
+        if (sender is Control { DataContext: ConversationItemViewModel item })
+            item.IsDeleteConfirmationVisible = true;
+    }
+
+    private void OnDetailsDeleteCancelClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: ConversationItemViewModel item })
+            item.IsDeleteConfirmationVisible = false;
+    }
+
+    private async void OnDetailsDeleteConfirmClick(object? sender, RoutedEventArgs e)
+    {
         if (sender is Control { DataContext: ConversationItemViewModel item }
             && DataContext is MainWindowViewModel vm)
         {
-            vm.DeleteConversationCommand.Execute(item);
+            await vm.DeleteConversationAfterInlineConfirmationAsync(item);
         }
     }
 

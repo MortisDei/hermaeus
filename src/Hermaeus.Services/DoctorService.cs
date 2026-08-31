@@ -128,7 +128,6 @@ public sealed partial class DoctorService : IDoctorService
                 ? await CheckEmbeddingBackendAsync(ct)
                 : CheckEmbeddingBackendSkipped(embeddingModelCheck),
             CheckRerankerAssets(),
-            CheckNativeKokoroAssets(),
             await CheckSpeechRecognitionAsync(ct),
             CheckMicrophoneAsync(),
             await CheckGpuAsync(ct),

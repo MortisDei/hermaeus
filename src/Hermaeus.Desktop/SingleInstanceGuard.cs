@@ -8,6 +8,7 @@ namespace Hermaeus.Desktop;
 /// </summary>
 internal static class SingleInstanceGuard
 {
+    private static readonly object Sync = new();
     private static FileStream? _lockStream;
 
     /// <summary>
@@ -28,21 +29,30 @@ internal static class SingleInstanceGuard
     internal static bool TryAcquire(string? lockFilePath = null)
     {
         lockFilePath ??= DefaultLockFilePath;
-        Directory.CreateDirectory(Path.GetDirectoryName(lockFilePath)!);
         try
         {
-            _lockStream = new FileStream(lockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            return true;
+            Directory.CreateDirectory(Path.GetDirectoryName(lockFilePath)!);
+            lock (Sync)
+            {
+                if (_lockStream is not null)
+                    return false;
+
+                _lockStream = new FileStream(lockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                return true;
+            }
         }
-        catch (IOException)
-        {
-            return false;
-        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+        catch (ArgumentException) { return false; }
+        catch (NotSupportedException) { return false; }
     }
 
     internal static void Release()
     {
-        _lockStream?.Dispose();
-        _lockStream = null;
+        lock (Sync)
+        {
+            _lockStream?.Dispose();
+            _lockStream = null;
+        }
     }
 }

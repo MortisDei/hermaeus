@@ -2,7 +2,6 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using Avalonia.Threading;
 using Hermaeus.Agent.Services;
 using Hermaeus.Composition;
 using Hermaeus.Desktop.Controls;
@@ -71,7 +70,6 @@ public partial class App : Application
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
-            Program.ActivationRequested = () => Dispatcher.UIThread.Post(() => _desktopIntegration?.ShowAndActivate());
             window.Opened += async (_, _) =>
             {
                 if (Interlocked.Exchange(ref _initialized, 1) != 0) return;

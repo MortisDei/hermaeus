@@ -107,7 +107,7 @@
                     <Button.Flyout>
                         <Flyout Placement="Bottom">
                             <StackPanel Width="360" Spacing="12">
-                                <TextBlock Text="Sampling settings" FontSize="14" FontWeight="SemiBold" />
+                                <TextBlock Text="Chat settings" FontSize="14" FontWeight="SemiBold" />
 
                                 <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
                                     <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
@@ -176,6 +176,31 @@
 
                                 <TextBlock Text="Applies to this conversation only."
                                            FontSize="11" Opacity="0.55" FontStyle="Italic" TextWrapping="Wrap" />
+
+                                <Separator />
+                                <StackPanel Spacing="6" x:CompileBindings="False">
+                                    <TextBlock Text="Managed runtime" FontSize="13" FontWeight="SemiBold" />
+                                    <TextBlock Text="Placement is owned by the managed server on Services. This compact view edits the same live configuration; it does not create a second launch profile."
+                                               FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                    <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="6">
+                                        <TextBlock Grid.Row="0" Text="GPU placement" FontSize="11" Opacity="0.6" VerticalAlignment="Center" />
+                                        <ComboBox Grid.Row="0" Grid.Column="1"
+                                                  ItemsSource="{Binding ManagedServices.ChatServer.GpuPlacementOptions}"
+                                                  SelectedItem="{Binding ManagedServices.ChatServer.GpuPlacementSelection}"
+                                                  IsEnabled="{Binding ManagedServices.ChatServer.CanEdit}"
+                                                  ToolTip.Tip="CPU, runtime Auto, all layers, or an exact GPU layer count. Save the managed server configuration on Services." />
+                                        <TextBlock Grid.Row="1" Text="Exact layers" FontSize="11" Opacity="0.6" VerticalAlignment="Center"
+                                                   IsVisible="{Binding ManagedServices.ChatServer.IsExactGpuPlacement}" />
+                                        <NumericUpDown Grid.Row="1" Grid.Column="1"
+                                                       Value="{Binding ManagedServices.ChatServer.GpuLayers}"
+                                                       Minimum="1" Maximum="999" Increment="1"
+                                                       IsVisible="{Binding ManagedServices.ChatServer.IsExactGpuPlacement}"
+                                                       IsEnabled="{Binding ManagedServices.ChatServer.CanEdit}"
+                                                       ToolTip.Tip="Exact GPU layer count for the managed llama-server launch." />
+                                    </Grid>
+                                    <TextBlock Text="{Binding ManagedServices.ChatServer.EffectiveOffloadLabel}"
+                                               FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
                             </StackPanel>
                         </Flyout>
                     </Button.Flyout>

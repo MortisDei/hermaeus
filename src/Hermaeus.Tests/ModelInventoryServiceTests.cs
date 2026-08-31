@@ -87,4 +87,36 @@ public sealed class ModelInventoryServiceTests
         Assert.Equal("owner/repo", second.Entries[0].Manifest?.RepoId);
         Assert.False(second.FromCache);
     }
+
+    [Fact]
+    public async Task Scan_includes_dedicated_embedding_files_for_role_classification()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        var assetsRoot = temp.PathFor("assets");
+        var embeddingRoot = Path.Combine(assetsRoot, "Models", "embeddings", "old-model");
+        Directory.CreateDirectory(embeddingRoot);
+        var embeddingPath = Path.Combine(embeddingRoot, "model.gguf");
+        File.WriteAllBytes(embeddingPath, [1, 2, 3]);
+        var service = new ModelInventoryService(new ModelManifestStore(settings));
+
+        var snapshot = await service.ScanAsync(assetsRoot);
+
+        var entry = Assert.Single(snapshot.Entries);
+        Assert.Equal(embeddingPath, entry.Path);
+        Assert.True(LocalAiAssetLocator.IsUnderEmbeddingDirectory(assetsRoot, entry.Path));
+    }
+
+    [Fact]
+    public void Dedicated_embedding_layout_is_role_evidence_but_a_filename_is_not()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("assets");
+        var models = Path.Combine(root, "Models");
+        Directory.CreateDirectory(Path.Combine(models, "embed"));
+        Directory.CreateDirectory(Path.Combine(models, "other"));
+
+        Assert.True(LocalAiAssetLocator.IsUnderEmbeddingDirectory(root, Path.Combine(models, "embed", "model.gguf")));
+        Assert.False(LocalAiAssetLocator.IsUnderEmbeddingDirectory(root, Path.Combine(models, "other", "embedding-model.gguf")));
+    }
 }

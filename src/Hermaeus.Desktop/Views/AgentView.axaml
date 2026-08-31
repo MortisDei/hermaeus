@@ -84,16 +84,15 @@
             </Grid>
         </Border>
 
-        <!-- Decision strip. Collapses to nothing when nothing is waiting on the
-             user, and carries whatever the review queue says needs a decision:
-             an approval, a reply, or an instruction for a blocked run. -->
+        <!-- Decision strip. Approval cards stay visible here; reply and continue
+             states point to the matching controls beside the Run response. -->
         <Border Grid.Row="1" Padding="12,10"
                 Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 IsVisible="{Binding HasDecisionWaiting}">
             <StackPanel Spacing="8">
-                <TextBlock Text="{Binding ReviewQueueLabel}" FontSize="12" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding DecisionStripLabel}" FontSize="12" FontWeight="SemiBold" />
 
                 <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto" IsVisible="{Binding HasReviewQueue}">
                     <ItemsControl ItemsSource="{Binding ReviewQueue}">
@@ -226,73 +225,14 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <!-- r24: the reply box is the immediate next action after reading the
-                     agent's response, so it stays with the decision rather than
-                     behind a tab. -->
-                <!-- r29 doc 03 3.5: the same row also steers a run in flight. Its
-                     caption, watermark and button label change with state, so the
-                     user always knows which of the two they are doing. -->
-                <StackPanel Spacing="8" IsVisible="{Binding ShowReplyBox}">
-                    <TextBlock Text="{Binding ReplyBoxTitle}"
-                               FontWeight="SemiBold"
-                               FontSize="12" />
-                    <!-- The question itself. It used to reach only the log and the
-                         transcript, so this box asked for an answer without ever
-                         saying what the question was. -->
-                    <SelectableTextBlock Text="{Binding CurrentQuestion}"
-                                         IsVisible="{Binding HasCurrentQuestion}"
-                                         FontSize="12"
-                                         Opacity="0.85"
-                                         MaxHeight="160"
-                                         TextWrapping="Wrap" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <TextBox Grid.Column="0"
-                                 Text="{Binding ReplyText}"
-                                 Watermark="{Binding ReplyWatermark}"
-                                 AcceptsReturn="True"
-                                 MinHeight="56"
-                                 TextWrapping="Wrap" />
-                        <Button Grid.Column="1"
-                                Command="{Binding SendReplyCommand}"
-                                Content="{Binding ReplyButtonLabel}"
-                                VerticalAlignment="Bottom"
-                                Padding="14,8"
-                                CornerRadius="6" />
-                    </Grid>
-                </StackPanel>
-
-                <!-- r19 3.1: a finished/failed/blocked task can be reopened with a new
-                     instruction instead of only being restartable as a brand new task.
-                     r23 2.1: the same box also resumes past the opt-in plan-approval
-                     checkpoint - ContinueTaskAsync either way. -->
-                <StackPanel Spacing="8" IsVisible="{Binding ShowContinueBox}">
-                    <TextBlock Text="{Binding ContinueBoxTitle}"
-                               FontWeight="SemiBold"
-                               FontSize="12" />
-                    <TextBlock Text="Step budget exhausted. Add steps or leave the instruction empty to continue the remaining plan."
-                               FontSize="11"
-                               Opacity="0.75"
-                               TextWrapping="Wrap"
-                               IsVisible="{Binding IsStepBudgetExhausted}" />
-                    <TextBlock Text="Plan is ready for review. Continue when you are ready to let the run proceed, or leave it paused here."
-                               FontSize="11"
-                               Opacity="0.75"
-                               TextWrapping="Wrap"
-                               IsVisible="{Binding IsWaitingForPlanApproval}" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <TextBox Grid.Column="0"
-                                 Text="{Binding ContinueInstructionText}"
-                                 Watermark="{Binding ContinueInstructionWatermark}"
-                                 AcceptsReturn="True"
-                                 MinHeight="56"
-                                 TextWrapping="Wrap" />
-                        <Button Grid.Column="1"
-                                Command="{Binding ContinueTaskCommand}"
-                                Content="Continue"
-                                VerticalAlignment="Bottom"
-                                Padding="14,8"
-                                CornerRadius="6" />
-                    </Grid>
+                <StackPanel Spacing="8" IsVisible="{Binding HasNonReviewDecision}">
+                    <TextBlock Text="{Binding NextUserActionLabel}" FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                    <Button Content="Open Run"
+                            Command="{Binding ShowRunTabCommand}"
+                            HorizontalAlignment="Left"
+                            Padding="10,4"
+                            CornerRadius="6"
+                            ToolTip.Tip="Opens the Run tab beside the agent response and its next action." />
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -454,6 +394,65 @@
                                 </ScrollViewer>
                             </StackPanel>
                         </Border>
+
+                        <!-- The reply and continue controls live beside the response
+                             they act on. The pinned strip above only points here when
+                             the user is viewing another Agent tab. -->
+                        <StackPanel Spacing="8" IsVisible="{Binding ShowReplyBox}">
+                            <TextBlock Text="{Binding ReplyBoxTitle}"
+                                       FontWeight="SemiBold"
+                                       FontSize="12" />
+                            <SelectableTextBlock Text="{Binding CurrentQuestion}"
+                                                 IsVisible="{Binding HasCurrentQuestion}"
+                                                 FontSize="12"
+                                                 Opacity="0.85"
+                                                 MaxHeight="160"
+                                                 TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding ReplyText}"
+                                         Watermark="{Binding ReplyWatermark}"
+                                         AcceptsReturn="True"
+                                         MinHeight="56"
+                                         TextWrapping="Wrap" />
+                                <Button Grid.Column="1"
+                                        Command="{Binding SendReplyCommand}"
+                                        Content="{Binding ReplyButtonLabel}"
+                                        VerticalAlignment="Bottom"
+                                        Padding="14,8"
+                                        CornerRadius="6" />
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="8" IsVisible="{Binding ShowContinueBox}">
+                            <TextBlock Text="{Binding ContinueBoxTitle}"
+                                       FontWeight="SemiBold"
+                                       FontSize="12" />
+                            <TextBlock Text="Step budget exhausted. Add steps or leave the instruction empty to continue the remaining plan."
+                                       FontSize="11"
+                                       Opacity="0.75"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding IsStepBudgetExhausted}" />
+                            <TextBlock Text="Plan is ready for review. Continue when you are ready to let the run proceed, or leave it paused here."
+                                       FontSize="11"
+                                       Opacity="0.75"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding IsWaitingForPlanApproval}" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding ContinueInstructionText}"
+                                         Watermark="{Binding ContinueInstructionWatermark}"
+                                         AcceptsReturn="True"
+                                         MinHeight="56"
+                                         TextWrapping="Wrap" />
+                                <Button Grid.Column="1"
+                                        Command="{Binding ContinueTaskCommand}"
+                                        Content="Continue"
+                                        VerticalAlignment="Bottom"
+                                        Padding="14,8"
+                                        CornerRadius="6" />
+                            </Grid>
+                        </StackPanel>
 
                         <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
                                 IsVisible="{Binding HasSubTaskPlan}">

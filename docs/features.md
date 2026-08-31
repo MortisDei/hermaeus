@@ -40,6 +40,14 @@ for Knowledge behavior in Chat.
   configuration also hydrates the editable saved tune values from that shared
   profile; saving them remains separate from the runtime Save Config action on
   Services.
+- The Models catalog is organized into **Chat & Generation**, **Embeddings**,
+  and **Rerankers**. Role sections come from provider configuration, dedicated
+  asset layout, GGUF metadata, and trusted manifest provenance. Factual badges
+  such as MoE, MTP, Draft, and Vision / Projector remain separate from
+  configured or ready state. Proven companions stay owned by their primary
+  model card with Present, Missing, Stale, or Unknown detail; they do not
+  become standalone cards merely because they are GGUF-like files. Search
+  covers roles, capabilities, tags, and companion state.
 - Services manages local runtime processes and files. Managed `llama.cpp`,
   Ollama, and OpenAI-compatible profiles are supported, with explicit
   localhost, model, port, and launch configuration.
@@ -264,6 +272,10 @@ an in-process Whisper model when installed; remote transcription is explicit.
 Captured and uploaded audio is transient and is not persisted or attached to
 conversations.
 
+Native Kokoro health failures retain the provider's observed diagnosis in
+Services and link directly to Doctor. Doctor owns the verified asset repair
+action; a healthy native provider is not offered as an install action.
+
 Audio feedback is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
 speaks. It does not cue ordinary clicks, token arrival, navigation, or high GPU
@@ -285,10 +297,13 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 
 ## System, Logs, Activity, and Settings
 
-- A second normal launch asks the existing per-user desktop instance to show
-  and activate its window, then exits. The file lock remains the cross-process
-  data-safety gate; the package install and uninstall helpers remain separate
-  utility launches.
+- A second normal launch exits immediately when the existing per-user file
+  lock is held. It does not contact, activate, or change the existing
+  instance. The lock remains the cross-process data-safety gate; package
+  install and uninstall helpers remain separate utility launches.
+- Conversation deletion from its details flyout keeps confirmation beside the
+  initiating control. The context-menu path retains a full confirmation dialog
+  because it has no anchored details surface.
 - System shows app, operating-system, CPU, RAM, storage, database, managed
   component, and best-effort GPU information.
 - Chat telemetry can sample the currently active managed server process. Its

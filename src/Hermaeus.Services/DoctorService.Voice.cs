@@ -19,6 +19,7 @@ public sealed partial class DoctorService
     {
         var provider = _voice.GetActiveVoiceProvider();
         var health = await provider.HealthCheckAsync(ct);
+        var isNativeKokoro = provider.Id == VoiceProvider.KokoroNative;
         var status = health.Status switch
         {
             VoiceHealthStatus.Healthy => DoctorCheckStatus.Ready,
@@ -27,13 +28,15 @@ public sealed partial class DoctorService
         };
 
         return BuildCheck(
-            "voice-backend",
-            "Voice backend health",
+            isNativeKokoro ? "kokoro-native" : "voice-backend",
+            isNativeKokoro ? "Kokoro (native) voice health" : "Voice backend health",
             status,
             health.Summary,
             health.Detail,
-            "Open Settings",
-            true,
+            isNativeKokoro
+                ? health.Status == VoiceHealthStatus.Healthy ? "Installed" : "Install Kokoro (native)"
+                : "Open Settings",
+            !isNativeKokoro || health.Status != VoiceHealthStatus.Healthy,
             $"Provider: {provider.DisplayName}\n{health.Detail}",
             "Voice");
     }
@@ -76,24 +79,6 @@ public sealed partial class DoctorService
             "Open Settings",
             true,
             report.Diagnostics,
-            "Voice");
-    }
-
-    private DoctorCheck CheckNativeKokoroAssets()
-    {
-        var provider = GetNativeKokoroProvider();
-        var ok = provider?.IsInstalled ?? false;
-        return BuildCheck(
-            "kokoro-native",
-            "Kokoro (native) assets",
-            ok ? DoctorCheckStatus.Ready : DoctorCheckStatus.Info,
-            ok ? "Kokoro native ONNX assets present" : "Kokoro native ONNX assets not installed",
-            ok
-                ? "The native Kokoro model and voice files are downloaded and verified."
-                : "Install to synthesize speech fully in-process, with no Python subprocess.",
-            ok ? "Open Settings" : "Install Kokoro (native)",
-            true,
-            string.Empty,
             "Voice");
     }
 

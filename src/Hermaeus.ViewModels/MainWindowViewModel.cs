@@ -133,6 +133,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services;
+        Chat.AttachManagedServices(services);
         Benchmarks = benchmarks; Lab = lab; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Projects = projects;
         // r24 doc 01 1.6: switching a project only ever changes what NEW work
@@ -173,6 +174,8 @@ public partial class MainWindowViewModel : ViewModelBase
         // independent install button that never learned it had succeeded.
         if (Services.Stt is { } stt)
             stt.RequestNavigate = panel => ActivePanel = panel;
+        if (Settings.Tts is { } tts)
+            tts.RequestNavigate = panel => ActivePanel = panel;
         // r19 6.1: memory pill flyout's "Open in Memories" navigates and prefills search.
         Chat.RequestNavigateToMemory = title =>
         {
@@ -673,9 +676,26 @@ public partial class MainWindowViewModel : ViewModelBase
     public Func<ConversationItemViewModel, Task<bool>>? RequestDeleteConversationConfirmation { get; set; }
 
     [RelayCommand]
-    private async Task DeleteConversationAsync(ConversationItemViewModel item)
+    private Task DeleteConversationAsync(ConversationItemViewModel item) =>
+        DeleteConversationCoreAsync(item, alreadyConfirmed: false);
+
+    /// <summary>
+    /// Completes the explicit confirmation rendered in the conversation
+    /// details flyout. Context-menu deletion continues through the modal
+    /// confirmation delegate above because it has no anchored details surface.
+    /// </summary>
+    public async Task DeleteConversationAfterInlineConfirmationAsync(ConversationItemViewModel item)
     {
-        var confirmed = RequestDeleteConversationConfirmation is not null
+        if (!item.IsDeleteConfirmationVisible)
+            return;
+
+        await DeleteConversationCoreAsync(item, alreadyConfirmed: true);
+        item.IsDeleteConfirmationVisible = false;
+    }
+
+    private async Task DeleteConversationCoreAsync(ConversationItemViewModel item, bool alreadyConfirmed)
+    {
+        var confirmed = alreadyConfirmed || RequestDeleteConversationConfirmation is not null
             && await RequestDeleteConversationConfirmation(item);
         if (!confirmed)
             return;

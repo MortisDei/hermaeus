@@ -75,6 +75,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     private readonly IVoiceOrchestrator? _voice;
     private bool _externalServiceRunning;
     private bool _isReloading;
+    private VoiceProvider? _lastHealthProvider;
+    private VoiceHealthStatus? _lastHealthStatus;
     private long _voiceRefreshGeneration;
     private CancellationTokenSource? _voiceRefreshCancellation;
 
@@ -127,6 +129,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     public Action? RequestTtsModelDirectoryPicker { get; set; }
     public Action? RequestTtsOutputPicker { get; set; }
     public Action? RequestTtsVoiceDirectoryPicker { get; set; }
+    public Action<string>? RequestNavigate { get; set; }
 
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm", "mps"];
     public UiBoundCollection<string> TtsVoices { get; } = ["default"];
@@ -199,6 +202,16 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
             return provider is not null && provider.Capabilities.HasFlag(VoiceCapability.Remote);
         }
     }
+
+    /// <summary>
+    /// Native Kokoro's actionable failure is owned by Doctor, not by the
+    /// Services settings editor. This remains false until a health probe has
+    /// observed a non-healthy result for the currently selected provider.
+    /// </summary>
+    public bool CanOpenDoctor => IsKokoroNativeProvider
+        && _lastHealthProvider == VoiceProvider.KokoroNative
+        && _lastHealthStatus is not null
+        && _lastHealthStatus != VoiceHealthStatus.Healthy;
 
     public TtsSettingsViewModel(
         ITtsService tts,
@@ -330,16 +343,22 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     private void ApplyXttsStatus()
     {
-        TtsStatus = IsXttsV2Provider
-            ? _xttsProcess.StatusLabel
-            : IsKokoroProvider
-                ? _kokoroProcess.StatusLabel
-                : "Ready";
+        if (!(IsKokoroNativeProvider && _lastHealthProvider == VoiceProvider.KokoroNative && _lastHealthStatus is not null))
+        {
+            TtsStatus = IsXttsV2Provider
+                ? _xttsProcess.StatusLabel
+                : IsKokoroProvider
+                    ? _kokoroProcess.StatusLabel
+                    : "Ready";
+        }
         OnPropertyChanged(nameof(IsTtsRunning));
         OnPropertyChanged(nameof(IsServerManagedProvider));
+        OnPropertyChanged(nameof(CanOpenDoctor));
         StartTtsCommand.NotifyCanExecuteChanged();
         StopTtsCommand.NotifyCanExecuteChanged();
     }
+
+    partial void OnTtsStatusChanged(string value) => OnPropertyChanged(nameof(CanOpenDoctor));
 
     public void Dispose()
     {
@@ -517,6 +536,9 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         }
     }
 
+    [RelayCommand]
+    private void OpenDoctor() => RequestNavigate?.Invoke("doctor");
+
     private bool OwnsVoiceRefresh(string providerName, long generation, CancellationTokenSource cancellation) =>
         generation == Volatile.Read(ref _voiceRefreshGeneration)
         && ReferenceEquals(cancellation, Volatile.Read(ref _voiceRefreshCancellation))
@@ -572,16 +594,22 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     public async Task ProbeActiveProviderHealthAsync(CancellationToken ct = default)
     {
+        VoiceProvider active;
         try
         {
-            var active = _voiceProviderRegistry.GetActiveProvider();
+            active = _voiceProviderRegistry.GetActiveProvider();
+            _lastHealthProvider = active;
             var provider = _voiceProviderRegistry.GetVoiceProvider(active);
             var health = await provider.HealthCheckAsync(ct);
+            _lastHealthStatus = health.Status;
             _externalServiceRunning = health.Status == VoiceHealthStatus.Healthy;
             TtsStatus = health.Summary;
         }
         catch (Exception ex)
         {
+            active = _voiceProviderRegistry.GetActiveProvider();
+            _lastHealthProvider = active;
+            _lastHealthStatus = VoiceHealthStatus.Unhealthy;
             _externalServiceRunning = false;
             TtsStatus = ex.Message;
         }
@@ -609,6 +637,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     partial void OnSelectedVoiceProviderChanged(string value)
     {
         SupersedeVoiceRefresh();
+        _lastHealthProvider = null;
+        _lastHealthStatus = null;
         OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
         NotifyProviderDependentProperties();
         ApplyXttsStatus();
