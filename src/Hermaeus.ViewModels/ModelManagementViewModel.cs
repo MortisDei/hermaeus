@@ -141,7 +141,15 @@ public partial class ModelManagementViewModel : ObservableObject
         IReadOnlyList<LlmModel> existingModels,
         ModelInventorySnapshot inventory)
     {
+        var manifestCompanionPaths = inventory.ManifestEntries
+            .SelectMany(entry => entry.Companions)
+            .Select(companion => companion.LocalFilePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizeModelPath)
+            .ToHashSet(ModelPathSafety.LocalPathComparer);
+
         return inventory.Entries
+            .Where(entry => !manifestCompanionPaths.Contains(NormalizeModelPath(entry.Path)))
             .Where(entry => !IsCatalogCompanion(entry))
             .Where(entry => !existingModels.Any(model => SameLocalModelIdentity(model.Id, entry.Path)))
             .Select(entry => new LlmModel
@@ -156,20 +164,37 @@ public partial class ModelManagementViewModel : ObservableObject
             .ToList();
     }
 
+    private static string NormalizeModelPath(string path)
+    {
+        try { return Path.GetFullPath(path.Trim()); }
+        catch (ArgumentException) { return string.Empty; }
+    }
+
     /// <summary>
     /// A catalog row is hidden as a companion only when existing trusted
     /// provenance or unambiguous GGUF metadata proves that role. Filename
-    /// spelling is intentionally not consulted here.
+    /// spelling is intentionally not consulted here. The primary manifest's
+    /// companion paths are handled before this predicate, so downloaded
+    /// companions remain grouped even when an older manifest did not write a
+    /// reciprocal ParentModelPath on the child entry.
     /// </summary>
     private static bool IsCatalogCompanion(ModelInventoryEntry entry) =>
         !string.IsNullOrWhiteSpace(entry.Manifest?.ParentModelPath)
-        || string.Equals(entry.GgufInfo?.GeneralType, "clip", StringComparison.OrdinalIgnoreCase)
+        || IsMetadataProjector(entry.GgufInfo)
         || IsMetadataDraftCompanion(entry.GgufInfo);
+
+    private static bool IsMetadataProjector(GgufModelInfo? info) =>
+        info is not null
+        && (string.Equals(info.GeneralType, "clip", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(info.GeneralType, "mmproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(info.Architecture, "clip", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsMetadataDraftCompanion(GgufModelInfo? info) =>
         info is not null
-        && info.NextnPredictLayers is > 0
-        && info.Architecture.Trim().ToLowerInvariant() is "eagle" or "eagle2" or "eagle3";
+        && (info.NextnPredictLayers is > 0
+            && info.Architecture.Trim().ToLowerInvariant() is "eagle" or "eagle2" or "eagle3"
+            || (string.Equals(info.GeneralType, "model", StringComparison.OrdinalIgnoreCase)
+                && info.Architecture.Trim().EndsWith("-assistant", StringComparison.OrdinalIgnoreCase)));
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -1089,6 +1114,15 @@ public partial class ModelManagementViewModel : ObservableObject
                     item.UpdateStatus = result.Status;
                     entry.LastCheckedAtUtc = DateTime.UtcNow;
                     entry.NoLongerPublished = result.Status == ModelUpdateStatus.NoLongerPublished;
+                    if (result.Status == ModelUpdateStatus.UpToDate
+                        && HuggingFaceArtworkService.IsImmutableRevision(revision))
+                    {
+                        // Older manifest entries may have a verified file hash but
+                        // no immutable revision. A successful tree comparison is
+                        // the evidence that closes that provenance gap and lets the
+                        // decoration cache use the same revision safely.
+                        entry.RevisionSha = revision;
+                    }
                     if (result.Status == ModelUpdateStatus.UpdateAvailable && result.MatchedEntry is not null)
                     {
                         entry.PendingSha256 = result.MatchedEntry.LfsSha256;
@@ -1121,7 +1155,7 @@ public partial class ModelManagementViewModel : ObservableObject
                         .Select(candidate => candidate.Item)
                         .ToList();
                     if (artworkItems.Count > 0)
-                        _ = BackfillArtworkAsync(group.Key, card, tree, revision, artworkItems);
+                        await BackfillArtworkAsync(group.Key, card, tree, revision, artworkItems);
                 }
             }
 

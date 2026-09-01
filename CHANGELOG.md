@@ -13,6 +13,22 @@ limit.
 
 ### Changed
 
+- RAG, Agent workspace reads, and Chat attachments now share one bounded common
+  text/source extension policy, including log files, while retaining separate
+  binary, size, path, and document-extraction guards. RAG streaming no longer
+  pulls the view back to the bottom after the user scrolls up.
+- Confirmation dialogs now use the framework's owner placement consistently;
+  the manual pixel repositioning that could place a prompt outside the app
+  window was removed. Model cards and their configuration flyouts now resize
+  and wrap within narrower app windows, and section headers are more prominent.
+- Verified manifest companion paths and GGUF metadata now hide projector and
+  draft companions from the top-level model catalog without filename guessing.
+  A successful update check also records the immutable revision needed for
+  revision-pinned artwork, and the check awaits optional artwork backfill.
+- Native Kokoro installation failures now retain their actionable exception in
+  the runtime log and progress channel instead of collapsing to a generic
+  failure-only diagnostic.
+
 - Corrective hardening now recognizes Linux GPU shared libraries in Doctor,
   keeps typed Auto placement out of CPU-only advisories, separates installed
   llama.cpp identity from an Unknown latest-release comparison. A second

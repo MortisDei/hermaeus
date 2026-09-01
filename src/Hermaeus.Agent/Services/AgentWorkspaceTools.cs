@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Hermaeus.Core.Services;
 using Hermaeus.Agent.Models;
 
 namespace Hermaeus.Agent.Services;
@@ -21,13 +22,6 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         "bin",
         "obj",
         "dist"
-    };
-
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".cs", ".csproj", ".sln", ".props", ".targets", ".xaml", ".axaml",
-        ".md", ".txt", ".json", ".xml", ".yml", ".yaml", ".sh", ".ps1",
-        ".css", ".html", ".js", ".ts", ".sql", ".toml", ".ini", ".gitignore"
     };
 
     public IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null)
@@ -490,7 +484,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
             return false;
         if (IsSymlink(info.FullName))
             return false;
-        return TextExtensions.Contains(info.Extension) || TextExtensions.Contains(info.Name);
+        return SupportedTextFileTypes.IsSupported(info.Name);
     }
 
     private static bool PathHasSymlinkAncestor(string root, string fullPath)

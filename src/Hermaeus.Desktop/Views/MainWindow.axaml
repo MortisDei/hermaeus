@@ -262,8 +262,9 @@
                 </Grid>
             </Border>
 
-            <ContentControl Grid.Row="1" Content="{Binding ActiveViewModel}">
-                <ContentControl.DataTemplates>
+            <Grid Grid.Row="1">
+                <ContentControl Content="{Binding ActiveViewModel}">
+                    <ContentControl.DataTemplates>
                     <DataTemplate DataType="vm:ChatViewModel">
                         <views:ChatView />
                     </DataTemplate>
@@ -306,8 +307,41 @@
                     <DataTemplate DataType="vm:SettingsViewModel">
                         <views:SettingsView />
                     </DataTemplate>
-                </ContentControl.DataTemplates>
-            </ContentControl>
+                    </ContentControl.DataTemplates>
+                </ContentControl>
+
+                <!-- Keep an unanswered Agent action visible after the user
+                     navigates away. The Agent panel owns the detailed review;
+                     this is only a contained route back to it. -->
+                <Border IsVisible="{Binding HasPendingAgentAction}"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Top"
+                        Margin="18"
+                        Padding="12"
+                        CornerRadius="8"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                        BorderThickness="1">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Agent action needed"
+                                       FontWeight="SemiBold"
+                                       FontSize="13" />
+                            <TextBlock Text="{Binding Agent.NextUserActionLabel}"
+                                       TextWrapping="Wrap"
+                                       FontSize="12"
+                                       Opacity="0.85" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Content="Open Agent"
+                                Command="{Binding ShowAgentPanelCommand}"
+                                VerticalAlignment="Center"
+                                Padding="10,5"
+                                CornerRadius="6"
+                                ToolTip.Tip="Open the Agent workbench to review or answer the pending action." />
+                    </Grid>
+                </Border>
+            </Grid>
 
             <Border Grid.Row="1"
                     IsVisible="{Binding ShowQuickChat}"

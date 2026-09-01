@@ -49,6 +49,49 @@ public sealed class ModelManagementViewModelTests
     }
 
     [Fact]
+    public async Task Refresh_hides_manifest_mapped_companions_without_filename_guessing()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var models = Path.Combine(assets, "Models");
+        Directory.CreateDirectory(models);
+        var primaryPath = Path.Combine(models, "primary.gguf");
+        var companionPath = Path.Combine(models, "supporting.gguf");
+        File.WriteAllText(primaryPath, "primary");
+        File.WriteAllText(companionPath, "companion");
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = primaryPath,
+            Companions = [new ModelCompanionManifestEntry
+            {
+                LocalFilePath = companionPath,
+                Role = "projector",
+                SizeBytes = new FileInfo(companionPath).Length
+            }]
+        });
+
+        var vm = new ModelManagementViewModel(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            NewServicesViewModel(settings),
+            manifest,
+            new HuggingFaceClient(),
+            new ModelDownloadService());
+
+        await vm.RefreshAsync();
+
+        Assert.Contains(vm.Models, item => item.ModelId == primaryPath);
+        Assert.DoesNotContain(vm.Models, item => item.ModelId == companionPath);
+    }
+
+    [Fact]
     public void Catalog_classification_keeps_capability_facts_separate_from_readiness()
     {
         using var temp = new TempDir();
@@ -475,7 +518,6 @@ public sealed class ModelManagementViewModelTests
             FilePath = modelPath,
             RepoId = "org/repo",
             RepoFile = "model.gguf",
-            RevisionSha = revision,
             Sha256 = modelHash,
             SizeBytes = modelBytes.Length,
             Source = "hf-browser"

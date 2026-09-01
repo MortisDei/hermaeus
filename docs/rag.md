@@ -9,7 +9,8 @@ traces, versioned SQLite schema migrations, and native eval support.
 ## Getting Started
 
 1. Start an embeddings runtime in **Services** (Doctor can auto-download if missing).
-2. Open **RAG** and ingest a folder of `.txt` / `.md` / digital `.pdf` files.
+2. Open **RAG** and ingest a folder of supported text/source files such as
+   `.txt`, `.md`, `.log`, `.csv`, code, configuration, and digital `.pdf` files.
 3. Use **Dry run** to preview the ingest report before writing to SQLite, or
    choose a duplicate policy to skip unchanged sources, replace them, or just
    report what would happen. Use **Stop** during ingest to cancel long runs.

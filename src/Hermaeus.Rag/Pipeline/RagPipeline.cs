@@ -76,14 +76,14 @@ public sealed class RagPipeline
         // r24 doc 03 3.3: a watched-source refresh passes its own computed
         // new+changed file list (already filtered by include/exclude globs)
         // instead of the directory-wide .txt/.md/.pdf scan below.
-        var files = explicitFiles?.OrderBy(f => f).ToList() ?? Directory.GetFiles(directory, "*.txt", SearchOption.AllDirectories)
-            .Concat(Directory.GetFiles(directory, "*.md", SearchOption.AllDirectories))
-            .Concat(Directory.GetFiles(directory, "*.pdf", SearchOption.AllDirectories))
+        var files = explicitFiles?.OrderBy(f => f).ToList() ?? Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(file => SupportedTextFileTypes.IsSupported(file)
+                || Path.GetExtension(file).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
             .OrderBy(f => f)
             .ToList();
 
         if (files.Count == 0)
-            throw new InvalidOperationException($"No .txt, .md, or .pdf files found in {directory}");
+            throw new InvalidOperationException($"No supported text, source, or PDF files found in {directory}");
 
         var fileBatchCount = (int)Math.Ceiling(files.Count / (double)DirectoryFileBatchSize);
         var overallTotal = Math.Max(1, fileBatchCount * 3 + 2);

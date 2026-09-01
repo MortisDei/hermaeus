@@ -543,7 +543,7 @@
                                                       ToolTip.Tip="Request multi-device planning only. Execution remains unavailable until device and split behavior are proven." />
                                             <CheckBox IsChecked="{Binding AdaptivePreserveAcceleratedBackend}" Content="Preserve accelerated backend"
                                                       FontSize="12" IsEnabled="{Binding CanEdit}"
-                                                      ToolTip.Tip="Keep enabled to prevent CPU fallback. R32 never silently falls back from managed Auto to CPU." />
+                                                      ToolTip.Tip="Keep enabled to prevent CPU fallback. Managed Auto never silently falls back to CPU." />
                                         </WrapPanel>
                                     </StackPanel>
 

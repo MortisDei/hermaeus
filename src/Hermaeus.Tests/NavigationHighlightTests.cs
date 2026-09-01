@@ -45,7 +45,7 @@ public sealed class NavigationHighlightTests
     {
         var window = File.ReadAllText(Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "MainWindow.axaml"));
 
-        var navCommands = Regex.Matches(window, @"Command=""\{Binding (Show(\w+)PanelCommand)\}""[^>]*")
+        var navCommands = Regex.Matches(window, @"<Button[^>]*Classes=""icon-btn""[^>]*Command=""\{Binding (Show(\w+)PanelCommand)\}""[^>]*")
             .Select(m => (Element: m.Value, Panel: m.Groups[2].Value))
             .ToList();
         Assert.True(navCommands.Count >= 12, $"expected the nav buttons, found {navCommands.Count}");

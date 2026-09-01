@@ -746,7 +746,7 @@ public sealed class LocalModelCapabilityService
         {
             normalized[capabilityId] = capabilities is not null && capabilities.TryGetValue(capabilityId, out var evidence)
                 ? evidence
-                : Unknown("runtime-capability-unknown", "No bounded evidence was supplied for this R32 launch capability.");
+                : Unknown("runtime-capability-unknown", "No bounded evidence was supplied for this launch capability.");
         }
 
         return normalized;

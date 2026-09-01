@@ -82,6 +82,7 @@ namespace Hermaeus.Tests
             var docs = temp.PathFor("docs");
             Directory.CreateDirectory(docs);
             await File.WriteAllTextAsync(Path.Combine(docs, "notes.md"), "markdown source alpha");
+            await File.WriteAllTextAsync(Path.Combine(docs, "runtime.log"), "runtime log source delta");
             WriteSimplePdf(Path.Combine(docs, "paper.pdf"), "pdf source beta gamma");
 
             var dataset = new RagDataset { Name = "docs" };
@@ -92,6 +93,7 @@ namespace Hermaeus.Tests
             True(chunks.Any(c => c.SourceFile == "paper.pdf" && c.Content.Contains("pdf source beta gamma", StringComparison.Ordinal)),
                 "PDF content should be chunked and stored");
             True(chunks.Any(c => c.SourceFile == "notes.md"), "markdown content should still ingest");
+            True(chunks.Any(c => c.SourceFile == "runtime.log"), "log content should be available to RAG");
         }
 
         public static async Task RagDirectoryIngestReportsOverallProgress()

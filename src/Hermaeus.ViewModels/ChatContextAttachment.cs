@@ -1,5 +1,6 @@
 using Hermaeus.Rag.Pipeline;
 using Hermaeus.Services;
+using Hermaeus.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Hermaeus.ViewModels;
@@ -23,15 +24,6 @@ public sealed partial class ChatContextAttachment : ObservableObject
 {
     public const int MaxFileBytes = 512 * 1024;
     public const int MaxTotalBytes = 1024 * 1024;
-
-    private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".markdown", ".cs", ".fs", ".vb", ".csproj", ".props", ".targets",
-        ".sln", ".json", ".jsonl", ".xml", ".xaml", ".axaml", ".yaml", ".yml", ".toml",
-        ".ini", ".config", ".sh", ".ps1", ".py", ".js", ".jsx", ".ts", ".tsx", ".css",
-        ".scss", ".html", ".htm", ".razor", ".sql", ".rs", ".go", ".java", ".c", ".h",
-        ".cpp", ".hpp", ".swift", ".kt", ".kts", ".php", ".rb", ".lua", ".Dockerfile"
-    };
 
     /// <summary>r19 5.1/5.2: these extensions never pass through the plain-text/LooksBinary
     /// path - their raw bytes are always binary. Text is pulled out first, and the extracted
@@ -155,9 +147,9 @@ public sealed partial class ChatContextAttachment : ObservableObject
             if (ImageExtensions.Contains(ext))
                 return await LoadImageAsync(path, ext, currentImageCount, visionAvailable, ct);
 
-            var isDockerfile = Path.GetFileName(path).Equals("Dockerfile", StringComparison.OrdinalIgnoreCase);
+            var isSupportedText = SupportedTextFileTypes.IsSupported(path);
             var isExtractThenAttach = ExtractThenAttachExtensions.Contains(ext);
-            if (!SupportedExtensions.Contains(ext) && !isDockerfile && !isExtractThenAttach)
+            if (!isSupportedText && !isExtractThenAttach)
                 return Skipped(path, "Unsupported file type for direct chat context.");
 
             if (isExtractThenAttach)

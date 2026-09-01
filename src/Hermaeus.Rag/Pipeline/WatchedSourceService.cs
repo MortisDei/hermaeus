@@ -246,7 +246,12 @@ public sealed class WatchedSourceService
         var option = watched.Recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         var all = Directory.EnumerateFiles(root, "*", option);
 
-        var includes = watched.IncludeGlobs.Count > 0 ? watched.IncludeGlobs : ["**/*.txt", "**/*.md", "**/*.pdf"];
+        IReadOnlyList<string> includes = watched.IncludeGlobs.Count > 0
+            ? watched.IncludeGlobs
+            : SupportedTextFileTypes.PickerPatterns
+                .Select(pattern => $"**/{pattern}")
+                .Concat(["**/*.pdf"])
+                .ToArray();
         var excludes = watched.ExcludeGlobs;
 
         var results = new List<string>();

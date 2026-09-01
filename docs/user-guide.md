@@ -228,12 +228,12 @@ Nested panes keep wheel input when the pointer is over their content and pass it
 to the page only at an edge. Horizontal overflow remains available in panes
 that provide it.
 
-Attach text, code, PDF, DOCX, or supported image files from the attachment
-control, drag and drop, or clipboard. Images are sent only when the selected
-route actually accepts them. The **Context Inspector** shows the environment
-context, prompt, draft, history estimate, attachments, and attached Knowledge
-context. Normal Chat does not expose web access, a shell, tool calls, or Agent
-workspace actions.
+Attach text, code, logs, CSV/TSV, markup, configuration, PDF, DOCX, or supported
+image files from the attachment control, drag and drop, or clipboard. Images
+are sent only when the selected route actually accepts them. The **Context
+Inspector** shows the environment context, prompt, draft, history estimate,
+attachments, and attached Knowledge context. Normal Chat does not expose web
+access, a shell, tool calls, or Agent workspace actions.
 
 ## Projects and Project State
 

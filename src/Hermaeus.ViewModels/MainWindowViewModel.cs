@@ -77,6 +77,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowWizard => ActivePanel == "wizard";
     public bool SetupIncomplete => !_settingsService.Settings.SetupWizardCompleted;
     public bool ShowSetupResume => SetupIncomplete && !ShowWizard;
+    public bool HasPendingAgentAction => Agent.HasDecisionWaiting && !ShowAgent;
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -192,6 +193,12 @@ public partial class MainWindowViewModel : ViewModelBase
         Doctor.RequestSyncServerExecutablePaths = Services.SyncAllExecutablePathsFromConfig;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
+        Agent.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(AgentViewModel.HasDecisionWaiting)
+                or nameof(AgentViewModel.CurrentTask))
+                OnPropertyChanged(nameof(HasPendingAgentAction));
+        };
         UpdateDoctorStatus();
         Wizard.WizardCompleted += () =>
         {
@@ -951,6 +958,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowActivity));
         OnPropertyChanged(nameof(ShowWizard));
         OnPropertyChanged(nameof(ShowSetupResume));
+        OnPropertyChanged(nameof(HasPendingAgentAction));
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));
     }

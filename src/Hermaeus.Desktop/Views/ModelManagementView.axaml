@@ -10,44 +10,44 @@
 
     <DockPanel Margin="24">
 
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" Margin="0,0,0,10" ColumnSpacing="10">
-            <TextBlock Grid.Column="0" Text="Models"
-                       FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <CheckBox Grid.Column="1"
+        <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" ItemSpacing="8" LineSpacing="8" Margin="0,0,0,10">
+            <TextBlock Text="Models"
+                       FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <CheckBox
                       Content="Force refresh"
                       IsChecked="{Binding ForceRefresh}"
                       VerticalAlignment="Center"
                       FontSize="12"
                       Opacity="0.7"
                       ToolTip.Tip="Bypasses the cached model list and re-queries every configured provider." />
-            <Button Grid.Column="2"
+            <Button
                     Command="{Binding OrganizeModelsFolderCommand}"
                     Content="Organize folder..."
                     IsEnabled="{Binding !IsOrganizing}"
                     Padding="14,7" CornerRadius="6" FontSize="13"
                     ToolTip.Tip="Moves nested Hugging Face hub-cache files into a flat Models\LLM folder. Preview and confirm before anything moves." />
-            <Button Grid.Column="3"
+            <Button
                     Command="{Binding CheckForUpdatesCommand}"
                     Content="Check for updates"
                     IsEnabled="{Binding !IsCheckingUpdates}"
                     Padding="14,7" CornerRadius="6" FontSize="13"
                     ToolTip.Tip="Compares models linked to a Hugging Face repo against the repo's current file hash. Manual only, huggingface.co, anonymous." />
-            <Button Grid.Column="4"
+            <Button
                     Command="{Binding AutoTuneAllCommand}"
                     Content="Auto-tune all"
                     IsVisible="{Binding !IsAutoTuningAll}"
                     Padding="14,7" CornerRadius="6" FontSize="13"
                     ToolTip.Tip="Auto-tunes every local GGUF that is not running and does not already have a fresh tune profile, one at a time." />
-            <Button Grid.Column="4"
+            <Button
                     Command="{Binding CancelAutoTuneAllCommand}"
                     Content="Cancel tuning"
                     IsVisible="{Binding IsAutoTuningAll}"
                     Padding="14,7" CornerRadius="6" FontSize="13"
                     ToolTip.Tip="Stops after the model currently being probed finishes." />
-            <Button Grid.Column="5" Command="{Binding RefreshCommand}"
+            <Button Command="{Binding RefreshCommand}"
                     Content="Refresh" Padding="14,7" CornerRadius="6" FontSize="13"
                     ToolTip.Tip="Reloads the model list from all enabled providers." />
-        </Grid>
+        </WrapPanel>
 
         <TextBlock DockPanel.Dock="Top"
                    Text="{Binding OrganizeStatus}"
@@ -237,7 +237,9 @@
              size, tags, fit, tune summary, update state and a date into one
              line of small grey text. Every control from the old expander body
              moved verbatim into the Configure flyout; none was dropped. -->
-        <ScrollViewer x:Name="ModelListScrollViewer" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="ModelListScrollViewer"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <controls:MossEmptyState IsVisible="{Binding HasNoModels}"
                                          Title="No models here yet"
@@ -247,7 +249,12 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="vm:ModelCatalogSectionViewModel">
                             <StackPanel Spacing="6" Margin="0,8,0,8">
-                                <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+                                <Border Padding="10,6" Margin="0,4,0,2"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="0,0,0,1">
+                                    <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" />
+                                </Border>
                                 <ItemsControl ItemsSource="{Binding Models}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -258,7 +265,7 @@
                                         <DataTemplate DataType="vm:ModelProfileItemViewModel">
                             <!-- Fixed width, free height: a WrapPanel of variable-width
                                  tiles produces ragged columns. -->
-                            <Border Width="340"
+                            <Border MinWidth="260" MaxWidth="390"
                                     Margin="0,0,10,10"
                                     Padding="14"
                                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
@@ -429,10 +436,11 @@
                                             <ToggleButton.Flyout>
                                                 <Flyout Placement="BottomEdgeAlignedRight"
                                                         PlacementConstraintAdjustment="SlideX,FlipY,ResizeX,ResizeY">
-                                                    <ScrollViewer Width="680" MaxWidth="720" MaxHeight="520"
+                                                    <ScrollViewer MaxWidth="720" MaxHeight="520"
+                                                                  HorizontalContentAlignment="Stretch"
                                                                   VerticalScrollBarVisibility="Auto"
-                                                                  HorizontalScrollBarVisibility="Visible">
-                                                        <StackPanel Width="680" MaxWidth="720" Spacing="6">
+                                                                  HorizontalScrollBarVisibility="Disabled">
+                                                        <StackPanel MaxWidth="720" HorizontalAlignment="Stretch" Spacing="6">
                                                             <TextBlock Text="{Binding EffectiveName}"
                                                                        FontSize="14" FontWeight="SemiBold" />
                                                             <TextBlock Text="Model-specific defaults and metadata"

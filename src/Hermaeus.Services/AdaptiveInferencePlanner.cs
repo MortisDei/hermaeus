@@ -247,7 +247,7 @@ public static class AdaptiveInferencePlanner
             foreach (var context in ContextLadder.Reverse().Where(value => value < source.ContextSize && value >= minimum))
             {
                 AddContextCandidate(context,
-                    $"Reduce context to {context.ToString(CultureInfo.InvariantCulture)} on the named R32 ladder, never below the envelope minimum.");
+                    $"Reduce context to {context.ToString(CultureInfo.InvariantCulture)} on the configured context ladder, never below the envelope minimum.");
                 if (candidates.Count >= MaximumCandidates)
                     break;
             }

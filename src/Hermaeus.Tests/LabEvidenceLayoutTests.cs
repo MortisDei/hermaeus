@@ -30,7 +30,7 @@ public sealed class LabEvidenceLayoutTests
     }
 
     [Fact]
-    public void Model_configuration_flyout_has_stable_size_and_work_area_constraints()
+    public void Model_configuration_flyout_has_work_area_constraints_without_a_fixed_width()
     {
         var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "ModelManagementView.axaml");
         var doc = XDocument.Load(path);
@@ -39,8 +39,15 @@ public sealed class LabEvidenceLayoutTests
         var scrollViewer = flyout.Descendants().Single(element => element.Name.LocalName == "ScrollViewer");
 
         Assert.Equal("SlideX,FlipY,ResizeX,ResizeY", (string?)flyout.Attribute("PlacementConstraintAdjustment"));
-        Assert.Equal("680", (string?)scrollViewer.Attribute("Width"));
+        Assert.Null((string?)scrollViewer.Attribute("Width"));
+        Assert.Equal("720", (string?)scrollViewer.Attribute("MaxWidth"));
         Assert.Equal("520", (string?)scrollViewer.Attribute("MaxHeight"));
         Assert.Equal("Auto", (string?)scrollViewer.Attribute("VerticalScrollBarVisibility"));
+        Assert.Equal("Disabled", (string?)scrollViewer.Attribute("HorizontalScrollBarVisibility"));
+
+        var modelList = doc.Descendants().Single(element => element.Name.LocalName == "ScrollViewer"
+            && element.Attributes().Any(attribute => attribute.Name.LocalName == "Name"
+                && (string?)attribute == "ModelListScrollViewer"));
+        Assert.Equal("Disabled", (string?)modelList.Attribute("HorizontalScrollBarVisibility"));
     }
 }

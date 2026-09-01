@@ -114,13 +114,7 @@ public partial class ChatView : UserControl
                 var top = TopLevel.GetTopLevel(this);
                 if (top is null) return;
 
-                var textAndCodePatterns = new[]
-                {
-                    "*.txt", "*.md", "*.cs", "*.fs", "*.vb", "*.csproj", "*.props", "*.json",
-                    "*.xml", "*.xaml", "*.axaml", "*.yaml", "*.yml", "*.toml", "*.sh", "*.ps1",
-                    "*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.css", "*.html", "*.razor",
-                    "*.sql", "*.rs", "*.go", "*.java", "*.c", "*.h", "*.cpp", "*.hpp"
-                };
+                var textAndCodePatterns = SupportedTextFileTypes.PickerPatterns.ToArray();
                 var documentPatterns = new[] { "*.docx", "*.pdf" };
                 var imagePatterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp" };
 

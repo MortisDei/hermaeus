@@ -102,8 +102,13 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
             await _model.InstallAssetsAsync(SupportedVoices, progress, ct);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            // The provider boundary intentionally returns a bool for the
+            // Doctor/setup contract, but swallowing the exception made a
+            // failed install impossible to diagnose from the app log.
+            Log(RuntimeLogLevel.Error, $"Kokoro native asset installation failed: {ex.Message}");
+            progress?.Report($"Kokoro native install failed: {ex.Message}");
             return false;
         }
     }
