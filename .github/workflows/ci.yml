@@ -65,7 +65,12 @@ jobs:
       # because the Windows leg spends about seven times as long inside this
       # step as the Linux leg does, and nobody knew which tests owned the
       # difference (r28 doc 04 4.1). See docs/pull-requests.md, "CI timing".
+      - name: Test (Ubuntu virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
+
       - name: Test
+        if: runner.os == 'Windows'
         run: dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test timings

@@ -80,7 +80,12 @@ jobs:
           Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
           Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
 
+      - name: Test (Ubuntu virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
+
       - name: Test
+        if: runner.os == 'Windows'
         run: dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test timings
