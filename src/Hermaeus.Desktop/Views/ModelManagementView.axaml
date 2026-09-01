@@ -72,7 +72,7 @@
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0"
                              Text="{Binding HfSearchQuery}"
-                             Watermark="Search GGUF repos, e.g. 'llama 3 instruct'"
+                             PlaceholderText="Search GGUF repos, e.g. 'llama 3 instruct'"
                              CornerRadius="6"
                              Padding="10,6"
                              KeyDown="OnHfSearchKeyDown" />
@@ -218,7 +218,7 @@
 
         <TextBox DockPanel.Dock="Top"
                  Text="{Binding FilterText}"
-                 Watermark="Filter by name, role, capability, or companion..."
+                 PlaceholderText="Filter by name, role, capability, or companion..."
                  CornerRadius="6"
                  Padding="10,6"
                  Margin="0,0,0,12"
@@ -444,26 +444,26 @@
                                                                   Margin="0,4,0,0">
                                                                 <TextBox Grid.Row="0" Grid.Column="0"
                                                                          Text="{Binding DisplayName}"
-                                                                         Watermark="Display name"
+                                                                         PlaceholderText="Display name"
                                                                          CornerRadius="6"
                                                                          Padding="10,6"
                                                                          ToolTip.Tip="Friendly name shown in the model picker instead of the raw provider ID." />
                                                                 <TextBox Grid.Row="0" Grid.Column="1"
                                                                          Text="{Binding Description}"
-                                                                         Watermark="Description"
+                                                                         PlaceholderText="Description"
                                                                          CornerRadius="6"
                                                                          Padding="10,6"
                                                                          ToolTip.Tip="Optional note shown alongside the model in pickers." />
                                                                 <TextBox Grid.Row="0" Grid.Column="2"
                                                                          Text="{Binding TagsText}"
-                                                                         Watermark="tags"
+                                                                         PlaceholderText="tags"
                                                                          CornerRadius="6"
                                                                          Padding="10,6"
                                                                          ToolTip.Tip="Comma-separated tags used for grouping and benchmark leaderboards." />
 
                                                                 <NumericUpDown Grid.Row="1" Grid.Column="0"
                                                                                Value="{Binding DefaultTemperature}"
-                                                                               Watermark="Default temp"
+                                                                               PlaceholderText="Default temp"
                                                                                Minimum="0"
                                                                                Maximum="2"
                                                                                Increment="0.1"
@@ -472,7 +472,7 @@
                                                                 <StackPanel Grid.Row="1" Grid.Column="1" Spacing="3">
                                                                     <TextBlock Text="Runtime defaults" FontSize="11" Opacity="0.65" />
                                                                     <NumericUpDown Value="{Binding DefaultContextSize}"
-                                                                                   Watermark="{Binding ContextWatermark}"
+                                                                                   PlaceholderText="{Binding ContextWatermark}"
                                                                                    Minimum="0"
                                                                                    Maximum="262144"
                                                                                    Increment="512"
@@ -497,7 +497,7 @@
                                                                                            ToolTip.Tip="Saved llama.cpp thread setting. This edits the shared tune profile only." />
                                                                         </Grid>
                                                                         <NumericUpDown Value="{Binding TunedContextSize}"
-                                                                                       Watermark="{Binding TuneProfileContextWatermark}"
+                                                                                       PlaceholderText="{Binding TuneProfileContextWatermark}"
                                                                                        Minimum="128"
                                                                                        Maximum="2097152"
                                                                                        Increment="512"
@@ -508,7 +508,7 @@
                                                                 </StackPanel>
                                                                 <NumericUpDown Grid.Row="1" Grid.Column="2"
                                                                                Value="{Binding DefaultMaxTokens}"
-                                                                               Watermark="Max tokens"
+                                                                               PlaceholderText="Max tokens"
                                                                                Minimum="0"
                                                                                Maximum="262144"
                                                                                Increment="256"
@@ -516,7 +516,7 @@
 
                                                                 <NumericUpDown Grid.Row="2" Grid.Column="0"
                                                                                Value="{Binding DefaultTopP}"
-                                                                               Watermark="Top P"
+                                                                               PlaceholderText="Top P"
                                                                                Minimum="0"
                                                                                Maximum="1"
                                                                                Increment="0.05"
@@ -524,14 +524,14 @@
                                                                                ToolTip.Tip="Per-model nucleus sampling override. Leave blank to use the provider's own default." />
                                                                 <NumericUpDown Grid.Row="2" Grid.Column="1"
                                                                                Value="{Binding DefaultTopK}"
-                                                                               Watermark="Top K"
+                                                                               PlaceholderText="Top K"
                                                                                Minimum="0"
                                                                                Maximum="500"
                                                                                Increment="1"
                                                                                ToolTip.Tip="Per-model top-K sampling override. llama.cpp/Ollama only." />
                                                                 <NumericUpDown Grid.Row="2" Grid.Column="2"
                                                                                Value="{Binding DefaultMinP}"
-                                                                               Watermark="Min P"
+                                                                               PlaceholderText="Min P"
                                                                                Minimum="0"
                                                                                Maximum="1"
                                                                                Increment="0.01"
@@ -540,7 +540,7 @@
 
                                                                 <NumericUpDown Grid.Row="3" Grid.Column="0"
                                                                                Value="{Binding DefaultRepeatPenalty}"
-                                                                               Watermark="Repeat penalty"
+                                                                               PlaceholderText="Repeat penalty"
                                                                                Minimum="0.5"
                                                                                Maximum="2"
                                                                                Increment="0.05"
@@ -548,7 +548,7 @@
                                                                                ToolTip.Tip="Per-model repeat penalty override. 1.0 is no penalty." />
                                                                 <NumericUpDown Grid.Row="3" Grid.Column="1"
                                                                                Value="{Binding DefaultFrequencyPenalty}"
-                                                                               Watermark="Frequency penalty"
+                                                                               PlaceholderText="Frequency penalty"
                                                                                Minimum="-2"
                                                                                Maximum="2"
                                                                                Increment="0.1"
@@ -556,7 +556,7 @@
                                                                                ToolTip.Tip="Per-model frequency penalty override. OpenAI-compatible endpoints only." />
                                                                 <NumericUpDown Grid.Row="3" Grid.Column="2"
                                                                                Value="{Binding DefaultPresencePenalty}"
-                                                                               Watermark="Presence penalty"
+                                                                               PlaceholderText="Presence penalty"
                                                                                Minimum="-2"
                                                                                Maximum="2"
                                                                                Increment="0.1"
@@ -573,7 +573,7 @@
                                                                 </StackPanel>
                                                                 <TextBox Grid.Row="4" Grid.Column="1"
                                                                          Text="{Binding Avatar}"
-                                                                         Watermark="Avatar/icon label"
+                                                                         PlaceholderText="Avatar/icon label"
                                                                          CornerRadius="6"
                                                                          Padding="10,6"
                                                                          ToolTip.Tip="Short label or initials shown as this model's avatar in chat." />

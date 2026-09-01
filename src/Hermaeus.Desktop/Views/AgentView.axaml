@@ -260,7 +260,7 @@
                                        Opacity="0.6" />
                             <TextBox Grid.Row="0" Grid.Column="1"
                                      Text="{Binding GoalText}"
-                                     Watermark="Describe the task for Hermaeus Agent..."
+                                     PlaceholderText="Describe the task for Hermaeus Agent..."
                                      AcceptsReturn="True"
                                      MinHeight="82"
                                      MaxHeight="120"
@@ -273,7 +273,7 @@
                                        Opacity="0.6" />
                             <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
                                 <TextBox Text="{Binding WorkspaceRoot}"
-                                         Watermark="/path/to/project"
+                                         PlaceholderText="/path/to/project"
                                          IsEnabled="{Binding !IsRunning}"
                                          ToolTip.Tip="The folder the agent can read and edit. Nothing outside it is touched." />
                                 <TextBlock Text="No workspace selected. Choose a folder so the agent has somewhere to work."
@@ -411,7 +411,7 @@
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                 <TextBox Grid.Column="0"
                                          Text="{Binding ReplyText}"
-                                         Watermark="{Binding ReplyWatermark}"
+                                         PlaceholderText="{Binding ReplyWatermark}"
                                          AcceptsReturn="True"
                                          MinHeight="56"
                                          TextWrapping="Wrap" />
@@ -441,7 +441,7 @@
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                 <TextBox Grid.Column="0"
                                          Text="{Binding ContinueInstructionText}"
-                                         Watermark="{Binding ContinueInstructionWatermark}"
+                                         PlaceholderText="{Binding ContinueInstructionWatermark}"
                                          AcceptsReturn="True"
                                          MinHeight="56"
                                          TextWrapping="Wrap" />
@@ -956,7 +956,7 @@
                                                             ToolTip.Tip="Adds this recipe and saves it to .hermaeus/workspace.json straight away." />
                                                     <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                                                              Text="{Binding NewRecipeArgument}"
-                                                             Watermark="Optional argument, e.g. src/Hermaeus.Tests/Hermaeus.Tests.csproj"
+                                                             PlaceholderText="Optional argument, e.g. src/Hermaeus.Tests/Hermaeus.Tests.csproj"
                                                              FontFamily="{DynamicResource AppMonoFont}"
                                                              FontSize="11"
                                                              ToolTip.Tip="Optional. Narrows the recipe to one project or script. Leave empty to allow the bare command." />
@@ -1029,7 +1029,7 @@
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                         <TextBox Grid.Column="0"
                                                  Text="{Binding WorkspaceFileQuery}"
-                                                 Watermark="Search workspace files by path or content..."
+                                                 PlaceholderText="Search workspace files by path or content..."
                                                  IsEnabled="{Binding !IsRunning}" />
                                         <Button Grid.Column="1"
                                                 Command="{Binding RefreshWorkspaceFilesCommand}"
@@ -1079,12 +1079,12 @@
                                             <Expander Header="Draft Patch" IsExpanded="False" Margin="0,8,0,0">
                                                 <StackPanel Spacing="8">
                                                     <TextBox Text="{Binding DraftRationale}"
-                                                             Watermark="Rationale for this patch..."
+                                                             PlaceholderText="Rationale for this patch..."
                                                              AcceptsReturn="True"
                                                              MinHeight="56"
                                                              TextWrapping="Wrap" />
                                                     <TextBox Text="{Binding DraftProposedContent}"
-                                                             Watermark="Proposed file content..."
+                                                             PlaceholderText="Proposed file content..."
                                                              AcceptsReturn="True"
                                                              MinHeight="120"
                                                              TextWrapping="Wrap"
@@ -1281,7 +1281,7 @@
                                                              FontSize="11"
                                                              Opacity="0.75"
                                                              TextWrapping="Wrap"
-                                                             Watermark="Guidance (optional)" />
+                                                             PlaceholderText="Guidance (optional)" />
                                                     <TextBlock Text="{Binding ConfidenceLabel}"
                                                                FontSize="11"
                                                                Opacity="0.5" />

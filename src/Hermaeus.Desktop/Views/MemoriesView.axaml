@@ -40,7 +40,7 @@
                         <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="6">
                             <TextBlock Text="Search memories" FontSize="12" Opacity="0.6" />
                             <TextBox Text="{Binding SearchText}"
-                                     Watermark="Search by content, tags, category..."
+                                     PlaceholderText="Search by content, tags, category..."
                                      FontSize="12" Padding="10,8"
                                      ToolTip.Tip="Matches memory content, tags, and category as you type." />
                         </StackPanel>
@@ -256,7 +256,7 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <TextBox Text="{Binding ContradictionExplanation}"
-                             Watermark="Why do these two assertions appear incompatible?"
+                             PlaceholderText="Why do these two assertions appear incompatible?"
                              IsEnabled="{Binding !IsRevisionBusy}"
                              ToolTip.Tip="Describe the suspected contradiction. This records a proposal and does not change either assertion." />
                     <Button Content="Record contradiction proposal"

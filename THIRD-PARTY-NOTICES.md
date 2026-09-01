@@ -32,28 +32,30 @@ own `.nuspec`.
 
 | Package | Version | Licence | Copyright |
 | --- | --- | --- | --- |
-| Avalonia | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.Angle.Windows.Natives | 2.1.22045.20230930 | BSD-3-Clause (ANGLE) | Copyright 2018 The ANGLE Project Authors |
-| Avalonia.AvaloniaEdit | 11.3.0 | MIT | Copyright 2017-2025 (c) The AvaloniaUI Project |
-| Avalonia.BuildServices | 0.0.31 | MIT | Copyright 2023-2024 (c) The AvaloniaUI Project |
-| Avalonia.Desktop | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.Fonts.Inter | 11.3.0 | MIT (package); the Inter font itself is SIL OFL 1.1, see section 3 | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.FreeDesktop | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.Native | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.Remote.Protocol | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.Skia | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.Themes.Fluent | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.Win32 | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
-| Avalonia.X11 | 11.3.0 | MIT | Copyright 2013-2025 (c) The AvaloniaUI Project |
+| Avalonia | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Angle.Windows.Natives | 2.1.27548.20260419 | BSD-3-Clause (ANGLE) | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.AvaloniaEdit | 12.0.0 | MIT | Copyright 2017-2026 (c) The AvaloniaUI Project |
+| Avalonia.BuildServices | 11.3.2 | MIT | Copyright 2023-2025 (c) The AvaloniaUI Project |
+| Avalonia.Desktop | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Fonts.Inter | 12.1.1 | MIT (package); the Inter font itself is SIL OFL 1.1, see section 3 | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.FreeDesktop | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.FreeDesktop.AtSpi | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.HarfBuzz | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Native | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Remote.Protocol | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Skia | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Themes.Fluent | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Win32 | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.X11 | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | CommunityToolkit.Mvvm | 8.3.2 | MIT | (c) .NET Foundation and Contributors |
 | Google.Protobuf | 3.30.2 | BSD-3-Clause | Copyright 2015, Google Inc. |
-| HarfBuzzSharp | 7.3.0.3 | MIT | (c) Microsoft Corporation |
-| HarfBuzzSharp.NativeAssets.Linux | 7.3.0.3 | MIT | (c) Microsoft Corporation |
-| HarfBuzzSharp.NativeAssets.macOS | 7.3.0.3 | MIT | (c) Microsoft Corporation |
-| HarfBuzzSharp.NativeAssets.WebAssembly | 7.3.0.3 | MIT | (c) Microsoft Corporation |
-| HarfBuzzSharp.NativeAssets.Win32 | 7.3.0.3 | MIT | (c) Microsoft Corporation |
+| HarfBuzzSharp | 8.3.1.3 | MIT | (c) Microsoft Corporation |
+| HarfBuzzSharp.NativeAssets.Linux | 8.3.1.3 | MIT | (c) Microsoft Corporation |
+| HarfBuzzSharp.NativeAssets.macOS | 8.3.1.3 | MIT | (c) Microsoft Corporation |
+| HarfBuzzSharp.NativeAssets.WebAssembly | 8.3.1.3 | MIT | (c) Microsoft Corporation |
+| HarfBuzzSharp.NativeAssets.Win32 | 8.3.1.3 | MIT | (c) Microsoft Corporation |
 | Markdig | 0.38.0 | BSD-2-Clause | Alexandre Mutel |
-| MicroCom.Runtime | 0.11.0 | MIT | Copyright 2021 (c) Nikita Tsukanov |
+| MicroCom.Runtime | 0.11.6 | MIT | Copyright 2021 (c) Nikita Tsukanov |
 | Microsoft.Data.Sqlite | 9.0.9 | MIT | (c) Microsoft Corporation |
 | Microsoft.Data.Sqlite.Core | 9.0.9 | MIT | (c) Microsoft Corporation |
 | Microsoft.Extensions.DependencyInjection | 9.0.4 | MIT | (c) Microsoft Corporation |
@@ -67,13 +69,13 @@ own `.nuspec`.
 | SQLitePCLRaw.core | 3.0.0 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
 | SQLitePCLRaw.lib.e_sqlite3 | 3.50.3 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
 | SQLitePCLRaw.provider.e_sqlite3 | 3.0.0 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
-| SkiaSharp | 2.88.9 | MIT | (c) Microsoft Corporation |
-| SkiaSharp.NativeAssets.Linux | 2.88.9 | MIT | (c) Microsoft Corporation |
-| SkiaSharp.NativeAssets.macOS | 2.88.9 | MIT | (c) Microsoft Corporation |
-| SkiaSharp.NativeAssets.WebAssembly | 2.88.9 | MIT | (c) Microsoft Corporation |
-| SkiaSharp.NativeAssets.Win32 | 2.88.9 | MIT | (c) Microsoft Corporation |
+| SkiaSharp | 3.119.4 | MIT | (c) Microsoft Corporation |
+| SkiaSharp.NativeAssets.Linux | 3.119.4 | MIT | (c) Microsoft Corporation |
+| SkiaSharp.NativeAssets.macOS | 3.119.4 | MIT | (c) Microsoft Corporation |
+| SkiaSharp.NativeAssets.WebAssembly | 3.119.4 | MIT | (c) Microsoft Corporation |
+| SkiaSharp.NativeAssets.Win32 | 3.119.4 | MIT | (c) Microsoft Corporation |
 | System.Numerics.Tensors | 9.0.9 | MIT | (c) Microsoft Corporation |
-| Tmds.DBus.Protocol | 0.21.3 | MIT | Tom Deseyn |
+| Tmds.DBus.Protocol | 0.94.1 | MIT | Tom Deseyn |
 
 Apache-2.0 requires that its NOTICE text, where the upstream project ships
 one, travels with redistributions. The Apache-2.0 packages above

@@ -78,7 +78,7 @@
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
-            <TextBox Text="{Binding RecipePrompt}" Watermark="Controlled prompt" MaxLength="4096"
+            <TextBox Text="{Binding RecipePrompt}" PlaceholderText="Controlled prompt" MaxLength="4096"
                      ToolTip.Tip="Recipes reconstruct the same prompt for each configuration. Prompt/shared-prefix timing compares request timing; reused-token counts stay Unknown unless directly reported by the runtime." />
             <TextBlock Text="Trade-off table" FontWeight="SemiBold" />
             <TextBlock Text="{Binding TradeoffSummary}" FontFamily="Consolas" TextWrapping="Wrap" />
@@ -106,10 +106,10 @@
             <ComboBox Width="145" Margin="0,0,8,8" ItemsSource="{Binding OutcomeOptions}" SelectedItem="{Binding OutcomeFilter}" />
             <ComboBox Width="175" Margin="0,0,8,8" ItemsSource="{Binding OriginOptions}" SelectedItem="{Binding OriginFilter}" />
             <ComboBox Width="135" Margin="0,0,8,8" ItemsSource="{Binding StatusOptions}" SelectedItem="{Binding StatusFilter}" />
-            <TextBox Width="150" Margin="0,0,8,8" Watermark="Project id" Text="{Binding ProjectFilter}" />
-            <TextBox Width="180" Margin="0,0,8,8" Watermark="Workspace fingerprint" Text="{Binding WorkspaceFilter}" />
-            <TextBox Width="150" Margin="0,0,8,8" Watermark="Model fingerprint" Text="{Binding ModelFilter}" />
-            <TextBox Width="150" Margin="0,0,8,8" Watermark="Runtime fingerprint" Text="{Binding RuntimeFilter}" />
+            <TextBox Width="150" Margin="0,0,8,8" PlaceholderText="Project id" Text="{Binding ProjectFilter}" />
+            <TextBox Width="180" Margin="0,0,8,8" PlaceholderText="Workspace fingerprint" Text="{Binding WorkspaceFilter}" />
+            <TextBox Width="150" Margin="0,0,8,8" PlaceholderText="Model fingerprint" Text="{Binding ModelFilter}" />
+            <TextBox Width="150" Margin="0,0,8,8" PlaceholderText="Runtime fingerprint" Text="{Binding RuntimeFilter}" />
             <StackPanel Margin="0,0,8,8"><TextBlock Text="From" FontSize="11" /><DatePicker SelectedDate="{Binding CreatedFrom}" /></StackPanel>
             <StackPanel Margin="0,0,8,8"><TextBlock Text="To" FontSize="11" /><DatePicker SelectedDate="{Binding CreatedTo}" /></StackPanel>
           </WrapPanel>
@@ -242,7 +242,7 @@
                 </ItemsControl>
                 <TextBlock Text="Typed correction" FontWeight="SemiBold" />
                 <ComboBox ItemsSource="{Binding OutcomeOptions}" SelectedItem="{Binding CorrectionOutcome}" />
-                <TextBox Text="{Binding CorrectionDetail}" Watermark="Correction detail" MaxLength="512" />
+                <TextBox Text="{Binding CorrectionDetail}" PlaceholderText="Correction detail" MaxLength="512" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button Content="Save correction" Command="{Binding CorrectSelectedCommand}" />
                   <Button Content="Remove..." Command="{Binding RemoveSelectedCommand}" />

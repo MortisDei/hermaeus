@@ -19,8 +19,10 @@ namespace Hermaeus.Desktop.Controls;
 /// iteration, and TopLevel calls SetCursor on every such change, so the visible
 /// symptom is the mouse cursor flickering between the control's cursor and the
 /// default arrow, usually without the tooltip ever painting. It is upstream
-/// AvaloniaUI/Avalonia#19218, still open against 12.0.3 and reproduced on
-/// Windows, macOS and Wayland. Placement and offset workarounds only help when
+/// AvaloniaUI/Avalonia#19218, which remains open. Its public report targets
+/// Avalonia 11.3.2 on macOS, and this migration does not assume that 12.1.1
+/// fixes the same feedback loop on Hermaeus's supported platforms. Placement
+/// and offset workarounds only help when
 /// they happen to move the popup clear of the pointer's path, which is why four
 /// attempts at fixing this in the XAML did not hold.
 ///

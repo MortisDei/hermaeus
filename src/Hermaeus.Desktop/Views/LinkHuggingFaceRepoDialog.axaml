@@ -9,7 +9,7 @@
     <Border Padding="18">
         <StackPanel Spacing="14">
             <TextBlock Name="MessageText" TextWrapping="Wrap" />
-            <TextBox Name="RepoIdBox" Watermark="org/repo, e.g. unsloth/gemma-3-12b-it-GGUF" />
+            <TextBox Name="RepoIdBox" PlaceholderText="org/repo, e.g. unsloth/gemma-3-12b-it-GGUF" />
             <TextBlock Text="Validated against huggingface.co before saving. Anonymous, public repos only."
                        TextWrapping="Wrap"
                        FontSize="11"

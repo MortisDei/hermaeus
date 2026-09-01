@@ -87,7 +87,7 @@
                                           RowSpacing="8">
                                         <TextBox Grid.Row="0" Grid.Column="0"
                                                  Text="{Binding Name}"
-                                                 Watermark="Profile name"
+                                                 PlaceholderText="Profile name"
                                                  CornerRadius="6"
                                                  Padding="10,6" />
                                         <ComboBox Grid.Row="0" Grid.Column="1"
@@ -97,7 +97,7 @@
                                                   Padding="8,4" />
                                         <TextBox Grid.Row="0" Grid.Column="2"
                                                  Text="{Binding BaseUrl}"
-                                                 Watermark="http://127.0.0.1:8080"
+                                                 PlaceholderText="http://127.0.0.1:8080"
                                                  CornerRadius="6"
                                                  Padding="10,6" />
                                         <StackPanel Grid.Row="0" Grid.Column="3"
@@ -115,7 +115,7 @@
                                         <TextBox Grid.Row="1" Grid.Column="0"
                                                  Text="{Binding ApiKey}"
                                                  PasswordChar="*"
-                                                 Watermark="API key"
+                                                 PlaceholderText="API key"
                                                  CornerRadius="6"
                                                  Padding="10,6" />
                                         <CheckBox Grid.Row="1" Grid.Column="1"
@@ -267,7 +267,7 @@
                                                Opacity="0.6" FontSize="13" />
                                         <TextBox Grid.Row="0" Grid.Column="1"
                                                  Text="{Binding ExecutablePath}"
-                                                 Watermark="llama-server  or  /full/path/llama-server"
+                                                 PlaceholderText="llama-server  or  /full/path/llama-server"
                                                  FontSize="13" CornerRadius="6" Padding="10,6"
                                                  IsEnabled="{Binding CanEdit}"
                                                  ToolTip.Tip="Full path or PATH command for llama-server. Trust scan can hash local files and warn outside the AI root." />
@@ -443,7 +443,7 @@
                                                Opacity="0.6" FontSize="13" />
                                     <TextBox Grid.Row="5" Grid.Column="1"
                                              Text="{Binding ExtraArgs}"
-                                             Watermark="--flash-attn --mlock  etc."
+                                             PlaceholderText="--flash-attn --mlock  etc."
                                              FontSize="13" CornerRadius="6" Padding="10,6"
                                              IsEnabled="{Binding CanEdit}"
                                              ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning. Quote a value containing spaces, e.g. --mmproj &quot;C:\models\a b\proj.gguf&quot;; a backslash is only an escape before a quote or another backslash, so plain Windows paths like C:\models\proj.gguf do not need to be escaped." />
@@ -598,7 +598,7 @@
                                                        VerticalAlignment="Center" FontSize="12" Opacity="0.75" />
                                             <TextBox Grid.Column="1"
                                                      Text="{Binding CpuMoeLayersText}"
-                                                     Watermark="off"
+                                                     PlaceholderText="off"
                                                      FontSize="12"
                                                      CornerRadius="6"
                                                      IsEnabled="{Binding CanEdit}"
@@ -654,25 +654,25 @@
                                             <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
                                                 <TextBox Grid.Column="0"
                                                          Text="{Binding SpeculativeNMaxText}"
-                                                         Watermark="n-max"
+                                                         PlaceholderText="n-max"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="--spec-draft-n-max: tokens to draft per step. Blank uses the server default of 3." />
                                                 <TextBox Grid.Column="1"
                                                          Text="{Binding SpeculativeNMinText}"
-                                                         Watermark="n-min"
+                                                         PlaceholderText="n-min"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="--spec-draft-n-min: minimum drafted tokens. Blank uses the server default of 0." />
                                                 <TextBox Grid.Column="2"
                                                          Text="{Binding SpeculativePMinText}"
-                                                         Watermark="p-min"
+                                                         PlaceholderText="p-min"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="--spec-draft-p-min: minimum draft probability. Blank uses the server default of 0.00." />
                                                 <TextBox Grid.Column="3"
                                                          Text="{Binding DraftGpuLayersText}"
-                                                         Watermark="draft ngl"
+                                                         PlaceholderText="draft ngl"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="-ngld: draft-model layers to keep in VRAM. Blank leaves the server's own default alone." />

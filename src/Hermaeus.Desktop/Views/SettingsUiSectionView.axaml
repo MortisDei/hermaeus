@@ -17,13 +17,13 @@
             <TextBlock Text="Typography" FontSize="14" FontWeight="SemiBold" />
             <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="12">
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Heading font" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding HeadingFontFamily}" FontSize="13" Watermark="System default"
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding HeadingFontFamily}" FontSize="13" PlaceholderText="System default"
                          ToolTip.Tip="Font family for page titles and headings. Leave blank to use the OS default UI font. Enter the name of a font installed on this system." />
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Body font" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding BodyFontFamily}" FontSize="13" Watermark="System default"
+                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding BodyFontFamily}" FontSize="13" PlaceholderText="System default"
                          ToolTip.Tip="Font family for chat and general UI text. Leave blank to use the OS default UI font." />
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Code font" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding MonoFontFamily}" FontSize="13" Watermark="System default"
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding MonoFontFamily}" FontSize="13" PlaceholderText="System default"
                          ToolTip.Tip="Font family for code blocks and other technical text. Leave blank to use the OS default monospace font, e.g. Consolas." />
             </Grid>
             <CheckBox IsChecked="{Binding ShowNavLabels}" Content="Show text labels next to toolbar icons" FontSize="13"

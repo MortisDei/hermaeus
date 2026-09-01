@@ -35,7 +35,7 @@
                 </ComboBox>
 
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Model" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding !IsNativeProvider}" />
-                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding RemoteModel}" Watermark="whisper-1" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding !IsNativeProvider}" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding RemoteModel}" PlaceholderText="whisper-1" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding !IsNativeProvider}" />
             </Grid>
 
             <TextBlock Text="{Binding MicrophoneStatus}" FontSize="12" Opacity="0.6" />

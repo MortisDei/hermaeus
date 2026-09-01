@@ -7,16 +7,18 @@
     <RootNamespace>Hermaeus.Desktop</RootNamespace>
     <AssemblyName>Hermaeus.Desktop</AssemblyName>
     <ApplicationIcon>Assets/hermaeus.ico</ApplicationIcon>
+    <!-- Avalonia 11 used reflection bindings by default; retain that established binding model until views are explicitly typed. -->
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia"               Version="11.3.0" />
-    <PackageReference Include="Avalonia.AvaloniaEdit"  Version="11.3.0" />
-    <PackageReference Include="Avalonia.Desktop"       Version="11.3.0" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Fonts.Inter"   Version="11.3.0" />
+    <PackageReference Include="Avalonia"               Version="12.1.1" />
+    <PackageReference Include="Avalonia.AvaloniaEdit"  Version="12.0.0" />
+    <PackageReference Include="Avalonia.Desktop"       Version="12.1.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter"   Version="12.1.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
     <PackageReference Include="Markdig"                Version="0.38.0" />
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Hermaeus.Core/Hermaeus.Core.csproj" />

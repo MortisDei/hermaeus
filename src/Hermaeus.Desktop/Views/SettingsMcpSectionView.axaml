@@ -23,18 +23,18 @@
                                   RowSpacing="8">
                                 <TextBox Grid.Row="0" Grid.Column="0"
                                          Text="{Binding Name}"
-                                         Watermark="Server name"
+                                         PlaceholderText="Server name"
                                          CornerRadius="6"
                                          Padding="10,6" />
                                 <TextBox Grid.Row="0" Grid.Column="1"
                                          Text="{Binding Command}"
-                                         Watermark="Executable, e.g. npx"
+                                         PlaceholderText="Executable, e.g. npx"
                                          CornerRadius="6"
                                          Padding="10,6"
                                          ToolTip.Tip="Program Hermaeus launches as a child process to speak MCP over stdio." />
                                 <TextBox Grid.Row="0" Grid.Column="2"
                                          Text="{Binding ArgumentsText}"
-                                         Watermark="Arguments, space separated"
+                                         PlaceholderText="Arguments, space separated"
                                          CornerRadius="6"
                                          Padding="10,6"
                                          ToolTip.Tip="Command-line arguments passed to the executable, exactly as typed here." />
@@ -54,14 +54,14 @@
 
                                 <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
                                          Text="{Binding WorkingDirectory}"
-                                         Watermark="Working directory (optional)"
+                                         PlaceholderText="Working directory (optional)"
                                          CornerRadius="6"
                                          Padding="10,6"
                                          ToolTip.Tip="Directory the server process starts in. Defaults to Hermaeus's own working directory if left blank." />
 
                                 <TextBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
                                          Text="{Binding AllowedToolsText}"
-                                         Watermark="Allowed tools, comma separated (empty = allow every tool the server declares)"
+                                         PlaceholderText="Allowed tools, comma separated (empty = allow every tool the server declares)"
                                          CornerRadius="6"
                                          Padding="10,6"
                                          ToolTip.Tip="Restricts which of the server's declared tools the Agent may call. Every call is still separately approval-gated." />

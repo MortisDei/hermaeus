@@ -31,6 +31,12 @@ limit.
   owns the verified asset diagnosis and repair action.
 - R32 development is prepared as `0.39.0-beta`; no release or tag is created
   by this work.
+- R32 dependency closeout migrates the Avalonia framework packages to 12.1.1,
+  AvaloniaEdit to its latest compatible stable 12.0.0 release, and the
+  required Tmds.DBus.Protocol floor to 0.94.1. Clipboard and drag/drop paths
+  use Avalonia 12 typed transfer APIs while preserving their existing user
+  outcomes. Both CI workflows now pin actions/cache 6.1.0; cache paths, keys,
+  and permissions are unchanged.
 - R32 Batch 4 adds whole-workload resource admission receipts in Services and
   System Overview, with expiring reservations and explicit Unknown resource
   state across managed runtimes, Lab, voice, ONNX, and embedding backfill.

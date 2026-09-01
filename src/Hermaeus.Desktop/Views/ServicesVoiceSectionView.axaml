@@ -38,7 +38,7 @@
             <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                   RowSpacing="8" ColumnSpacing="12">
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding TtsServiceUrl}" Watermark="http://127.0.0.1:8020"
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding TtsServiceUrl}" PlaceholderText="http://127.0.0.1:8020"
                          FontSize="13" CornerRadius="6" Padding="10,6" />
                 <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Command="{Binding StartTtsCommand}" IsEnabled="{Binding !IsTtsRunning}" Content="Start" FontSize="12" Padding="12,5" CornerRadius="6" />
@@ -54,34 +54,34 @@
                         IsSnapToTickEnabled="True" Value="{Binding TtsSpeed}" VerticalAlignment="Center" />
                 <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding TtsSpeed, StringFormat={}{0:F1}x}" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                 <TextBlock Grid.Row="4" Grid.Column="0" Text="XTTS version" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />
-                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsModelVersion}" Watermark="2.0.3" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
+                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsModelVersion}" PlaceholderText="2.0.3" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
                 <TextBlock Grid.Row="5" Grid.Column="0" Text="Python" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsPythonFields}" />
-                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsPythonPath, UpdateSourceTrigger=PropertyChanged}" Watermark="/path/to/venv/bin/python" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsPythonFields}" />
+                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsPythonPath, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="/path/to/venv/bin/python" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsPythonFields}" />
                 <Button Grid.Row="5" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsPythonCommand}" ToolTip.Tip="Choose venv Python" IsVisible="{Binding ShowsPythonFields}">
                     <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
                 </Button>
                 <TextBlock Grid.Row="6" Grid.Column="0" Text="XTTS script" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />
-                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding TtsScriptPath, UpdateSourceTrigger=PropertyChanged}" Watermark="/path/to/xtts_api_server.py" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
+                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding TtsScriptPath, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="/path/to/xtts_api_server.py" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
                 <Button Grid.Row="6" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsScriptCommand}" ToolTip.Tip="Choose XTTS script" IsVisible="{Binding ShowsXttsFields}">
                     <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
                 </Button>
                 <TextBlock Grid.Row="7" Grid.Column="0" Text="XTTS model" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />
-                <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding TtsModelDirectory, UpdateSourceTrigger=PropertyChanged}" Watermark="XTTS v2 model folder" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
+                <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding TtsModelDirectory, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="XTTS v2 model folder" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
                 <Button Grid.Row="7" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsModelDirectoryCommand}" ToolTip.Tip="Choose model folder" IsVisible="{Binding ShowsXttsFields}">
                     <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
                 </Button>
                 <TextBlock Grid.Row="8" Grid.Column="0" Text="Output" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding TtsOutputDirectory, UpdateSourceTrigger=PropertyChanged}" Watermark="Default Hermaeus XTTS folder" FontSize="13" CornerRadius="6" Padding="10,6" />
+                <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding TtsOutputDirectory, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Default Hermaeus XTTS folder" FontSize="13" CornerRadius="6" Padding="10,6" />
                 <Button Grid.Row="8" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsOutputCommand}" ToolTip.Tip="Choose output folder">
                     <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
                 </Button>
                 <TextBlock Grid.Row="9" Grid.Column="0" Text="Voice samples" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsVoiceSampleFields}" />
-                <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding TtsVoiceDirectory, UpdateSourceTrigger=PropertyChanged}" Watermark="Default Hermaeus voice folder" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsVoiceSampleFields}" />
+                <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding TtsVoiceDirectory, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Default Hermaeus voice folder" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsVoiceSampleFields}" />
                 <Button Grid.Row="9" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsVoiceDirectoryCommand}" ToolTip.Tip="Choose voice sample folder" IsVisible="{Binding ShowsVoiceSampleFields}">
                     <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
                 </Button>
                 <TextBlock Grid.Row="10" Grid.Column="0" Text="Preview" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding TtsPreviewText}" Watermark="Preview sentence" FontSize="13" CornerRadius="6" Padding="10,6" />
+                <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding TtsPreviewText}" PlaceholderText="Preview sentence" FontSize="13" CornerRadius="6" Padding="10,6" />
                 <StackPanel Grid.Row="10" Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Command="{Binding PreviewTtsVoiceCommand}" Content="Play" FontSize="12" Padding="10,5" CornerRadius="6" />
                     <Button Command="{Binding ImportTtsVoiceSampleCommand}" Content="Import" FontSize="12" Padding="10,5" CornerRadius="6" IsVisible="{Binding ShowsVoiceSampleFields}" />

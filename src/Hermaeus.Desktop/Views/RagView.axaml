@@ -467,7 +467,7 @@
                                            Opacity="0.6" FontSize="13" />
                                 <TextBox Grid.Row="0" Grid.Column="1"
                                          Text="{Binding NewDatasetName}"
-                                         Watermark="e.g.  skyrim,  work-notes"
+                                         PlaceholderText="e.g.  skyrim,  work-notes"
                                          FontSize="13" CornerRadius="6" Padding="10,6"
                                          IsEnabled="{Binding !IsIngesting}" />
 
@@ -503,7 +503,7 @@
                                     </Grid.IsVisible>
                                     <TextBox Grid.Column="0"
                                              Text="{Binding IngestPath}"
-                                             Watermark="/path/to/text-md-pdf/files"
+                                             PlaceholderText="/path/to/text-md-pdf/files"
                                              FontSize="13" CornerRadius="6" Padding="10,6"
                                              IsEnabled="{Binding !IsIngesting}" />
                                     <Button Grid.Column="1"
@@ -526,7 +526,7 @@
                                       IsVisible="{Binding EnableWebLoader}">
                                     <TextBox Grid.Row="0"
                                              Text="{Binding WebUrlList}"
-                                             Watermark="https://example.com/page"
+                                             PlaceholderText="https://example.com/page"
                                              AcceptsReturn="True"
                                              MinHeight="74"
                                              FontSize="13" CornerRadius="6" Padding="10,6"
@@ -632,7 +632,7 @@
                                            FontSize="13" />
                                 <TextBox Grid.Column="1"
                                          Text="{Binding EvalPath}"
-                                         Watermark="/path/to/gold.json"
+                                         PlaceholderText="/path/to/gold.json"
                                          CornerRadius="6"
                                          Padding="10,6"
                                          IsEnabled="{Binding !IsEvaluating}" />
@@ -750,7 +750,7 @@
                          x:Name="QuestionBox"
                          Classes="chat-input"
                          Text="{Binding QuestionText}"
-                         Watermark="Ask a question about your documents..."
+                         PlaceholderText="Ask a question about your documents..."
                          KeyDown="OnQuestionKeyDown" />
 
                 <Button Grid.Column="1" Classes="send-btn"

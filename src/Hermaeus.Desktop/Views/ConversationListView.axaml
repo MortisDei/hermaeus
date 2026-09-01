@@ -21,7 +21,7 @@
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBox Grid.Column="0"
                              Text="{Binding SearchQuery}"
-                             Watermark="Search…"
+                             PlaceholderText="Search…"
                              BorderThickness="0"
                              Background="Transparent"
                              Padding="10,6" FontSize="13" />
@@ -143,15 +143,15 @@
                                             <StackPanel Spacing="10">
                                                 <TextBlock Text="Conversation" FontWeight="SemiBold" FontSize="14" />
                                                 <TextBox Text="{Binding Title, Mode=TwoWay}"
-                                                         Watermark="Title"
+                                                         PlaceholderText="Title"
                                                          CornerRadius="6"
                                                          Padding="10,6" />
                                                 <TextBox Text="{Binding Folder, Mode=TwoWay}"
-                                                         Watermark="Folder"
+                                                         PlaceholderText="Folder"
                                                          CornerRadius="6"
                                                          Padding="10,6" />
                                                 <TextBox Text="{Binding TagsText, Mode=TwoWay}"
-                                                         Watermark="tags, comma separated"
+                                                         PlaceholderText="tags, comma separated"
                                                          CornerRadius="6"
                                                          Padding="10,6" />
                                                 <Grid ColumnDefinitions="*,*" ColumnSpacing="8">

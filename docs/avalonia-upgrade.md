@@ -7,25 +7,47 @@ for the containment rationale.
 
 ## Current pin
 
-All five Avalonia packages (`Avalonia`, `Avalonia.Desktop`,
-`Avalonia.Themes.Fluent`, `Avalonia.Fonts.Inter`, `Avalonia.AvaloniaEdit`) are
-pinned to the same exact version in `src/Hermaeus.Desktop/Hermaeus.Desktop.csproj`
-(no wildcard, no floating minor). They must always move together.
+The Avalonia framework packages (`Avalonia`, `Avalonia.Desktop`,
+`Avalonia.Themes.Fluent`, and `Avalonia.Fonts.Inter`) are pinned to the same
+exact `12.1.1` version in `src/Hermaeus.Desktop/Hermaeus.Desktop.csproj`.
+`Avalonia.AvaloniaEdit` is pinned to its latest stable `12.0.0` release because
+no `12.1.1` package exists. Its package dependency targets Avalonia 12.0.0 or
+newer, so restore resolves it against the 12.1.1 framework. This is the only
+intentional package-family version difference and must be checked whenever the
+framework moves.
+
+## R32 migration record
+
+The R32 closeout moved the four framework packages to 12.1.1, AvaloniaEdit to
+12.0.0, and the direct `Tmds.DBus.Protocol` reference to 0.94.1, the minimum
+required by Avalonia 12.1.1's Linux dependency chain. Avalonia 12 enables
+compiled bindings by default, so the Desktop project explicitly retains the
+existing reflection-binding default until views are migrated to explicit data
+types. The migration also replaced the obsolete clipboard and drag/drop APIs
+with Avalonia 12's typed transfer APIs, and replaced the obsolete `Watermark`
+property with `PlaceholderText` without changing the displayed prompts.
+
+The built-in tooltip service remains disabled. Upstream issue #19218 is still
+open, and this migration records no assumption that Avalonia 12.1.1 fixes that
+feedback loop. Owner validation of tooltips, theme switching, window behavior,
+tray integration, and Windows runtime behavior remains required.
 
 ## When to upgrade
 
-- A patch release (`11.3.x`) fixing a bug Hermaeus actually hits: low risk, can
-  land in a normal PR with the checklist below.
-- A minor release (`11.x`): review the Avalonia changelog for styling/theming
-  breaking changes before touching the pin; budget a dedicated PR.
-- A major release (`1x.0`): treat as a project, not a PR. Expect
-  styling-system churn (10 to 11 was painful project-wide); do not combine
-  with unrelated feature work.
+- A patch release (`12.1.x`) fixing a bug Hermaeus actually hits: review the
+  framework and satellite package compatibility before touching the pin.
+- A minor release (`12.x`): review the Avalonia changelog for
+  styling/theming breaking changes before touching the pin; budget a dedicated
+  migration.
+- A major release (`1x.0`): treat as a project, not a routine dependency PR.
+  Expect styling-system and platform API churn.
 
 ## Checklist for any pin bump
 
-1. Bump all five `Avalonia*` package versions in `Hermaeus.Desktop.csproj` to
-   the same new version in one commit. Never let them drift apart.
+1. Bump the four framework package versions together in
+   `Hermaeus.Desktop.csproj`, then verify that the pinned AvaloniaEdit release
+   supports that framework major and minor. Never introduce an unverified
+   package-family split.
 2. `dotnet build Hermaeus.sln -v q --nologo` clean, zero warnings
    (`TreatWarningsAsErrors` is on solution-wide).
 3. `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj -v q --nologo` green.
@@ -35,11 +57,15 @@ pinned to the same exact version in `src/Hermaeus.Desktop/Hermaeus.Desktop.cspro
    DBus tray on Linux), and window chrome/resizing.
 5. Check `Directory.Build.props`'s `TreatWarningsAsErrors` catches any new
    analyzer warnings Avalonia's own analyzers introduce.
-6. Update `CHANGELOG.md` noting the version bump and anything visibly
-   changed (theme tweaks, control behavior).
+6. Exercise startup ordering, second-launch rejection, tray integration, and
+   the strict lock invariant before claiming the migration is complete.
+7. Update `CHANGELOG.md` noting the version bump and anything visibly changed
+   (theme tweaks, control behavior).
 
 ## What NOT to do
 
 Do not bump Avalonia as a drive-by inside an unrelated feature PR. Do not let
-the five packages diverge in version. Do not skip the manual pass: XAML
-styling regressions do not reliably show up as build or test failures.
+the four framework packages diverge in version, and do not use an AvaloniaEdit
+version without evidence that it supports the selected framework. Do not skip
+the manual pass: XAML styling regressions do not reliably show up as build or
+test failures.
