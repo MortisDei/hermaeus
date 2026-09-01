@@ -223,6 +223,7 @@ public sealed class AgentTaskListItemViewModel
         ? "Model inherits on next run"
         : $"{(string.IsNullOrWhiteSpace(ModelDisplayName) ? ModelId : ModelDisplayName)} ({ModelId})";
     public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentTaskId);
+    public bool CanDelete => !IsSubTask && Status != AgentTaskStatus.Running;
     /// <summary>r23 2.3: presentation only - status stays Complete; a non-empty Reservations list just changes what this label says.</summary>
     public string StatusLabel => Status == AgentTaskStatus.Complete && HasReservations ? "Completed with reservations" : Status.ToString();
 
@@ -524,6 +525,20 @@ public sealed record AgentTaskRewindConfirmation(IReadOnlyList<string> FilesToRe
 public partial class AgentViewModel : ViewModelBase
 {
     public Func<DraftPatchPreviewRequest, Task<bool>>? RequestDraftPatchPreview { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
+
+    [RelayCommand]
+    private async Task CopyResponseAsync()
+    {
+        var text = CurrentTaskSummaryLabel;
+        if (RequestCopyToClipboard is null || string.IsNullOrWhiteSpace(text))
+        {
+            StatusMessage = "Response copying is unavailable.";
+            return;
+        }
+
+        StatusMessage = await RequestCopyToClipboard(text) ? "Copied Agent response." : "Could not copy Agent response.";
+    }
     /// <summary>
     /// Emitted before RewindTaskAsync touches anything, listing exactly which
     /// files will be restored and which will be deleted; returning false
@@ -550,6 +565,8 @@ public partial class AgentViewModel : ViewModelBase
     /// Optional so the existing test constructions are unaffected.</summary>
     private readonly IToastService? _toasts;
     private CancellationTokenSource? _cts;
+    private string? _activeRunTaskId;
+    private bool _stopRequested;
     /// <summary>
     /// The task id the user actually opened (Start or LoadTask), independent
     /// of which task an in-flight orchestrated run's steps currently belong
@@ -628,6 +645,7 @@ public partial class AgentViewModel : ViewModelBase
     public Action? RequestWorkspaceRootPicker { get; set; }
     /// <summary>Opens a path with the OS default handler (same shape as LogsViewModel.RequestOpenFolder); used here for the synthesis report.md (r15 02-orchestration-ui.md 2.4).</summary>
     public Action<string>? RequestOpenFolder { get; set; }
+    public Func<AgentTaskListItemViewModel, Task<bool>>? RequestDeleteTaskConfirmation { get; set; }
 
     /// <summary>r24 doc 01 1.6: id of the active project, captured onto every new task at
     /// creation time. Wired by MainWindowViewModel; a running task never rereads this.</summary>
@@ -721,6 +739,8 @@ public partial class AgentViewModel : ViewModelBase
         null => "No active task",
         { StepBudgetExhausted: true } => "Paused at step budget",
         { Status: AgentTaskStatus.Complete, Reservations.Count: > 0 } => "Completed with reservations",
+        { Status: AgentTaskStatus.Blocked, UserTransitions: var transitions } when transitions.LastOrDefault()?.Kind == AgentTaskTransitionKind.StopRun => "Stopped",
+        { Status: AgentTaskStatus.Interrupted } => "Interrupted during startup recovery",
         _ => CurrentTask.Status.ToString()
     };
     public bool HasReservations => CurrentTask is { Reservations.Count: > 0 };
@@ -768,7 +788,7 @@ public partial class AgentViewModel : ViewModelBase
                 return "No summary yet";
             if (CurrentTask.StepBudgetExhausted)
                 return "The automatic run paused after reaching its step budget. Continue to resume the remaining work.";
-            if (CurrentTask.Status is (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
+            if (CurrentTask.Status is (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted)
                 && !string.IsNullOrWhiteSpace(CurrentTask.LastUserMessage))
                 return CurrentTask.LastUserMessage;
             return string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
@@ -778,7 +798,7 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>r19 3.1/3.3: a task that will not resume its own loop without user action - the
     /// Continue affordance and New task button both key off this.</summary>
     public bool IsTaskTerminal => CurrentTask?.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed
-        or AgentTaskStatus.Blocked or AgentTaskStatus.Cancelled;
+        or AgentTaskStatus.Blocked or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted;
 
     /// <summary>r19 3.3: presentation only - a terminal task whose own plan still lists pending
     /// steps declared victory prematurely; pairs with the Continue box (3.1) to answer
@@ -801,10 +821,13 @@ public partial class AgentViewModel : ViewModelBase
     public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null, StepBudgetExhausted: false };
 
     public bool IsStepBudgetExhausted => CurrentTask?.StepBudgetExhausted == true;
+    public bool HasPendingPlan => CurrentTask is { PendingSteps.Count: > 0 };
     public string ContinueBoxTitle => IsStepBudgetExhausted ? "Continue after step budget" : "Continue task";
     public string ContinueInstructionWatermark => IsStepBudgetExhausted
-        ? "Add steps or leave empty to continue the remaining plan"
-        : "What should it do next? Leave empty to finish the remaining planned steps";
+        ? "Tell it what to do next"
+        : "Describe the follow-up instruction";
+    public bool ShowFinishRun => !IsRunning && CurrentTask is not null
+        && (IsWaitingForReply || ShowContinueBox) && CurrentTask.PendingToolAction is null;
     public bool ShowRunStep => !IsRunning && CurrentTask is { Status: AgentTaskStatus.New or AgentTaskStatus.Running }
         && (SelectedModel is not null || !string.IsNullOrWhiteSpace(CurrentTask.ModelId));
 
@@ -860,7 +883,7 @@ public partial class AgentViewModel : ViewModelBase
     private static readonly HashSet<AgentTaskStatus> RewindEligibleStatuses =
     [
         AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked,
-        AgentTaskStatus.WaitingForUser, AgentTaskStatus.Cancelled
+        AgentTaskStatus.WaitingForUser, AgentTaskStatus.Cancelled, AgentTaskStatus.Interrupted
     ];
 
     public bool HasLedgerEntries => LedgerFiles.Count > 0 || LedgerCommands.Count > 0 || LedgerApprovals.Count > 0;
@@ -998,6 +1021,8 @@ public partial class AgentViewModel : ViewModelBase
         { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: not null } => "Review the requested action above, then approve or reject it.",
         { StepBudgetExhausted: true } => "Step budget exhausted. Add steps or continue the remaining plan, or stop the task.",
         { Status: AgentTaskStatus.WaitingForUser } => "Agent needs your answer. Reply below its response in the Run tab.",
+        { Status: AgentTaskStatus.Blocked, UserTransitions: var transitions } when transitions.LastOrDefault()?.Kind == AgentTaskTransitionKind.StopRun
+            => "The run was stopped. Review its outcome, continue planned work, add an instruction, or finish it.",
         { Status: AgentTaskStatus.Blocked } => "Agent is blocked. Read the reason in Run, then provide an instruction or change the workspace policy.",
         { Status: AgentTaskStatus.Complete } => "Review the outcome below, then inspect Changes or start a follow-up task.",
         { Status: AgentTaskStatus.Failed } => "Review the failure and transcript, then provide a new instruction or start again.",
@@ -1102,6 +1127,8 @@ public partial class AgentViewModel : ViewModelBase
     private async Task StartAsync()
     {
         IsRunning = true;
+        _stopRequested = false;
+        _activeRunTaskId = null;
         IsError = false;
         StatusMessage = string.Empty;
         _cts = new CancellationTokenSource();
@@ -1111,6 +1138,7 @@ public partial class AgentViewModel : ViewModelBase
                 $"Agent started: {GoalText}"));
             CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token, ActiveProjectId);
             _openedTaskId = CurrentTask.TaskId;
+            _activeRunTaskId = CurrentTask.TaskId;
             _currentTaskParentGoal = string.Empty;
             Narrate("Agent task started.", VoicePriority.Normal, $"{CurrentTask.TaskId}:started");
             await RunAgentLoopAsync();
@@ -1119,7 +1147,11 @@ public partial class AgentViewModel : ViewModelBase
             // (r26 01 1.4); it used to wait for a manual refresh click.
             await RefreshReviewQueueAsync();
         }
-        catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
+        catch (OperationCanceledException)
+        {
+            await FinalizeRequestedStopAsync();
+            StatusMessage = _stopRequested ? "Agent stopped. Completed work remains available." : "Agent stopped.";
+        }
         catch (Exception ex) { SetError(ex.Message); }
         finally
         {
@@ -1129,6 +1161,10 @@ public partial class AgentViewModel : ViewModelBase
             StartCommand.NotifyCanExecuteChanged();
             RunStepCommand.NotifyCanExecuteChanged();
             SendReplyCommand.NotifyCanExecuteChanged();
+            ContinuePlannedTaskCommand.NotifyCanExecuteChanged();
+            FinishTaskCommand.NotifyCanExecuteChanged();
+            _activeRunTaskId = null;
+            _stopRequested = false;
         }
     }
 
@@ -1136,6 +1172,8 @@ public partial class AgentViewModel : ViewModelBase
     private async Task RunStepAsync()
     {
         IsRunning = true;
+        _stopRequested = false;
+        _activeRunTaskId = CurrentTask?.TaskId;
         IsError = false;
         _cts = new CancellationTokenSource();
         try
@@ -1146,7 +1184,11 @@ public partial class AgentViewModel : ViewModelBase
             await RefreshRecentAsync();
             await RefreshReviewQueueAsync();
         }
-        catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
+        catch (OperationCanceledException)
+        {
+            await FinalizeRequestedStopAsync();
+            StatusMessage = _stopRequested ? "Agent stopped. Completed work remains available." : "Agent stopped.";
+        }
         catch (Exception ex) { SetError(ex.Message); }
         finally
         {
@@ -1156,11 +1198,41 @@ public partial class AgentViewModel : ViewModelBase
             StartCommand.NotifyCanExecuteChanged();
             RunStepCommand.NotifyCanExecuteChanged();
             SendReplyCommand.NotifyCanExecuteChanged();
+            ContinuePlannedTaskCommand.NotifyCanExecuteChanged();
+            FinishTaskCommand.NotifyCanExecuteChanged();
+            _activeRunTaskId = null;
+            _stopRequested = false;
         }
     }
 
     [RelayCommand]
-    private void Stop() => _cts?.Cancel();
+    private Task StopAsync()
+    {
+        if (!IsRunning)
+            return Task.CompletedTask;
+
+        _stopRequested = true;
+        _cts?.Cancel();
+        return Task.CompletedTask;
+    }
+
+    private async Task FinalizeRequestedStopAsync()
+    {
+        if (!_stopRequested || string.IsNullOrWhiteSpace(_activeRunTaskId))
+            return;
+
+        try
+        {
+            CurrentTask = await _agent.StopTaskAsync(_activeRunTaskId, CancellationToken.None);
+            RefreshTaskPreview();
+            await RefreshRecentAsync();
+            await RefreshReviewQueueAsync();
+        }
+        catch (Exception ex)
+        {
+            SetError($"The run stopped, but its stop transition could not be recorded: {ex.Message}");
+        }
+    }
 
     /// <summary>
     /// r19 3.2: once a task is loaded the workbench is visually and mentally
@@ -1183,6 +1255,29 @@ public partial class AgentViewModel : ViewModelBase
         StatusMessage = string.Empty;
         IsError = false;
         RefreshTaskPreview();
+    }
+
+    [RelayCommand]
+    private async Task DeleteRecentTaskAsync(AgentTaskListItemViewModel? item)
+    {
+        if (item is null || !item.CanDelete || RequestDeleteTaskConfirmation is null)
+            return;
+        if (!await RequestDeleteTaskConfirmation(item))
+            return;
+
+        try
+        {
+            await _agent.DeleteTaskAsync(item.TaskId);
+            if (CurrentTask?.TaskId == item.TaskId)
+                NewTask();
+            await RefreshRecentAsync();
+            await RefreshReviewQueueAsync();
+            StatusMessage = $"Deleted historical agent run: {item.Goal}";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
     }
 
     /// <summary>
@@ -1441,8 +1536,7 @@ public partial class AgentViewModel : ViewModelBase
     // and while it waits on a question (to answer), and nothing else.
     private bool CanSendReply() => (IsSteering || IsWaitingForReply) && !string.IsNullOrWhiteSpace(ReplyText);
 
-    /// <summary>Bound to the "Continue task" instruction box (r19 3.1); placeholder text
-    /// covers the empty-input default, so this stays literally empty until the user types.</summary>
+    /// <summary>Bound to the typed "Continue with instruction" path (r19 3.1); empty text is refused.</summary>
     [ObservableProperty] private string _continueInstructionText = string.Empty;
 
     [RelayCommand(CanExecute = nameof(CanContinueTask))]
@@ -1468,7 +1562,52 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
-    private bool CanContinueTask() => !IsRunning && (IsTaskTerminal || IsWaitingForPlanApproval);
+    private bool CanContinueTask() => !IsRunning
+        && !string.IsNullOrWhiteSpace(ContinueInstructionText)
+        && (IsTaskTerminal || IsWaitingForPlanApproval);
+
+    [RelayCommand(CanExecute = nameof(CanContinuePlannedTask))]
+    private async Task ContinuePlannedTaskAsync()
+    {
+        if (CurrentTask is null) return;
+        var taskId = CurrentTask.TaskId;
+        try
+        {
+            var options = CurrentTask.WorkspaceRoot is { Length: > 0 } root ? BuildOptions() with { WorkspaceRoot = root } : BuildOptions();
+            await _agent.ContinuePlannedTaskAsync(taskId, options);
+            await LoadTaskIfOpenAsync(taskId);
+            await RefreshReviewQueueAsync();
+            await ResumeAgentLoopIfRunnableAsync(taskId);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private bool CanContinuePlannedTask() => !IsRunning && HasPendingPlan
+        && (IsTaskTerminal || IsWaitingForPlanApproval);
+
+    [RelayCommand(CanExecute = nameof(CanFinishTask))]
+    private async Task FinishTaskAsync()
+    {
+        if (CurrentTask is null) return;
+        var taskId = CurrentTask.TaskId;
+        try
+        {
+            CurrentTask = await _agent.FinishTaskAsync(taskId);
+            RefreshTaskPreview();
+            await RefreshRecentAsync();
+            await RefreshReviewQueueAsync();
+            StatusMessage = "Run finished. Its history and evidence remain available.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private bool CanFinishTask() => ShowFinishRun;
 
     /// <summary>
     /// Shared by <see cref="ApproveReviewAsync"/> and <see cref="SendReplyAsync"/>:
@@ -1496,6 +1635,8 @@ public partial class AgentViewModel : ViewModelBase
             return;
 
         IsRunning = true;
+        _stopRequested = false;
+        _activeRunTaskId = taskId;
         IsError = false;
         _cts = new CancellationTokenSource();
         try
@@ -1505,7 +1646,11 @@ public partial class AgentViewModel : ViewModelBase
             await RefreshRecentAsync();
             await RefreshReviewQueueAsync();
         }
-        catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
+        catch (OperationCanceledException)
+        {
+            await FinalizeRequestedStopAsync();
+            StatusMessage = _stopRequested ? "Agent stopped. Completed work remains available." : "Agent stopped.";
+        }
         catch (Exception ex) { SetError(ex.Message); }
         finally
         {
@@ -1515,6 +1660,10 @@ public partial class AgentViewModel : ViewModelBase
             StartCommand.NotifyCanExecuteChanged();
             RunStepCommand.NotifyCanExecuteChanged();
             SendReplyCommand.NotifyCanExecuteChanged();
+            ContinuePlannedTaskCommand.NotifyCanExecuteChanged();
+            FinishTaskCommand.NotifyCanExecuteChanged();
+            _activeRunTaskId = null;
+            _stopRequested = false;
         }
     }
 
@@ -1792,6 +1941,7 @@ public partial class AgentViewModel : ViewModelBase
                         .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
                         .ToList()
                     : _workspaceTools.SearchFiles(options, WorkspaceFileQuery)
+                        .Where(result => !result.IsTruncationNotice)
                         .Select(result => new AgentWorkspaceFileViewModel(result.RelativePath, result.Snippet, result.ModifiedUtc))
                         .ToList();
             });
@@ -2578,7 +2728,14 @@ public partial class AgentViewModel : ViewModelBase
         SendReplyCommand.NotifyCanExecuteChanged();
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
+        ContinuePlannedTaskCommand.NotifyCanExecuteChanged();
+        FinishTaskCommand.NotifyCanExecuteChanged();
         ChangeTaskModelCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(NextUserActionLabel));
+        OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
+        OnPropertyChanged(nameof(HasPendingPlan));
+        OnPropertyChanged(nameof(ShowFinishRun));
         OnPropertyChanged(nameof(IsWaitingForReply));
         OnPropertyChanged(nameof(IsSteering));
         OnPropertyChanged(nameof(ReplyBoxTitle));
@@ -2586,8 +2743,10 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReplyButtonLabel));
         OnPropertyChanged(nameof(ShowReplyBox));
         OnPropertyChanged(nameof(IsStepBudgetExhausted));
+        OnPropertyChanged(nameof(HasPendingPlan));
         OnPropertyChanged(nameof(ContinueBoxTitle));
         OnPropertyChanged(nameof(ContinueInstructionWatermark));
+        OnPropertyChanged(nameof(ShowFinishRun));
         OnPropertyChanged(nameof(CurrentQuestion));
         OnPropertyChanged(nameof(HasCurrentQuestion));
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
@@ -2608,7 +2767,7 @@ public partial class AgentViewModel : ViewModelBase
         _ = RefreshRunLedgerAsync();
 
         // r24 doc 02 2.3: re-index on terminal transition only, never per step.
-        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled })
+        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted })
             _ = IndexTaskForRecallAsync(value);
     }
 
@@ -2618,7 +2777,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         var recent = await _store.ListRecentAsync(limit: 200);
         var inputs = new List<Hermaeus.Core.Models.RecallTaskInput>();
-        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled))
+        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted))
         {
             var full = await _store.LoadAsync(item.TaskId);
             if (full is null) continue;
@@ -2657,10 +2816,17 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
     partial void OnReplyTextChanged(string value) => SendReplyCommand.NotifyCanExecuteChanged();
+    partial void OnContinueInstructionTextChanged(string value)
+    {
+        ContinueTaskCommand.NotifyCanExecuteChanged();
+        FinishTaskCommand.NotifyCanExecuteChanged();
+    }
     partial void OnIsRunningChanged(bool value)
     {
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
+        ContinuePlannedTaskCommand.NotifyCanExecuteChanged();
+        FinishTaskCommand.NotifyCanExecuteChanged();
         SendReplyCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanShowNewTaskButton));
         // r29 doc 03 3.5: the reply row's caption, watermark, button label and
@@ -2675,6 +2841,7 @@ public partial class AgentViewModel : ViewModelBase
 
         OnPropertyChanged(nameof(CurrentStepCountLabel));
         OnPropertyChanged(nameof(ShowRunStep));
+        OnPropertyChanged(nameof(ShowFinishRun));
 
         if (value)
             StartActivityTicker();

@@ -18,6 +18,7 @@ public enum RagGroundingMode
 public sealed class RagQueryTrace
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string OperationId { get; set; } = string.Empty;
     public string DatasetId { get; set; } = string.Empty;
     public string Question { get; set; } = string.Empty;
     public string ExpandedQuestion { get; set; } = string.Empty;

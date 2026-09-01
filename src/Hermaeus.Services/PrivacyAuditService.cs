@@ -68,7 +68,7 @@ public sealed class PrivacyAuditService
         var settings = _settings.Settings;
         var count = CompositeLlmService.Providers.Count(p => p.IsRemote && IsChatProviderEnabled(p, settings));
 
-        var activeVoiceProvider = Enum.TryParse<VoiceProvider>(settings.Tts.VoiceProvider, ignoreCase: true, out var voiceId)
+        var activeVoiceProvider = VoiceProviderIdentity.TryParse(settings.Tts.VoiceProvider, out var voiceId)
             ? _voiceProviders.GetAvailableProviders().FirstOrDefault(p => p.Id == voiceId)
             : null;
         if (activeVoiceProvider?.Capabilities.HasFlag(VoiceCapability.Remote) == true)
@@ -96,7 +96,7 @@ public sealed class PrivacyAuditService
         var remoteChatProviders = CompositeLlmService.Providers
             .Where(p => p.IsRemote && IsChatProviderEnabled(p, settings))
             .ToList();
-        var activeVoiceProvider = Enum.TryParse<VoiceProvider>(settings.Tts.VoiceProvider, ignoreCase: true, out var voiceId)
+        var activeVoiceProvider = VoiceProviderIdentity.TryParse(settings.Tts.VoiceProvider, out var voiceId)
             ? _voiceProviders.GetAvailableProviders().FirstOrDefault(p => p.Id == voiceId)
             : null;
         var voiceRemote = activeVoiceProvider?.Capabilities.HasFlag(VoiceCapability.Remote) ?? false;

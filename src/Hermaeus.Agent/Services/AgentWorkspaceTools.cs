@@ -95,10 +95,10 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         }
 
         var boundedContext = Math.Clamp(contextLines, 0, 10);
+        var cap = Math.Max(1, options.MaxSearchResults);
         var results = new List<AgentFileSearchResult>();
         foreach (var file in EnumerateSafeFiles(root, options.MaxFileBytes))
         {
-            if (results.Count >= options.MaxSearchResults) break;
             var relative = ToRelative(root, file);
             if (!WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
                 continue;
@@ -135,6 +135,16 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
                 }
             }
 
+            if (results.Count >= cap)
+            {
+                results.Add(new AgentFileSearchResult(
+                    "[search truncated]",
+                    $"Search stopped after {cap} matching file(s). Narrow the query or search a subdirectory before concluding that no other files match.",
+                    DateTime.UtcNow,
+                    IsTruncationNotice: true));
+                break;
+            }
+
             results.Add(new AgentFileSearchResult(
                 relative,
                 boundedContext == 0 ? CompactSnippet(string.IsNullOrWhiteSpace(snippet) ? relative : snippet) : snippet,
@@ -149,12 +159,18 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         if (string.IsNullOrWhiteSpace(pattern)) return [];
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var regex = GlobToRegex(pattern);
-        return EnumerateSafeFiles(root, options.MaxFileBytes)
+        var cap = Math.Max(1, options.MaxSearchResults);
+        var matches = EnumerateSafeFiles(root, options.MaxFileBytes)
             .Select(path => ToRelative(root, path))
             .Where(relative => regex.IsMatch(relative))
             .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
-            .Take(options.MaxSearchResults)
             .ToList();
+        if (matches.Count <= cap)
+            return matches;
+
+        matches = matches.Take(cap).ToList();
+        matches.Add($"[glob truncated: more matches exist beyond the first {cap}. Narrow the pattern or workspace scope before concluding that a path is absent.]");
+        return matches;
     }
 
     public AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath, int? lineOffset = null, int? lineLimit = null)
@@ -190,7 +206,14 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         using var fs = File.OpenRead(full);
         var max = Math.Max(1024, options.MaxFileBytes);
         var buffer = new byte[Math.Min(max, (int)Math.Min(info.Length, int.MaxValue))];
-        var read = fs.Read(buffer, 0, buffer.Length);
+        var read = 0;
+        while (read < buffer.Length)
+        {
+            var count = fs.Read(buffer, read, buffer.Length - read);
+            if (count == 0)
+                break;
+            read += count;
+        }
         // Unreachable in practice: IsSafeTextFile above already refused
         // anything larger than MaxFileBytes, so the buffer always spans the
         // whole file. Kept as a belt-and-braces guard, and honest about what

@@ -1,4 +1,5 @@
 using Hermaeus.Core.Models;
+using Hermaeus.Services;
 using Hermaeus.Voice;
 using static Hermaeus.Tests.Helpers;
 
@@ -67,6 +68,7 @@ internal static class VoiceTests
         var loaded = await model.EnsureLoadedAsync("af_heart", CancellationToken.None);
         False(loaded, "Model must not report loaded when its ONNX file has not been downloaded yet.");
         False(model.AssetsPresent("af_heart"), "AssetsPresent must be false when the model directory is empty.");
+        Equal("model_missing", model.LastAdmissionFailure, "Missing model diagnosis must be concrete.");
     }
 
     public static async Task OnnxModelHashVerificationRejectsTamperedFile()
@@ -75,6 +77,29 @@ internal static class VoiceTests
         var path = temp.PathFor("model.onnx");
         await File.WriteAllTextAsync(path, "not the real model");
         False(await KokoroOnnxModel.VerifySha256Async(path, KokoroOnnxModel.ModelSha256), "A tampered/incomplete file must fail SHA256 verification against the pinned hash.");
+    }
+
+    public static async Task NativePreviewKeepsPresentAssetFailureDistinctFromNotInstalled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("ai-assets");
+        settings.Settings.Tts.Speaker = "af_heart";
+
+        var root = NativeKokoroVoiceProvider.ResolveAssetsDirectory(settings.Settings);
+        Directory.CreateDirectory(Path.Combine(root, "voices"));
+        await File.WriteAllTextAsync(Path.Combine(root, "model_q8f16.onnx"), "model placeholder");
+        await File.WriteAllTextAsync(Path.Combine(root, "voices", "af_heart.bin"), "voice placeholder");
+
+        using var provider = new NativeKokoroVoiceProvider(settings);
+        True(provider.IsInstalled, "The native provider should report the requested files as present.");
+
+        var error = await Xunit.Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.PreviewVoiceAsync("af_heart", "preview"));
+        True(error.Message.Contains("model_sha256_mismatch", StringComparison.Ordinal),
+            "A present but invalid native model must retain its validation diagnosis.");
+        False(error.Message.Contains("not installed", StringComparison.OrdinalIgnoreCase),
+            "A present native model must not be reported as not installed after admission fails.");
     }
 
     public static Task NativeProviderReportsNotInstalledWithoutAssets()
@@ -114,12 +139,59 @@ internal static class VoiceTests
         return Task.CompletedTask;
     }
 
+    public static async Task NativeProviderClearsFailedAdmissionAfterAssetsRootChanges()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("ai-assets-a");
+        var firstRoot = NativeKokoroVoiceProvider.ResolveAssetsDirectory(settings.Settings);
+        Directory.CreateDirectory(Path.Combine(firstRoot, "voices"));
+        await File.WriteAllTextAsync(Path.Combine(firstRoot, "model_q8f16.onnx"), "model placeholder");
+        await File.WriteAllTextAsync(Path.Combine(firstRoot, "voices", "af_heart.bin"), "voice placeholder");
+
+        using var provider = new NativeKokoroVoiceProvider(settings);
+        var firstError = await Xunit.Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.PreviewVoiceAsync("af_heart", "preview"));
+        True(firstError.Message.Contains("model_sha256_mismatch", StringComparison.Ordinal),
+            "The first root should retain its failed-admission reason.");
+
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("ai-assets-b");
+        var secondError = await Xunit.Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.PreviewVoiceAsync("af_heart", "preview"));
+        True(secondError.Message.Contains("model_missing", StringComparison.Ordinal),
+            "Changing roots after a failed admission must evaluate the new root.");
+        False(secondError.Message.Contains("model_sha256_mismatch", StringComparison.Ordinal),
+            "A failed admission from the old root must not leak into the new root.");
+    }
+
     public static Task NativeProviderRequiresNoPythonVersion()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         using var provider = new NativeKokoroVoiceProvider(settings);
         Equal(null, provider.RequiredPythonVersion, "The native provider must not require a Python interpreter.");
+        return Task.CompletedTask;
+    }
+
+    public static Task NativeKokoroResourceAdmissionIdentityIsStable()
+    {
+        var adapter = ResourceConsumerAdapters.Kokoro(() => false);
+        var registry = new ResourceConsumerRegistry([adapter]);
+
+        // Lazy model admission re-registers the logical consumer after the
+        // Services adapter has registered it during composition. The second
+        // registration must be equivalent, or every native load is refused
+        // before ONNX Runtime is even constructed.
+        registry.RegisterConsumer(new ResourceConsumerDescriptor(
+            "tts.kokoro",
+            ResourceConsumerKind.TextToSpeech,
+            ResourceOwnerIdentity.InProcess("tts.kokoro"),
+            nameof(NativeKokoroVoiceProvider),
+            ResourcePriorityClass.Foreground,
+            ResourceReclaimability.Cooperative,
+            [ResourceKind.DeviceMemory, ResourceKind.SystemResidentMemory]));
+
+        Equal(1, registry.Consumers.Count, "native Kokoro admission should reuse the pre-registered logical consumer");
         return Task.CompletedTask;
     }
 

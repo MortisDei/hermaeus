@@ -1,8 +1,11 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Avalonia.Media.Imaging;
+using Hermaeus.Desktop.Views;
 using Hermaeus.Core.Models;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
@@ -18,7 +21,19 @@ public sealed class HuggingFaceArtworkTests
     [Fact]
     public async Task Card_parser_keeps_a_bounded_thumbnail_and_ignores_other_card_fields()
     {
-        var json = "{\"sha\":\"" + Revision + "\",\"cardData\":{\"license\":\"mit\",\"thumbnail\":\"art.png\",\"widget\":[{\"text\":\"not artwork\"}]}}";
+        var json = "{\"sha\":\"" + Revision + "\",\"author\":\"org\",\"cardData\":{\"license\":\"mit\",\"thumbnail\":\"art.png\",\"widget\":[{\"text\":\"not artwork\"}]}}";
+        var client = NewClient(_ => Response(json));
+
+        var card = await client.GetModelCardAsync(Repo);
+
+        Assert.Equal("art.png", card!.Thumbnail);
+        Assert.Equal("org", card.Author);
+    }
+
+    [Fact]
+    public async Task Card_parser_accepts_the_documented_root_metadata_thumbnail_shape()
+    {
+        var json = "{\"sha\":\"" + Revision + "\",\"thumbnail\":\"art.png\"}";
         var client = NewClient(_ => Response(json));
 
         var card = await client.GetModelCardAsync(Repo);
@@ -36,6 +51,141 @@ public sealed class HuggingFaceArtworkTests
         var card = await client.GetModelCardAsync(Repo);
 
         Assert.Null(card!.Thumbnail);
+    }
+
+    [Fact]
+    public async Task Author_avatar_url_is_resolved_from_the_exact_hf_overview_host()
+    {
+        var client = NewClient(request => request.RequestUri!.AbsolutePath.EndsWith(
+            "/api/organizations/org/overview", StringComparison.Ordinal)
+            ? Response("{\"avatarUrl\":\"https://cdn-avatars.huggingface.co/v1/production/uploads/org/avatar.png\"}")
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var avatar = await client.GetAuthorAvatarUrlAsync("org");
+
+        Assert.Equal("https://cdn-avatars.huggingface.co/v1/production/uploads/org/avatar.png", avatar);
+    }
+
+    [Fact]
+    public async Task Author_avatar_metadata_lookup_strips_credentials()
+    {
+        var handler = new RecordingHandler(request =>
+            Response("{\"avatarUrl\":\"https://cdn-avatars.huggingface.co/v1/org/avatar.png\"}"));
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "must-not-travel");
+        http.DefaultRequestHeaders.Add("Cookie", "session=must-not-travel");
+
+        var avatar = await new HuggingFaceClient(http).GetAuthorAvatarUrlAsync("org");
+
+        Assert.NotNull(avatar);
+        Assert.False(handler.SawAuthorization);
+    }
+
+    [Fact]
+    public async Task Author_avatar_is_an_explicit_fallback_with_revision_provenance_and_cache_hit()
+    {
+        using var temp = new TempDir();
+        var calls = 0;
+        var handler = new RecordingHandler(request =>
+        {
+            calls++;
+            return Bytes(OnePixelPng(), "image/png");
+        });
+        var service = new HuggingFaceArtworkService(new HttpClient(handler));
+        var card = new HfModelCard(Revision, null, null, null, Author: "org");
+        var tree = new[] { new HfTreeEntry("README.md", 10, null) };
+        var cache = HuggingFaceArtworkCache.ResolveRoot(temp.PathFor("data"));
+
+        var declaredPlan = HuggingFaceArtworkService.Describe(Repo, card, tree);
+        var first = await service.FetchAsync(Repo, card, tree, cache,
+            "https://cdn-avatars.huggingface.co/v1/production/uploads/org/avatar.png");
+        var second = await service.FetchAsync(Repo, card, tree, cache,
+            "https://cdn-avatars.huggingface.co/v1/production/uploads/org/avatar.png");
+
+        Assert.Equal(HfArtworkState.NoDeclaredArtwork, declaredPlan.State);
+        Assert.Equal(HfArtworkSourceKind.HuggingFaceAuthorAvatar, first.EffectiveSourceKind);
+        Assert.Equal(HfArtworkSourceKind.HuggingFaceAuthorAvatar, second.EffectiveSourceKind);
+        Assert.Equal(1, calls);
+        Assert.Equal(Revision, first.Descriptor!.RevisionSha);
+        Assert.Equal("cdn-avatars.huggingface.co", first.Host);
+        Assert.True(File.Exists(first.CachePath));
+    }
+
+    [Fact]
+    public async Task Shared_content_addressed_artwork_keeps_separate_provenance_records()
+    {
+        using var temp = new TempDir();
+        var calls = 0;
+        var service = new HuggingFaceArtworkService(new HttpClient(new RecordingHandler(_ =>
+        {
+            calls++;
+            return Bytes(OnePixelPng(), "image/png");
+        })));
+        var card = new HfModelCard(Revision, null, null, null, "art.png");
+        var tree = new[] { new HfTreeEntry("art.png", 10, null) };
+        var cache = HuggingFaceArtworkCache.ResolveRoot(temp.PathFor("data"));
+
+        var first = await service.FetchAsync("org/first", card, tree, cache);
+        var second = await service.FetchAsync("org/second", card, tree, cache);
+        var firstCached = await service.TryGetCachedAsync("org/first", Revision, cache);
+        var secondCached = await service.TryGetCachedAsync("org/second", Revision, cache);
+        var info = await HuggingFaceArtworkCache.GetInfoAsync(cache);
+
+        Assert.Equal(HfArtworkState.Available, first.State);
+        Assert.Equal(HfArtworkState.Available, second.State);
+        Assert.Equal(first.CachePath, second.CachePath);
+        Assert.Equal(2, calls);
+        Assert.Equal(first.CachePath, firstCached!.CachePath);
+        Assert.Equal(second.CachePath, secondCached!.CachePath);
+        Assert.Equal(HfArtworkSourceKind.RepositoryFile, firstCached.EffectiveSourceKind);
+        Assert.Equal(HfArtworkSourceKind.RepositoryFile, secondCached.EffectiveSourceKind);
+        Assert.Equal(2, info.EntryCount);
+        Assert.Equal(3, Directory.EnumerateFiles(cache).Count());
+    }
+
+    [Fact]
+    public async Task Cache_eviction_keeps_shared_bytes_until_the_last_provenance_record_is_removed()
+    {
+        using var temp = new TempDir();
+        var image = OnePixelPng();
+        var service = new HuggingFaceArtworkService(new HttpClient(new RecordingHandler(_ =>
+            Bytes(image, "image/png"))));
+        var card = new HfModelCard(Revision, null, null, null, "art.png");
+        var tree = new[] { new HfTreeEntry("art.png", image.Length, null) };
+        var cache = HuggingFaceArtworkCache.ResolveRoot(temp.PathFor("data"));
+
+        HfArtworkResult? last = null;
+        for (var index = 0; index < 65; index++)
+            last = await service.FetchAsync($"org/repo-{index}", card, tree, cache);
+
+        var info = await HuggingFaceArtworkCache.GetInfoAsync(cache);
+
+        Assert.Equal(HfArtworkState.Available, last!.State);
+        Assert.Equal(64, info.EntryCount);
+        Assert.Single(Directory.EnumerateFiles(cache, "*.png"));
+        Assert.True(File.Exists(last.CachePath));
+    }
+
+    [Fact]
+    public async Task Verified_cached_artwork_decodes_at_the_Avalonia_render_boundary()
+    {
+        using var temp = new TempDir();
+        var service = new HuggingFaceArtworkService(new HttpClient(new RecordingHandler(_ =>
+            Bytes(OnePixelPng(), "image/png"))));
+        var result = await service.FetchAsync(
+            Repo,
+            new HfModelCard(Revision, null, null, null, "art.png"),
+            [new HfTreeEntry("art.png", 10, null)],
+            HuggingFaceArtworkCache.ResolveRoot(temp.PathFor("data")));
+
+        Assert.Equal(HfArtworkState.Available, result.State);
+        Assert.NotNull(result.CachePath);
+        Assert.True(File.Exists(result.CachePath));
+        Hermaeus.Desktop.Program.BuildAvaloniaApp<Avalonia.Application>().SetupWithoutStarting();
+        using var bitmap = Assert.IsType<Bitmap>(ArtworkFileToBitmapConverter.Instance.Convert(
+            result.CachePath, typeof(Bitmap), null, CultureInfo.InvariantCulture));
+        Assert.Equal(1, bitmap.PixelSize.Width);
+        Assert.Equal(1, bitmap.PixelSize.Height);
     }
 
     [Fact]

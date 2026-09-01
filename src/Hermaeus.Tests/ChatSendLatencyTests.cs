@@ -26,6 +26,21 @@ public sealed class ChatSendLatencyTests
     }
 
     [Fact]
+    public async Task StreamAsync_records_reasoning_evidence_separately_from_content()
+    {
+        var reasoning = new List<string>();
+        var result = await ChatSendOrchestrator.StreamAsync(
+            new PrefixThenContentLlm(nonContentEvents: 0, reasoningEvents: 2),
+            "m", [], LlmChatOptions.Default, _ => { }, _ => { }, CancellationToken.None,
+            onReasoning: reasoning.Add);
+
+        Assert.Equal(2, result.ReasoningEventCount);
+        Assert.Equal(16, result.ReasoningCharacterCount);
+        Assert.Equal(["thinking", "thinking"], reasoning);
+        Assert.True(result.FirstEventMs <= result.FirstTokenMs);
+    }
+
+    [Fact]
     public void NonContentStreamMs_is_the_gap_from_first_event_to_first_token()
     {
         var timing = new ChatSendTiming(0, 0, 0, 0, FirstTokenMs: 302_500, TotalMs: 585_000,
@@ -93,7 +108,7 @@ public sealed class ChatSendLatencyTests
         Assert.Equal(1, firstEvents);
     }
 
-    private sealed class PrefixThenContentLlm(int nonContentEvents) : ILlmService
+    private sealed class PrefixThenContentLlm(int nonContentEvents, int reasoningEvents = 0) : ILlmService
     {
         public string ProviderName => "fake";
         public bool IsConfigured => true;
@@ -103,6 +118,12 @@ public sealed class ChatSendLatencyTests
             string modelId, IReadOnlyList<ChatMessage> messages, LlmChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
+            for (var i = 0; i < reasoningEvents; i++)
+            {
+                await Task.Delay(1, ct);
+                yield return new LlmStreamEvent(ReasoningDelta: "thinking");
+            }
+
             for (var i = 0; i < nonContentEvents; i++)
             {
                 // A non-content event that still reaches the orchestrator (e.g. a

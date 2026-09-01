@@ -149,9 +149,13 @@ replacement in Services remains an explicit user action.
 When the model card declares a Hugging Face thumbnail, the selected repository
 and its download cards may show it as optional repository artwork. Hermaeus
 reads only the bounded `cardData.thumbnail` value, requires an exact immutable
-repository revision, blocks arbitrary external hosts, and falls back to the
-generic mark for missing, invalid, unavailable, or unsafe artwork. Artwork
-does not affect model identity, fit, trust, ranking, or download selection.
+repository revision, blocks arbitrary external hosts, and checks MIME, magic,
+dimensions, and decoded size before loading it. If the repository does not
+declare artwork, Hermaeus may use the publisher or organization avatar from
+the exact Hugging Face avatar host as a clearly labelled fallback. It is not
+treated as repository-declared artwork. Missing, invalid, unavailable, or
+unsafe artwork falls back to the generic mark. Artwork does not affect model
+identity, fit, trust, ranking, or download selection.
 The cache is rebuildable and excluded from Data Root backups. Settings >
 Data Storage shows its size and provides a confirmed Clear action that does
 not remove models or manifests. A custom model avatar remains separate and
@@ -221,6 +225,10 @@ previous answer. Deleting the active conversation returns Chat to a fresh,
 focused input. Delete from a conversation's details flyout shows its nearby
 confirmation; the context-menu path keeps a full confirmation dialog.
 
+The compact **Quick Chat** surface sends with Enter or Ctrl+Enter; use
+Shift+Enter for a newline. It shows a Processing indicator while the request is
+active.
+
 While a response streams, scrolling upward pauses bottom-following. Scroll back
 to the bottom to intentionally re-pin. The telemetry flyout can start bounded
 sampling for the exact managed server process serving the selected model.
@@ -256,8 +264,10 @@ Knowledge/RAG, conversations, and Agent task history.
 
 ## Knowledge, Memory, and Recall
 
-**Knowledge** ingests files into a local RAG dataset. Attach a dataset to a Chat
-conversation from the Knowledge picker. Retrieval is bounded and cited; weak
+**Knowledge** ingests files into local RAG datasets. In the RAG panel, select
+one or more datasets for each question from **Datasets included in this
+question**. Attach one dataset to a Chat conversation from the Knowledge
+picker. Retrieval is bounded and cited; weak
 matches are omitted instead of forced into every answer. Reindex after changing
 the embedding model. Dataset Manager shows the published generation history,
 while ordinary retrieval uses only the current complete generation. A cancelled
@@ -315,7 +325,9 @@ restrained and deduplicated; high GPU use by itself is normal and produces no
 warning.
 Request timing labels use first content, meaning the first non-empty content
 delta received from the runtime, rather than a provider reasoning or tool
-event.
+event. The same trace line identifies the selected provider tag and reports
+reasoning-event/character counts when the provider emits a reasoning stream,
+so reasoning time is not mistaken for answer content latency.
 
 Settings > Voice contains supplementary audio feedback controls for the
 explicit task/runtime/recording event list. Volume is retained when muted,
@@ -466,7 +478,8 @@ Save Config action for provider, device, speed, and process settings.
 
 ## Activity, logs, and troubleshooting
 
-**Activity** records completed outcomes such as downloads, ingests, backups,
+Background **Activity** is available as a collapsed section inside **Memories**
+and records completed outcomes such as downloads, ingests, backups,
 and managed-server events. **Runtime Logs** contain live operational detail,
 apply redaction before display or persistence, and retain useful aggregate
 timing while filtering repetitive low-level slot scheduler chatter. Diagnostic notifications that

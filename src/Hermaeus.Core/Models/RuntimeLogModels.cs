@@ -25,4 +25,5 @@ public sealed record RuntimeLogEntry(
     DateTime Timestamp,
     RuntimeLogLevel Level,
     RuntimeLogCategory Category,
-    string Message);
+    string Message,
+    string? OperationId = null);

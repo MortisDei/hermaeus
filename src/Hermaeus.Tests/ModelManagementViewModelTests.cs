@@ -413,6 +413,34 @@ public sealed class ModelManagementViewModelTests
         }
     }
 
+    private sealed class PublisherAvatarArtworkHandler(string revision, string modelHash, int modelSize, byte[] image) : HttpMessageHandler
+    {
+        public List<string> RequestedUrls { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var url = request.RequestUri!.ToString();
+            RequestedUrls.Add(url);
+            if (url.Contains("/tree/", StringComparison.Ordinal))
+            {
+                var tree = "[{\"path\":\"model.gguf\",\"size\":" + modelSize + ",\"lfs\":{\"oid\":\"" + modelHash + "\"}}]";
+                return Task.FromResult(Response(tree));
+            }
+            if (url.Contains("/api/models/", StringComparison.Ordinal))
+                return Task.FromResult(Response("{\"sha\":\"" + revision + "\",\"author\":\"org\",\"cardData\":{}}"));
+            if (url.Contains("/api/organizations/org/overview", StringComparison.Ordinal))
+                return Task.FromResult(Response("{\"avatarUrl\":\"https://cdn-avatars.huggingface.co/v1/production/uploads/org/avatar.png\"}"));
+
+            var artwork = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(image)
+            };
+            artwork.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            artwork.Content.Headers.ContentLength = image.Length;
+            return Task.FromResult(artwork);
+        }
+    }
+
     private static HttpResponseMessage Response(string json) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -544,6 +572,69 @@ public sealed class ModelManagementViewModelTests
         await WaitForAsync(() => item.ArtworkState == HfArtworkState.Available, "revision-pinned artwork backfill");
         Assert.NotNull(item.ArtworkPath);
         Assert.Contains(revision, item.ArtworkTooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckForUpdates_backfills_the_publisher_avatar_when_the_repo_has_no_declared_artwork()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor(Path.Combine("assets", "Models"));
+        Directory.CreateDirectory(assets);
+        var modelPath = Path.Combine(assets, "model.gguf");
+        var modelBytes = Encoding.UTF8.GetBytes("fake model");
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("assets");
+        const string revision = "0123456789abcdef0123456789abcdef01234567";
+        var modelHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(modelBytes));
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = "org/repo",
+            RepoFile = "model.gguf",
+            Sha256 = modelHash,
+            SizeBytes = modelBytes.Length,
+            Source = "hf-browser"
+        });
+
+        var image = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        var handler = new PublisherAvatarArtworkHandler(revision, modelHash, modelBytes.Length, image);
+        using var http = new HttpClient(handler);
+        var vm = new ModelManagementViewModel(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            NewServicesViewModel(settings),
+            manifest,
+            new HuggingFaceClient(http),
+            new ModelDownloadService(),
+            artwork: new HuggingFaceArtworkService(http));
+
+        await vm.RefreshAsync();
+        await vm.CheckForUpdatesCommand.ExecuteAsync(null);
+
+        var item = Assert.Single(vm.Models);
+        await WaitForAsync(() => item.ArtworkState == HfArtworkState.Available, "publisher avatar fallback");
+        Assert.Equal(ModelUpdateStatus.UpToDate, item.UpdateStatus);
+        Assert.Equal(HfArtworkSourceKind.HuggingFaceAuthorAvatar, item.ArtworkSource);
+        Assert.Contains("Publisher avatar fallback", item.ArtworkTooltip, StringComparison.Ordinal);
+        Assert.NotNull(item.ArtworkPath);
+        Assert.Collection(handler.RequestedUrls,
+            cardUrl => Assert.Contains("/api/models/org/repo", cardUrl, StringComparison.Ordinal),
+            treeUrl =>
+            {
+                Assert.Contains($"/tree/{revision}", treeUrl, StringComparison.Ordinal);
+                Assert.DoesNotContain("/resolve/", treeUrl, StringComparison.Ordinal);
+            },
+            avatarMetadataUrl => Assert.Contains("/api/organizations/org/overview", avatarMetadataUrl, StringComparison.Ordinal),
+            avatarImageUrl =>
+            {
+                Assert.Equal("cdn-avatars.huggingface.co", new Uri(avatarImageUrl).Host);
+                Assert.DoesNotContain("/resolve/", avatarImageUrl, StringComparison.Ordinal);
+            });
     }
 
     [Fact]

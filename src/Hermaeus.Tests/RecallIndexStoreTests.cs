@@ -1,3 +1,4 @@
+using Hermaeus.Rag.Embeddings;
 using Hermaeus.Services.Recall;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
@@ -25,6 +26,55 @@ public sealed class RecallIndexStoreTests
         IsArchived = archived,
         CreatedAt = DateTime.UtcNow
     };
+
+    [Fact]
+    public async Task Failed_embedding_is_persisted_and_can_retry_after_store_recreation()
+    {
+        using var temp = new TempDir();
+        var failed = new ToggleEmbeddingService { Fail = true };
+        var settings = NewSettings(temp);
+        var dataRoot = temp.PathFor("data");
+        settings.Settings.DataManagement.DataRootDirectory = dataRoot;
+        var first = new RecallIndexStore(settings, failed, backfillCooldown: TimeSpan.Zero, automaticRetry: false);
+        await first.UpsertBatchAsync([Entry("message", "c1", "0", "retryable recall content")]);
+
+        var failure = await first.RunEmbeddingBackfillAsync();
+        Assert.Equal(1, failure.FailedCount);
+        Assert.Equal(1, failure.PendingCount);
+        Assert.Equal(nameof(InvalidOperationException), failure.LastFailure);
+
+        var persisted = await first.GetEmbeddingBackfillStatusAsync();
+        Assert.Equal(1, persisted.PendingCount);
+        Assert.Equal(1, persisted.DeferredCount);
+        Assert.Equal(nameof(InvalidOperationException), persisted.LastFailure);
+
+        failed.Fail = false;
+        var recreated = new RecallIndexStore(settings, failed, backfillCooldown: TimeSpan.Zero, automaticRetry: false);
+        var success = await recreated.RunEmbeddingBackfillAsync();
+
+        Assert.Equal(1, success.EmbeddedCount);
+        Assert.Equal(0, (await recreated.GetEmbeddingBackfillStatusAsync()).PendingCount);
+    }
+
+    [Fact]
+    public async Task Embedding_failure_budget_is_bounded_and_exposed_as_exhausted()
+    {
+        using var temp = new TempDir();
+        var failed = new ToggleEmbeddingService { Fail = true };
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var store = new RecallIndexStore(settings, failed, backfillCooldown: TimeSpan.Zero, automaticRetry: false);
+        await store.UpsertBatchAsync([Entry("message", "c1", "0", "content that always fails")]);
+
+        for (var i = 0; i < 6; i++)
+            await store.RunEmbeddingBackfillAsync();
+
+        Assert.Equal(5, failed.Calls);
+        var status = await store.GetEmbeddingBackfillStatusAsync();
+        Assert.Equal(1, status.ExhaustedCount);
+        Assert.Equal(1, status.PendingCount);
+        Assert.Equal(nameof(InvalidOperationException), status.LastFailure);
+    }
 
     [Fact]
     public async Task Upserting_the_same_source_twice_is_an_update_not_a_duplicate()
@@ -165,5 +215,23 @@ public sealed class RecallIndexStoreTests
 
         var title = await store.GetTitleAsync("task", "parent1");
         Assert.Equal("Title parent1", title);
+    }
+
+    private sealed class ToggleEmbeddingService : IEmbeddingService
+    {
+        public bool Fail { get; set; }
+        public int Calls { get; private set; }
+        public int Dimensions => 4;
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+        {
+            Calls++;
+            if (Fail)
+                throw new InvalidOperationException("embedding endpoint unavailable");
+            return Task.FromResult(new[] { 1f, 2f, 3f, 4f });
+        }
+
+        public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+            Task.FromResult(texts.Select(_ => new[] { 1f, 2f, 3f, 4f }).ToList());
     }
 }

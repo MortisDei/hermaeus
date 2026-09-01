@@ -265,9 +265,11 @@
                                         <DataTemplate DataType="vm:ModelProfileItemViewModel">
                             <!-- Fixed width, free height: a WrapPanel of variable-width
                                  tiles produces ragged columns. -->
-                            <Border MinWidth="260" MaxWidth="390"
-                                    Margin="0,0,10,10"
+                            <Border Classes="model-card"
+                                    MinWidth="280" MaxWidth="390"
+                                    Margin="0,0,12,12"
                                     Padding="14"
+                                    Background="{DynamicResource SubtleFillColorTertiaryBrush}"
                                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                     BorderThickness="1" CornerRadius="8">
                                 <StackPanel Spacing="6">
@@ -440,7 +442,7 @@
                                                                   HorizontalContentAlignment="Stretch"
                                                                   VerticalScrollBarVisibility="Auto"
                                                                   HorizontalScrollBarVisibility="Disabled">
-                                                        <StackPanel MaxWidth="720" HorizontalAlignment="Stretch" Spacing="6">
+                                                        <StackPanel HorizontalAlignment="Stretch" Spacing="6">
                                                             <TextBlock Text="{Binding EffectiveName}"
                                                                        FontSize="14" FontWeight="SemiBold" />
                                                             <TextBlock Text="Model-specific defaults and metadata"

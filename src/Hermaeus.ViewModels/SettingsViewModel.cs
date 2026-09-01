@@ -626,7 +626,7 @@ public partial class SettingsViewModel : ViewModelBase
         settings.Tts.ModelVersion = Tts.TtsModelVersion.Trim();
         settings.Tts.Speed = Tts.TtsSpeed;
         settings.Tts.Preload = Tts.TtsPreload;
-        settings.Tts.VoiceProvider = Tts.SelectedVoiceProvider;
+        settings.Tts.VoiceProvider = VoiceProviderIdentity.CanonicalId(Tts.SelectedVoiceProviderId);
         Tts.ApplyVoiceOrchestrationTo(settings.Tts);
     }
 

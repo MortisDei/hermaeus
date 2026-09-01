@@ -387,11 +387,15 @@
                             <StackPanel Spacing="6">
                                 <TextBlock Text="Agent response" FontSize="12" FontWeight="SemiBold" Opacity="0.7" />
                                 <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
-                                    <SelectableTextBlock Text="{Binding CurrentTaskSummaryLabel}"
-                                                         FontSize="13"
-                                                         TextWrapping="Wrap"
-                                                         MinHeight="220" />
+                                    <controls:MarkdownViewer Markdown="{Binding CurrentTaskSummaryLabel}"
+                                                              RequestCopyToClipboard="{Binding RequestCopyToClipboard}"
+                                                              FontSize="13" />
                                 </ScrollViewer>
+                                <Button Content="Copy response"
+                                        Command="{Binding CopyResponseCommand}"
+                                        HorizontalAlignment="Left"
+                                        Padding="8,3"
+                                        ToolTip.Tip="Copy the Agent response as Markdown text." />
                             </StackPanel>
                         </Border>
 
@@ -428,12 +432,12 @@
                             <TextBlock Text="{Binding ContinueBoxTitle}"
                                        FontWeight="SemiBold"
                                        FontSize="12" />
-                            <TextBlock Text="Step budget exhausted. Add steps or leave the instruction empty to continue the remaining plan."
+                            <TextBlock Text="Step budget exhausted. Choose Continue planned work or add a follow-up instruction."
                                        FontSize="11"
                                        Opacity="0.75"
                                        TextWrapping="Wrap"
                                        IsVisible="{Binding IsStepBudgetExhausted}" />
-                            <TextBlock Text="Plan is ready for review. Continue when you are ready to let the run proceed, or leave it paused here."
+                            <TextBlock Text="Plan is ready for review. Choose Continue planned work, add an instruction, or finish the run."
                                        FontSize="11"
                                        Opacity="0.75"
                                        TextWrapping="Wrap"
@@ -447,11 +451,25 @@
                                          TextWrapping="Wrap" />
                                 <Button Grid.Column="1"
                                         Command="{Binding ContinueTaskCommand}"
-                                        Content="Continue"
+                                        Content="Continue with instruction"
                                         VerticalAlignment="Bottom"
                                         Padding="14,8"
                                         CornerRadius="6" />
                             </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Continue planned work"
+                                        Command="{Binding ContinuePlannedTaskCommand}"
+                                        IsVisible="{Binding HasPendingPlan}"
+                                        Padding="14,8"
+                                        CornerRadius="6"
+                                        ToolTip.Tip="Resume the persisted plan without adding new instruction text." />
+                                <Button Content="Finish run"
+                                        Command="{Binding FinishTaskCommand}"
+                                        IsVisible="{Binding ShowFinishRun}"
+                                        Padding="14,8"
+                                        CornerRadius="6"
+                                        ToolTip.Tip="Accept the current result and end the run while preserving its history and evidence." />
+                            </StackPanel>
                         </StackPanel>
 
                         <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
@@ -1183,7 +1201,7 @@
                                                     CornerRadius="6"
                                                     Padding="10"
                                                     Margin="{Binding IsSubTask, Converter={StaticResource BoolToIndentMargin}}">
-                                                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="8">
+                                                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
                                                     <Border Grid.Column="0" CornerRadius="4" Padding="6,1" MinWidth="90"
                                                             Background="{Binding Status, Converter={StaticResource AgentTaskStatusColor}}">
                                                         <TextBlock Text="{Binding StatusLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
@@ -1205,6 +1223,12 @@
                                                             Command="{Binding DataContext.LoadTaskCommand, ElementName=Root}"
                                                             CommandParameter="{Binding TaskId}"
                                                             Padding="8,3" CornerRadius="6" FontSize="11" />
+                                                    <Button Grid.Column="5" Content="Delete"
+                                                            IsVisible="{Binding CanDelete}"
+                                                            Command="{Binding DataContext.DeleteRecentTaskCommand, ElementName=Root}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="8,3" CornerRadius="6" FontSize="11"
+                                                            ToolTip.Tip="Permanently deletes this historical run and its persisted sub-tasks. Running tasks must be stopped first." />
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>

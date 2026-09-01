@@ -67,6 +67,7 @@
                                                      FilterMode="Contains"
                                                      MinimumPrefixLength="0"
                                                      DropDownOpening="OnChannelVoiceDropDownOpening"
+                                                     DropDownClosed="OnChannelVoiceDropDownClosed"
                                                      FontSize="12"
                                                      HorizontalAlignment="Stretch" />
                                     <Button Grid.Column="1"

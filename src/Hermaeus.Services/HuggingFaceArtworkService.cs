@@ -20,8 +20,10 @@ public enum HfArtworkState
 
 public enum HfArtworkSourceKind
 {
+    None,
     RepositoryFile,
-    HuggingFaceSocialThumbnail
+    HuggingFaceSocialThumbnail,
+    HuggingFaceAuthorAvatar
 }
 
 public enum HfArtworkFetchPolicy
@@ -55,8 +57,11 @@ public sealed record HfArtworkResult(
     int Height,
     string? ContentHash,
     string FailureCode,
-    string Host)
+    string Host,
+    HfArtworkSourceKind SourceKind = HfArtworkSourceKind.None)
 {
+    public HfArtworkSourceKind EffectiveSourceKind => Descriptor?.SourceKind ?? SourceKind;
+
     public static HfArtworkResult Loading(HfArtworkDescriptor? descriptor = null) =>
         new(HfArtworkState.Loading, descriptor, null, null, 0, 0, 0, null, string.Empty, string.Empty);
 }
@@ -79,6 +84,7 @@ public sealed class HuggingFaceArtworkService
     public const long MaxDecodedBytes = 64 * 1024 * 1024;
 
     private const string HubHost = "huggingface.co";
+    private const string AvatarHost = "cdn-avatars.huggingface.co";
     private static readonly HashSet<string> DeliveryHosts = new(StringComparer.OrdinalIgnoreCase)
     {
         "cas-server.xethub.hf.co",
@@ -166,14 +172,32 @@ public sealed class HuggingFaceArtworkService
             HfArtworkFetchPolicy.HuggingFaceHostNoCredentials);
     }
 
+    public static HfArtworkPlan DescribeAuthorAvatar(
+        string repoId,
+        HfModelCard card,
+        string? authorAvatarUrl)
+    {
+        if (!IsRepoId(repoId) || !IsImmutableRevision(card.Sha))
+            return new HfArtworkPlan(null, HfArtworkState.Invalid, "missing_immutable_revision", string.Empty);
+        if (!TryValidateAuthorAvatarUrl(authorAvatarUrl, out var avatarUri))
+            return new HfArtworkPlan(null, HfArtworkState.NoDeclaredArtwork, "author_avatar_unavailable", AvatarHost);
+
+        return BuildDescriptor(repoId, card.Sha, avatarUri!.AbsoluteUri, null,
+            HfArtworkSourceKind.HuggingFaceAuthorAvatar,
+            HfArtworkFetchPolicy.HuggingFaceHostNoCredentials);
+    }
+
     public async Task<HfArtworkResult> FetchAsync(
         string repoId,
         HfModelCard card,
         IReadOnlyList<HfTreeEntry> tree,
         string cacheRoot,
+        string? authorAvatarUrl = null,
         CancellationToken ct = default)
     {
         var plan = Describe(repoId, card, tree);
+        if (plan.State == HfArtworkState.NoDeclaredArtwork && !string.IsNullOrWhiteSpace(authorAvatarUrl))
+            plan = DescribeAuthorAvatar(repoId, card, authorAvatarUrl);
         if (plan.Descriptor is null)
             return new HfArtworkResult(plan.State, null, null, null, 0, 0, 0, null, plan.FailureCode, plan.Host);
 
@@ -187,7 +211,8 @@ public sealed class HuggingFaceArtworkService
             for (var redirect = 0; ; redirect++)
             {
                 ct.ThrowIfCancellationRequested();
-                if (!IsFetchUriSafe(current, isInitial: redirect == 0, previousHost: null, out var requestHost, out var uriFailure))
+                if (!IsFetchUriSafe(current, plan.Descriptor.SourceKind, isInitial: redirect == 0,
+                        previousHost: null, out var requestHost, out var uriFailure))
                     return Failure(plan.Descriptor, HfArtworkState.Invalid, uriFailure, requestHost);
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, current);
@@ -202,7 +227,8 @@ public sealed class HuggingFaceArtworkService
 
                     var redirectFailure = string.Empty;
                     if (!Uri.TryCreate(current, response.Headers.Location, out var next)
-                        || !IsFetchUriSafe(next, isInitial: false, previousHost: current.Host, out var nextHost, out redirectFailure))
+                        || !IsFetchUriSafe(next, plan.Descriptor.SourceKind, isInitial: false,
+                            previousHost: current.Host, out var nextHost, out redirectFailure))
                         return Failure(plan.Descriptor, HfArtworkState.Invalid, redirectFailure, next?.Host ?? requestHost);
                     current = next;
                     continue;
@@ -292,12 +318,16 @@ public sealed class HuggingFaceArtworkService
         HfArtworkSourceKind sourceKind,
         HfArtworkFetchPolicy fetchPolicy)
     {
+        var sourceIdentity = sourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar
+            ? "author:" + new Uri(declared).AbsolutePath
+            : repositoryPath ?? "social:" + new Uri(declared).AbsolutePath;
         var identity = string.Join('|', repoId.ToLowerInvariant(), revision.ToLowerInvariant(), sourceKind,
-            (repositoryPath ?? "social:" + new Uri(declared).AbsolutePath).ToLowerInvariant());
+            sourceIdentity.ToLowerInvariant());
         var cacheKey = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
         return new HfArtworkPlan(
             new HfArtworkDescriptor(repoId, revision, declared, repositoryPath, sourceKind, fetchPolicy, cacheKey),
-            HfArtworkState.Loading, string.Empty, HubHost);
+            HfArtworkState.Loading, string.Empty,
+            sourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar ? AvatarHost : HubHost);
     }
 
     private static bool TryResolveRepositoryPath(
@@ -357,12 +387,16 @@ public sealed class HuggingFaceArtworkService
         if (descriptor.SourceKind == HfArtworkSourceKind.RepositoryFile)
             return new Uri(HuggingFaceClient.ResolveDownloadUrl(descriptor.RepoId, descriptor.RepositoryPath!, descriptor.RevisionSha));
 
+        if (descriptor.SourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar)
+            return new Uri(descriptor.DeclaredValue);
+
         var social = new Uri(descriptor.DeclaredValue);
         return new Uri($"https://{HubHost}{social.AbsolutePath}");
     }
 
     private static bool IsFetchUriSafe(
         Uri uri,
+        HfArtworkSourceKind sourceKind,
         bool isInitial,
         string? previousHost,
         out string host,
@@ -378,10 +412,23 @@ public sealed class HuggingFaceArtworkService
         }
 
         var isHub = string.Equals(host, HubHost, StringComparison.OrdinalIgnoreCase);
+        var isAuthorAvatar = string.Equals(host, AvatarHost, StringComparison.OrdinalIgnoreCase);
         var isDelivery = DeliveryHosts.Contains(host);
-        if (isInitial && !isHub)
+        if (isInitial && sourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar && !isAuthorAvatar)
+        {
+            failure = "initial_avatar_host_not_allowed";
+            return false;
+        }
+        if (isInitial && sourceKind != HfArtworkSourceKind.HuggingFaceAuthorAvatar && !isHub)
         {
             failure = "initial_host_not_hub";
+            return false;
+        }
+        if (!isInitial && sourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar
+            && (!isAuthorAvatar || previousHost is null
+                || !string.Equals(previousHost, AvatarHost, StringComparison.OrdinalIgnoreCase)))
+        {
+            failure = "avatar_redirect_host_changed";
             return false;
         }
         if (!isInitial && previousHost is not null
@@ -391,12 +438,12 @@ public sealed class HuggingFaceArtworkService
             failure = "delivery_origin_changed";
             return false;
         }
-        if (!isHub && !isDelivery)
+        if (!isHub && !isDelivery && !isAuthorAvatar)
         {
             failure = "redirect_host_not_allowed";
             return false;
         }
-        if (isHub && !string.IsNullOrEmpty(uri.Query))
+        if ((isHub || isAuthorAvatar) && !string.IsNullOrEmpty(uri.Query))
         {
             failure = "hub_redirect_query";
             return false;
@@ -416,6 +463,27 @@ public sealed class HuggingFaceArtworkService
         && !uri.IsLoopback
         && !IPAddress.TryParse(uri.Host, out _)
         && uri.Host.All(ch => ch < 128 && (char.IsLetterOrDigit(ch) || ch is '.' or '-'));
+
+    private static bool TryValidateAuthorAvatarUrl(string? value, out Uri? validated)
+    {
+        validated = null;
+        if (string.IsNullOrWhiteSpace(value)
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.Host, AvatarHost, StringComparison.OrdinalIgnoreCase)
+            || !IsSafeAuthorityForHost(uri)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || uri.AbsolutePath == "/"
+            || HasEncodedPathHazard(uri))
+            return false;
+
+        validated = uri;
+        return true;
+    }
+
+    internal static string HostFor(HfArtworkSourceKind sourceKind) =>
+        sourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar ? AvatarHost : HubHost;
 
     private static bool IsRedirect(HttpStatusCode statusCode) =>
         statusCode is HttpStatusCode.MovedPermanently
@@ -720,7 +788,8 @@ public static class HuggingFaceArtworkCache
             try { await WriteMetadataAsync(cacheRoot, touched, ct); }
             catch (IOException) { }
             return new HfArtworkResult(HfArtworkState.Available, descriptor with { CacheKey = metadata.CacheKey }, path, metadata.MimeType,
-                metadata.ByteCount, metadata.Width, metadata.Height, metadata.ContentHash, string.Empty, "huggingface.co");
+                metadata.ByteCount, metadata.Width, metadata.Height, metadata.ContentHash, string.Empty,
+                HuggingFaceArtworkService.HostFor(metadata.SourceKind), metadata.SourceKind);
         }
         finally
         {
@@ -750,21 +819,15 @@ public static class HuggingFaceArtworkCache
                 _ => ".webp"
             };
             var cacheKey = $"{descriptor.CacheKey}-{contentHash}";
-            var fileName = $"{cacheKey}{extension}";
+            // Keep lookup metadata repository/revision/source specific, but share
+            // verified bytes when different records resolve to the same image.
+            var fileName = $"{contentHash}{extension}";
             var filePath = SafeChildPath(cacheRoot, fileName)
                 ?? throw new IOException("Artwork cache path was unsafe.");
             var metadata = new Metadata(
                 descriptor.CacheKey, cacheKey, descriptor.RepoId, descriptor.RevisionSha, descriptor.RepositoryPath,
                 descriptor.SourceKind, mime, bytes.LongLength, width, height, contentHash, fileName, etag,
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
-
-            foreach (var staleFile in Directory.EnumerateFiles(cacheRoot, descriptor.CacheKey + "-*", SearchOption.TopDirectoryOnly))
-            {
-                if (!string.Equals(staleFile, filePath, StringComparison.Ordinal))
-                {
-                    try { File.Delete(staleFile); } catch { }
-                }
-            }
 
             var tempFile = Path.Combine(cacheRoot, $".{Guid.NewGuid():N}.tmp");
             try
@@ -783,7 +846,8 @@ public static class HuggingFaceArtworkCache
 
             await EvictAsync(cacheRoot, ct);
             return new HfArtworkResult(HfArtworkState.Available, descriptor with { CacheKey = cacheKey }, filePath, mime,
-                bytes.LongLength, width, height, contentHash, string.Empty, "huggingface.co");
+                bytes.LongLength, width, height, contentHash, string.Empty,
+                HuggingFaceArtworkService.HostFor(descriptor.SourceKind), descriptor.SourceKind);
         }
         finally
         {
@@ -830,7 +894,8 @@ public static class HuggingFaceArtworkCache
                 try { await WriteMetadataAsync(cacheRoot, touched, ct); }
                 catch (IOException) { }
                 return new HfArtworkResult(HfArtworkState.Available, null, path, metadata.MimeType,
-                    metadata.ByteCount, metadata.Width, metadata.Height, metadata.ContentHash, string.Empty, "huggingface.co");
+                    metadata.ByteCount, metadata.Width, metadata.Height, metadata.ContentHash, string.Empty,
+                    HuggingFaceArtworkService.HostFor(metadata.SourceKind), metadata.SourceKind);
             }
             return null;
         }
@@ -877,16 +942,26 @@ public static class HuggingFaceArtworkCache
             {
                 var metadata = JsonSerializer.Deserialize<Metadata>(await File.ReadAllTextAsync(metadataPath, ct), JsonOptions);
                 var imagePath = metadata is null ? null : SafeChildPath(cacheRoot, metadata.FileName);
-                if (metadata is not null && imagePath is not null && File.Exists(imagePath))
+                if (metadata is not null && IsValidMetadata(metadata)
+                    && imagePath is not null && File.Exists(imagePath) && !IsReparsePoint(imagePath))
                     rows.Add((metadata, metadataPath, imagePath));
             }
             catch { }
         }
 
-        long bytes = rows.Sum(row => new FileInfo(row.ImagePath).Length + new FileInfo(row.MetadataPath).Length);
+        var imageLengths = rows
+            .Select(row => row.ImagePath)
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(path => path, path => new FileInfo(path).Length, StringComparer.Ordinal);
+        var metadataLengths = rows.ToDictionary(
+            row => row.MetadataPath,
+            row => new FileInfo(row.MetadataPath).Length,
+            StringComparer.Ordinal);
+        long bytes = imageLengths.Values.Sum() + metadataLengths.Values.Sum();
         var owned = rows
             .SelectMany(row => new[] { row.ImagePath, row.MetadataPath })
             .ToHashSet(StringComparer.Ordinal);
+        var remainingEntries = rows.Count;
         foreach (var orphan in Directory.EnumerateFiles(cacheRoot, "*", SearchOption.TopDirectoryOnly)
                      .Where(path => !owned.Contains(path)))
         {
@@ -900,11 +975,31 @@ public static class HuggingFaceArtworkCache
         }
         foreach (var row in rows.OrderBy(row => row.Metadata.LastAccessedUtc).ToList())
         {
-            if (rows.Count <= MaximumEntries && bytes <= MaximumBytes)
+            if (remainingEntries <= MaximumEntries && bytes <= MaximumBytes)
                 break;
-            try { File.Delete(row.ImagePath); } catch { }
-            try { bytes -= new FileInfo(row.MetadataPath).Length; File.Delete(row.MetadataPath); } catch { }
+            if (metadataLengths.TryGetValue(row.MetadataPath, out var metadataLength))
+            {
+                try
+                {
+                    File.Delete(row.MetadataPath);
+                    bytes -= metadataLength;
+                }
+                catch { }
+            }
             rows.Remove(row);
+            if (!rows.Any(other => string.Equals(other.ImagePath, row.ImagePath, StringComparison.Ordinal)))
+            {
+                if (imageLengths.TryGetValue(row.ImagePath, out var imageLength))
+                {
+                    try
+                    {
+                        File.Delete(row.ImagePath);
+                        bytes -= imageLength;
+                    }
+                    catch { }
+                }
+            }
+            remainingEntries--;
         }
     }
 
@@ -953,10 +1048,18 @@ public static class HuggingFaceArtworkCache
         && HuggingFaceArtworkService.IsSupportedMime(metadata.MimeType)
         && metadata.ContentHash is { Length: 64 } contentHash
         && contentHash.All(Uri.IsHexDigit)
-        && !string.IsNullOrWhiteSpace(metadata.FileName);
+        && string.Equals(metadata.FileName,
+            metadata.ContentHash + ExtensionForMime(metadata.MimeType), StringComparison.OrdinalIgnoreCase);
 
     private static bool IsSafeCacheKey(string? value) =>
         value is { Length: > 0 } && value.All(character => Uri.IsHexDigit(character) || character == '-');
+
+    private static string ExtensionForMime(string mime) => mime switch
+    {
+        "image/png" => ".png",
+        "image/jpeg" => ".jpg",
+        _ => ".webp"
+    };
 
     private static async Task WriteMetadataAsync(string cacheRoot, Metadata metadata, CancellationToken ct)
     {

@@ -214,3 +214,39 @@ At R32 close-out:
 - keep operational watches out of the feature table;
 - do not reopen rejected autonomous learning or truth resolution through vague
   wording such as “experience improvements” or “knowledge evolution”.
+
+## 7.8 Corrective audit deferments
+
+### SQLite free-page maintenance
+
+The reported free-page ratios are storage maintenance debt, not evidence of
+corruption. The current stores use short-lived disposed connections and WAL;
+missing `-wal` and `-shm` files after a checkpoint are therefore not by
+themselves anomalous, and the inspected byte copies passed `PRAGMA
+integrity_check`. This pass does not run `VACUUM` against a live database.
+
+A safe implementation needs one application-owned maintenance coordinator that
+proves the single-instance lock, waits for all store writers to quiesce, records
+the database and schema identity, creates or verifies a backup, checkpoints or
+vacuum-copies to a temporary file, verifies integrity and foreign keys, then
+atomically replaces the database only during controlled shutdown or an equally
+strict exclusive window. Failure must preserve the original and report whether
+the temporary copy was discarded. That boundary is broader than this pass and
+remains deferred. Current code logs database open and journal context where a
+future maintenance decision will need it.
+
+### Legacy `rag_query_traces` table
+
+The table is still created by the RAG store in `conversations.db`, while current
+trace records are written to `traces.db`. Its zero-row state does not prove that
+all supported older installations have no reader, backup, or migration need.
+It is retained in this pass because removal requires a versioned migration and
+an explicit compatibility decision for existing databases. No casual `DROP`
+was added. The split storage paths and their ownership remain documented by
+the current stores.
+
+### Existing dataset path spelling
+
+The working `Hermaues` path is an existing user data identity. It is not
+renamed or normalized silently; no product-facing defect was found that would
+justify breaking it.

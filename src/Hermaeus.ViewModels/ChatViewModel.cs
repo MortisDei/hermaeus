@@ -1283,6 +1283,13 @@ public partial class ChatViewModel : ViewModelBase
         ClearContextAttachments();
 
         var selectedModelId = SelectedModel.Id;
+        var operationId = OperationCorrelation.NewId();
+        _runtimeLogs.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Service,
+            $"Chat turn started; model={selectedModelId}, provider={SelectedModel.ProviderTag}.",
+            operationId));
         var asst = new MessageViewModel
         {
             Role = "assistant",
@@ -1311,7 +1318,7 @@ public partial class ChatViewModel : ViewModelBase
             // measures only its own task. The pre-stream wait becomes the
             // slowest of the three rather than their sum.
             var memoryTask = BuildMemoryInjectionAsync(text, _cts.Token);
-            var ragTask = BuildRagInjectionAsync(text, _cts.Token);
+            var ragTask = BuildRagInjectionAsync(text, _cts.Token, operationId);
             var recallTask = BuildRecallInjectionAsync(text, _cts.Token);
             var projectStateTask = BuildProjectStateInjectionAsync(_cts.Token);
 
@@ -1409,8 +1416,17 @@ public partial class ChatViewModel : ViewModelBase
                 asst.Content += remainder;
             }
 
-            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs);
-            Telemetry?.RecordRequest(selectedModelId, SelectedModel.ProviderTag, result.ServerTimings, result.Usage, result.FirstTokenMs, result.TotalLatencyMs);
+            var providerTag = SelectedModel.ProviderTag;
+            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs,
+                result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs,
+                result.ReasoningEventCount, result.ReasoningCharacterCount, providerTag, operationId);
+            _runtimeLogs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Chat turn completed; {timing.Format()}.",
+                operationId));
+            Telemetry?.RecordRequest(selectedModelId, providerTag, result.ServerTimings, result.Usage, result.FirstTokenMs, result.TotalLatencyMs);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"
@@ -1426,7 +1442,7 @@ public partial class ChatViewModel : ViewModelBase
                 var warning = $"Slow chat send ({timing.PreFirstTokenMs} ms before first content): {timing.Format()}";
                 if (hint is not null)
                     warning += $" - {hint}";
-                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, warning));
+                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, warning, operationId));
             }
 
             if (result.Cancelled)
@@ -1507,7 +1523,7 @@ public partial class ChatViewModel : ViewModelBase
                 asst.Content = $"{asst.Content.TrimEnd()}\n\n[Error: {ex.Message}]";
             }
             _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
-                $"Chat send failed: {ex.Message}"));
+                $"Chat send failed: {ex.Message}", operationId));
             _toasts.Show("Send failed", ex.Message, ToastKind.Error, 7000);
         }
         finally
@@ -2205,11 +2221,12 @@ public partial class ChatViewModel : ViewModelBase
     /// it logs one Warning and returns empty. Cancellation propagates
     /// (never swallowed into the best-effort catch), matching 2.1's fallback.
     /// </summary>
-    private async Task<(string ContextText, List<SourceReference> Sources, long RagMs, int RagContextItems, string RagNote)> BuildRagInjectionAsync(string question, CancellationToken ct)
+    private async Task<(string ContextText, List<SourceReference> Sources, long RagMs, int RagContextItems, string RagNote)> BuildRagInjectionAsync(string question, CancellationToken ct, string? operationId = null)
     {
         if (_rag is null || string.IsNullOrWhiteSpace(RagDatasetId) || string.IsNullOrWhiteSpace(question))
             return (string.Empty, [], 0, 0, string.Empty);
 
+        operationId ??= OperationCorrelation.NewId();
         var sw = Stopwatch.StartNew();
         try
         {
@@ -2221,7 +2238,7 @@ public partial class ChatViewModel : ViewModelBase
                 TopK: 5,
                 UseParentChild: dataset.Config.UseParentChild,
                 ContextTokenBudget: _settings.Settings.Rag.ChatInjectionTokenBudget);
-            var retrieval = await _rag.RetrieveAsync(dataset.Id, question, opts, ct);
+            var retrieval = await _rag.RetrieveAsync(dataset.Id, question, opts, ct, operationId);
 
             // r21 1.3: the entire reason attaching a dataset does not degrade
             // normal conversation - chat must not parrot weakly-related
@@ -2265,7 +2282,7 @@ public partial class ChatViewModel : ViewModelBase
         catch (Exception ex)
         {
             _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                $"Knowledge context injection failed: {ex.Message}"));
+                $"Knowledge context injection failed: {ex.Message}", operationId));
             return (string.Empty, [], sw.ElapsedMilliseconds, 0, string.Empty);
         }
     }

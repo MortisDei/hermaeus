@@ -483,6 +483,27 @@ internal static class AgentTests
     return Task.CompletedTask;
     }
 
+    public static Task AgentSearchAndGlobReportResultCaps()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "one.txt"), "needle");
+    File.WriteAllText(Path.Combine(root, "two.txt"), "needle");
+
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root, MaxSearchResults: 1);
+    var search = tools.SearchFiles(options, "needle");
+    Equal(2, search.Count, "search should return a visible truncation notice after reaching its result cap");
+    True(search[^1].IsTruncationNotice, "search truncation must be explicit rather than silently dropping matches");
+
+    var glob = tools.GlobFiles(options, "*.txt");
+    Equal(2, glob.Count, "glob should return a visible truncation notice after reaching its result cap");
+    True(glob[^1].Contains("glob truncated", StringComparison.OrdinalIgnoreCase),
+        "glob truncation must be explicit rather than silently dropping matches");
+    return Task.CompletedTask;
+    }
+
     public static async Task AgentReadFilePagesByLine()
     {
     using var temp = new TempDir();
@@ -501,6 +522,48 @@ internal static class AgentTests
     var last = tools.ReadFile(options, "big.txt", lineOffset: 9, lineLimit: 5);
     Equal("line 10", last.Content, "read_file should stop at the end of the file without erroring");
     False(last.Truncated, "reaching the end of the file should not report truncation");
+    }
+
+    public static async Task AgentReadFileDefaultsToCompleteContentThroughExecutor()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    await File.WriteAllTextAsync(Path.Combine(root, "log.txt"), "first line\nsecond line\nfinal line");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var result = await executor.ExecuteAsync(
+        "read_file",
+        new Dictionary<string, object?> { ["relative_path"] = "log.txt" },
+        new AgentWorkspaceOptions(root));
+
+    True(result.ResultSummary.Contains("first line", StringComparison.Ordinal), "a default read should include the first line");
+    True(result.ResultSummary.Contains("final line", StringComparison.Ordinal), "a default read should include the final line, not only the first line");
+    using var parsed = JsonDocument.Parse(result.ResultSummary);
+    True(parsed.RootElement.GetProperty("content").GetString()!.Contains("final line", StringComparison.Ordinal),
+        "the complete read result should remain valid JSON through the executor");
+    }
+
+    public static async Task AgentDeletingRootRunRemovesItsPersistedSubtasks()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var root = new AgentTaskState { TaskId = "root-run", Goal = "parent", Status = AgentTaskStatus.Complete };
+    var child = new AgentTaskState { TaskId = "child-run", Goal = "child", ParentTaskId = root.TaskId, Status = AgentTaskStatus.Complete };
+    await store.SaveAsync(root);
+    await store.SaveAsync(child);
+    await store.AppendLogAsync(root.TaskId, "parent log");
+    await store.AppendTraceAsync(child.TaskId, new { event_name = "child" });
+
+    await store.DeleteAsync(root.TaskId);
+
+    Equal(null, await store.LoadAsync(root.TaskId), "deleting a root run should remove its state file");
+    Equal(null, await store.LoadAsync(child.TaskId), "deleting a root run should remove persisted sub-task state");
+    False(Directory.Exists(store.GetTaskDirectory(root.TaskId)), "the root run directory should be deleted");
+    False(Directory.Exists(store.GetTaskDirectory(child.TaskId)), "the child run directory should be deleted");
+    Equal(0, (await store.ListRecentAsync()).Count, "deleted runs should leave no index rows");
     }
 
     public static Task AgentSearchFilesSupportsRegexAndContext()
@@ -3229,7 +3292,7 @@ internal static class AgentTests
     True(step.State.PlanApprovalCheckpointFired, "the checkpoint should record that it already fired");
     Equal(2, step.State.Plan.Count, "the plan itself should still be applied even though the run paused");
 
-    var resumed = await service.ContinueTaskAsync(state.TaskId, "", options);
+    var resumed = await service.ContinuePlannedTaskAsync(state.TaskId, options);
     Equal(AgentTaskStatus.Running, resumed.Status, "continuing should return the task to Running");
     False(resumed.PlanApprovalPending, "continuing should clear the pending-plan-approval flag");
     }
@@ -3252,7 +3315,7 @@ internal static class AgentTests
     var first = await service.RunStepAsync(state.TaskId, options);
     Equal(AgentTaskStatus.WaitingForUser, first.State.Status, "the first set_plan should still pause the run");
 
-    await service.ContinueTaskAsync(state.TaskId, string.Empty, options);
+    await service.ContinuePlannedTaskAsync(state.TaskId, options);
     var second = await service.RunStepAsync(state.TaskId, options);
 
     Equal(AgentTaskStatus.Running, second.State.Status, "a plan revision after the checkpoint already fired must not re-pause the task");

@@ -28,15 +28,25 @@ public partial class SettingsVoiceSectionView : UserControl
 
     private static void OnChannelVoiceDropDownOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (sender is AutoCompleteBox box
-            && string.Equals(box.Text, VoiceChannelSettingViewModel.DefaultVoiceLabel, StringComparison.Ordinal))
+        if (sender is AutoCompleteBox box)
         {
-            // The sentinel is the selected value, not a useful search term.
-            // Leaving it in the AutoCompleteBox filter makes a populated
-            // provider catalogue look empty when the chevron is clicked.
-            // Clearing it maps back to the same empty VoiceId and keeps the
-            // current selection semantically unchanged.
+            // The current value is not a search term. Leaving it in the
+            // filter makes a populated provider catalogue look like it only
+            // contains the selected voice. VoiceDisplay ignores this transient
+            // clear, and the closed handler restores the visible value when
+            // the user dismisses the popup without choosing anything.
+            box.Tag = box.Text;
             box.Text = string.Empty;
         }
+    }
+
+    private static void OnChannelVoiceDropDownClosed(object? sender, EventArgs e)
+    {
+        if (sender is not AutoCompleteBox box)
+            return;
+
+        if (box.Tag is string previous && string.IsNullOrWhiteSpace(box.Text))
+            box.Text = previous;
+        box.Tag = null;
     }
 }

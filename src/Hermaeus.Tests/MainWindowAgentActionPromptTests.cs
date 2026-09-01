@@ -12,8 +12,9 @@ public sealed class MainWindowAgentActionPromptTests
         var viewModel = File.ReadAllText(Path.Combine(root, "src", "Hermaeus.ViewModels", "MainWindowViewModel.cs"));
 
         Assert.Contains("HasPendingAgentAction", view, StringComparison.Ordinal);
-        Assert.Contains("Agent.NextUserActionLabel", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("Agent.NextUserActionLabel", view, StringComparison.Ordinal);
         Assert.Contains("Open Agent", view, StringComparison.Ordinal);
+        Assert.Contains("Grid.Column=\"2\"", view, StringComparison.Ordinal);
         Assert.Contains("Agent.HasDecisionWaiting && !ShowAgent", viewModel, StringComparison.Ordinal);
     }
 }

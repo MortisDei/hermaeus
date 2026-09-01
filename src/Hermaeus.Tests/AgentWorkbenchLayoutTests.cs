@@ -83,6 +83,10 @@ public sealed class AgentWorkbenchLayoutTests
         Assert.Contains("How Agent work proceeds", source, StringComparison.Ordinal);
         Assert.Contains("review the plan and each requested approval", source, StringComparison.Ordinal);
         Assert.Contains("{Binding NextUserActionLabel}", source, StringComparison.Ordinal);
+        Assert.Contains("controls:MarkdownViewer", source, StringComparison.Ordinal);
+        Assert.Contains("CopyResponseCommand", source, StringComparison.Ordinal);
+        Assert.Contains("ContinuePlannedTaskCommand", source, StringComparison.Ordinal);
+        Assert.Contains("FinishTaskCommand", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -103,6 +107,10 @@ public sealed class AgentWorkbenchLayoutTests
         var budget = Task(AgentTaskStatus.Blocked);
         budget.StepBudgetExhausted = true;
         Assert.Equal("Step budget exhausted. Add steps or continue the remaining plan, or stop the task.", AgentViewModel.DescribeNextUserAction(budget));
+
+        var stopped = Task(AgentTaskStatus.Blocked);
+        stopped.UserTransitions.Add(new AgentTaskTransition(AgentTaskTransitionKind.StopRun, DateTime.UtcNow));
+        Assert.Equal("The run was stopped. Review its outcome, continue planned work, add an instruction, or finish it.", AgentViewModel.DescribeNextUserAction(stopped));
     }
 
     [Fact]

@@ -189,6 +189,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // r19 2.2: Doctor has no server-process knowledge of its own; bridge
         // the llama.cpp update flow's stop-before/restart-after to Services.
         Doctor.RequestStopRunningLlamaServersForUpdate = Services.StopRunningLlamaServersForUpdate;
+        Doctor.RequestStopRunningEmbeddingServersForModelChange = Services.StopRunningEmbeddingServersForModelChangeAsync;
         Doctor.RequestRestartServers = Services.RestartServersAsync;
         Doctor.RequestSyncServerExecutablePaths = Services.SyncAllExecutablePathsFromConfig;
         // Keep toolbar doctor badge in sync with doctor checks
@@ -294,7 +295,12 @@ public partial class MainWindowViewModel : ViewModelBase
         Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
         Nav("nav.memories", "Memories", "Memory", "", "memories");
         Nav("nav.logs", "Logs", "System", "", "logs");
-        Nav("nav.activity", "Activity", "Activity", "", "activity");
+        registry.Register(new AppCommand(
+            Id: "nav.activity", Title: "Activity", Area: "Memory",
+            Description: "Open Memories with background activity expanded.",
+            Keywords: ["activity", "history", "memory"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { ShowActivityPanel(); return Task.CompletedTask; }));
         Nav("nav.settings", "Settings", "Settings", "", "settings");
 
         registry.Register(new AppCommand(
@@ -891,7 +897,13 @@ public partial class MainWindowViewModel : ViewModelBase
         RunBackgroundTaskAsync("load memories", () => Memories.InitializeCommand.ExecuteAsync(null));
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
-    [RelayCommand] private void ShowActivityPanel()    { ActivePanel = "activity"; RunBackgroundTaskAsync("refresh activity", Activity.RefreshAsync); }
+    [RelayCommand]
+    private void ShowActivityPanel()
+    {
+        Memories.IsActivityExpanded = true;
+        ActivePanel = "memories";
+        RunBackgroundTaskAsync("load memories and activity", () => Memories.InitializeCommand.ExecuteAsync(null));
+    }
     [RelayCommand] private void ResumeSetup()           => ActivePanel = "wizard";
     [RelayCommand]
     private void ShowWizardPanel()

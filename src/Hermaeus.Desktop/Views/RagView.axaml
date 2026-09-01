@@ -43,7 +43,8 @@
                 <CheckBox Grid.Column="3"
                           IsChecked="{Binding UseParentChild}"
                           Content="Parent-child" FontSize="12"
-                          VerticalAlignment="Center" />
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="Retrieve child chunks together with their parent context when this dataset was indexed with parent-child structure." />
 
                 <!-- Grounding score pill -->
                 <Border Grid.Column="4"
@@ -74,6 +75,46 @@
                             Margin="0,60"
                             Title="No datasets yet"
                             Hint="Ingest a folder below and Moss will keep it indexed." />
+
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="12"
+                        IsVisible="{Binding Datasets.Count, Converter={x:Static views:RagView.IsNonZero}}">
+                    <StackPanel Spacing="7">
+                        <TextBlock Text="Datasets included in this question"
+                                   FontSize="14"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="Choose one or more. The dataset dropdown above still controls ingest, reindex, and evaluation."
+                                   FontSize="11"
+                                   Opacity="0.65"
+                                   TextWrapping="Wrap" />
+                        <ItemsControl ItemsSource="{Binding QueryDatasetOptions}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:RagDatasetQueryOptionViewModel">
+                                    <CheckBox IsChecked="{Binding IsIncluded}"
+                                              Margin="0,0,18,4"
+                                              VerticalContentAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <TextBlock Text="{Binding Name}" />
+                                            <TextBlock Text="{Binding ChunkLabel}" FontSize="10" Opacity="0.55" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding QueryDatasetSelectionLabel}"
+                                   FontSize="11"
+                                   Opacity="0.7"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
 
                 <Expander Header="Dataset Manager" IsExpanded="True"
                           IsVisible="{Binding Datasets.Count, Converter={x:Static views:RagView.IsNonZero}}">
@@ -198,7 +239,10 @@
                 </Expander>
 
                 <!-- Answer area -->
-                <StackPanel IsVisible="{Binding HasAnswer}" Spacing="4">
+                <Border Classes="settings-card"
+                        IsVisible="{Binding HasAnswer}"
+                        Padding="16">
+                <StackPanel Spacing="4">
                     <!-- The question box empties on send, so the question is
                          echoed here. Without it an answer would sit on the page
                          with nothing on screen saying what was asked. -->
@@ -271,6 +315,7 @@
                         </Button>
                     </StackPanel>
                 </StackPanel>
+                </Border>
 
                 <!-- Streaming answer (while generating) -->
                 <StackPanel IsVisible="{Binding IsQuerying}" Spacing="4">
@@ -461,7 +506,7 @@
                         <StackPanel Spacing="12">
 
                             <Grid ColumnDefinitions="90,*" ColumnSpacing="12"
-                                  RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+                                  RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
                                 <TextBlock Grid.Row="0" Grid.Column="0"
                                            Text="Dataset name" VerticalAlignment="Center"
                                            Opacity="0.6" FontSize="13" />
@@ -751,7 +796,10 @@
                          Classes="chat-input"
                          Text="{Binding QuestionText}"
                          PlaceholderText="Ask a question about your documents..."
-                         KeyDown="OnQuestionKeyDown" />
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         MinHeight="42"
+                         MaxHeight="140" />
 
                 <Button Grid.Column="1" Classes="send-btn"
                         Command="{Binding QueryCommand}"

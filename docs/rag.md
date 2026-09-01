@@ -14,7 +14,8 @@ traces, versioned SQLite schema migrations, and native eval support.
 3. Use **Dry run** to preview the ingest report before writing to SQLite, or
    choose a duplicate policy to skip unchanged sources, replace them, or just
    report what would happen. Use **Stop** during ingest to cancel long runs.
-4. Ask questions against the dataset. The box empties on send and the question
+4. In **Datasets included in this question**, select one or more datasets, then
+   ask your question. The box empties on send and the question
    is shown above the answer it produced; a question that failed goes back in
    the box so it can be edited and retried. Answers are written by the model
    Chat has selected, falling back to Settings > LLM's default.
@@ -194,6 +195,10 @@ outcome without holding anything open for the life of the process.
 
 ### Querying
 
+- The RAG question panel has a separate multi-select dataset scope. It defaults
+  to the selected dataset, but each question can include any combination of
+  loaded datasets. The Dataset Manager dropdown remains single-select because
+  ingest, reindex, and evaluation operate on one dataset at a time.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
   Each citation also carries the dataset generation, stable source id, source
   revision id, and content hash that supplied the indexed chunk. A path remains

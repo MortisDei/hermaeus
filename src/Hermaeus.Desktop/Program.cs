@@ -117,8 +117,11 @@ class Program
     /// </summary>
     internal static bool ShouldContinueStartup(bool ownsInstance) => ownsInstance;
 
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
+    public static AppBuilder BuildAvaloniaApp() => BuildAvaloniaApp<App>();
+
+    internal static AppBuilder BuildAvaloniaApp<TApplication>()
+        where TApplication : Application, new() =>
+        AppBuilder.Configure<TApplication>()
             .UsePlatformDetect()
             .With(new X11PlatformOptions { WmClass = "hermaeus" })
             .WithInterFont()

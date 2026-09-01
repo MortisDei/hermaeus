@@ -14,6 +14,7 @@ public sealed class SqliteTraceStore : ITraceStore
     internal const int MaxTracesPerKind = 500;
 
     private readonly ISettingsService _settings;
+    private readonly IRuntimeLogService? _logs;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
 
@@ -29,9 +30,10 @@ public sealed class SqliteTraceStore : ITraceStore
 
     private string Cs => $"Data Source={DbPath}";
 
-    public SqliteTraceStore(ISettingsService settings)
+    public SqliteTraceStore(ISettingsService settings, IRuntimeLogService? logs = null)
     {
         _settings = settings;
+        _logs = logs;
     }
 
     private async Task EnsureInitializedAsync(CancellationToken ct)
@@ -40,6 +42,7 @@ public sealed class SqliteTraceStore : ITraceStore
         if (_initializedPath == dbPath && File.Exists(dbPath)) return;
 
         await _initGate.WaitAsync(ct);
+        var operationId = OperationCorrelation.NewId();
         try
         {
             if (_initializedPath == dbPath && File.Exists(dbPath)) return;
@@ -70,12 +73,35 @@ public sealed class SqliteTraceStore : ITraceStore
                 new SqliteMigration(1, (_, _) => Task.FromResult(false)),
                 new SqliteMigration(2, CreateModelUsageTableAsync)
             ], ct);
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Trace database opened with mode=read-write, pooling=provider-default, journal={await ReadJournalModeAsync(c, ct)}, schema_target={SchemaVersion}.",
+                operationId));
             _initializedPath = dbPath;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                $"Trace database initialization failed: exception={ex.GetType().Name}.",
+                operationId));
+            throw;
         }
         finally
         {
             _initGate.Release();
         }
+    }
+
+    private static async Task<string> ReadJournalModeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode";
+        return Convert.ToString(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture) ?? "Unknown";
     }
 
     public async Task AppendAsync(TraceRecord trace, CancellationToken ct = default)

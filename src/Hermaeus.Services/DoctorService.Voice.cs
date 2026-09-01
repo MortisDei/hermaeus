@@ -20,6 +20,7 @@ public sealed partial class DoctorService
         var provider = _voice.GetActiveVoiceProvider();
         var health = await provider.HealthCheckAsync(ct);
         var isNativeKokoro = provider.Id == VoiceProvider.KokoroNative;
+        var nativeKokoro = provider as NativeKokoroVoiceProvider;
         var status = health.Status switch
         {
             VoiceHealthStatus.Healthy => DoctorCheckStatus.Ready,
@@ -34,7 +35,11 @@ public sealed partial class DoctorService
             health.Summary,
             health.Detail,
             isNativeKokoro
-                ? health.Status == VoiceHealthStatus.Healthy ? "Installed" : "Install Kokoro (native)"
+                ? health.Status == VoiceHealthStatus.Healthy
+                    ? "Installed"
+                    : nativeKokoro?.IsInstalled == true
+                        ? "Retry Kokoro (native) health"
+                        : "Install Kokoro (native)"
                 : "Open Settings",
             !isNativeKokoro || health.Status != VoiceHealthStatus.Healthy,
             $"Provider: {provider.DisplayName}\n{health.Detail}",

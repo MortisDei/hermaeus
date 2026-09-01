@@ -9,7 +9,8 @@ public sealed record HfModelCard(
     DateTimeOffset? LastModified,
     string? License,
     long? Downloads,
-    string? Thumbnail = null);
+    string? Thumbnail = null,
+    string? Author = null);
 
 public sealed record HfTreeEntry(string Path, long? SizeBytes, string? LfsSha256, string Revision = "");
 
@@ -44,12 +45,15 @@ public sealed record HfSearchResult(string RepoId, long Downloads);
 public sealed class HuggingFaceClient
 {
     private const string BaseUrl = "https://huggingface.co";
+    private const string AvatarHost = "cdn-avatars.huggingface.co";
     private static readonly HttpClient DefaultHttp = BuildDefaultClient();
     private readonly HttpClient _http;
 
     public HuggingFaceClient(HttpClient? http = null)
     {
         _http = http ?? DefaultHttp;
+        _http.DefaultRequestHeaders.Remove("Authorization");
+        _http.DefaultRequestHeaders.Remove("Cookie");
         if (!_http.DefaultRequestHeaders.UserAgent.Any())
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("Hermaeus/1.0");
     }
@@ -75,16 +79,20 @@ public sealed class HuggingFaceClient
             string? license = root.TryGetProperty("cardData", out var cardEl)
                 && cardEl.ValueKind == JsonValueKind.Object
                 && cardEl.TryGetProperty("license", out var licenseEl) ? licenseEl.GetString() : null;
-            string? thumbnail = root.TryGetProperty("cardData", out cardEl)
-                && cardEl.ValueKind == JsonValueKind.Object
-                && cardEl.TryGetProperty("thumbnail", out var thumbnailEl)
-                && thumbnailEl.ValueKind == JsonValueKind.String
-                && IsBoundedThumbnail(thumbnailEl.GetString())
-                ? thumbnailEl.GetString()
-                : null;
+            string? thumbnail = ReadBoundedThumbnail(root, "cardData");
+            // The Hub documents thumbnail as model-card YAML metadata. Some
+            // API responses normalize that metadata under cardData while
+            // others expose the same declared field at the response root.
+            // Read only that exact field in either shape, never README text
+            // or a filename convention.
+            thumbnail ??= ReadBoundedThumbnail(root, string.Empty);
             long? downloads = root.TryGetProperty("downloads", out var dlEl) && dlEl.TryGetInt64(out var dl) ? dl : null;
+            var author = root.TryGetProperty("author", out var authorEl)
+                && authorEl.ValueKind == JsonValueKind.String
+                ? authorEl.GetString()
+                : null;
 
-            return new HfModelCard(sha, lastModified, license, downloads, thumbnail);
+            return new HfModelCard(sha, lastModified, license, downloads, thumbnail, author);
         }
         catch
         {
@@ -118,6 +126,44 @@ public sealed class HuggingFaceClient
 
     public Task<IReadOnlyList<HfTreeEntry>?> GetTreeAsync(string repoId, CancellationToken ct) =>
         GetTreeAsync(repoId, "main", ct);
+
+    /// <summary>Resolves the public HF author or organization avatar used by the
+    /// repository page. The returned value is only a validated exact-host URL;
+    /// artwork acquisition applies its own redirect, byte, MIME, and image checks.</summary>
+    public async Task<string?> GetAuthorAvatarUrlAsync(string? author, CancellationToken ct = default)
+    {
+        if (!IsSafeNamespace(author))
+            return null;
+
+        foreach (var endpoint in new[] { "organizations", "users" })
+        {
+            try
+            {
+                using var response = await _http.GetAsync(
+                    $"{BaseUrl}/api/{endpoint}/{Uri.EscapeDataString(author!)}/overview", ct);
+                if (!response.IsSuccessStatusCode)
+                    continue;
+
+                using var doc = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                if (!doc.RootElement.TryGetProperty("avatarUrl", out var avatar)
+                    || avatar.ValueKind != JsonValueKind.String
+                    || !TryValidateAvatarUrl(avatar.GetString(), out var validated))
+                    return null;
+                return validated;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
 
     internal static List<HfTreeEntry> ParseTree(JsonElement root)
     {
@@ -519,4 +565,47 @@ public sealed class HuggingFaceClient
 
     private static bool IsBoundedThumbnail(string? value) =>
         value is not null && System.Text.Encoding.UTF8.GetByteCount(value) <= 2048;
+
+    private static string? ReadBoundedThumbnail(JsonElement root, string containerName)
+    {
+        var container = string.IsNullOrEmpty(containerName)
+            ? root
+            : root.TryGetProperty(containerName, out var value) && value.ValueKind == JsonValueKind.Object
+                ? value
+                : default;
+        return container.ValueKind == JsonValueKind.Object
+            && container.TryGetProperty("thumbnail", out var thumbnail)
+            && thumbnail.ValueKind == JsonValueKind.String
+            && IsBoundedThumbnail(thumbnail.GetString())
+            ? thumbnail.GetString()
+            : null;
+    }
+
+    private static bool IsSafeNamespace(string? value) =>
+        value is { Length: > 0 and <= 96 }
+        && value.All(character => character < 128
+            && (char.IsLetterOrDigit(character) || character is '-' or '_' or '.'));
+
+    private static bool TryValidateAvatarUrl(string? value, out string? validated)
+    {
+        validated = null;
+        if (string.IsNullOrWhiteSpace(value)
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.Host, AvatarHost, StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || uri.Port != 443
+            || uri.IsLoopback
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || uri.AbsolutePath == "/"
+            || uri.AbsolutePath.Any(char.IsControl)
+            || uri.GetComponents(UriComponents.Path, UriFormat.UriEscaped).Contains("%2f", StringComparison.OrdinalIgnoreCase)
+            || uri.GetComponents(UriComponents.Path, UriFormat.UriEscaped).Contains("%5c", StringComparison.OrdinalIgnoreCase)
+            || uri.GetComponents(UriComponents.Path, UriFormat.UriEscaped).Contains("%2e", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        validated = uri.AbsoluteUri;
+        return true;
+    }
 }

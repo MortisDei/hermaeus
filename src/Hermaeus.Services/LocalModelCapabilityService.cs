@@ -44,6 +44,7 @@ public sealed record LocalModelCapabilityProbe(
 /// <summary>Combines bounded GGUF facts with executable and live /props evidence.</summary>
 public sealed class LocalModelCapabilityService
 {
+    private static readonly SemaphoreSlim CapabilityCacheWriteGate = new(1, 1);
     /// <summary>
     /// Capability ids for the R32 launch contract. The list is deliberately
     /// fixed and bounded so a runtime cannot create an unreviewed setting by
@@ -293,7 +294,7 @@ public sealed class LocalModelCapabilityService
                 LaunchCapabilities = launchCapabilities
             };
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             return facts with { PropsProbeSucceeded = false, SupportsPreserveReasoningTemplate = null, Modalities = [] };
         }
@@ -388,7 +389,8 @@ public sealed class LocalModelCapabilityService
         try { await SaveCacheAsync(modelPath, executablePath, result, ct, runtimeIdentity, modelIdentity); }
         catch (Exception ex)
         {
-                _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, $"Capability cache write failed: {ex.Message}"));
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                $"Capability cache write failed at '{CapabilityCachePath}': {ex.Message}"));
         }
         var drift = Compare(previous, result);
         if (drift.Count > 0)
@@ -405,11 +407,11 @@ public sealed class LocalModelCapabilityService
 
     public async Task<LocalModelCapabilities?> TryGetCachedAsync(string modelPath, string executablePath, CancellationToken ct = default)
     {
-        var cachePath = Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "capability-cache.json");
+        var cachePath = CapabilityCachePath;
         if (!File.Exists(cachePath)) return null;
         try
         {
-            await using var stream = File.OpenRead(cachePath);
+            await using var stream = OpenSharedRead(cachePath);
             var entries = await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
             var identity = Identity(modelPath, executablePath);
             var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(executablePath, null, ct);
@@ -425,7 +427,7 @@ public sealed class LocalModelCapabilityService
                         && e.ExecutableSize == identity.ExecutableSize
                         && e.ExecutableMtime == identity.ExecutableMtime)?.Capabilities;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -433,11 +435,11 @@ public sealed class LocalModelCapabilityService
 
     private async Task<LocalModelCapabilities?> TryGetPreviousSnapshotAsync(string modelPath, string executablePath, CancellationToken ct)
     {
-        var cachePath = Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "capability-cache.json");
+        var cachePath = CapabilityCachePath;
         if (!File.Exists(cachePath)) return null;
         try
         {
-            await using var stream = File.OpenRead(cachePath);
+            await using var stream = OpenSharedRead(cachePath);
             var entries = await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
             return entries
                 .Where(entry => ModelPathSafety.AreSameLocalPath(entry.ModelPath, modelPath))
@@ -503,34 +505,52 @@ public sealed class LocalModelCapabilityService
         RuntimeIdentityV2? knownRuntimeIdentity = null,
         ModelIdentityV2? knownModelIdentity = null)
     {
-        var cachePath = Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "capability-cache.json");
-        var entries = new List<CapabilityCacheEntry>();
-        if (File.Exists(cachePath))
+        var cachePath = CapabilityCachePath;
+        await CapabilityCacheWriteGate.WaitAsync(ct);
+        try
         {
-            try
+            var entries = new List<CapabilityCacheEntry>();
+            if (File.Exists(cachePath))
             {
-                await using var stream = File.OpenRead(cachePath);
-                entries = await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
+                try
+                {
+                    await using var stream = OpenSharedRead(cachePath);
+                    entries = await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
+                }
+                catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { entries = []; }
             }
-            catch (JsonException) { entries = []; }
-        }
 
-        var identity = Identity(modelPath, executablePath);
-        var runtimeIdentity = knownRuntimeIdentity
-            ?? await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(executablePath, null, ct);
-        var modelIdentity = knownModelIdentity
-            ?? RuntimeIdentityFactory.CreateModelIdentity(modelPath, GgufMetadataReader.TryRead(modelPath));
-        entries.RemoveAll(e => e.RuntimeIdentity is not null && e.ModelIdentity is not null
-            ? e.RuntimeIdentity.IdentifiesSameRuntime(runtimeIdentity)
-                && string.Equals(e.ModelIdentity.StableId, modelIdentity.StableId, StringComparison.Ordinal)
-            : ModelPathSafety.AreSameLocalPath(e.ModelPath, identity.ModelPath)
-                && ModelPathSafety.AreSameLocalPath(e.ExecutablePath, identity.ExecutablePath));
-        entries.Add(new CapabilityCacheEntry(
-            identity.ModelPath, identity.ModelSize, identity.ModelMtime,
-            identity.ExecutablePath, identity.ExecutableSize, identity.ExecutableMtime,
-            capabilities, runtimeIdentity, modelIdentity, 2));
-        await AtomicFile.WriteAllTextAsync(cachePath, JsonSerializer.Serialize(entries, JsonOptions), ct);
+            var identity = Identity(modelPath, executablePath);
+            var runtimeIdentity = knownRuntimeIdentity
+                ?? await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(executablePath, null, ct);
+            var modelIdentity = knownModelIdentity
+                ?? RuntimeIdentityFactory.CreateModelIdentity(modelPath, GgufMetadataReader.TryRead(modelPath));
+            entries.RemoveAll(e => e.RuntimeIdentity is not null && e.ModelIdentity is not null
+                ? e.RuntimeIdentity.IdentifiesSameRuntime(runtimeIdentity)
+                    && string.Equals(e.ModelIdentity.StableId, modelIdentity.StableId, StringComparison.Ordinal)
+                : ModelPathSafety.AreSameLocalPath(e.ModelPath, identity.ModelPath)
+                    && ModelPathSafety.AreSameLocalPath(e.ExecutablePath, identity.ExecutablePath));
+            entries.Add(new CapabilityCacheEntry(
+                identity.ModelPath, identity.ModelSize, identity.ModelMtime,
+                identity.ExecutablePath, identity.ExecutableSize, identity.ExecutableMtime,
+                capabilities, runtimeIdentity, modelIdentity, 2));
+            await AtomicFile.WriteAllTextAsync(cachePath, JsonSerializer.Serialize(entries, JsonOptions), ct);
+        }
+        finally
+        {
+            CapabilityCacheWriteGate.Release();
+        }
     }
+
+    private string CapabilityCachePath => Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "capability-cache.json");
+
+    private static FileStream OpenSharedRead(string path) => new(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.ReadWrite | FileShare.Delete,
+        bufferSize: 4096,
+        useAsync: true);
 
     private static (string ModelPath, long ModelSize, DateTime ModelMtime, string ExecutablePath, long ExecutableSize, DateTime ExecutableMtime) Identity(string modelPath, string executablePath)
     {

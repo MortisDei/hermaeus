@@ -99,6 +99,7 @@ public sealed class VoiceChannelPickerTests
         var view = File.ReadAllText(Path.Combine(repoRoot, "src", "Hermaeus.Desktop", "Views", "SettingsVoiceSectionView.axaml"));
 
         Assert.Contains("DropDownOpening=\"OnChannelVoiceDropDownOpening\"", view, StringComparison.Ordinal);
+        Assert.Contains("DropDownClosed=\"OnChannelVoiceDropDownClosed\"", view, StringComparison.Ordinal);
     }
 
     private sealed class DelayedVoiceService : ITtsService

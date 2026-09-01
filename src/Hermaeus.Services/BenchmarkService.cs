@@ -16,16 +16,18 @@ public sealed class BenchmarkService
     private readonly ILlmService _llm;
     private readonly ISystemInfoService _system;
     private readonly IEvalStore _evalStore;
+    private readonly IRuntimeLogService? _logs;
     private string _initializedPath = string.Empty;
     private string _starterSuitesSeededPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
 
-    public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system, IEvalStore evalStore)
+    public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system, IEvalStore evalStore, IRuntimeLogService? logs = null)
     {
         _settings = settings;
         _llm = llm;
         _system = system;
         _evalStore = evalStore;
+        _logs = logs;
     }
 
     private string DbPath
@@ -511,6 +513,7 @@ public sealed class BenchmarkService
         // could race the starter-suite seed (EnsureStarterSuitesAsync reads
         // `existing` then inserts) into a double-insert or a PK violation.
         await _initGate.WaitAsync(ct);
+        var operationId = OperationCorrelation.NewId();
         try
         {
             if (_initializedPath == dbPath && File.Exists(dbPath)) return;
@@ -543,16 +546,40 @@ public sealed class BenchmarkService
             await cmd.ExecuteNonQueryAsync(ct);
             _initializedPath = dbPath;
 
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Benchmark database opened with mode=read-write, pooling=provider-default, journal={await ReadJournalModeAsync(c, ct)}, schema_target=1.",
+                operationId));
+
             if (_starterSuitesSeededPath != dbPath)
             {
                 await EnsureStarterSuitesAsync(ct);
                 _starterSuitesSeededPath = dbPath;
             }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                $"Benchmark database initialization failed: exception={ex.GetType().Name}.",
+                operationId));
+            throw;
+        }
         finally
         {
             _initGate.Release();
         }
+    }
+
+    private static async Task<string> ReadJournalModeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode";
+        return Convert.ToString(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture) ?? "Unknown";
     }
 
     /// <summary>

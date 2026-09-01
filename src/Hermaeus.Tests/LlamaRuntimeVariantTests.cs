@@ -283,7 +283,6 @@ public sealed class LlamaRuntimeVariantTests
         Assert.Equal(
             Path.Combine(assetsRoot, "llama-server"),
             setup.GetDefaultInstallPath(assetsRoot));
-        Assert.DoesNotContain("Data", setup.GetDefaultInstallPath(assetsRoot), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

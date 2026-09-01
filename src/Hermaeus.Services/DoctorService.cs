@@ -118,7 +118,9 @@ public sealed partial class DoctorService : IDoctorService
             await CheckAppUpdateAsync(ct),
             CheckGgufModels(),
             CheckUntunedGgufModels(),
-            await CheckOllamaAsync(ct),
+            // Ollama remains a supported legacy RuntimeProfile, but its
+            // provider-specific Doctor card was a noisy empty check for most
+            // installations. Runtime profile health is the authoritative path.
             await CheckVoiceBackendAsync(ct),
             await CheckPythonAsync(ct),
             await CheckRagDbAsync(ct),

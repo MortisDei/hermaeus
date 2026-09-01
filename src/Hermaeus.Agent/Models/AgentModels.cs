@@ -21,8 +21,33 @@ public enum AgentTaskStatus
     /// returned the task to WaitingForUser, so a run the user had finished
     /// with sat in the review queue forever with no action that could clear it.
     /// </summary>
-    Cancelled
+    Cancelled,
+
+    /// <summary>
+    /// The persisted run was active when its execution context disappeared,
+    /// normally because the application restarted. This is distinct from a
+    /// user cancellation and is recoverable only through an explicit continue.
+    /// </summary>
+    Interrupted
 }
+
+/// <summary>
+/// A deliberate user transition at an Agent run boundary. Persisting this
+/// separately from the resulting status keeps "continue", "finish", and
+/// "stop" distinguishable in task history.
+/// </summary>
+public enum AgentTaskTransitionKind
+{
+    ContinueWithInstruction,
+    ContinuePlannedWork,
+    FinishRun,
+    StopRun
+}
+
+public sealed record AgentTaskTransition(
+    AgentTaskTransitionKind Kind,
+    DateTime AtUtc,
+    string Instruction = "");
 
 public enum AgentRiskLevel
 {
@@ -64,7 +89,8 @@ public enum AgentSubTaskStatus
     Running,
     Complete,
     Failed,
-    Skipped
+    Skipped,
+    Interrupted
 }
 
 /// <summary>Where a lesson applies: every task in every workspace, or one specific workspace.</summary>
@@ -113,6 +139,9 @@ public sealed class AgentTaskState
     public List<AgentToolResult> ToolResults { get; set; } = [];
     public List<AgentApprovalRecord> ApprovalHistory { get; set; } = [];
 
+    /// <summary>Explicit user lifecycle decisions. Additive for older task files.</summary>
+    public List<AgentTaskTransition> UserTransitions { get; set; } = [];
+
     /// <summary>
     /// Instructions the user sent while the task was running, not yet folded
     /// into the planner context. Drained at the next step boundary, in order.
@@ -123,6 +152,12 @@ public sealed class AgentTaskState
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
     public AgentPendingToolAction? PendingToolAction { get; set; }
     public string Summary { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Explains an interrupted persisted run. Empty for ordinary tasks and
+    /// pre-existing state files (JSON-additive).
+    /// </summary>
+    public string InterruptionReason { get; set; } = string.Empty;
 
     /// <summary>
     /// The model's own last message to the user (the planner's
@@ -792,7 +827,9 @@ public sealed record AgentTaskListItem(
 public sealed record AgentFileSearchResult(
     string RelativePath,
     string Snippet,
-    DateTime ModifiedUtc);
+    DateTime ModifiedUtc,
+    /// <summary>True only for the explicit final row that says the result cap was reached.</summary>
+    bool IsTruncationNotice = false);
 
 public sealed record AgentFileReadResult(
     string RelativePath,

@@ -71,6 +71,14 @@ public partial class DoctorViewModel : ObservableObject
     public Func<IReadOnlyList<string>, Task>? RequestRestartServers { get; set; }
 
     /// <summary>
+    /// Stops the dedicated embedding server before its model path changes and
+    /// returns the ids that should be started again after the verified model is
+    /// configured. The active process must not keep serving the old embedding
+    /// dimensions after Doctor reports a successful migration.
+    /// </summary>
+    public Func<Task<IReadOnlyList<string>>>? RequestStopRunningEmbeddingServersForModelChange { get; set; }
+
+    /// <summary>
     /// Re-syncs every Services row's displayed executable path after a
     /// successful llama.cpp update, since the update rewrites every managed
     /// server's path unconditionally, not just the ones that were running
@@ -345,13 +353,19 @@ public partial class DoctorViewModel : ObservableObject
         string successTitle,
         string successBody,
         string failureTitle,
-        string cancelledTitle)
+        string cancelledTitle,
+        Func<Task<IReadOnlyList<string>>>? prepareAsync = null,
+        Func<IReadOnlyList<string>, Task>? restoreAsync = null)
     {
         if (isBusy()) return;
         setBusy(true);
         _installCts = new CancellationTokenSource();
+        IReadOnlyList<string> preparedServerIds = [];
         try
         {
+            if (prepareAsync is not null)
+                preparedServerIds = await prepareAsync();
+
             var progress = new Progress<string>(setProgress);
             var ok = await installAsync(progress, _installCts.Token);
             _toasts.Show(ok ? successTitle : failureTitle,
@@ -368,6 +382,16 @@ public partial class DoctorViewModel : ObservableObject
         }
         finally
         {
+            if (preparedServerIds.Count > 0 && restoreAsync is not null)
+            {
+                try { await restoreAsync(preparedServerIds); }
+                catch (Exception ex)
+                {
+                    _toasts.Show("Could not restart the embedding server", ex.Message, ToastKind.Warning, 7000);
+                }
+            }
+
+            await ScanAsync();
             setProgress(string.Empty);
             setBusy(false);
             _installCts?.Dispose();
@@ -482,13 +506,16 @@ public partial class DoctorViewModel : ObservableObject
 
         if (check.Key == "kokoro-native")
         {
+            var retry = check.FixLabel.StartsWith("Retry", StringComparison.OrdinalIgnoreCase);
             await RunInstallAsync(
                 () => IsInstallingNativeKokoro,
                 v => IsInstallingNativeKokoro = v,
                 s => NativeKokoroProgress = s,
                 (p, ct) => _doctor.InstallNativeKokoroAssetsAsync(p, ct),
-                "Kokoro (native) installed", "Kokoro native ONNX model and voices installed.",
-                "Kokoro (native) install failed", "Kokoro (native) install cancelled");
+                retry ? "Kokoro (native) health restored" : "Kokoro (native) installed",
+                retry ? "Kokoro native assets were present and the ONNX session was retried." : "Kokoro native ONNX model and voices installed.",
+                retry ? "Kokoro (native) retry failed" : "Kokoro (native) install failed",
+                retry ? "Kokoro (native) health retry cancelled" : "Kokoro (native) install cancelled");
             return;
         }
 
@@ -512,7 +539,9 @@ public partial class DoctorViewModel : ObservableObject
                 HandleEmbeddingProgress,
                 (p, ct) => _doctor.InstallEmbeddingModelAsync(p, ct),
                 "Embedding model installed", "Embedding model downloaded and configured.",
-                "Embedding model install failed", "Embedding install cancelled");
+                "Embedding model install failed", "Embedding install cancelled",
+                RequestStopRunningEmbeddingServersForModelChange,
+                RequestRestartServers);
             return;
         }
 

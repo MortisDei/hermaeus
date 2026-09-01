@@ -31,7 +31,7 @@
             <Border Grid.Row="0" Padding="8,6"
                     BorderThickness="0,0,0,1"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
 
                     <Button Grid.Column="0" Classes="icon-btn" Background="Transparent" Cursor="Hand"
                             Command="{Binding ToggleSidebarCommand}"
@@ -205,15 +205,6 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowActivityPanelCommand}" Classes.nav-active="{Binding ShowActivity}"
-                            ToolTip.Tip="Activity - what the app has been doing">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <PathIcon Data="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"
-                                          Width="17" Height="17" />
-                                <TextBlock Text="Activity" FontSize="11" VerticalAlignment="Center" IsVisible="{Binding Settings.Ui.ShowNavLabels}" />
-                            </StackPanel>
-                        </Button>
-
                         <Button Classes="icon-btn" Command="{Binding ToggleToastHistoryCommand}"
                             ToolTip.Tip="Toast notifications">
                             <StackPanel Orientation="Horizontal" Spacing="4">
@@ -242,14 +233,32 @@
                         </Button>
                     </StackPanel>
 
-                    <Button Grid.Column="2"
+                    <Border Grid.Column="2"
+                            IsVisible="{Binding HasPendingAgentAction}"
+                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                            BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="8,3"
+                            Margin="0,0,10,0">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Agent needs input" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Button Content="Open Agent"
+                                    Command="{Binding ShowAgentPanelCommand}"
+                                    Padding="8,3"
+                                    CornerRadius="5"
+                                    ToolTip.Tip="Open the Agent workbench to review or answer the pending action." />
+                        </StackPanel>
+                    </Border>
+
+                    <Button Grid.Column="3"
                             Content="Resume setup"
                             Command="{Binding ResumeSetupCommand}"
                             IsVisible="{Binding ShowSetupResume}"
                             Padding="10,5" Margin="0,0,10,0"
                             ToolTip.Tip="Return to the incomplete first-run setup without losing your current step." />
 
-                    <TextBlock Grid.Column="3"
+                    <TextBlock Grid.Column="4"
                                Text="{Binding Chat.ConversationTitle}"
                                IsVisible="{Binding ShowChat}"
                                VerticalAlignment="Center"
@@ -257,7 +266,7 @@
                                FontSize="12" MaxWidth="220"
                                TextTrimming="CharacterEllipsis" />
 
-                    <views:ProjectSwitcherView Grid.Column="4" DataContext="{Binding Projects}"
+                    <views:ProjectSwitcherView Grid.Column="5" DataContext="{Binding Projects}"
                                                 VerticalAlignment="Center" Margin="0,0,4,0" />
                 </Grid>
             </Border>
@@ -310,37 +319,6 @@
                     </ContentControl.DataTemplates>
                 </ContentControl>
 
-                <!-- Keep an unanswered Agent action visible after the user
-                     navigates away. The Agent panel owns the detailed review;
-                     this is only a contained route back to it. -->
-                <Border IsVisible="{Binding HasPendingAgentAction}"
-                        HorizontalAlignment="Stretch"
-                        VerticalAlignment="Top"
-                        Margin="18"
-                        Padding="12"
-                        CornerRadius="8"
-                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                        BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
-                        BorderThickness="1">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                        <StackPanel Spacing="3">
-                            <TextBlock Text="Agent action needed"
-                                       FontWeight="SemiBold"
-                                       FontSize="13" />
-                            <TextBlock Text="{Binding Agent.NextUserActionLabel}"
-                                       TextWrapping="Wrap"
-                                       FontSize="12"
-                                       Opacity="0.85" />
-                        </StackPanel>
-                        <Button Grid.Column="1"
-                                Content="Open Agent"
-                                Command="{Binding ShowAgentPanelCommand}"
-                                VerticalAlignment="Center"
-                                Padding="10,5"
-                                CornerRadius="6"
-                                ToolTip.Tip="Open the Agent workbench to review or answer the pending action." />
-                    </Grid>
-                </Border>
             </Grid>
 
             <Border Grid.Row="1"
@@ -395,19 +373,35 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
                     </ScrollViewer>
-                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <TextBox Grid.Column="0"
-                                 Text="{Binding Chat.InputText}"
-                                 PlaceholderText="Ask quickly..."
-                                 Classes="chat-input"
-                                 MinHeight="40"
-                                 MaxHeight="92" />
-                        <Button Grid.Column="1"
-                                Command="{Binding Chat.SendCommand}"
-                                Content="Send"
-                                Padding="14,8"
-                                CornerRadius="8" />
-                    </Grid>
+                    <StackPanel Grid.Row="2" Spacing="5">
+                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                    IsVisible="{Binding Chat.IsGenerating}">
+                            <ProgressBar IsIndeterminate="True"
+                                         Width="70"
+                                         Height="3"
+                                         VerticalAlignment="Center"
+                                         ToolTip.Tip="The quick-chat request is still processing." />
+                            <TextBlock Text="Processing..."
+                                       FontSize="11"
+                                       Opacity="0.65"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding Chat.InputText}"
+                                     PlaceholderText="Ask quickly..."
+                                     Classes="chat-input"
+                                     MinHeight="40"
+                                     MaxHeight="92"
+                                     KeyDown="OnQuickChatKeyDown"
+                                     ToolTip.Tip="Enter or Ctrl+Enter sends. Shift+Enter inserts a newline." />
+                            <Button Grid.Column="1"
+                                    Command="{Binding Chat.SendCommand}"
+                                    Content="Send"
+                                    Padding="14,8"
+                                    CornerRadius="8" />
+                        </Grid>
+                    </StackPanel>
                 </Grid>
             </Border>
 

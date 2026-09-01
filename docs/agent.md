@@ -16,7 +16,11 @@ explicit user approval before it executes.
   `transcript.jsonl` under the Hermaeus data root.
 - Maintains `agent/task_index.db` as a SQLite catalog for recent-task and review
   queue lists, with `task_state.json` remaining the source of truth for full
-  task state. Initialization reconciles JSON task files back into the index.
+  task state. Initialization first reconciles persisted `Running` task files:
+  when no execution owner exists after startup, the task and any active child
+  plan entry become `Interrupted` with a concrete recovery reason. Continuing
+  an interrupted task is explicit; deletion still refuses genuinely `Running`
+  tasks. Initialization then reconciles JSON task files back into the index.
 - Validates task IDs with a short alphanumeric, dash, and underscore allowlist
   before resolving task directories.
 - Shows a review queue of tasks that need a decision right now: those
@@ -42,16 +46,21 @@ explicit user approval before it executes.
   count; sub-task children indented with a tag) so a completed task's
   report, a failed task's blockers, or an orphaned task is reachable after a
   restart without going through the review queue. Opening a child directly
-  also shows its parent's goal.
+  also shows its parent's goal. A stopped or terminal top-level run can be
+  permanently deleted after confirmation, including its persisted transcript,
+  trace, log, report, and sub-task directories. Running runs and direct child
+  deletion are refused.
 - A task that reached a terminal state before its own plan actually
   finished (the model stopped short, or the run hit `Agent.MaxAutoSteps`)
-  shows a note naming why, alongside a Continue box: typed instructions call
-  `ContinueTaskAsync`, which resets the task back to a runnable state and
-  reconciles any sub-task plan, rather than requiring a brand new task for
-  what is really unfinished work. `ContinueTaskAsync` refuses with an
-  explanation when the task is a sub-task (continue the parent instead), is
-  already running, or has a tool approval pending. A "New Task" button next
-  to Start always starts an actual fresh task.
+  shows a note naming why, alongside explicit continuation choices. A typed
+  instruction calls `ContinueTaskAsync`; **Continue planned work** calls
+  `ContinuePlannedTaskAsync`. Both reset the task to a runnable state and
+  reconcile any sub-task plan, rather than requiring a brand new task for what
+  is really unfinished work. The typed path requires non-empty instruction
+  text and both paths refuse a sub-task, an already-running task, or a pending
+  tool approval. **Finish run** accepts the current result and ends the run
+  while preserving its transcript, ledger, and unfinished-plan evidence. A
+  "New Task" button next to Start always starts an actual fresh task.
 - Reaching `Agent.MaxAutoSteps` is persisted as a truthful blocked budget pause,
   not as a semantic question from the user. The Run tab offers Continue/Add
   steps or Stop, keeps the model response separate from the pause explanation,
@@ -61,6 +70,9 @@ explicit user approval before it executes.
 
 - Searches and reads bounded text files under a selected workspace root, with
   glob matching, optional regex search, and line-ranged reads for large files.
+  `read_file` returns complete content by default. Explicitly bounded reads
+  carry their line range and a continuation hint; search and glob result caps
+  are reported instead of silently implying that omitted matches do not exist.
 - Can include relevant context from an optional RAG dataset.
 - Replays a budgeted tail of the task's own step transcript (see below). The
   persisted `transcript.jsonl` remains complete; model-facing replay compacts
@@ -101,14 +113,19 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
   rotation restart on each step, so the line reports the current step's wait
   rather than the age of the whole run, and it stays empty for the first
   second and a half so a fast step never flickers a placeholder.
+- When the Agent is waiting while another panel is selected, the shell header
+  shows only a compact **Agent needs input** indicator and an **Open Agent**
+  action. The detailed question, response, and transition controls remain in
+  the Agent workbench.
 - **Decision strip.** Sits above the tabs and collapses to nothing when
   nothing is waiting on you. It carries the review queue, the reply box (with
   the agent's actual question shown above it) and the Continue box. This is the
   rule that makes tabs safe here: the thing the agent is waiting on is never
   behind a tab.
 - **Run.** Goal, workspace, model and RAG dataset; the Start Agent button; the
-  run outcome for a finished task; the agent's own response; sub-tasks and
-  plan; and the task state, context receipt and retrieved context, collapsed.
+  run outcome for a finished task; the agent's own selectable Markdown
+  response with an explicit Copy response action; sub-tasks and plan; and the
+  task state, context receipt and retrieved context, collapsed.
   The task's frozen model identity is shown independently of the current model
   picker. Changing the picker does not retarget an existing task. A paused task
   can use **Use for task** to make an explicit, audited model change after the
@@ -198,10 +215,18 @@ one of the following happens:
   rather than leaving it looking silently active.
 
 The workbench shows live progress (current step, tool, status) as the run
-proceeds, and Stop cancels mid-run at any point. A manual "Run step" advance is
-still available for stepping through a task one model call at a time. Nothing
-about this changes what is allowed to execute without approval; the loop only
-removes the need to click through every read-only step by hand.
+proceeds, and Stop cancels active work at a safe boundary. The stop is recorded
+as a resumable `Blocked` task transition and does not erase completed work,
+transcript, or ledger evidence. A manual "Run step" advance is still available
+for stepping through a task one model call at a time. Nothing about this
+changes what is allowed to execute without approval; the loop only removes the
+need to click through every read-only step by hand.
+
+The Run tab keeps four user-visible lifecycle choices distinct: continue with
+an instruction, continue the persisted plan, finish the current run, or stop
+active work. **Dismiss** remains the separate abandonment path for a queued
+paused task and records `Cancelled`; it is not used to represent an active
+stop.
 
 An unreadable model response does not stop the run. The response is recorded,
 a corrective note is appended to the transcript naming what was wrong with it,

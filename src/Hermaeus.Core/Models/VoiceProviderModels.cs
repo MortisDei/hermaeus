@@ -12,6 +12,44 @@ public enum VoiceProvider
     KokoroNative
 }
 
+/// <summary>
+/// Stable parsing and persistence identity for voice providers. The settings
+/// file stores enum ids; display names remain accepted for compatibility with
+/// older Settings-page saves.
+/// </summary>
+public static class VoiceProviderIdentity
+{
+    public static bool TryParse(string? value, out VoiceProvider provider)
+    {
+        provider = default;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var trimmed = value.Trim();
+        if (Enum.TryParse(trimmed, ignoreCase: true, out provider)
+            && Enum.IsDefined(provider))
+            return true;
+
+        if (trimmed.Equals("Kokoro (Python)", StringComparison.OrdinalIgnoreCase))
+            provider = VoiceProvider.Kokoro;
+        else if (trimmed.Equals("Kokoro (native)", StringComparison.OrdinalIgnoreCase))
+            provider = VoiceProvider.KokoroNative;
+        else if (trimmed.Equals("F5-TTS", StringComparison.OrdinalIgnoreCase))
+            provider = VoiceProvider.F5Tts;
+        else if (trimmed.Equals("XTTS", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("XTTS v2", StringComparison.OrdinalIgnoreCase))
+            provider = VoiceProvider.XttsV2;
+        else if (trimmed.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+            provider = VoiceProvider.OpenAi;
+        else
+            return false;
+
+        return true;
+    }
+
+    public static string CanonicalId(VoiceProvider provider) => provider.ToString();
+}
+
 public enum VoiceProviderCategory
 {
     Recommended,

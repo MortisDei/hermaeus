@@ -41,6 +41,18 @@ public sealed class ChatSendTimingTests
     }
 
     [Fact]
+    public void Format_labels_provider_and_reasoning_evidence()
+    {
+        var timing = new ChatSendTiming(0, 0, 0, 0, 500, 900,
+            ReasoningEventCount: 2, ReasoningCharacterCount: 16, ProviderTag: "llama.cpp");
+
+        var formatted = timing.Format();
+
+        Assert.Contains("provider llama.cpp", formatted);
+        Assert.Contains("reasoning 2 events / 16 chars", formatted);
+    }
+
+    [Fact]
     public void Format_omits_server_timings_when_provider_does_not_report_them()
     {
         var timing = new ChatSendTiming(0, 0, 0, 0, FirstTokenMs: 500, TotalMs: 900);

@@ -64,6 +64,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
     public bool IsInstalled => _model.AssetsPresent(NormalizeVoice(_settings.Settings.Tts.Speaker));
     public bool IsLoaded => _model.IsLoaded;
+    public string AdmissionFailureReason => _model.LastAdmissionFailure;
 
     public VoiceProviderDetection Detect()
     {
@@ -97,9 +98,11 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
     public async Task<bool> InstallAssetsAsync(IProgress<string>? progress = null, CancellationToken ct = default)
     {
+        var operationId = OperationCorrelation.NewId();
         try
         {
             await _model.InstallAssetsAsync(SupportedVoices, progress, ct);
+            Log(RuntimeLogLevel.Info, "Kokoro native asset installation completed.", operationId);
             return true;
         }
         catch (Exception ex)
@@ -107,7 +110,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
             // The provider boundary intentionally returns a bool for the
             // Doctor/setup contract, but swallowing the exception made a
             // failed install impossible to diagnose from the app log.
-            Log(RuntimeLogLevel.Error, $"Kokoro native asset installation failed: {ex.Message}");
+            Log(RuntimeLogLevel.Error, $"Kokoro native asset installation failed: {ex.Message}", operationId);
             progress?.Report($"Kokoro native install failed: {ex.Message}");
             return false;
         }
@@ -120,12 +123,12 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     {
         var voice = NormalizeVoice(_settings.Settings.Tts.Speaker);
         if (!_model.AssetsPresent(voice))
-            return new VoiceHealth(VoiceHealthStatus.Warning, "Kokoro native assets not installed", "Run the install action in Settings to download the ONNX model and voice files.");
+            return new VoiceHealth(VoiceHealthStatus.Warning, "Kokoro native assets not installed", $"Expected model and {voice} voice under {ResolveAssetsDirectory(_settings.Settings)}. Run the install action in Settings to download the ONNX model and voice files.");
 
         var loaded = await _model.EnsureLoadedAsync(voice, ct);
         return loaded
             ? new VoiceHealth(VoiceHealthStatus.Healthy, "Kokoro native model loaded", "ONNX session initialized from local assets.")
-            : new VoiceHealth(VoiceHealthStatus.Unhealthy, "Kokoro native model failed to load", "Installed assets failed SHA256 verification or failed to load; reinstall.");
+            : new VoiceHealth(VoiceHealthStatus.Unhealthy, "Kokoro native model failed to load", $"ONNX admission failed: {_model.LastAdmissionFailure}. Reinstall only if the diagnosis identifies a damaged asset.");
     }
 
     public Task<IReadOnlyList<VoiceDefinition>> ListVoicesAsync(CancellationToken ct = default) =>
@@ -173,25 +176,27 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
     {
-        Log(RuntimeLogLevel.Info, "Kokoro native preview synthesis started.");
+        var operationId = OperationCorrelation.NewId();
+        Log(RuntimeLogLevel.Info, "Kokoro native preview synthesis started.", operationId);
+        Log(RuntimeLogLevel.Info, $"Kokoro native preview assets root: {ResolveAssetsDirectory(_settings.Settings)}.", operationId);
         string? output = null;
         try
         {
             output = await RenderToFileAsync(text, speaker, null, ct);
             var byteLength = new FileInfo(output).Length;
-            Log(RuntimeLogLevel.Info, $"Kokoro native preview synthesis produced {byteLength} bytes; WAV validation and playback are starting.");
+            Log(RuntimeLogLevel.Info, $"Kokoro native preview synthesis produced {byteLength} bytes; WAV validation and playback are starting.", operationId);
             await AudioPlayback.PlayAsync(output, ct, backend =>
-                Log(RuntimeLogLevel.Info, $"Kokoro native preview playback backend selected: {backend}."));
-            Log(RuntimeLogLevel.Info, "Kokoro native preview completed.");
+                Log(RuntimeLogLevel.Info, $"Kokoro native preview playback backend selected: {backend}.", operationId));
+            Log(RuntimeLogLevel.Info, "Kokoro native preview completed.", operationId);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            Log(RuntimeLogLevel.Info, "Kokoro native preview cancelled.");
+            Log(RuntimeLogLevel.Info, "Kokoro native preview cancelled.", operationId);
             throw;
         }
         catch (Exception ex)
         {
-            Log(RuntimeLogLevel.Error, $"Kokoro native preview failed: {ex.Message}");
+            Log(RuntimeLogLevel.Error, $"Kokoro native preview failed: {ex.Message}", operationId);
             throw;
         }
         finally
@@ -201,18 +206,18 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
                 try
                 {
                     File.Delete(output);
-                    Log(RuntimeLogLevel.Debug, "Kokoro native preview temporary WAV cleaned up.");
+                    Log(RuntimeLogLevel.Debug, "Kokoro native preview temporary WAV cleaned up.", operationId);
                 }
                 catch (Exception ex)
                 {
-                    Log(RuntimeLogLevel.Warning, $"Kokoro native preview cleanup failed: {ex.Message}");
+                    Log(RuntimeLogLevel.Warning, $"Kokoro native preview cleanup failed: {ex.Message}", operationId);
                 }
             }
         }
     }
 
-    private void Log(RuntimeLogLevel level, string message) =>
-        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, level, RuntimeLogCategory.Voice, message));
+    private void Log(RuntimeLogLevel level, string message, string? operationId = null) =>
+        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, level, RuntimeLogCategory.Voice, message, operationId));
 
     private async Task<string> RenderToFileAsync(string text, string? speaker, string? outputPath, CancellationToken ct)
     {
@@ -224,7 +229,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
             var voice = NormalizeVoice(speaker);
             if (!await _model.EnsureLoadedAsync(voice, ct))
-                throw new InvalidOperationException("Kokoro native model is not installed. Run the install action in Settings first.");
+                throw new InvalidOperationException($"Kokoro native model is unavailable: {_model.LastAdmissionFailure}.");
 
             var speed = Math.Clamp(_settings.Settings.Tts.Speed, 0.5, 2.0);
             var output = string.IsNullOrWhiteSpace(outputPath)

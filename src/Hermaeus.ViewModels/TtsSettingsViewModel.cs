@@ -37,7 +37,22 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
     public string VoiceDisplay
     {
         get => string.IsNullOrEmpty(VoiceId) ? DefaultVoiceLabel : VoiceId;
-        set => VoiceId = value == DefaultVoiceLabel ? string.Empty : value;
+        set
+        {
+            if (string.Equals(value, DefaultVoiceLabel, StringComparison.Ordinal))
+            {
+                VoiceId = string.Empty;
+                return;
+            }
+
+            // AutoCompleteBox clears its text while opening and when its
+            // popup closes without a selection. An empty edit is not a
+            // deliberate channel reset, so preserve the last real choice.
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            VoiceId = value.Trim();
+        }
     }
 
     public VoiceChannelSettingViewModel(VoiceChannel channel, string displayName)
@@ -134,6 +149,26 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm", "mps"];
     public UiBoundCollection<string> TtsVoices { get; } = ["default"];
     public UiBoundCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
+
+    /// <summary>
+    /// The settings editor displays provider names, but persistence must use
+    /// the stable enum id so Kokoro (Python) cannot be reloaded as native
+    /// Kokoro on the next startup.
+    /// </summary>
+    public VoiceProvider SelectedVoiceProviderId
+    {
+        get
+        {
+            var selected = VoiceProviders.FirstOrDefault(p =>
+                p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            if (selected is not null)
+                return selected.Id;
+
+            return VoiceProviderIdentity.TryParse(SelectedVoiceProvider, out var parsed)
+                ? parsed
+                : VoiceProvider.KokoroNative;
+        }
+    }
 
     public bool IsTtsRunning => IsXttsV2Provider
         ? (_xttsProcess.IsRunning || _externalServiceRunning)

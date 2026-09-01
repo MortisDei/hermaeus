@@ -1192,7 +1192,28 @@ namespace Hermaeus.Tests
             var report = await service.ScanAsync(settings.Settings);
 
             True(report.Items.Any(item => item.Status == LocalAiReadinessStatus.Found), "scan should find ready items");
+            Equal(LocalAiReadinessStatus.Optional, report.Items.Single(item => item.Key == "voice-native").Status,
+                "native voice assets are owned by Doctor and must not be reported as installed by Local AI setup");
             True(report.Actions.Count > 0, "scan should produce setup actions");
+        }
+
+        public static async Task LocalAiSetupKeepsKokoroPythonDisplayNameOnThePythonPath()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(root);
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.Tts.VoiceProvider = "Kokoro (Python)";
+
+            var report = await new LocalAiSetupService(new PythonHealthValidator()).ScanAsync(settings.Settings);
+
+            True(report.Actions.Any(action => action.CommandPreview.Any(argument =>
+                argument.Equals("kokoro", StringComparison.OrdinalIgnoreCase))),
+                "The Kokoro Python display name must select the Python package setup path.");
+            False(report.Items.Any(item => item.Key == "voice-native"),
+                "The Kokoro Python display name must not select native voice handling.");
         }
 
         public static async Task LocalAiSetupScriptHandlingIsApprovalGated()

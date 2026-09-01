@@ -90,6 +90,7 @@ public static class HarnessCases
         [new HarnessCase("Doctor warns for untuned local GGUF models", ServiceTests.DoctorWarnsForUntunedLocalGgufModels)],
         [new HarnessCase("Doctor startup scan raises problem toast", ServiceTests.DoctorStartupScanRaisesProblemToast)],
         [new HarnessCase("local AI setup detects Hermaeus folder layout", ServiceTests.LocalAiSetupDetectsFolderLayout)],
+        [new HarnessCase("local AI setup keeps Kokoro Python display name on Python path", ServiceTests.LocalAiSetupKeepsKokoroPythonDisplayNameOnThePythonPath)],
         [new HarnessCase("local AI setup script handling is approval gated", ServiceTests.LocalAiSetupScriptHandlingIsApprovalGated)],
         [new HarnessCase("local AI setup command previews stay shell-free", ServiceTests.LocalAiSetupCommandPreviewsStayShellFree)],
         [new HarnessCase("local AI setup builds correct torch install args per backend", ServiceTests.LocalAiSetupBuildsCorrectTorchInstallArgsPerBackend)],
@@ -250,7 +251,8 @@ public static class HarnessCases
         [new HarnessCase("native Kokoro health failure stays visible and opens Doctor", TtsTests.NativeKokoroHealthFailureStaysVisibleAndOpensDoctor)],
         [new HarnessCase("voice provider XTTS v2 requires local and TTS", TtsTests.VoiceProviderXttsV2RequiresLocalAndTts)],
         [new HarnessCase("voice device options include Apple Silicon MPS", TtsTests.VoiceDeviceOptionsIncludeMps)],
-        [new HarnessCase("voice preview skips blank text", TtsTests.VoicePreviewSkipsBlankText)]
+        [new HarnessCase("voice preview skips blank text", TtsTests.VoicePreviewSkipsBlankText)],
+        [new HarnessCase("native Kokoro resource admission identity is stable", VoiceTests.NativeKokoroResourceAdmissionIdentityIsStable)]
     ];
 
     public static IEnumerable<object[]> Agent =>
@@ -269,7 +271,10 @@ public static class HarnessCases
         [new HarnessCase("agent edit_file requires a unique match", AgentTests.AgentEditFileRequiresUniqueMatch)],
         [new HarnessCase("agent create_file refuses to overwrite existing files", AgentTests.AgentCreateFileRefusesToOverwriteExisting)],
         [new HarnessCase("agent glob_files matches patterns", AgentTests.AgentGlobFilesMatchesPatterns)],
+        [new HarnessCase("agent search and glob report result caps", AgentTests.AgentSearchAndGlobReportResultCaps)],
         [new HarnessCase("agent read_file pages by line", AgentTests.AgentReadFilePagesByLine)],
+        [new HarnessCase("agent read_file defaults to complete content through executor", AgentTests.AgentReadFileDefaultsToCompleteContentThroughExecutor)],
+        [new HarnessCase("agent deleting a root run removes its persisted sub-tasks", AgentTests.AgentDeletingRootRunRemovesItsPersistedSubtasks)],
         [new HarnessCase("agent search_files supports regex and context", AgentTests.AgentSearchFilesSupportsRegexAndContext)],
         [new HarnessCase("agent set_plan updates task state without approval", AgentTests.AgentSetPlanUpdatesTaskStateWithoutApproval)],
         [new HarnessCase("agent task state persists queued draft patches", AgentTests.AgentTaskStatePersistsQueuedDraftPatches)],
@@ -413,8 +418,10 @@ public static class HarnessCases
         [new HarnessCase("tokenizer returns empty for blank input", VoiceTests.TokenizerReturnsEmptyForBlankInput)],
         [new HarnessCase("onnx model refuses to load when assets are missing", VoiceTests.OnnxModelRefusesToLoadWhenAssetsAreMissing)],
         [new HarnessCase("onnx model hash verification rejects tampered file", VoiceTests.OnnxModelHashVerificationRejectsTamperedFile)],
+        [new HarnessCase("native preview keeps present asset failure distinct from not installed", VoiceTests.NativePreviewKeepsPresentAssetFailureDistinctFromNotInstalled)],
         [new HarnessCase("native provider reports not installed without assets", VoiceTests.NativeProviderReportsNotInstalledWithoutAssets)],
         [new HarnessCase("native provider re-resolves assets root after settings change", VoiceTests.NativeProviderReResolvesAssetsRootAfterSettingsChange)],
+        [new HarnessCase("native provider clears failed admission after assets root changes", VoiceTests.NativeProviderClearsFailedAdmissionAfterAssetsRootChanges)],
         [new HarnessCase("native provider requires no python version", VoiceTests.NativeProviderRequiresNoPythonVersion)]
     ];
 

@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:views="using:Hermaeus.Desktop.Views"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
              x:Class="Hermaeus.Desktop.Views.MemoriesView"
              x:Name="Root"
@@ -15,6 +16,13 @@
                 <TextBlock Text="Chat Memories" FontSize="22" FontWeight="SemiBold" />
                 <TextBlock Text="Review, search, pin, and manage stored memories from conversations." FontSize="13" Opacity="0.5" />
             </StackPanel>
+
+            <Expander Header="Background activity" IsExpanded="{Binding IsActivityExpanded}"
+                      IsVisible="{Binding HasActivity}">
+                <Border Classes="settings-card" Padding="0" MaxHeight="520">
+                    <views:ActivityView DataContext="{Binding Activity}" />
+                </Border>
+            </Expander>
 
             <!-- Embedding mismatch banner (r16 02-memory-integrity.md 2.4) -->
             <Border Classes="settings-card" Padding="14" IsVisible="{Binding HasEmbeddingMismatch}">

@@ -13,6 +13,33 @@ limit.
 
 ### Changed
 
+- Startup recovery now marks persisted Agent runs with no execution owner as
+  `Interrupted`, including active child-plan entries, with an explicit reason;
+  active `Running` tasks remain protected from deletion. Recall incremental
+  indexing now performs bounded embedding backfill immediately, persists
+  retry/exhaustion state, and retries transient failures without requiring a
+  restart. Normal missing Hugging Face artwork is recorded as partial rather
+  than failed, and duplicate same-revision artwork reports are suppressed.
+- RAG questions can now include an explicit combination of datasets, while
+  ingest, reindex, and evaluation retain their single-dataset controls.
+- Hugging Face artwork checks now continue after a missing repository thumbnail
+  by using a separately labelled, exact-host publisher/avatar fallback. The
+  fallback retains immutable repository/revision provenance, shares only
+  verified content-addressed image bytes across metadata records, and remains
+  subject to the existing redirect, MIME, magic, size, decode, and atomic-cache
+  guards. Quick Chat now sends with Enter or Ctrl+Enter and shows processing
+  state while a request is active.
+- Agent workspace reads now preserve complete default file content through the
+  executor, report search and glob caps explicitly, and allow confirmed
+  deletion of stopped historical top-level runs with their persisted sub-tasks.
+- Activity is folded into the Memories surface as a collapsed section, and
+  model tiles and system overview sections regain bounded visual grouping.
+- RAG Enter-to-send follows the shared Chat setting, including multiline input
+  when the configured modifier is not pressed.
+- Native Kokoro resource admission now reuses the provider's registered
+  consumer identity, so present verified assets are not rejected before ONNX
+  session creation by a false owner conflict. Doctor distinguishes install
+  from retry-health actions for present but unadmitted assets.
 - RAG, Agent workspace reads, and Chat attachments now share one bounded common
   text/source extension policy, including log files, while retaining separate
   binary, size, path, and document-extraction guards. RAG streaming no longer
@@ -28,6 +55,23 @@ limit.
 - Native Kokoro installation failures now retain their actionable exception in
   the runtime log and progress channel instead of collapsing to a generic
   failure-only diagnostic.
+- Native Kokoro admission now validates the required ONNX input contract and
+  records a bounded rejection reason. Capability-cache reads and atomic writer
+  updates share Windows-compatible file access and serialization so a runtime
+  update cannot leave a transient Access Denied result.
+- Voice provider settings now persist canonical provider ids. Legacy Kokoro
+  display labels remain readable, while Kokoro (Python) and Kokoro (native)
+  retain separate setup parsing, install-state reporting, and provider config
+  keys.
+- Chat send traces now label the selected provider and count reasoning deltas
+  separately from first-content latency when the runtime emits them.
+- Agent Run now separates typed continue, planned continuation, Finish run,
+  and Stop transitions, preserving stopped-run evidence. The shell keeps only a
+  compact pending-action indicator, while the Agent response is selectable and
+  copyable. Lab displays execution and source-restore outcomes separately.
+- Hugging Face artwork accepts the documented thumbnail metadata shape when it
+  is returned at either supported API level; missing optional declarations
+  remain an honest `NoDeclaredArtwork` state.
 
 - Corrective hardening now recognizes Linux GPU shared libraries in Doctor,
   keeps typed Auto placement out of CPU-only advisories, separates installed

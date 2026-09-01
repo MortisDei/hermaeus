@@ -20,7 +20,7 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class RagQuestionBoxTests
 {
-    private static async Task<(RagViewModel Vm, RagDataset Dataset)> NewAsync(TempDir temp, ILlmService llm)
+    private static async Task<(RagViewModel Vm, RagDataset Dataset, RagQueryService Query)> NewAsync(TempDir temp, ILlmService llm)
     {
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
@@ -44,16 +44,20 @@ public sealed class RagQuestionBoxTests
 
         await vm.LoadDatasetsAsync();
         vm.SelectedDataset = vm.Datasets.FirstOrDefault(d => d.Id == dataset.Id);
-        return (vm, dataset);
+        return (vm, dataset, query);
     }
 
     [Fact]
     public async Task A_sent_question_leaves_the_box_and_is_shown_with_its_answer()
     {
         using var temp = new TempDir();
-        var (vm, _) = await NewAsync(temp, new FakeLlm());
+        var (vm, _, _) = await NewAsync(temp, new FakeLlm());
         vm.ChatModelProvider = () => "fake";
         vm.QuestionText = "  Who is Hermaeus Mora?  ";
+
+        Assert.Single(vm.QueryDatasetOptions);
+        Assert.True(vm.QueryDatasetOptions[0].IsIncluded,
+            "loading RAG datasets should include the selected dataset by default");
 
         await vm.QueryCommand.ExecuteAsync(null);
 
@@ -68,7 +72,7 @@ public sealed class RagQuestionBoxTests
     public async Task A_failed_question_goes_back_in_the_box_to_be_retried()
     {
         using var temp = new TempDir();
-        var (vm, _) = await NewAsync(temp, new ThrowingLlm());
+        var (vm, _, _) = await NewAsync(temp, new ThrowingLlm());
         vm.ChatModelProvider = () => "fake";
         vm.QuestionText = "Who is Hermaeus Mora?";
 
@@ -85,7 +89,7 @@ public sealed class RagQuestionBoxTests
     public async Task Retyping_during_a_failing_query_is_not_overwritten_by_the_restore()
     {
         using var temp = new TempDir();
-        var (vm, _) = await NewAsync(temp, new ThrowingLlm());
+        var (vm, _, _) = await NewAsync(temp, new ThrowingLlm());
         vm.ChatModelProvider = () => "fake";
         vm.QuestionText = "first";
 
@@ -94,6 +98,28 @@ public sealed class RagQuestionBoxTests
         await run;
 
         Assert.Equal("second", vm.QuestionText);
+    }
+
+    [Fact]
+    public async Task A_query_can_include_more_than_one_explicit_dataset()
+    {
+        using var temp = new TempDir();
+        var (_, first, query) = await NewAsync(temp, new FakeLlm());
+        var second = new RagDataset { Name = "second-dataset" };
+        await query.SaveDatasetAsync(second);
+
+        string? traceDatasetId = null;
+        await foreach (var evt in query.StreamQueryAsync(
+            new[] { first.Id, second.Id },
+            "Who is Hermaeus Mora?",
+            new RagQueryOptions(TopK: 3)))
+        {
+            if (evt.Kind == RagStreamEventKind.Trace)
+                traceDatasetId = evt.Trace?.DatasetId;
+        }
+
+        Assert.Contains(first.Id, traceDatasetId, StringComparison.Ordinal);
+        Assert.Contains(second.Id, traceDatasetId, StringComparison.Ordinal);
     }
 
     private sealed class ThrowingLlm : ILlmService

@@ -82,14 +82,19 @@ for Knowledge behavior in Chat.
   relationship is proven. Ambiguous companions require review, and removing
   known companions is an explicit Keep, Remove, or Cancel choice.
 - Hugging Face repository artwork is optional decoration only. It is read from
-  the selected card's bounded `cardData.thumbnail`, pinned to the exact
-  repository revision and tree when it names a repository file, fetched only
+  the selected card's bounded `thumbnail` declaration in `cardData` or
+  normalized root metadata, pinned to the exact repository revision and tree
+  when it names a repository file, fetched only
   through the reviewed Hugging Face host and delivery-host policy, and
   independently checked for MIME, magic, format, animation, dimensions, and
-  size before Avalonia decode. The artwork cache is bounded, LRU-evictable,
-  excluded from Data Root backups, and has a separate Clear action. A model
-  update check may backfill artwork when its verified manifest revision matches
-  the fetched card and tree; decoration failures never fail the update check.
+  size before Avalonia decode. When no repository declaration exists, the
+  verified publisher/organization avatar may be used as an explicit fallback;
+  its provenance remains distinct from repository-declared artwork. The
+  artwork cache is bounded, LRU-evictable, content-addressed for safe byte
+  reuse, excluded from Data Root backups, and has a separate Clear action. A
+  model update check may backfill either source when its verified manifest
+  revision matches the fetched card and tree; decoration failures never fail
+  the update check.
 - GPU Fit is a deterministic prediction over the current editor values. It
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are
@@ -142,6 +147,9 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
   generation, source revision, and content hash that supplied the chunk.
 - Chat Knowledge injection is bounded and cited. Weak retrieval adds nothing
   rather than forcing unrelated chunks into a response.
+- The RAG question panel can include an explicit combination of datasets per
+  question. Its multi-select scope is separate from the single-dataset
+  manager controls used for ingest, reindex, and evaluation.
 - RAG has a native evaluation harness with retrieval metrics, refusal handling,
   cancellation, and export. The separate [eval harness plan](rag-eval-harness.md)
   describes proposed expansion beyond the shipped surface.
@@ -173,6 +181,8 @@ See the [RAG reference](rag.md).
   and review-only contradiction proposals. A versioned redacted JSON export
   preserves assertion, revision, effective-time, source, and decision
   structure. The existing CSV export remains current-projection-only.
+- Background Activity is folded into the Memories surface as a collapsed,
+  refreshable section; it remains a separate trace projection and clear action.
 - Agent lessons are a separate, reviewable store. Optional read-only use of
   Global-scope lessons in Chat never changes the Agent safety gate.
 
@@ -182,7 +192,11 @@ Recall is one local search index over conversations, Agent tasks, Memories, and
 RAG chunks. Its command-palette search is distinct from RAG retrieval and
 Memory injection. Recall indexing is visible and clearable, and optional Chat
 injection is off by default. Chat traces label keyword-only Recall as degraded
-retrieval even when lexical hits are usable. See the [Recall reference](recall.md).
+retrieval even when lexical hits are usable. Incremental indexing immediately
+starts a bounded embedding backfill off the send path; failures retain a
+durable retry count and reason, retry after a delay while attempts remain, and
+surface exhausted rows as an explicit degraded state. See the [Recall
+reference](recall.md).
 
 ## Agent Workbench
 
@@ -193,8 +207,18 @@ retrieval even when lexical hits are usable. See the [Recall reference](recall.m
   commands, MCP calls, and sub-task planning remain approval-gated and are
   classified deterministically by the safety gate.
 - The workbench exposes the current decision, live progress, plan, response,
-  changes, approvals, reservations, commands, and unfinished work. A run ledger
-  supports per-file Rewind with staleness checks.
+  changes, approvals, reservations, commands, and unfinished work. Responses
+  are selectable Markdown with an explicit copy action. Continue planned work,
+  continue with an instruction, Finish run, and Stop are distinct persisted
+  lifecycle transitions. A run ledger supports per-file Rewind with staleness
+  checks.
+- Recent terminal top-level runs can be permanently deleted after confirmation,
+  including their persisted sub-task records and evidence files. Running runs
+  and direct child deletion are refused.
+- A persisted `Running` task found during startup recovery is marked
+  `Interrupted` with a reason when no execution owner is present. Child plan
+  entries are reconciled to the same state, and the task requires an explicit
+  Continue action before it can run again.
 - Workspace policy narrows paths and read budgets. Lessons inform the model
   but never widen authority. Native tool calling and constrained JSON planner
   output are alternate transport paths through the same gate.
@@ -233,6 +257,9 @@ review and confirmation owned by the Hermaeus window. The result card leads
 with the experiment, recorded model identity when available, status,
 timestamps, tested configurations, recommendation state, correctness, and
 measured or predicted resource deltas. Missing measurements remain `Unknown`.
+The Experiment card keeps the execution outcome separate from source-restore
+state and raises an explicit attention state when restoration fails or is
+blocked by a changed configuration.
 
 The Evidence surface stores typed Agent, GPU Fit, Lab, and adaptive-launch records with source
 links, fingerprints, corrections, redacted export, and confirmed removal.
@@ -309,6 +336,8 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 - Chat telemetry can sample the currently active managed server process. Its
   process RAM and per-process GPU readings are tied to that process identity;
   missing counters remain Unknown.
+- Chat send traces retain the selected provider tag, separate first-event and
+  first-content timing, and count emitted reasoning deltas when available.
 - Activity records observed outcomes for operations such as model downloads,
   server lifecycle, ingest, backups, restores, memory sweeps, and voice.
   Artifact-specific rows open their artifact; rows without one stay inert.

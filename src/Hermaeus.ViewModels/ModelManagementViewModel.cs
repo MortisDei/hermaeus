@@ -28,6 +28,8 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly List<LlmModel> _modelCache = [];
     private readonly object _modelCacheLock = new();
     private readonly List<ModelProfileItemViewModel> _allModels = [];
+    private readonly HashSet<string> _reportedArtworkOutcomes = new(StringComparer.Ordinal);
+    private readonly object _artworkReportLock = new();
     private CancellationTokenSource? _hfSelectionCts;
     private long _hfSelectionGeneration;
 
@@ -274,7 +276,8 @@ public partial class ModelManagementViewModel : ObservableObject
                         verifiedManifest.RevisionSha,
                         HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)));
                     item.ApplyArtwork(cachedArtwork?.CachePath, cachedArtwork?.State ?? HfArtworkState.Unavailable,
-                        cachedArtwork?.FailureCode ?? "not_cached", verifiedManifest.RevisionSha);
+                        cachedArtwork?.FailureCode ?? "not_cached", verifiedManifest.RevisionSha,
+                        cachedArtwork?.EffectiveSourceKind ?? HfArtworkSourceKind.None);
                 }
                 _allModels.Add(item);
             }
@@ -1096,12 +1099,15 @@ public partial class ModelManagementViewModel : ObservableObject
                 IReadOnlyList<HfTreeEntry>? tree;
                 var revision = "main";
                 HfModelCard? card = null;
+                string? authorAvatarUrl = null;
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                     card = await _hf.GetModelCardAsync(group.Key, cts.Token);
                     revision = !string.IsNullOrWhiteSpace(card?.Sha) ? card.Sha : "main";
                     tree = await _hf.GetTreeAsync(group.Key, revision, cts.Token);
+                    if (card is not null)
+                        authorAvatarUrl = await _hf.GetAuthorAvatarUrlAsync(card.Author, cts.Token);
                 }
                 catch
                 {
@@ -1155,7 +1161,7 @@ public partial class ModelManagementViewModel : ObservableObject
                         .Select(candidate => candidate.Item)
                         .ToList();
                     if (artworkItems.Count > 0)
-                        await BackfillArtworkAsync(group.Key, card, tree, revision, artworkItems);
+                        await BackfillArtworkAsync(group.Key, card, tree, revision, artworkItems, authorAvatarUrl);
                 }
             }
 
@@ -1180,7 +1186,8 @@ public partial class ModelManagementViewModel : ObservableObject
         HfModelCard card,
         IReadOnlyList<HfTreeEntry> tree,
         string revision,
-        IReadOnlyList<ModelProfileItemViewModel> items)
+        IReadOnlyList<ModelProfileItemViewModel> items,
+        string? authorAvatarUrl)
     {
         try
         {
@@ -1188,24 +1195,60 @@ public partial class ModelManagementViewModel : ObservableObject
                 repoId,
                 card,
                 tree,
-                HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)));
+                HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)),
+                authorAvatarUrl);
             foreach (var item in items)
             {
                 if (!item.HasCustomAvatar && !item.HasArtworkForDisplay)
-                    item.ApplyArtwork(result.CachePath, result.State, result.FailureCode, revision);
+                    item.ApplyArtwork(result.CachePath, result.State, result.FailureCode, revision,
+                        result.EffectiveSourceKind);
             }
 
-            if (result.State is not HfArtworkState.Available)
-                _activity.RecordSafe("models.artwork", repoId, ActivityOutcome.Failed,
-                    "Repository artwork unavailable", $"{result.State}:{result.FailureCode} rev={revision}");
+            RecordArtworkOutcome(repoId, revision, result);
         }
         catch (Exception ex)
         {
             // Artwork is decoration. A failed backfill must never turn a
             // completed update check into a failed model-management action.
-            _activity.RecordSafe("models.artwork", repoId, ActivityOutcome.Failed,
-                "Repository artwork unavailable", $"Unavailable:{ex.GetType().Name} rev={revision}");
+            RecordArtworkFailure(repoId, revision, ex);
         }
+    }
+
+    private void RecordArtworkOutcome(string repoId, string revision, HfArtworkResult result)
+    {
+        if (result.State == HfArtworkState.Available)
+            return;
+
+        var key = $"{repoId}\n{revision}\n{result.State}\n{result.FailureCode}";
+        lock (_artworkReportLock)
+        {
+            if (!_reportedArtworkOutcomes.Add(key))
+                return;
+        }
+
+        var outcome = result.State == HfArtworkState.NoDeclaredArtwork
+            ? ActivityOutcome.Partial
+            : ActivityOutcome.Failed;
+        var title = result.EffectiveSourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar
+            ? "Publisher avatar fallback unavailable"
+            : result.State == HfArtworkState.NoDeclaredArtwork
+                ? "No artwork available"
+                : "Repository-declared artwork unavailable";
+        _activity.RecordSafe("models.artwork", repoId, outcome, title,
+            $"source={result.EffectiveSourceKind} state={result.State}:{result.FailureCode} rev={revision}");
+    }
+
+    private void RecordArtworkFailure(string repoId, string revision, Exception exception)
+    {
+        var key = $"{repoId}\n{revision}\nexception\n{exception.GetType().Name}";
+        lock (_artworkReportLock)
+        {
+            if (!_reportedArtworkOutcomes.Add(key))
+                return;
+        }
+
+        _activity.RecordSafe("models.artwork", repoId, ActivityOutcome.Failed,
+            "Repository artwork unavailable", $"Unavailable:{exception.GetType().Name} rev={revision}");
     }
 
     private static async Task<string> ComputeSha256Async(string path)
@@ -1619,6 +1662,10 @@ public partial class ModelManagementViewModel : ObservableObject
             var tree = await _hf.GetTreeAsync(repo.RepoId, revision, ct);
             ct.ThrowIfCancellationRequested();
             repo.License = card?.License ?? "unknown";
+            var authorAvatarUrl = card is null
+                ? null
+                : await _hf.GetAuthorAvatarUrlAsync(card.Author, ct);
+            ct.ThrowIfCancellationRequested();
 
             if (tree is null)
             {
@@ -1635,6 +1682,7 @@ public partial class ModelManagementViewModel : ObservableObject
                     card,
                     tree,
                     HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)),
+                    authorAvatarUrl,
                     ct);
             _ = PublishHfArtworkAsync(repo, generation, artworkTask, ct);
 
@@ -1685,7 +1733,7 @@ public partial class ModelManagementViewModel : ObservableObject
             if (repo.HasArtwork)
             {
                 foreach (var row in HfFiles)
-                    row.ApplyArtwork(repo.ArtworkPath, repo.ArtworkState);
+                    row.ApplyArtwork(repo.ArtworkPath, repo.ArtworkState, repo.ArtworkSource);
             }
 
             var enrichments = modelEntries.Select(async entry =>
@@ -1774,9 +1822,7 @@ public partial class ModelManagementViewModel : ObservableObject
             repo.ApplyArtwork(result);
             foreach (var file in HfFiles)
                 file.ApplyArtwork(result);
-            if (result.State is not HfArtworkState.Available)
-                _activity.RecordSafe("models.artwork", repo.RepoId, ActivityOutcome.Failed,
-                    "Repository artwork unavailable", $"{result.State}:{result.FailureCode} host={result.Host} rev={repo.RevisionSha}");
+            RecordArtworkOutcome(repo.RepoId, repo.RevisionSha, result);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception ex)
@@ -1786,8 +1832,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 repo.ApplyArtwork(new HfArtworkResult(
                     HfArtworkState.Unavailable, null, null, null, 0, 0, 0, null,
                     "artwork_error", string.Empty));
-                _activity.RecordSafe("models.artwork", repo.RepoId, ActivityOutcome.Failed,
-                    "Repository artwork unavailable", $"Unavailable:{ex.GetType().Name} rev={repo.RevisionSha}");
+                RecordArtworkFailure(repo.RepoId, repo.RevisionSha, ex);
             }
         }
     }
@@ -1976,12 +2021,19 @@ public sealed partial class HfRepoResultViewModel : ObservableObject
     [ObservableProperty] private HfArtworkState _artworkState = HfArtworkState.NoDeclaredArtwork;
     [ObservableProperty] private string? _artworkPath;
     [ObservableProperty] private string _artworkFailureCode = string.Empty;
+    [ObservableProperty] private HfArtworkSourceKind _artworkSource;
 
     public bool HasArtwork => !string.IsNullOrWhiteSpace(ArtworkPath);
+    public string ArtworkSourceLabel => ArtworkSource switch
+    {
+        HfArtworkSourceKind.RepositoryFile or HfArtworkSourceKind.HuggingFaceSocialThumbnail => "Repository-declared artwork",
+        HfArtworkSourceKind.HuggingFaceAuthorAvatar => "Publisher avatar fallback",
+        _ => "No artwork available"
+    };
     public string ArtworkTooltip =>
         HasArtwork
-            ? $"Repository artwork from Hugging Face: {RepoId}, revision {RevisionSha}."
-            : $"Repository artwork: {ArtworkState}.";
+            ? $"{ArtworkSourceLabel} from Hugging Face: {RepoId}, revision {RevisionSha}."
+            : $"{ArtworkSourceLabel}: {ArtworkState}.";
 
     public HfRepoResultViewModel(string repoId, long downloads)
     {
@@ -1994,6 +2046,7 @@ public sealed partial class HfRepoResultViewModel : ObservableObject
         ArtworkPath = null;
         ArtworkState = HfArtworkState.Loading;
         ArtworkFailureCode = string.Empty;
+        ArtworkSource = HfArtworkSourceKind.None;
     }
 
     public void ApplyArtwork(HfArtworkResult result)
@@ -2001,14 +2054,17 @@ public sealed partial class HfRepoResultViewModel : ObservableObject
         ArtworkPath = result.CachePath;
         ArtworkState = result.State;
         ArtworkFailureCode = result.FailureCode;
+        ArtworkSource = result.EffectiveSourceKind;
         OnPropertyChanged(nameof(HasArtwork));
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
         OnPropertyChanged(nameof(ArtworkTooltip));
     }
 
-    public void ApplyArtwork(string? path, HfArtworkState state)
+    public void ApplyArtwork(string? path, HfArtworkState state, HfArtworkSourceKind source = HfArtworkSourceKind.None)
     {
         ArtworkPath = path;
         ArtworkState = state;
+        ArtworkSource = source;
     }
 
     partial void OnArtworkPathChanged(string? value)
@@ -2018,6 +2074,11 @@ public sealed partial class HfRepoResultViewModel : ObservableObject
     }
 
     partial void OnArtworkStateChanged(HfArtworkState value) => OnPropertyChanged(nameof(ArtworkTooltip));
+    partial void OnArtworkSourceChanged(HfArtworkSourceKind value)
+    {
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
 }
 
 public enum HfDownloadState { NotDownloaded, Partial, Downloaded, Downloading }
@@ -2044,6 +2105,7 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     [ObservableProperty] private HfDownloadState _downloadState = HfDownloadState.NotDownloaded;
     [ObservableProperty] private HfArtworkState _artworkState = HfArtworkState.NoDeclaredArtwork;
     [ObservableProperty] private string? _artworkPath;
+    [ObservableProperty] private HfArtworkSourceKind _artworkSource;
     public string DownloadStateLabel => DownloadState switch
     {
         HfDownloadState.Downloaded => "On disk",
@@ -2052,10 +2114,16 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         _ => "Download"
     };
     public bool HasArtwork => !string.IsNullOrWhiteSpace(ArtworkPath);
+    public string ArtworkSourceLabel => ArtworkSource switch
+    {
+        HfArtworkSourceKind.RepositoryFile or HfArtworkSourceKind.HuggingFaceSocialThumbnail => "Repository-declared artwork",
+        HfArtworkSourceKind.HuggingFaceAuthorAvatar => "Publisher avatar fallback",
+        _ => "No artwork available"
+    };
     public string ArtworkTooltip =>
         HasArtwork
-            ? $"Repository artwork from Hugging Face: {RepoId}, revision {RevisionSha}."
-            : $"Repository artwork: {ArtworkState}.";
+            ? $"{ArtworkSourceLabel} from Hugging Face: {RepoId}, revision {RevisionSha}."
+            : $"{ArtworkSourceLabel}: {ArtworkState}.";
     partial void OnDownloadStateChanged(HfDownloadState value)
     {
         OnPropertyChanged(nameof(DownloadStateLabel));
@@ -2222,14 +2290,17 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     {
         ArtworkPath = result.CachePath;
         ArtworkState = result.State;
+        ArtworkSource = result.EffectiveSourceKind;
         OnPropertyChanged(nameof(HasArtwork));
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
         OnPropertyChanged(nameof(ArtworkTooltip));
     }
 
-    public void ApplyArtwork(string? path, HfArtworkState state)
+    public void ApplyArtwork(string? path, HfArtworkState state, HfArtworkSourceKind source = HfArtworkSourceKind.None)
     {
         ArtworkPath = path;
         ArtworkState = state;
+        ArtworkSource = source;
     }
 
     partial void OnArtworkPathChanged(string? value)
@@ -2239,6 +2310,11 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     }
 
     partial void OnArtworkStateChanged(HfArtworkState value) => OnPropertyChanged(nameof(ArtworkTooltip));
+    partial void OnArtworkSourceChanged(HfArtworkSourceKind value)
+    {
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
 
     private void NotifyResolvedSetChanged()
     {
@@ -2372,6 +2448,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private HfArtworkState _artworkState = HfArtworkState.Unavailable;
     [ObservableProperty] private string? _artworkPath;
     [ObservableProperty] private string _artworkFailureCode = string.Empty;
+    [ObservableProperty] private HfArtworkSourceKind _artworkSource;
 
     private GgufModelInfo? _ggufInfo;
     private ModelCatalogRole _catalogRole = ModelCatalogRole.Unknown;
@@ -2395,10 +2472,21 @@ public partial class ModelProfileItemViewModel : ObservableObject
 
     public bool HasCustomAvatar => !string.IsNullOrWhiteSpace(Avatar);
     public bool HasArtworkForDisplay => !HasCustomAvatar && !string.IsNullOrWhiteSpace(ArtworkPath);
+    public string ArtworkSourceLabel => ArtworkSource switch
+    {
+        HfArtworkSourceKind.RepositoryFile or HfArtworkSourceKind.HuggingFaceSocialThumbnail => "Repository-declared artwork",
+        HfArtworkSourceKind.HuggingFaceAuthorAvatar => "Publisher avatar fallback",
+        _ => "No artwork available"
+    };
     public string ArtworkTooltip =>
         HasArtworkForDisplay
-            ? $"Repository artwork from Hugging Face: {RepoId}, revision {ArtworkRevision}."
-            : HasCustomAvatar ? "Custom model avatar." : "No verified repository artwork cached.";
+            ? $"{ArtworkSourceLabel} from Hugging Face: {RepoId}, revision {ArtworkRevision}."
+            : HasCustomAvatar ? "Custom model avatar."
+            : ArtworkState == HfArtworkState.NoDeclaredArtwork && ArtworkSource == HfArtworkSourceKind.None
+                ? "No artwork is available for this Hugging Face repository."
+                : ArtworkState == HfArtworkState.Unavailable && !string.IsNullOrWhiteSpace(ArtworkFailureCode)
+                    ? $"Hugging Face artwork is unavailable ({ArtworkFailureCode})."
+                    : "No verified repository artwork cached.";
     private string ArtworkRevision { get; set; } = string.Empty;
 
     [ObservableProperty] private bool _hasMissingCompanions;
@@ -2555,13 +2643,20 @@ public partial class ModelProfileItemViewModel : ObservableObject
         OnPropertyChanged(nameof(ArtworkTooltip));
     }
 
-    public void ApplyArtwork(string? path, HfArtworkState state, string failureCode, string revisionSha = "")
+    public void ApplyArtwork(
+        string? path,
+        HfArtworkState state,
+        string failureCode,
+        string revisionSha = "",
+        HfArtworkSourceKind source = HfArtworkSourceKind.None)
     {
         ArtworkPath = path;
         ArtworkState = state;
         ArtworkFailureCode = failureCode;
         ArtworkRevision = revisionSha;
+        ArtworkSource = source;
         OnPropertyChanged(nameof(HasArtworkForDisplay));
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
         OnPropertyChanged(nameof(ArtworkTooltip));
     }
 
@@ -2572,6 +2667,11 @@ public partial class ModelProfileItemViewModel : ObservableObject
     }
 
     partial void OnArtworkStateChanged(HfArtworkState value) => OnPropertyChanged(nameof(ArtworkTooltip));
+    partial void OnArtworkSourceChanged(HfArtworkSourceKind value)
+    {
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
     [ObservableProperty] private ModelUpdateStatus _updateStatus = ModelUpdateStatus.NotLinked;
     [ObservableProperty] private bool _isCheckingUpdate;
     [ObservableProperty] private bool _isUpdating;

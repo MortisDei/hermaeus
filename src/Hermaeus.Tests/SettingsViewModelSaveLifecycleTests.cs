@@ -17,6 +17,23 @@ namespace Hermaeus.Tests;
 public sealed class SettingsViewModelSaveLifecycleTests
 {
     [Fact]
+    public async Task Settings_save_persists_the_canonical_Kokoro_provider_id_not_its_display_label()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var tts = NewTtsSettingsViewModel(settings);
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore(), tts);
+        tts.VoiceProviders.Add(new VoiceProviderInfo(
+            VoiceProvider.Kokoro, "Kokoro (Python)", "Python backend.",
+            VoiceProviderCategory.Advanced, false, VoiceCapability.TextToSpeech | VoiceCapability.Local));
+        tts.SelectedVoiceProvider = "Kokoro (Python)";
+
+        await vm.SaveAsync();
+
+        Assert.Equal("Kokoro", settings.Settings.Tts.VoiceProvider);
+    }
+
+    [Fact]
     public async Task Failed_save_leaves_live_settings_unchanged_so_a_later_unrelated_save_does_not_persist_it()
     {
         using var temp = new TempDir();

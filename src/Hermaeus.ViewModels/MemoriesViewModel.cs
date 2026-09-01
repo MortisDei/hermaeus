@@ -19,6 +19,7 @@ public partial class MemoriesViewModel : ViewModelBase
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
     private readonly IActivityRecorder? _activity;
+    private readonly ActivityViewModel? _activityViewModel;
     private CancellationTokenSource? _searchTextCts;
 
     public UiBoundCollection<MemoryItemViewModel> Memories { get; } = [];
@@ -41,6 +42,7 @@ public partial class MemoriesViewModel : ViewModelBase
     [ObservableProperty] private bool _isRevisionBusy;
     [ObservableProperty] private MemoryItemViewModel? _contradictionTarget;
     [ObservableProperty] private string _contradictionExplanation = string.Empty;
+    [ObservableProperty] private bool _isActivityExpanded;
 
     public List<string> AvailableCategories { get; } = ["All", "facts", "preferences", "learned_behaviors", "interests"];
     public Func<MemoryItemViewModel, Task<bool>>? RequestDeleteConfirmation { get; set; }
@@ -51,7 +53,8 @@ public partial class MemoriesViewModel : ViewModelBase
         ISettingsService settings,
         IToastService toasts,
         IActivityRecorder? activity = null,
-        IKnowledgeRevisionStore? knowledge = null)
+        IKnowledgeRevisionStore? knowledge = null,
+        ActivityViewModel? activityViewModel = null)
     {
         _activity = activity;
         _store = store;
@@ -60,6 +63,7 @@ public partial class MemoriesViewModel : ViewModelBase
         _conversations = conversations;
         _settings = settings;
         _toasts = toasts;
+        _activityViewModel = activityViewModel;
         _selectedCategory = "All";
         Memories.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoMemories));
         ContradictionProposals.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasContradictionProposals));
@@ -68,6 +72,8 @@ public partial class MemoriesViewModel : ViewModelBase
     public bool HasNoMemories => Memories.Count == 0;
     public bool HasSelectedMemory => SelectedMemory is not null;
     public bool HasContradictionProposals => ContradictionProposals.Count > 0;
+    public bool HasActivity => _activityViewModel is not null;
+    public ActivityViewModel? Activity => _activityViewModel;
 
     [RelayCommand]
     public async Task InitializeAsync()
@@ -95,6 +101,8 @@ public partial class MemoriesViewModel : ViewModelBase
         await RefreshConversationFiltersAsync();
         await RefreshEmbeddingMismatchAsync();
         await RefreshContradictionProposalsAsync();
+        if (_activityViewModel is not null)
+            await _activityViewModel.RefreshAsync();
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>

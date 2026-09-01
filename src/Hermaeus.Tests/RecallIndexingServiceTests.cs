@@ -72,6 +72,20 @@ public sealed class RecallIndexingServiceTests
     }
 
     [Fact]
+    public async Task Incremental_indexing_completes_embedding_backfill_without_startup()
+    {
+        using var temp = new TempDir();
+        var (indexing, store, _) = New(temp);
+
+        await indexing.IndexConversationAsync(Conv("c1", ("user", "new content is long enough for recall")));
+
+        Assert.Equal(1, store.LastBackfillStatus.EmbeddedCount);
+        var status = await store.GetEmbeddingBackfillStatusAsync();
+        Assert.Equal(0, status.PendingCount);
+        Assert.Equal(0, status.ExhaustedCount);
+    }
+
+    [Fact]
     public async Task Re_indexing_removes_messages_that_no_longer_qualify()
     {
         using var temp = new TempDir();

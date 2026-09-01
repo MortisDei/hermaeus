@@ -13,10 +13,10 @@
 
     <TabControl Grid.Row="1">
       <TabItem Header="Experiment">
-        <ScrollViewer>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel Margin="8" Spacing="14" MaxWidth="920" HorizontalAlignment="Left">
-            <TextBlock Text="1. Set up an experiment" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock Text="Choose the Chat server, name the comparison, then start it. Lab freezes the exact baseline and candidate, stops a running source until its resources are released, runs on a dedicated loopback process, restores the source when safe, and never edits saved Services settings. Manual runs stay active for inspection until you finish or cancel; guided recipes complete automatically." TextWrapping="Wrap" />
+            <TextBlock Text="1. Compare your own baseline and candidate" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="Use this when you want to test a specific change, such as context size or GPU layers. Lab freezes the current baseline, runs the candidate beside it on a dedicated loopback process, and records the evidence without changing saved Services settings. Finish or cancel the run when you have inspected the result." TextWrapping="Wrap" />
             <Grid ColumnDefinitions="180,260" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="8">
               <TextBlock Grid.Row="0" Text="Configured Chat server" VerticalAlignment="Center" />
               <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
@@ -45,7 +45,18 @@
             <Border Classes="card" Padding="12">
               <StackPanel Spacing="5">
                 <TextBlock Text="Run state" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding RunStatus}" />
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <TextBlock Text="Execution:" />
+                  <TextBlock Text="{Binding RunStatus}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <TextBlock Text="Source restore:" />
+                  <TextBlock Text="{Binding RestoreStatus}" TextWrapping="Wrap" />
+                </StackPanel>
+                <TextBlock Text="Attention: source restore needs owner review before restarting Services."
+                           IsVisible="{Binding HasRestoreFailure}"
+                           TextWrapping="Wrap"
+                           FontWeight="SemiBold" />
                 <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Opacity="0.7" />
                 <TextBlock Text="{Binding RuntimeIsolation}" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding ComparisonSummary}" TextWrapping="Wrap" />
@@ -54,8 +65,8 @@
             <Expander Header="Frozen definition JSON">
               <TextBox Text="{Binding DefinitionPreview}" IsReadOnly="True" AcceptsReturn="True" MinHeight="140" FontFamily="Consolas" TextWrapping="Wrap" />
             </Expander>
-            <TextBlock Text="2. Or run a guided recipe" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock Text="Recipes always keep the baseline, change one declared dimension, check GPU Fit before launch, and preserve failures. Conditional controls remain Unknown until this exact runtime advertises them." TextWrapping="Wrap" />
+            <TextBlock Text="2. Run a guided recipe" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="Use a recipe when you want a ready-made runtime comparison. Each recipe changes one declared dimension, checks GPU Fit before launch, and preserves failures. Conditional controls remain Unknown until this exact runtime advertises them." TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button Content="Inspect runtime recipes" Command="{Binding RefreshRecipesCommand}"
                       ToolTip.Tip="Read capabilities from the selected runtime and rebuild the bounded recipe list." />

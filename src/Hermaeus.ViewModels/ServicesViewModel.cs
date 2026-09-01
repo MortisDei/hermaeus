@@ -1414,6 +1414,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void SyncExecutablePathFromConfig() => ExecutablePath = _config.ExecutablePath;
 
+    /// <summary>Refreshes the displayed model path after another service has
+    /// changed the live server configuration, before a programmatic restart.
+    /// </summary>
+    public void SyncModelPathFromConfig() => ModelPath = _config.ModelPath;
+
     public async Task SelectModelAndRestartAsync(string modelPath, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(modelPath))
@@ -2539,6 +2544,29 @@ public partial class ServicesViewModel : ViewModelBase
         return stopped;
     }
 
+    /// <summary>
+    /// Stops only managed embedding servers that are actually running. Doctor
+    /// uses this around a verified embedding-model migration so the process is
+    /// restarted with the new path and cannot continue serving the old vector
+    /// dimensions.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> StopRunningEmbeddingServersForModelChangeAsync()
+    {
+        var stopped = Servers
+            .Where(server => server.EmbeddingsMode && server.IsRunning)
+            .Select(server => server.Id)
+            .ToList();
+
+        foreach (var id in stopped)
+        {
+            var server = Servers.FirstOrDefault(candidate => candidate.Id == id);
+            if (server is not null)
+                await server.StopAndWaitAsync();
+        }
+
+        return stopped;
+    }
+
     /// <summary>Restarts exactly the servers named by id (r19 2.2), re-syncing each from its
     /// possibly just-updated <see cref="ServerConfig.ExecutablePath"/> first. Safe to call with
     /// ids for servers that no longer exist or are already running; both are no-ops.</summary>
@@ -2549,6 +2577,7 @@ public partial class ServicesViewModel : ViewModelBase
             var server = Servers.FirstOrDefault(s => s.Id == id);
             if (server is null || !server.IsStopped) continue;
             server.SyncExecutablePathFromConfig();
+            server.SyncModelPathFromConfig();
             await server.StartCommand.ExecuteAsync(null);
         }
     }

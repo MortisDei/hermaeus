@@ -79,6 +79,7 @@ public sealed class SqliteRagStore
         if (_initializedPath == dbPath && File.Exists(dbPath)) return;
 
         await _initGate.WaitAsync(ct);
+        var operationId = OperationCorrelation.NewId();
         try
         {
             if (_initializedPath == dbPath && File.Exists(dbPath)) return;
@@ -273,12 +274,36 @@ public sealed class SqliteRagStore
             // should find nothing on a healthy store going forward.
             await CleanupOrphanedRowsAsync(c, ct);
 
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Rag,
+                $"RAG database opened with mode=read-write, pooling=enabled, foreign_keys=enabled, journal={await ReadJournalModeAsync(c, ct)}, schema_target={SchemaVersion}.",
+                operationId));
+
             _initializedPath = dbPath;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Rag,
+                $"RAG database initialization failed: exception={ex.GetType().Name}.",
+                operationId));
+            throw;
         }
         finally
         {
             _initGate.Release();
         }
+    }
+
+    private static async Task<string> ReadJournalModeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode";
+        return Convert.ToString(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture) ?? "Unknown";
     }
 
     private async Task CleanupOrphanedRowsAsync(SqliteConnection c, CancellationToken ct)

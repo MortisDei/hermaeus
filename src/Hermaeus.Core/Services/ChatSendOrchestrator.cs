@@ -15,7 +15,12 @@ public sealed record ChatSendResult(
     long FirstEventMs = 0,
     // r19 1.2: "length" means the provider cut generation off at the
     // configured token cap, not that the model finished naturally.
-    string? FinishReason = null);
+    string? FinishReason = null,
+    // r32: preserve reasoning-stream evidence separately from visible answer
+    // content so a provider's thinking prefix is measurable rather than hidden
+    // inside the first-content latency.
+    int ReasoningEventCount = 0,
+    long ReasoningCharacterCount = 0);
 
 /// <summary>
 /// Drives one streamed chat completion and reports timing/usage, leaving all
@@ -43,6 +48,8 @@ public static class ChatSendOrchestrator
         ChatTokenUsage? usage = null;
         ChatServerTimings? serverTimings = null;
         string? finishReason = null;
+        var reasoningEventCount = 0;
+        long reasoningCharacterCount = 0;
         try
         {
             await foreach (var evt in llm.StreamChatAsync(modelId, history, options, ct))
@@ -76,18 +83,29 @@ public static class ChatSendOrchestrator
                 }
 
                 if (!string.IsNullOrEmpty(evt.ReasoningDelta))
+                {
+                    reasoningEventCount++;
+                    reasoningCharacterCount += evt.ReasoningDelta.Length;
                     onReasoning?.Invoke(evt.ReasoningDelta);
+                }
             }
 
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null, ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? firstTokenMs ?? 0, FinishReason: finishReason);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null,
+                ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? firstTokenMs ?? 0,
+                FinishReason: finishReason, ReasoningEventCount: reasoningEventCount,
+                ReasoningCharacterCount: reasoningCharacterCount);
         }
         catch (OperationCanceledException)
         {
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: true, Error: null, FirstEventMs: firstEventMs ?? 0);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: true, Error: null,
+                ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? 0, FinishReason: finishReason,
+                ReasoningEventCount: reasoningEventCount, ReasoningCharacterCount: reasoningCharacterCount);
         }
         catch (Exception ex)
         {
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: ex.Message, FirstEventMs: firstEventMs ?? 0);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: ex.Message,
+                ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? 0, FinishReason: finishReason,
+                ReasoningEventCount: reasoningEventCount, ReasoningCharacterCount: reasoningCharacterCount);
         }
     }
 }

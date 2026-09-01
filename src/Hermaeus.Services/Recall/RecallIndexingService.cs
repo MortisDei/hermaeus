@@ -65,7 +65,10 @@ public sealed class RecallIndexingService
         }
 
         if (entries.Count > 0)
+        {
             await _index.UpsertBatchAsync(entries, ct);
+            await _index.RunEmbeddingBackfillAsync(ct);
+        }
     }
 
     /// <summary>Deletion propagates, always: deleting a conversation deletes its recall
@@ -92,6 +95,7 @@ public sealed class RecallIndexingService
             CreatedAt = input.CreatedAt
         };
         await _index.UpsertBatchAsync([entry], ct);
+        await _index.RunEmbeddingBackfillAsync(ct);
     }
 
     public async Task RemoveTaskAsync(string taskId, CancellationToken ct = default) =>

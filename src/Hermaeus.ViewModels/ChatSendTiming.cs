@@ -19,7 +19,11 @@ public readonly record struct ChatSendTiming(
     ChatServerTimings? ServerTimings = null,
     long FirstEventMs = 0,
     long RagMs = 0,
-    long RecallInjectionMs = 0)
+    long RecallInjectionMs = 0,
+    int ReasoningEventCount = 0,
+    long ReasoningCharacterCount = 0,
+    string ProviderTag = "",
+    string OperationId = "")
 {
     /// <summary>A send whose pre-first-token wait exceeds this is worth a WARNING, not just an Info line.</summary>
     public const long SlowSendThresholdMs = 10_000;
@@ -57,6 +61,12 @@ public readonly record struct ChatSendTiming(
 
         if (NonContentStreamMs > 0)
             s += $", non-content stream {NonContentStreamMs} ms";
+
+        if (!string.IsNullOrWhiteSpace(ProviderTag))
+            s += $", provider {ProviderTag}";
+
+        if (ReasoningEventCount > 0 || ReasoningCharacterCount > 0)
+            s += $", reasoning {ReasoningEventCount} events / {ReasoningCharacterCount} chars";
 
         if (ServerTimings is { PromptTokens: { } promptTokens, PromptMs: { } promptMs })
             s += $", server prompt {promptTokens} tok / {promptMs:0} ms";

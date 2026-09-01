@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Hermaeus.Agent.Models;
+using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Microsoft.Data.Sqlite;
 
@@ -19,12 +20,14 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
     };
     private readonly ISettingsService _settings;
+    private readonly IRuntimeLogService? _logs;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private string _initializedIndexPath = string.Empty;
 
-    public FileAgentTaskStateStore(ISettingsService settings)
+    public FileAgentTaskStateStore(ISettingsService settings, IRuntimeLogService? logs = null)
     {
         _settings = settings;
+        _logs = logs;
     }
 
     private string AgentRoot
@@ -67,6 +70,75 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         if (!File.Exists(path)) return null;
         var json = await File.ReadAllTextAsync(path, ct);
         return JsonSerializer.Deserialize<AgentTaskState>(json, AgentJson.Options);
+    }
+
+    public async Task DeleteAsync(string taskId, CancellationToken ct = default)
+    {
+        await EnsureIndexInitializedAsync(ct);
+        var root = await LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+        if (!string.IsNullOrWhiteSpace(root.ParentTaskId))
+            throw new InvalidOperationException("Delete the top-level run to remove its sub-tasks.");
+
+        var links = new List<(string TaskId, string? ParentTaskId)>();
+        await using (var connection = new SqliteConnection(IndexConnectionString))
+        {
+            await connection.OpenAsync(ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT task_id, parent_task_id FROM agent_task_index";
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                links.Add((reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1)));
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal) { root.TaskId };
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var link in links)
+            {
+                if (link.ParentTaskId is not null && ids.Contains(link.ParentTaskId) && ids.Add(link.TaskId))
+                    changed = true;
+            }
+        }
+
+        foreach (var id in ids)
+        {
+            ct.ThrowIfCancellationRequested();
+            var state = await LoadAsync(id, ct);
+            if (state?.Status == AgentTaskStatus.Running)
+                throw new InvalidOperationException("Stop the run before deleting it.");
+        }
+
+        var tasksRoot = Path.GetFullPath(Path.Combine(AgentRoot, "tasks"));
+        var tasksRootPrefix = tasksRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        foreach (var id in ids)
+        {
+            ct.ThrowIfCancellationRequested();
+            var directory = Path.GetFullPath(GetTaskDirectory(id));
+            if (!directory.StartsWith(tasksRootPrefix, OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal))
+                throw new InvalidOperationException("Agent task directory escaped the agent task root.");
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+
+        await using var deleteConnection = new SqliteConnection(IndexConnectionString);
+        await deleteConnection.OpenAsync(ct);
+        await using var deleteCommand = deleteConnection.CreateCommand();
+        var parameters = new List<string>(ids.Count);
+        var index = 0;
+        foreach (var id in ids)
+        {
+            var parameter = $"$task{index++}";
+            parameters.Add(parameter);
+            deleteCommand.Parameters.AddWithValue(parameter, id);
+        }
+        deleteCommand.CommandText = $"DELETE FROM agent_task_index WHERE task_id IN ({string.Join(",", parameters)})";
+        await deleteCommand.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<IReadOnlyList<AgentTaskListItem>> ListRecentAsync(int limit = 25, CancellationToken ct = default)
@@ -273,6 +345,14 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
+            var journalMode = await ReadJournalModeAsync(c, ct);
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Agent task index opened with mode=read-write, pooling=provider-default, journal={journalMode}, schema_target={IndexSchemaVersion}",
+                OperationCorrelation.NewId()));
+
             await SqliteMigrationRunner.ApplyAsync(c, "agent_task_index", IndexSchemaVersion,
             [
                 new SqliteMigration(1, (_, _) => Task.FromResult(false)),
@@ -282,13 +362,124 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 new SqliteMigration(5, AddProjectIdColumnAsync),
                 new SqliteMigration(6, AddModelIdentityColumnsAsync)
             ], ct);
+            var recovered = await ReconcileStaleRunningTasksAsync(ct);
             await ReconcileIndexAsync(c, ct);
+            if (recovered > 0)
+            {
+                _logs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Warning,
+                    RuntimeLogCategory.Agent,
+                    $"Agent startup recovery interrupted {recovered} persisted run(s); no active execution owner was present.",
+                    OperationCorrelation.NewId()));
+            }
 
             _initializedIndexPath = path;
         }
         finally
         {
             _initGate.Release();
+        }
+    }
+
+    private static async Task<string> ReadJournalModeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode";
+        return Convert.ToString(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) ?? "Unknown";
+    }
+
+    private async Task<int> ReconcileStaleRunningTasksAsync(CancellationToken ct)
+    {
+        var states = new Dictionary<string, (string Path, AgentTaskState State)>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(AgentRoot, "tasks"), "task_state.json", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var json = await File.ReadAllTextAsync(file, ct);
+                var state = JsonSerializer.Deserialize<AgentTaskState>(json, AgentJson.Options);
+                if (state is not null)
+                    states[state.TaskId] = (file, state);
+            }
+            catch (JsonException)
+            {
+                // ReconcileIndexAsync retains the existing rule: one corrupt
+                // task file must not prevent the remaining tasks from loading.
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Warning,
+                    RuntimeLogCategory.Agent,
+                    $"Agent startup recovery skipped an unreadable task state; exception={ex.GetType().Name}.",
+                    OperationCorrelation.NewId()));
+            }
+        }
+
+        var reason = "The previous Agent execution was interrupted because its execution context was not present during startup recovery. Continue it explicitly to resume.";
+        var changed = new List<(string Path, AgentTaskState State)>();
+        foreach (var entry in states.Values)
+        {
+            var stateChanged = false;
+            if (entry.State.Status == AgentTaskStatus.Running)
+            {
+                MarkInterrupted(entry.State, reason);
+                stateChanged = true;
+            }
+
+            if (entry.State.SubTaskPlan.Count > 0)
+            {
+                foreach (var spec in entry.State.SubTaskPlan)
+                {
+                    if (spec.Status != AgentSubTaskStatus.Running || string.IsNullOrWhiteSpace(spec.TaskId))
+                        continue;
+
+                    var child = states.TryGetValue(spec.TaskId, out var childEntry) ? childEntry.State : null;
+                    if (child is null || child.Status != AgentTaskStatus.Interrupted)
+                        continue;
+
+                    spec.Status = AgentSubTaskStatus.Interrupted;
+                    spec.ResultSummary = child.InterruptionReason;
+                    stateChanged = true;
+                }
+            }
+
+            if (stateChanged)
+                changed.Add(entry);
+        }
+
+        foreach (var entry in changed)
+        {
+            ct.ThrowIfCancellationRequested();
+            entry.State.UpdatedAt = DateTime.UtcNow;
+            await AtomicFileWriter.WriteAllTextAsync(
+                entry.Path,
+                JsonSerializer.Serialize(entry.State, AgentJson.Options),
+                ct);
+        }
+
+        return changed.Count(entry => entry.State.Status == AgentTaskStatus.Interrupted);
+    }
+
+    private static void MarkInterrupted(AgentTaskState state, string reason)
+    {
+        state.Status = AgentTaskStatus.Interrupted;
+        state.InterruptionReason = reason;
+        state.ActiveStep = "Interrupted during startup recovery";
+        state.PendingToolAction = null;
+        state.PlanApprovalPending = false;
+        state.LastUserMessage = string.Empty;
+        state.Decisions.Add(new AgentDecision("Execution interrupted", reason, DateTime.UtcNow));
+        state.Summary = string.IsNullOrWhiteSpace(state.Summary)
+            ? reason
+            : $"{state.Summary} {reason}";
+
+        foreach (var spec in state.SubTaskPlan.Where(spec => spec.Status == AgentSubTaskStatus.Running))
+        {
+            spec.Status = AgentSubTaskStatus.Interrupted;
+            spec.ResultSummary = reason;
         }
     }
 

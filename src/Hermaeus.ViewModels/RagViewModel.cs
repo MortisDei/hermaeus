@@ -177,6 +177,43 @@ public sealed class RagDatasetManagerItemViewModel
         : $"Embedding model: {EmbeddingModel}";
 }
 
+/// <summary>
+/// One dataset that can be included in the next RAG question. This is kept
+/// separate from the manager's SelectedDataset because ingest, reindex and
+/// evaluation still operate on exactly one dataset at a time.
+/// </summary>
+public sealed class RagDatasetQueryOptionViewModel : ObservableObject
+{
+    private bool _isIncluded;
+
+    public RagDatasetQueryOptionViewModel(RagDataset dataset, bool isIncluded)
+    {
+        Dataset = dataset;
+        _isIncluded = isIncluded;
+    }
+
+    public RagDataset Dataset { get; }
+    public string Id => Dataset.Id;
+    public string Name => Dataset.Name;
+    public int ChunkCount => Dataset.ChunkCount;
+    public string ChunkLabel => $"{ChunkCount} chunk{(ChunkCount == 1 ? "" : "s")}";
+
+    public bool IsIncluded
+    {
+        get => _isIncluded;
+        set
+        {
+            if (_isIncluded == value)
+                return;
+            _isIncluded = value;
+            OnPropertyChanged();
+            SelectionChanged?.Invoke();
+        }
+    }
+
+    internal Action? SelectionChanged { get; set; }
+}
+
 public partial class RagViewModel : ObservableObject
 {
     private readonly RagQueryService _query;
@@ -201,6 +238,11 @@ public partial class RagViewModel : ObservableObject
     public UiBoundCollection<RagEvalResultViewModel> EvalResults { get; } = [];
     public UiBoundCollection<RagIngestReportItemViewModel> IngestReportItems { get; } = [];
     public UiBoundCollection<RagDatasetManagerItemViewModel> DatasetManagerItems { get; } = [];
+    public UiBoundCollection<RagDatasetQueryOptionViewModel> QueryDatasetOptions { get; } = [];
+
+    /// <summary>The settings service is exposed for the desktop input handler,
+    /// matching ChatView's shared Enter-to-send policy.</summary>
+    public ISettingsService Settings => _settings;
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
@@ -215,7 +257,23 @@ public partial class RagViewModel : ObservableObject
 
         var match = Datasets.FirstOrDefault(d => d.Id == datasetId);
         if (match is not null)
+        {
             SelectedDataset = match;
+            SetQueryDatasetIncluded(match.Id, true);
+        }
+    }
+
+    public string QueryDatasetSelectionLabel
+    {
+        get
+        {
+            var selected = QueryDatasetOptions.Where(option => option.IsIncluded).Select(option => option.Name).ToList();
+            if (selected.Count == 0 && QueryDatasetOptions.Count == 0 && SelectedDataset is not null)
+                return $"Using 1 dataset: {SelectedDataset.Name}";
+            return selected.Count == 0
+                ? "Select at least one dataset before asking."
+                : $"Using {selected.Count} dataset{(selected.Count == 1 ? "" : "s")}: {string.Join(", ", selected)}";
+        }
     }
     [ObservableProperty] private string      _answerText      = string.Empty;
 
@@ -315,10 +373,32 @@ public partial class RagViewModel : ObservableObject
     {
         try
         {
+            var previousSelectedId = SelectedDataset?.Id;
+            var previousIncludedIds = QueryDatasetOptions.Where(option => option.IsIncluded)
+                .Select(option => option.Id)
+                .ToHashSet(StringComparer.Ordinal);
             var all = await _query.GetDatasetsAsync();
             Datasets.Clear();
             foreach (var d in all) Datasets.Add(d);
-            SelectedDataset = Datasets.FirstOrDefault();
+            SelectedDataset = Datasets.FirstOrDefault(d => d.Id == previousSelectedId)
+                ?? Datasets.FirstOrDefault();
+            QueryDatasetOptions.Clear();
+            var hasPreviousSelection = previousIncludedIds.Any(id => Datasets.Any(dataset => dataset.Id == id));
+            var includedIds = hasPreviousSelection
+                ? previousIncludedIds
+                : SelectedDataset is null
+                    ? new HashSet<string>(StringComparer.Ordinal)
+                    : new HashSet<string>([SelectedDataset.Id], StringComparer.Ordinal);
+            foreach (var dataset in Datasets)
+            {
+                var option = new RagDatasetQueryOptionViewModel(dataset, includedIds.Contains(dataset.Id))
+                {
+                    SelectionChanged = OnQueryDatasetSelectionChanged
+                };
+                QueryDatasetOptions.Add(option);
+            }
+            OnPropertyChanged(nameof(QueryDatasetSelectionLabel));
+            QueryCommand.NotifyCanExecuteChanged();
             await RefreshDatasetManagerAsync();
         }
         catch (Exception ex) { SetError(ex.Message); }
@@ -327,7 +407,18 @@ public partial class RagViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanQuery))]
     private async Task QueryAsync()
     {
-        if (SelectedDataset is null || string.IsNullOrWhiteSpace(QuestionText)) return;
+        var selectedDatasets = QueryDatasetOptions.Where(option => option.IsIncluded).ToList();
+        var datasetIds = selectedDatasets.Count > 0
+            ? selectedDatasets.Select(option => option.Id).ToArray()
+            : SelectedDataset is not null && QueryDatasetOptions.Count == 0
+                ? [SelectedDataset.Id]
+                : [];
+        var datasetNames = selectedDatasets.Count > 0
+            ? selectedDatasets.Select(option => option.Name).ToArray()
+            : SelectedDataset is not null && QueryDatasetOptions.Count == 0
+                ? [SelectedDataset.Name]
+                : [];
+        if (datasetIds.Length == 0 || string.IsNullOrWhiteSpace(QuestionText)) return;
 
         // The box empties on send, the way the chat composer does, so a sent
         // question never looks like an unsent one. The text is not lost: it is
@@ -348,7 +439,7 @@ public partial class RagViewModel : ObservableObject
         try
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-                $"RAG query started for dataset {SelectedDataset.Name}"));
+                $"RAG query started for dataset(s) {string.Join(", ", datasetNames)}"));
             // Ask used to pass an empty model id unconditionally and let the
             // query service fall back to Llm.DefaultModel. That setting is
             // empty on any install where the user only ever picked a model from
@@ -364,7 +455,7 @@ public partial class RagViewModel : ObservableObject
             var answerBuilder = new StringBuilder();
 
             await foreach (var evt in _query.StreamQueryAsync(
-                SelectedDataset.Id, question, opts, _cts.Token))
+                datasetIds, question, opts, _cts.Token))
             {
                 switch (evt.Kind)
                 {
@@ -387,7 +478,7 @@ public partial class RagViewModel : ObservableObject
                 AnswerText,
                 string.Join(" ", Sources.Select(s => s.Content)));
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-                $"RAG query completed for dataset {SelectedDataset.Name}"));
+                $"RAG query completed for dataset(s) {string.Join(", ", datasetNames)}"));
         }
         catch (OperationCanceledException) { RestoreQuestion(question); }
         catch (Exception ex) { SetError(ex.Message); RestoreQuestion(question); }
@@ -1086,7 +1177,9 @@ public partial class RagViewModel : ObservableObject
     [RelayCommand]
     private void StopEval() => _evalCts?.Cancel();
 
-    private bool CanQuery()  => !IsQuerying && !IsIngesting && SelectedDataset is not null
+    private bool CanQuery()  => !IsQuerying && !IsIngesting
+                                && (QueryDatasetOptions.Any(option => option.IsIncluded)
+                                    || (QueryDatasetOptions.Count == 0 && SelectedDataset is not null))
                                 && !string.IsNullOrWhiteSpace(QuestionText);
     private bool CanIngest() => !IsIngesting && !IsQuerying
                                 && !string.IsNullOrWhiteSpace(NewDatasetName)
@@ -1238,6 +1331,19 @@ public partial class RagViewModel : ObservableObject
         RunFullEvalCommand.NotifyCanExecuteChanged();
     }
     partial void OnIsQueryingChanged(bool value) => QueryCommand.NotifyCanExecuteChanged();
+
+    private void SetQueryDatasetIncluded(string datasetId, bool included)
+    {
+        var option = QueryDatasetOptions.FirstOrDefault(candidate => candidate.Id == datasetId);
+        if (option is not null)
+            option.IsIncluded = included;
+    }
+
+    private void OnQueryDatasetSelectionChanged()
+    {
+        OnPropertyChanged(nameof(QueryDatasetSelectionLabel));
+        QueryCommand.NotifyCanExecuteChanged();
+    }
     partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnWebUrlListChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnEnableWebLoaderChanged(bool value)

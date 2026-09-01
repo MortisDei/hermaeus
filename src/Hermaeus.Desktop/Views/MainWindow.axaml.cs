@@ -34,6 +34,13 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm)
         {
             vm.Agent.RequestDraftPatchPreview = ShowDraftPatchPreviewAsync;
+            vm.Agent.RequestCopyToClipboard = async text =>
+            {
+                if (Clipboard is not { } clipboard)
+                    return false;
+                try { await clipboard.SetTextAsync(text); return true; }
+                catch { return false; }
+            };
             vm.Agent.RequestRewindConfirmation = async plan =>
             {
                 var dialog = new TaskRewindConfirmationDialog();
@@ -115,6 +122,18 @@ public partial class MainWindow : Window
             vm.Palette.CloseCommand.Execute(null);
             e.Handled = true;
         }
+    }
+
+    private void OnQuickChatKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Return or Key.Enter)
+            || e.KeyModifiers is not (KeyModifiers.None or KeyModifiers.Control)
+            || DataContext is not MainWindowViewModel vm)
+            return;
+
+        e.Handled = true;
+        if (vm.Chat.SendCommand.CanExecute(null))
+            vm.Chat.SendCommand.Execute(null);
     }
 
     private async Task<bool> ShowDraftPatchPreviewAsync(DraftPatchPreviewRequest request)

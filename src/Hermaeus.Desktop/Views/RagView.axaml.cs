@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Hermaeus.ViewModels;
@@ -25,6 +26,8 @@ public partial class RagView : UserControl
     public RagView()
     {
         InitializeComponent();
+        if (this.FindControl<TextBox>("QuestionBox") is { } questionBox)
+            questionBox.AddHandler(InputElement.KeyDownEvent, OnQuestionKeyDown, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
     }
 
@@ -157,12 +160,40 @@ public partial class RagView : UserControl
     private void OnQuestionKeyDown(object? sender, KeyEventArgs e)
     {
         if (_vm is null || _vm.IsQuerying) return;
-        if (e.Key == Key.Return && e.KeyModifiers == KeyModifiers.None)
+        var modifiers = ChatInputModifiers.None;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) modifiers |= ChatInputModifiers.Control;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) modifiers |= ChatInputModifiers.Shift;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt)) modifiers |= ChatInputModifiers.Alt;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Meta)) modifiers |= ChatInputModifiers.Meta;
+
+        var action = ChatInputKeys.Resolve(
+            e.Key is Key.Return or Key.Enter,
+            modifiers,
+            _vm.Settings.Settings.Ui.CtrlEnterToSend);
+
+        switch (action)
         {
-            e.Handled = true;
-            if (_vm.QueryCommand.CanExecute(null))
-                _vm.QueryCommand.Execute(null);
+            case ChatInputKeyAction.Send:
+                e.Handled = true;
+                if (_vm.QueryCommand.CanExecute(null))
+                    _vm.QueryCommand.Execute(null);
+                break;
+            case ChatInputKeyAction.Newline:
+                e.Handled = true;
+                InsertAtCursor(Environment.NewLine);
+                break;
         }
+    }
+
+    private void InsertAtCursor(string text)
+    {
+        if (_vm is null || this.FindControl<TextBox>("QuestionBox") is not { } questionBox)
+            return;
+
+        var current = _vm.QuestionText;
+        var caret = Math.Clamp(questionBox.CaretIndex, 0, current.Length);
+        _vm.QuestionText = current.Insert(caret, text);
+        questionBox.CaretIndex = caret + text.Length;
     }
 
     private async void OnBrowseClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

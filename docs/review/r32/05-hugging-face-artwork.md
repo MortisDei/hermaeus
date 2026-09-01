@@ -9,9 +9,17 @@ arbitrary remote-image beacon or an image-decoder attack surface.
 
 Hugging Face documents `thumbnail` as optional model-card metadata for a URL
 used in social sharing. The existing `GET /api/models/{repoId}` call already
-reads `cardData` and the immutable repository `sha`; acquire only the
-string-valued `cardData.thumbnail` from that response, capped at 2,048 UTF-8
-bytes. Do not scrape the card Markdown or make a second unpinned card request.
+reads the immutable repository `sha`; acquire only a string-valued
+`thumbnail` from the response's `cardData` or normalized root metadata,
+capped at 2,048 UTF-8 bytes. Do not scrape the card Markdown or make a second
+unpinned card request. A response without this optional declaration remains
+`NoDeclaredArtwork` for the repository source. Hermaeus may then make a
+separate anonymous lookup of the card's bounded `author` namespace through
+the exact organization/user overview endpoints and use its exact
+`cdn-avatars.huggingface.co` `avatarUrl` as publisher-avatar fallback artwork.
+That avatar is never repository-declared artwork, and a missing or rejected
+avatar remains `No artwork available`; Hermaeus does not infer a logo or image
+from repository filenames.
 Extend `HfModelCard` with a bounded artwork descriptor:
 
 ```text
@@ -31,7 +39,9 @@ Source order:
    URL, whose normalized path exists in the selected revision's file tree;
 2. a documented Hugging Face-hosted social thumbnail URL that passes the same
    exact-host policy and can be acquired without credentials;
-3. the existing local generic model mark.
+3. the publisher or organization avatar fallback from the exact avatar host,
+   only when neither repository-declared source is available;
+4. the existing local generic model mark.
 
 If `sha` is absent or not a 40-character immutable revision, do not fetch art.
 `main` is not an artwork cache identity. For a repository file, build the
@@ -42,9 +52,32 @@ Do not scrape Markdown for the first image. It may be a badge, tracking pixel,
 diagram, screenshot, external advertisement, or huge asset. Do not infer art
 from filenames such as `logo.png` without explicit model-card metadata.
 
-The UI identifies the image as repository artwork and retains repo/revision
-provenance in its cache metadata. Artwork never contributes to model identity,
-compatibility, trust, ranking, or download selection.
+The UI and cache metadata distinguish `RepositoryFile` or
+`HuggingFaceSocialThumbnail` from `HuggingFaceAuthorAvatar` fallback and from
+`None`. Every available result still retains repo/revision provenance. Artwork
+never contributes to model identity, compatibility, trust, ranking, or
+download selection.
+
+### Owner-session diagnosis
+
+During the 2026-09-01 owner session, **Check for updates** did run: the local
+manifest received current `last_checked_at_utc` values, and the attached logs
+showed the independent embedding installation activity. The representative
+model-card API responses returned an immutable `sha`, but no bounded
+`cardData.thumbnail` or root `thumbnail`; the repository tree therefore
+resolved the model revision without declaring model artwork. The pre-fallback
+owner-session path stopped at **artwork declaration discovery**, before any
+artwork remote fetch, trust/admission check, cache write, cache lookup, card
+binding, or bitmap decode could occur. The visible Hugging Face page image was
+the publisher avatar, which was a separate metadata surface the old path did
+not inspect.
+
+The bounded fallback now continues that same manual update path through the
+anonymous organization/user overview lookup, exact avatar-host validation,
+bounded image fetch and preflight, atomic cache write, content-addressed cache
+lookup, source-aware model-card binding, and the existing second-boundary
+Avalonia decode. Regression coverage records the request order and keeps the
+fallback source distinct from a repository declaration.
 
 ## 5.2 Untrusted URL policy
 
@@ -79,6 +112,10 @@ The metadata value is publisher-controlled. Treat it as hostile input.
   provider-generated signed query parameters; validate each hop, never persist
   or log that transient URL/query, and key the cache by repo/sha/path/content
   hash instead.
+- Publisher-avatar fallback starts only from the exact HTTPS
+  `cdn-avatars.huggingface.co` host, rejects queries/fragments and unsafe
+  authorities, and may redirect only within that same exact host. It never
+  follows a redirect from the avatar host to a Hub or delivery origin.
 - Never send Local API, provider, or Hugging Face access tokens for artwork.
 - Never fetch an arbitrary external `thumbnail` URL. Show the fallback and a
   bounded status explaining that external artwork was not loaded for privacy.
@@ -115,15 +152,20 @@ Store artwork under the configured AI assets/data cache policy only after the
 location is reviewed against backup/privacy semantics. Do not place it beside
 model weights or in the repository checkout.
 
-Cache key includes normalized repo id, exact revision sha, repository path or
-stable source kind, and content hash. It never includes a transient signed CDN
-URL. A small metadata row/file records MIME, byte count, dimensions, ETag when
-supplied, fetched time, and last access. Writes use temp plus atomic move.
+The logical cache lookup key includes normalized repo id, exact revision sha,
+repository path or stable source kind, and content hash. It never includes a
+transient signed CDN URL. A small metadata row/file records MIME, byte count,
+dimensions, source kind, ETag when supplied, fetched time, and last access.
+The verified physical image is content-addressed by its byte hash and may be
+shared by multiple logical repository/revision records; those metadata records
+remain separate so provenance is never merged. Writes use temp plus atomic
+move, and eviction deletes a shared image only after its last metadata record
+is removed.
 
 Rules:
 
-- Search is manual, so artwork network access starts only after the user opens
-  the browser and searches/selects a repository. No startup refresh.
+- Artwork network access starts only after an explicit repository selection or
+  the user's **Check for updates** action. No startup refresh.
 - Cache hits do not contact the network.
 - Revision change may fetch a new entry; it does not overwrite evidence for the
   old revision in place.
@@ -153,32 +195,37 @@ Initial presentation:
   current card;
 - file download cards reuse the selected repository artwork at thumbnail size;
   they do not fetch one image per quantization/file;
-- installed model cards may reuse cached repository artwork only when the
-  manifest has verified repo and revision provenance. User-selected local
-  avatars remain a separate preference and win where currently intended.
+- installed model cards may reuse cached repository or publisher-avatar artwork
+  only when the manifest has verified repo and revision provenance. User-selected
+  local avatars remain a separate preference and win where currently intended.
 
 Keep text primary. Artwork has fixed bounds, no layout jump after load, a
-fallback, accessible label, tooltip naming its repository origin, and no
-meaning conveyed only by color/image.
+fallback, accessible label, tooltip naming its repository/revision and source
+kind, and no meaning conveyed only by color/image.
 
 ## 5.6 Failure and privacy UX
 
 Card-local states are `Loading`, `Available`, `NoDeclaredArtwork`,
 `ExternalBlocked`, `Invalid`, and `Unavailable`. Most render the same fallback;
-the distinction appears in a restrained tooltip/detail, not a wall of warnings.
+the distinction between repository-declared artwork, publisher-avatar fallback,
+and no artwork appears in a restrained tooltip/detail, not a wall of warnings.
 
 Never include the full remote URL or query string in ordinary runtime logs.
 Log repo id, revision, stable failure code, host, and bounded exception type.
 Redaction still applies.
 
-The first manual search can explain that Hermaeus contacts Hugging Face for
-repository metadata and artwork. Existing anonymous/manual network semantics
-remain. Artwork does not cause traffic when the browser is closed.
+The first manual search or update check can explain that Hermaeus contacts
+Hugging Face for repository metadata and optional artwork. Existing
+anonymous/manual network semantics remain. Artwork does not cause traffic when
+the browser is closed.
 
 ## 5.7 Acceptance criteria
 
 - A valid repo-relative thumbnail appears on the selected repository and its
   download cards, keyed to the exact revision.
+- A repository without declared artwork may show its verified publisher/avatar
+  fallback, with fallback provenance retained separately from repository
+  declaration provenance.
 - Missing, external, oversized, redirected-to-disallowed-host, wrong-MIME,
   malformed, animated, SVG, and decode-bomb candidates fall back safely.
 - Missing/invalid immutable sha or a thumbnail path absent from the exact tree
@@ -195,7 +242,8 @@ remain. Artwork does not cause traffic when the browser is closed.
 
 Expected automated coverage: 20-25 tests.
 
-- metadata parsing, relative resolution, revision pinning, and fallback order;
+- metadata parsing, relative resolution, revision pinning, publisher-avatar
+  fallback, and fallback order;
 - declared-origin, exact delivery-host, scheme/port/IP/user-info/redirect
   validation, including authorization stripping and signed-query redaction;
 - byte, MIME, magic, dimension, pixel, and format limits;

@@ -572,6 +572,9 @@ public partial class LabViewModel : ViewModelBase
     [ObservableProperty] private int _candidateContextSize = 4096;
     [ObservableProperty] private string _definitionPreview = string.Empty;
     [ObservableProperty] private string _runStatus = "Not started";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRestoreFailure))]
+    private string _restoreStatus = "Not required";
     [ObservableProperty] private string _runtimeIsolation = "No Lab runtime is active.";
     [ObservableProperty] private string _comparisonSummary = string.Empty;
     [ObservableProperty] private string _applyReviewSummary = string.Empty;
@@ -592,6 +595,8 @@ public partial class LabViewModel : ViewModelBase
     private readonly Dictionary<string, string> _suspendedSourceConfigurationFingerprints = new(StringComparer.Ordinal);
 
     public bool HasSelection => SelectedExperience is not null;
+    public bool HasRestoreFailure => RestoreStatus.StartsWith("Failed:", StringComparison.Ordinal)
+        || RestoreStatus.StartsWith("Blocked:", StringComparison.Ordinal);
     [ObservableProperty] private bool _hasAnyEvidence;
     public string EvidenceEmptyState => HasAnyEvidence
         ? "No evidence matches these filters."
@@ -793,6 +798,8 @@ public partial class LabViewModel : ViewModelBase
         IsBusy = true;
         try
         {
+            if (_suspendedSourceServers.Count == 0)
+                RestoreStatus = "Not required";
             await SuspendSelectedSourceAsync();
             _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt, _recipeCts.Token);
             ShowCompletedRun(_currentRun);
@@ -888,6 +895,8 @@ public partial class LabViewModel : ViewModelBase
         IsBusy = true;
         try
         {
+            if (_suspendedSourceServers.Count == 0)
+                RestoreStatus = "Not required";
             await SuspendSelectedSourceAsync();
             var baseline = ConfigurationFrom(SelectedServer, "baseline", "Baseline");
             var candidate = baseline with { Id = "candidate-1", Label = "Candidate", ContextSize = CandidateContextSize };
@@ -1251,9 +1260,15 @@ public partial class LabViewModel : ViewModelBase
         _suspendedSourceConfigurationFingerprints[source.Id] = JsonSerializer.Serialize(source.BuildConfig());
         _suspendedSourceServers = await _services.SuspendRunningServersAsync([SelectedServer.Id]);
         if (_suspendedSourceServers.Count > 0)
+        {
+            RestoreStatus = "Pending";
             RuntimeIsolation = "The source Chat runtime is stopped and fully unloaded while Lab uses the GPU. It will be restored when the run ends.";
+        }
         else
+        {
+            RestoreStatus = "Not required";
             _suspendedSourceConfigurationFingerprints.Clear();
+        }
     }
 
     private async Task RestoreSuspendedSourceAsync()
@@ -1271,6 +1286,7 @@ public partial class LabViewModel : ViewModelBase
         if (changed.Length > 0)
         {
             _toasts.Show("Lab source was not restarted", "The source configuration changed during the run. Review it and start the original runtime manually instead of silently launching a different configuration.", ToastKind.Warning, 7000);
+            RestoreStatus = "Blocked: source configuration changed during Lab.";
             RuntimeIsolation = "The source Chat runtime stayed stopped because its configuration changed during Lab. Review Services before restarting it.";
             _suspendedSourceServers = [];
             _suspendedSourceConfigurationFingerprints.Clear();
@@ -1285,11 +1301,13 @@ public partial class LabViewModel : ViewModelBase
                 throw new InvalidOperationException($"The source runtime did not return to Running state: {string.Join(", ", failed)}.");
             _suspendedSourceServers = [];
             _suspendedSourceConfigurationFingerprints.Clear();
+            RestoreStatus = "Restored";
             RuntimeIsolation = "The isolated Lab runtime was torn down and the original source Chat runtime was restored.";
         }
         catch (Exception ex)
         {
             _toasts.Show("Could not restore Lab source", ex.Message, ToastKind.Warning, 7000);
+            RestoreStatus = $"Failed: {ex.Message}";
             RuntimeIsolation = $"The source Chat runtime remains stopped after Lab. Restore failed: {ex.Message}";
         }
     }

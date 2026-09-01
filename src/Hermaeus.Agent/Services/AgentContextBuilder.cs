@@ -328,6 +328,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
                     .Select(path => new AgentRetrievedItem("workspace", path, path, 0, Locator: path))
                     .ToList()
                 : _workspaceTools.SearchFiles(options, query)
+                    .Where(r => !r.IsTruncationNotice)
                     .Take(options.MaxContextItems)
                     .Select(r => new AgentRetrievedItem("workspace", r.RelativePath, r.Snippet, 0, r.ModifiedUtc, Locator: r.RelativePath))
                     .ToList();

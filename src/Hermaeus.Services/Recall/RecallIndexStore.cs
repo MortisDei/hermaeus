@@ -1,3 +1,4 @@
+using System.Globalization;
 using Hermaeus.Core.Services;
 using Hermaeus.Core.Models;
 using Hermaeus.Rag.Embeddings;
@@ -23,6 +24,20 @@ public sealed class RecallEntry
     public double RelevanceScore { get; set; }
 }
 
+public sealed record RecallEmbeddingBackfillStatus(
+    string OperationId,
+    int SelectedCount,
+    int EmbeddedCount,
+    int FailedCount,
+    int DeferredCount,
+    int ExhaustedCount,
+    int PendingCount,
+    string? LastFailure)
+{
+    public static RecallEmbeddingBackfillStatus None(string operationId) =>
+        new(operationId, 0, 0, 0, 0, 0, 0, null);
+}
+
 /// <summary>
 /// r24 doc 02 2.1: {DataRoot}/recall.db, holding one row per indexed message
 /// or agent task. Directly under the data root like every other store, so
@@ -33,17 +48,22 @@ public sealed class RecallEntry
 /// </summary>
 public sealed class RecallIndexStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private const int MaxBackfillAttemptsPerRow = 5;
     private static readonly TimeSpan QueryEmbedTimeout = TimeSpan.FromSeconds(3);
 
     private readonly ISettingsService _settings;
     private readonly IEmbeddingService? _embeddings;
     private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly IRuntimeLogService? _logs;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _backfillCooldown;
+    private readonly bool _automaticRetry;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly SemaphoreSlim _backfillGate = new(1, 1);
-    private readonly Dictionary<string, (DateTime NextAttemptUtc, int Attempts)> _backfillState = new(StringComparer.Ordinal);
+    private int _retryScheduled;
+    public RecallEmbeddingBackfillStatus LastBackfillStatus { get; private set; } = RecallEmbeddingBackfillStatus.None("none");
 
     private string DbPath
     {
@@ -59,11 +79,21 @@ public sealed class RecallIndexStore
     public RecallIndexStore(
         ISettingsService settings,
         IEmbeddingService? embeddings = null,
-        IResourceCoordinator? resourceCoordinator = null)
+        IResourceCoordinator? resourceCoordinator = null,
+        IRuntimeLogService? logs = null,
+        TimeProvider? timeProvider = null,
+        TimeSpan? backfillCooldown = null,
+        bool automaticRetry = true)
     {
         _settings = settings;
         _embeddings = embeddings;
         _resourceCoordinator = resourceCoordinator;
+        _logs = logs;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _backfillCooldown = backfillCooldown ?? TimeSpan.FromMinutes(10);
+        _automaticRetry = automaticRetry;
+        if (_backfillCooldown < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(backfillCooldown));
     }
 
     public async Task InitializeAsync(CancellationToken ct = default) => await EnsureInitializedAsync(ct);
@@ -74,6 +104,7 @@ public sealed class RecallIndexStore
         if (_initializedPath == dbPath && File.Exists(dbPath)) return;
 
         await _initGate.WaitAsync(ct);
+        var operationId = OperationCorrelation.NewId();
         try
         {
             if (_initializedPath == dbPath && File.Exists(dbPath)) return;
@@ -95,7 +126,10 @@ public sealed class RecallIndexStore
                 created_at    TEXT NOT NULL,
                 indexed_at    TEXT NOT NULL,
                 embedding     BLOB,
-                embedding_dim INTEGER
+                embedding_dim INTEGER,
+                embedding_attempts INTEGER NOT NULL DEFAULT 0,
+                embedding_next_attempt_at TEXT,
+                embedding_last_error TEXT
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS recall_fts USING fts5(
                 id UNINDEXED,
@@ -106,11 +140,38 @@ public sealed class RecallIndexStore
             CREATE INDEX IF NOT EXISTS idx_recall_project ON recall_entries(project_id);";
             await cmd.ExecuteNonQueryAsync(ct);
 
-            var schemaChanged = await SqliteMigrationRunner.ApplyAsync(c, "recall", SchemaVersion, [], ct);
+            var schemaChanged = await SqliteMigrationRunner.ApplyAsync(c, "recall", SchemaVersion,
+            [
+                new SqliteMigration(2, async (db, token) =>
+                {
+                    var changed = false;
+                    changed |= await EnsureColumnAsync(db, "embedding_attempts", "INTEGER NOT NULL DEFAULT 0", token);
+                    changed |= await EnsureColumnAsync(db, "embedding_next_attempt_at", "TEXT", token);
+                    changed |= await EnsureColumnAsync(db, "embedding_last_error", "TEXT", token);
+                    return changed;
+                })
+            ], ct);
             if (!ftsExisted || schemaChanged)
                 await RebuildFtsAsync(c, ct);
 
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Rag,
+                $"Recall database opened with mode=read-write, pooling=provider-default, journal={await ReadJournalModeAsync(c, ct)}, schema_target={SchemaVersion}.",
+                operationId));
+
             _initializedPath = dbPath;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Rag,
+                $"Recall database initialization failed: exception={ex.GetType().Name}.",
+                operationId));
+            throw;
         }
         finally
         {
@@ -124,6 +185,27 @@ public sealed class RecallIndexStore
         cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $table";
         cmd.Parameters.AddWithValue("$table", table);
         return await cmd.ExecuteScalarAsync(ct) is not null;
+    }
+
+    private static async Task<string> ReadJournalModeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode";
+        return Convert.ToString(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) ?? "Unknown";
+    }
+
+    private static async Task<bool> EnsureColumnAsync(SqliteConnection c, string column, string definition, CancellationToken ct)
+    {
+        await using var check = c.CreateCommand();
+        check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('recall_entries') WHERE name = $name";
+        check.Parameters.AddWithValue("$name", column);
+        if (Convert.ToInt64(await check.ExecuteScalarAsync(ct)) > 0)
+            return false;
+
+        await using var alter = c.CreateCommand();
+        alter.CommandText = $"ALTER TABLE recall_entries ADD COLUMN {column} {definition}";
+        await alter.ExecuteNonQueryAsync(ct);
+        return true;
     }
 
     private static async Task RebuildFtsAsync(SqliteConnection c, CancellationToken ct)
@@ -172,7 +254,8 @@ public sealed class RecallIndexStore
                     project_id=excluded.project_id, title=excluded.title, body=excluded.body,
                     is_archived=excluded.is_archived,
                     created_at=excluded.created_at, indexed_at=excluded.indexed_at,
-                    embedding=NULL, embedding_dim=NULL";
+                    embedding=NULL, embedding_dim=NULL,
+                    embedding_attempts=0, embedding_next_attempt_at=NULL, embedding_last_error=NULL";
             cmd.Parameters.AddWithValue("$id", entry.Id);
             cmd.Parameters.AddWithValue("$kind", entry.Kind);
             cmd.Parameters.AddWithValue("$sid", entry.SourceId);
@@ -271,7 +354,6 @@ public sealed class RecallIndexStore
             await vacuum.ExecuteNonQueryAsync(ct);
         }
 
-        _backfillState.Clear();
         return count;
     }
 
@@ -421,14 +503,30 @@ public sealed class RecallIndexStore
         return (results, false);
     }
 
-    /// <summary>Same shape as <c>MemoryStore.RunEmbeddingBackfillAsync</c>: bounded batch,
-    /// off the send path, gives up on rows that fail repeatedly.</summary>
-    public async Task RunEmbeddingBackfillAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Embeds a bounded batch of entries. Retry state is persisted with each
+    /// row, so a transient endpoint failure is visible and restart does not
+    /// erase the retry budget. A small delayed retry keeps a successful
+    /// endpoint from requiring another conversation save or application
+    /// restart.
+    /// </summary>
+    public async Task<RecallEmbeddingBackfillStatus> RunEmbeddingBackfillAsync(CancellationToken ct = default)
     {
-        if (_embeddings is null) return;
-        if (!await _backfillGate.WaitAsync(0, ct)) return;
+        var operationId = OperationCorrelation.NewId();
+        if (_embeddings is null)
+        {
+            LastBackfillStatus = RecallEmbeddingBackfillStatus.None(operationId);
+            return LastBackfillStatus;
+        }
+        if (!await _backfillGate.WaitAsync(0, ct))
+        {
+            LastBackfillStatus = RecallEmbeddingBackfillStatus.None(operationId);
+            return LastBackfillStatus;
+        }
 
         IResourceAdmissionLease? lease = null;
+        var retryNeeded = false;
+        var status = RecallEmbeddingBackfillStatus.None(operationId);
         try
         {
             lease = await AcquireBackfillLeaseAsync(ct);
@@ -436,41 +534,100 @@ public sealed class RecallIndexStore
             await using var c = new SqliteConnection(Cs);
             await c.OpenAsync(ct);
 
-            var pending = new List<(string Id, string Text)>();
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            var pending = new List<(string Id, string Text, int Attempts, DateTime? NextAttemptUtc)>();
             var select = c.CreateCommand();
-            select.CommandText = "SELECT id, title || ' ' || body FROM recall_entries WHERE embedding IS NULL LIMIT 200";
+            select.CommandText = @"
+                SELECT id, title || ' ' || body, embedding_attempts, embedding_next_attempt_at
+                FROM recall_entries
+                WHERE embedding IS NULL
+                ORDER BY
+                    CASE WHEN embedding_attempts >= $max_attempts THEN 1 ELSE 0 END,
+                    CASE WHEN embedding_next_attempt_at IS NULL OR embedding_next_attempt_at <= $now THEN 0 ELSE 1 END,
+                    COALESCE(embedding_next_attempt_at, '')
+                LIMIT 200";
+            select.Parameters.AddWithValue("$max_attempts", MaxBackfillAttemptsPerRow);
+            select.Parameters.AddWithValue("$now", now.ToString("O"));
             await using (var rd = await select.ExecuteReaderAsync(ct))
             {
                 while (await rd.ReadAsync(ct))
-                    pending.Add((rd.GetString(0), rd.GetString(1)));
+                {
+                    var next = rd.IsDBNull(3) ? null : ParseNullableUtc(rd.GetString(3));
+                    pending.Add((rd.GetString(0), rd.GetString(1), rd.GetInt32(2), next));
+                }
             }
 
-            var now = DateTime.UtcNow;
-            foreach (var (id, text) in pending)
+            var embedded = 0;
+            var failed = 0;
+            var deferred = 0;
+            var exhausted = 0;
+            string? lastFailure = null;
+            foreach (var (id, text, attempts, nextAttemptUtc) in pending)
             {
-                if (_backfillState.TryGetValue(id, out var state))
+                if (attempts >= MaxBackfillAttemptsPerRow)
                 {
-                    if (state.Attempts >= MaxBackfillAttemptsPerRow) continue;
-                    if (now < state.NextAttemptUtc) continue;
+                    exhausted++;
+                    continue;
+                }
+                if (nextAttemptUtc is { } next && now < next)
+                {
+                    deferred++;
+                    continue;
                 }
 
                 try
                 {
                     var vector = await _embeddings.EmbedAsync(text, ct);
-                    var update = c.CreateCommand();
-                    update.CommandText = "UPDATE recall_entries SET embedding = $emb, embedding_dim = $dim WHERE id = $id";
+                    await using var update = c.CreateCommand();
+                    update.CommandText = "UPDATE recall_entries SET embedding = $emb, embedding_dim = $dim, embedding_attempts = 0, embedding_next_attempt_at = NULL, embedding_last_error = NULL WHERE id = $id";
                     update.Parameters.AddWithValue("$emb", ToBlob(vector));
                     update.Parameters.AddWithValue("$dim", vector.Length);
                     update.Parameters.AddWithValue("$id", id);
                     await update.ExecuteNonQueryAsync(ct);
-                    _backfillState.Remove(id);
+                    embedded++;
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    var attempts = (_backfillState.TryGetValue(id, out var previous) ? previous.Attempts : 0) + 1;
-                    _backfillState[id] = (now.AddMinutes(10), attempts);
+                    var nextAttempts = attempts + 1;
+                    var nextRetry = nextAttempts >= MaxBackfillAttemptsPerRow
+                        ? (DateTime?)null
+                        : now.Add(_backfillCooldown);
+                    await using var failure = c.CreateCommand();
+                    failure.CommandText = "UPDATE recall_entries SET embedding_attempts = $attempts, embedding_next_attempt_at = $next, embedding_last_error = $error WHERE id = $id";
+                    failure.Parameters.AddWithValue("$attempts", nextAttempts);
+                    failure.Parameters.AddWithValue("$next", (object?)nextRetry?.ToString("O") ?? DBNull.Value);
+                    failure.Parameters.AddWithValue("$error", ex.GetType().Name);
+                    failure.Parameters.AddWithValue("$id", id);
+                    await failure.ExecuteNonQueryAsync(ct);
+                    failed++;
+                    lastFailure = ex.GetType().Name;
+                    retryNeeded |= nextAttempts < MaxBackfillAttemptsPerRow;
                 }
             }
+
+            var pendingCount = Math.Max(0, pending.Count - embedded);
+            status = new RecallEmbeddingBackfillStatus(
+                operationId, pending.Count, embedded, failed, deferred, exhausted, pendingCount, lastFailure);
+            LastBackfillStatus = status;
+            if (pending.Count > 0)
+            {
+                _logs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    failed > 0 ? RuntimeLogLevel.Warning : RuntimeLogLevel.Debug,
+                    RuntimeLogCategory.Rag,
+                    $"Recall embedding backfill selected={pending.Count}, embedded={embedded}, failed={failed}, deferred={deferred}, exhausted={exhausted}, pending={pendingCount}.",
+                    operationId));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Rag,
+                $"Recall embedding backfill failed during database or admission phase: {ex.GetType().Name}.",
+                operationId));
+            throw;
         }
         finally
         {
@@ -478,7 +635,83 @@ public sealed class RecallIndexStore
                 await lease.ReleaseAsync("recall embedding backfill completed");
             _backfillGate.Release();
         }
+
+        if (retryNeeded && _automaticRetry)
+            ScheduleBackfillRetry();
+        return status;
     }
+
+    public async Task<RecallEmbeddingBackfillStatus> GetEmbeddingBackfillStatusAsync(CancellationToken ct = default)
+    {
+        var operationId = OperationCorrelation.NewId();
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            SELECT
+                SUM(CASE WHEN embedding IS NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN embedding IS NULL AND embedding_attempts >= $max THEN 1 ELSE 0 END),
+                SUM(CASE WHEN embedding IS NULL AND embedding_attempts < $max AND embedding_next_attempt_at IS NOT NULL THEN 1 ELSE 0 END),
+                MAX(embedding_last_error)
+            FROM recall_entries";
+        cmd.Parameters.AddWithValue("$max", MaxBackfillAttemptsPerRow);
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        if (!await rd.ReadAsync(ct))
+            return RecallEmbeddingBackfillStatus.None(operationId);
+
+        static int ReadCount(SqliteDataReader reader, int ordinal) =>
+            reader.IsDBNull(ordinal) ? 0 : Convert.ToInt32(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+
+        return new RecallEmbeddingBackfillStatus(
+            operationId,
+            0,
+            0,
+            0,
+            ReadCount(rd, 2),
+            ReadCount(rd, 1),
+            ReadCount(rd, 0),
+            rd.IsDBNull(3) ? null : rd.GetString(3));
+    }
+
+    private void ScheduleBackfillRetry()
+    {
+        if (Interlocked.CompareExchange(ref _retryScheduled, 1, 0) != 0)
+            return;
+        _ = RetryBackfillAsync();
+    }
+
+    private async Task RetryBackfillAsync()
+    {
+        try
+        {
+            await Task.Delay(_backfillCooldown, _timeProvider);
+            var status = await RunEmbeddingBackfillAsync();
+            if (status.FailedCount > 0 && status.PendingCount > status.ExhaustedCount)
+            {
+                Volatile.Write(ref _retryScheduled, 0);
+                ScheduleBackfillRetry();
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Rag,
+                $"Recall embedding retry failed during background recovery: {ex.GetType().Name}.",
+                OperationCorrelation.NewId()));
+        }
+        finally
+        {
+            Volatile.Write(ref _retryScheduled, 0);
+        }
+    }
+
+    private static DateTime? ParseNullableUtc(string value) =>
+        DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
 
     private async Task<IResourceAdmissionLease?> AcquireBackfillLeaseAsync(CancellationToken ct)
     {

@@ -111,7 +111,8 @@ public sealed class RuntimeLogService : IRuntimeLogService
         try
         {
             var path = GetLogFilePath();
-            var line = $"{entry.Timestamp:O} [{entry.Level}] [{entry.Category}] {entry.Message}" + Environment.NewLine;
+            var operation = string.IsNullOrWhiteSpace(entry.OperationId) ? string.Empty : $" [op:{entry.OperationId}]";
+            var line = $"{entry.Timestamp:O} [{entry.Level}] [{entry.Category}]{operation} {entry.Message}" + Environment.NewLine;
 
             lock (_fileLock)
             {

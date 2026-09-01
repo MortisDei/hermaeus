@@ -63,7 +63,7 @@
                     <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Grid.Column="0" Spacing="2">
                             <TextBlock Text="Runtime Profiles" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="Connect local llama.cpp, Ollama, and OpenAI-compatible runtimes. Local llama.cpp processes still use the managed server cards below."
+                            <TextBlock Text="Add a profile, choose its runtime kind, enter its base URL, then use Health and Save. Ollama uses /api, while OpenAI-compatible endpoints use /v1. Local llama.cpp processes still use the managed server cards below."
                                        FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
                         </StackPanel>
                         <Button Grid.Column="1"
@@ -94,7 +94,8 @@
                                                   ItemsSource="{Binding $parent[UserControl].DataContext.RuntimeKinds}"
                                                   SelectedItem="{Binding Kind}"
                                                   CornerRadius="6"
-                                                  Padding="8,4" />
+                                                  Padding="8,4"
+                                                  ToolTip.Tip="Choose Ollama for an Ollama /api endpoint, or OpenAiCompatible for an OpenAI-compatible /v1 endpoint." />
                                         <TextBox Grid.Row="0" Grid.Column="2"
                                                  Text="{Binding BaseUrl}"
                                                  PlaceholderText="http://127.0.0.1:8080"

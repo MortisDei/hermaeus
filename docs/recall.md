@@ -42,8 +42,13 @@ size reporting. See [Settings > Memory](features.md) for the Recall card.
   sources are disjoint by kind.
 - **Indexing**: a background pass, bounded and never on the chat send path,
   modeled on the existing Memory auto-summary pipeline
-  (`MemoryStore.cs:515-545`). A startup backfill catches records that were not
-  indexed while the feature was disabled.
+  (`MemoryStore.cs:515-545`). Incremental conversation and task indexing starts
+  embedding backfill after its durable rows are written. Each row stores its
+  attempt count, next retry time, and safe failure type; five failed attempts
+  become an explicit exhausted state. A delayed retry handles transient
+  endpoint failures without requiring another save or application restart. A
+  startup backfill still catches records that were not indexed while the
+  feature was disabled.
 
 ## Settings
 
