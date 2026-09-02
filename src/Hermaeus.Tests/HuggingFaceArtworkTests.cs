@@ -7,6 +7,7 @@ using System.Text;
 using Avalonia.Media.Imaging;
 using Hermaeus.Desktop.Views;
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
 using Xunit;
@@ -109,6 +110,32 @@ public sealed class HuggingFaceArtworkTests
         Assert.Equal(Revision, first.Descriptor!.RevisionSha);
         Assert.Equal("cdn-avatars.huggingface.co", first.Host);
         Assert.True(File.Exists(first.CachePath));
+    }
+
+    [Fact]
+    public async Task Artwork_fetch_logs_declaration_fallback_cache_fetch_admission_and_write_stages()
+    {
+        using var temp = new TempDir();
+        var logs = new CollectingRuntimeLog();
+        var service = new HuggingFaceArtworkService(
+            new HttpClient(new RecordingHandler(_ => Bytes(OnePixelPng(), "image/png"))), logs);
+        var card = new HfModelCard(Revision, null, null, null, Author: "org");
+        var tree = new[] { new HfTreeEntry("README.md", 10, null) };
+        var cache = HuggingFaceArtworkCache.ResolveRoot(temp.PathFor("data"));
+        var key = HuggingFaceArtworkService.Describe(Repo, card, tree).Descriptor is null
+            ? string.Empty
+            : HuggingFaceArtworkService.Describe(Repo, card, tree).Descriptor!.CacheKey;
+
+        var result = await service.FetchAsync(Repo, card, tree, cache,
+            "https://cdn-avatars.huggingface.co/v1/production/uploads/org/avatar.png");
+
+        Assert.Equal(HfArtworkState.Available, result.State);
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains("declaration discovery completed", StringComparison.Ordinal));
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains("fallback selected", StringComparison.Ordinal));
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains($"key={key}", StringComparison.Ordinal));
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains("cache miss; remote fetch starting", StringComparison.Ordinal));
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains("remote fetch admitted", StringComparison.Ordinal));
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains("cache write completed", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -815,5 +842,16 @@ public sealed class HuggingFaceArtworkTests
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             await route(request, cancellationToken);
+    }
+
+    private sealed class CollectingRuntimeLog : IRuntimeLogService
+    {
+        public List<RuntimeLogEntry> Entries { get; } = [];
+        public event Action<RuntimeLogEntry>? LogAdded;
+        public void Add(RuntimeLogEntry entry) { Entries.Add(entry); LogAdded?.Invoke(entry); }
+        public IReadOnlyList<RuntimeLogEntry> GetEntries() => Entries;
+        public void ClearInMemory() => Entries.Clear();
+        public string GetLogDirectory() => string.Empty;
+        public string GetLogFilePath() => string.Empty;
     }
 }

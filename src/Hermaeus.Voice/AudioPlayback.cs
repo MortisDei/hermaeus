@@ -1,10 +1,12 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Hermaeus.Voice;
 
 /// <summary>
-/// Minimal cross-platform WAV playback: PowerShell's Media.SoundPlayer on
-/// Windows, then the first of paplay/pw-play/aplay/afplay/ffplay found on
+/// Minimal cross-platform WAV playback: winmm PlaySound on Windows, then the
+/// first of paplay/pw-play/aplay/afplay/ffplay found on
 /// PATH elsewhere. Public so Hermaeus.Services (which already project-references
 /// Hermaeus.Voice for provider registration) can share this instead of each
 /// voice provider carrying its own playback logic (r11 4.2): the previous
@@ -22,9 +24,14 @@ public static class AudioPlayback
         await using (var stream = File.OpenRead(wavFilePath))
             _ = WavFile.Read(stream);
 
-        var players = new List<(string Command, IReadOnlyList<string> Arguments)>();
         if (OperatingSystem.IsWindows())
-            players.Add(("powershell", BuildArguments("powershell", wavFilePath)));
+        {
+            await PlayWindowsAsync(wavFilePath, ct);
+            onBackendSelected?.Invoke("winmm");
+            return;
+        }
+
+        var players = new List<(string Command, IReadOnlyList<string> Arguments)>();
         players.Add(("paplay", [wavFilePath]));
         players.Add(("pw-play", [wavFilePath]));
         players.Add(("aplay", ["-q", wavFilePath]));
@@ -57,7 +64,7 @@ public static class AudioPlayback
     public static string? SelectPlayerCommand(Func<string, bool> isOnPath, bool? isWindowsOverride = null)
     {
         var isWindows = isWindowsOverride ?? OperatingSystem.IsWindows();
-        if (isWindows && isOnPath("powershell")) return "powershell";
+        if (isWindows) return "winmm";
         if (isOnPath("paplay")) return "paplay";
         if (isOnPath("pw-play")) return "pw-play";
         if (isOnPath("aplay")) return "aplay";
@@ -105,6 +112,24 @@ public static class AudioPlayback
             return false;
         }
     }
+
+    private static async Task PlayWindowsAsync(string wavFilePath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var played = await Task.Run(
+            () => PlaySound(wavFilePath, IntPtr.Zero, SoundFilename | SoundSync),
+            CancellationToken.None);
+        ct.ThrowIfCancellationRequested();
+        if (!played)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows audio playback failed.");
+    }
+
+    [DllImport("winmm.dll", EntryPoint = "PlaySoundW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PlaySound(string? sound, IntPtr module, uint flags);
+
+    private const uint SoundSync = 0x0000;
+    private const uint SoundFilename = 0x20000;
 
     internal static ProcessStartInfo BuildStartInfo(string command, IReadOnlyList<string> args)
     {

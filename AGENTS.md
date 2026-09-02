@@ -35,6 +35,10 @@ dotnet run --project src/Hermaeus.Desktop                  # launch the app; see
 ./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 60%)
 ```
 
+Run coverage once as the final automated verification immediately before
+creating a commit, after the solution build and test suite pass. Keep coverage
+results outside the repository.
+
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.
 
 - `docs/testing.md` is the reference for the suite: what it is, the platform-skip attribute, the injectable-timeout rule, the coverage floor, the guard tests, and why Windows CI is slower than Linux CI. Read it before adding or changing tests.

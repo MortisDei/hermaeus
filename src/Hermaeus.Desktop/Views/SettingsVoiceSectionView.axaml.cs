@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
+using Avalonia.Threading;
 using Hermaeus.ViewModels;
 
 namespace Hermaeus.Desktop.Views;
@@ -45,8 +46,23 @@ public partial class SettingsVoiceSectionView : UserControl
         if (sender is not AutoCompleteBox box)
             return;
 
-        if (box.Tag is string previous && string.IsNullOrWhiteSpace(box.Text))
-            box.Text = previous;
+        var previous = box.Tag as string;
         box.Tag = null;
+        if (string.IsNullOrWhiteSpace(previous))
+            return;
+
+        RestorePreviousSelection(box, previous);
+        // AutoCompleteBox can publish its final text after DropDownClosed.
+        // A background dispatcher pass restores a dismissal without clobbering
+        // a real selection made while the popup was open.
+        Dispatcher.UIThread.Post(
+            () => RestorePreviousSelection(box, previous),
+            DispatcherPriority.Background);
+    }
+
+    private static void RestorePreviousSelection(AutoCompleteBox box, string previous)
+    {
+        if (string.IsNullOrWhiteSpace(box.Text))
+            box.Text = previous;
     }
 }

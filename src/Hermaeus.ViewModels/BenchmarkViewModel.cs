@@ -583,12 +583,16 @@ public partial class BenchmarkViewModel : ObservableObject
         // SelectedRun, which OnSelectedRunChanged could not tell apart from a
         // row click, so choosing a suite threw the user onto the Run Detail
         // tab when they were reading Per-Suite Rankings.
+        var selectedRunId = SelectedRun?.Id;
         _suppressRunDetailJump = true;
         try
         {
-            if (SelectedRun is not null && Runs.All(r => r.Id != SelectedRun.Id))
-                SelectedRun = null;
-            SelectedRun ??= Runs.FirstOrDefault();
+            // Runs.Clear replaces the row instances. Retaining the old row by
+            // id left Run Detail bound to stale result objects after refresh.
+            SelectedRun = selectedRunId is null
+                ? Runs.FirstOrDefault()
+                : Runs.FirstOrDefault(r => string.Equals(r.Id, selectedRunId, StringComparison.Ordinal))
+                    ?? Runs.FirstOrDefault();
         }
         finally
         {

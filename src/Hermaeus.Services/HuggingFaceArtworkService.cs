@@ -5,6 +5,8 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 
 namespace Hermaeus.Services;
 
@@ -100,10 +102,12 @@ public sealed class HuggingFaceArtworkService
 
     private static readonly HttpClient DefaultHttp = BuildDefaultClient();
     private readonly HttpClient _http;
+    private readonly IRuntimeLogService? _runtimeLogs;
 
-    public HuggingFaceArtworkService(HttpClient? http = null)
+    public HuggingFaceArtworkService(HttpClient? http = null, IRuntimeLogService? runtimeLogs = null)
     {
         _http = http ?? DefaultHttp;
+        _runtimeLogs = runtimeLogs;
         // This client is an anonymous decoration channel. A caller must not be able
         // to accidentally carry a provider or Hub token into an artwork request.
         _http.DefaultRequestHeaders.Remove("Authorization");
@@ -196,16 +200,28 @@ public sealed class HuggingFaceArtworkService
         CancellationToken ct = default)
     {
         var plan = Describe(repoId, card, tree);
+        Log(RuntimeLogLevel.Info, $"Artwork declaration discovery completed: repo={repoId} state={plan.State} source={(plan.Descriptor?.SourceKind ?? HfArtworkSourceKind.None)}");
         if (plan.State == HfArtworkState.NoDeclaredArtwork && !string.IsNullOrWhiteSpace(authorAvatarUrl))
+        {
             plan = DescribeAuthorAvatar(repoId, card, authorAvatarUrl);
+            Log(RuntimeLogLevel.Info, $"Artwork fallback selected: repo={repoId} source={HfArtworkSourceKind.HuggingFaceAuthorAvatar} state={plan.State}");
+        }
         if (plan.Descriptor is null)
+        {
+            Log(RuntimeLogLevel.Warning, $"Artwork acquisition stopped at declaration admission: repo={repoId} state={plan.State} failure={plan.FailureCode}");
             return new HfArtworkResult(plan.State, null, null, null, 0, 0, 0, null, plan.FailureCode, plan.Host);
+        }
 
         try
         {
+            Log(RuntimeLogLevel.Info, $"Artwork cache lookup started: repo={repoId} revision={plan.Descriptor.RevisionSha} source={plan.Descriptor.SourceKind} key={plan.Descriptor.CacheKey}");
             var cached = await HuggingFaceArtworkCache.TryGetAsync(plan.Descriptor, cacheRoot, ct);
             if (cached is not null)
+            {
+                Log(RuntimeLogLevel.Info, $"Artwork cache hit: repo={repoId} revision={plan.Descriptor.RevisionSha} source={cached.EffectiveSourceKind}");
                 return cached;
+            }
+            Log(RuntimeLogLevel.Info, $"Artwork cache miss; remote fetch starting: repo={repoId} host={plan.Host} source={plan.Descriptor.SourceKind}");
 
             var current = BuildInitialUri(plan.Descriptor);
             for (var redirect = 0; ; redirect++)
@@ -213,7 +229,10 @@ public sealed class HuggingFaceArtworkService
                 ct.ThrowIfCancellationRequested();
                 if (!IsFetchUriSafe(current, plan.Descriptor.SourceKind, isInitial: redirect == 0,
                         previousHost: null, out var requestHost, out var uriFailure))
+                {
+                    Log(RuntimeLogLevel.Warning, $"Artwork security admission rejected fetch URI: repo={repoId} host={requestHost} failure={uriFailure}");
                     return Failure(plan.Descriptor, HfArtworkState.Invalid, uriFailure, requestHost);
+                }
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, current);
                 using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -253,9 +272,12 @@ public sealed class HuggingFaceArtworkService
                     return Failure(plan.Descriptor, HfArtworkState.Invalid, imageFailure, requestHost);
 
                 var contentHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
-                return await HuggingFaceArtworkCache.StoreAsync(
+                Log(RuntimeLogLevel.Info, $"Artwork remote fetch admitted after MIME, magic, dimension, and decode checks: repo={repoId} bytes={bytes.Length} source={plan.Descriptor.SourceKind}");
+                var stored = await HuggingFaceArtworkCache.StoreAsync(
                     plan.Descriptor, cacheRoot, mime!, bytes, image.Width, image.Height, contentHash,
                     response.Headers.ETag?.Tag, ct);
+                Log(RuntimeLogLevel.Info, $"Artwork cache write completed: repo={repoId} revision={plan.Descriptor.RevisionSha} source={stored.EffectiveSourceKind} hash={contentHash}");
+                return stored;
             }
         }
         catch (OperationCanceledException)
@@ -528,6 +550,9 @@ public sealed class HuggingFaceArtworkService
             ArrayPool<byte>.Shared.Return(rented);
         }
     }
+
+    private void Log(RuntimeLogLevel level, string message) =>
+        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, level, RuntimeLogCategory.Network, message));
 }
 
 internal sealed record ArtworkImageInfo(int Width, int Height);

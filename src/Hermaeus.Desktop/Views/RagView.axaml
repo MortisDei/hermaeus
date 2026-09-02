@@ -116,7 +116,7 @@
                     </StackPanel>
                 </Border>
 
-                <Expander Header="Dataset Manager" IsExpanded="True"
+                <Expander Header="Dataset Manager" IsExpanded="False"
                           IsVisible="{Binding Datasets.Count, Converter={x:Static views:RagView.IsNonZero}}">
                     <StackPanel Spacing="10" Margin="0,8,0,0">
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">

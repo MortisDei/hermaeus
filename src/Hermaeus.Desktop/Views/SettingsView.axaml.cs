@@ -54,7 +54,10 @@ public partial class SettingsView : UserControl
         {
             var folders = await PickFolderAsync("Choose Hermaeus data folder");
             if (folders.Count > 0)
+            {
                 vm.Data.DataRootDirectory = folders[0].Path.LocalPath;
+                await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+            }
         };
 
         vm.Data.RequestDataRootMigrationConfirmation = async plan =>

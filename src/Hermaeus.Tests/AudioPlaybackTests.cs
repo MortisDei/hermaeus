@@ -5,12 +5,12 @@ namespace Hermaeus.Tests;
 
 public sealed class AudioPlaybackTests
 {
-    /// <summary>r11 4.2: on Windows, powershell (Media.SoundPlayer) must be tried first; the previous Linux-only implementation would never resolve any player on a stock Windows machine.</summary>
+    /// <summary>r11 4.2: Windows uses the native winmm player and does not depend on a media-player file association.</summary>
     [Fact]
-    public void SelectPlayerCommand_prefers_powershell_on_windows()
+    public void SelectPlayerCommand_uses_native_winmm_on_windows()
     {
         var selected = AudioPlayback.SelectPlayerCommand(command => command is "powershell" or "aplay", isWindowsOverride: true);
-        Assert.Equal("powershell", selected);
+        Assert.Equal("winmm", selected);
     }
 
     [Fact]
@@ -28,10 +28,10 @@ public sealed class AudioPlaybackTests
     }
 
     [Fact]
-    public void SelectPlayerCommand_returns_null_when_nothing_is_available()
+    public void SelectPlayerCommand_uses_native_winmm_without_a_path_probe()
     {
         var selected = AudioPlayback.SelectPlayerCommand(_ => false, isWindowsOverride: true);
-        Assert.Null(selected);
+        Assert.Equal("winmm", selected);
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public sealed class AudioPlaybackTests
     }
 
     [Fact]
-    public void Windows_playback_uses_owned_process_instead_of_default_file_association()
+    public void Legacy_process_arguments_do_not_use_default_file_association()
     {
         var args = AudioPlayback.BuildArguments("powershell", "C:\\private\\preview.wav");
         var psi = AudioPlayback.BuildStartInfo("powershell", args);

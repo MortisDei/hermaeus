@@ -1403,6 +1403,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// </summary>
     public Task StopAndWaitAsync() => _mgr.StopAsync();
 
+    /// <summary>Synchronizes the bound status after a programmatic start has
+    /// completed. The manager is authoritative, while its UI event is queued
+    /// through the dispatcher and can otherwise arrive after Lab checks it.</summary>
+    public void RefreshStatusFromManager()
+    {
+        Status = _mgr.Status;
+        ErrorMessage = _mgr.ErrorMessage;
+        NotifyStatusProps();
+    }
+
     /// <summary>
     /// r19 2.2: after an llama.cpp update rewrites <c>ExecutablePath</c>
     /// directly on the underlying <see cref="ServerConfig"/> (a live
@@ -2579,6 +2589,7 @@ public partial class ServicesViewModel : ViewModelBase
             server.SyncExecutablePathFromConfig();
             server.SyncModelPathFromConfig();
             await server.StartCommand.ExecuteAsync(null);
+            server.RefreshStatusFromManager();
         }
     }
 

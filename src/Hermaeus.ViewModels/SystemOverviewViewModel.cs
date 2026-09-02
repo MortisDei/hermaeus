@@ -120,10 +120,16 @@ public partial class SystemOverviewViewModel : ObservableObject
             Metrics.Add(new("App", Snapshot.AppVersion));
             Metrics.Add(new("OS", $"{Snapshot.OSDescription} ({Snapshot.Architecture})"));
             Metrics.Add(new("CPU", $"{Snapshot.CpuName} · {Snapshot.ProcessorCount} threads"));
-            Metrics.Add(new("RAM", $"{FormatBytes(Snapshot.AvailableMemoryBytes)} available / {FormatBytes(Snapshot.TotalMemoryBytes)} total"));
+            var ramRatio = Snapshot.TotalMemoryBytes > 0
+                ? Math.Clamp(1d - (double)Snapshot.AvailableMemoryBytes / Snapshot.TotalMemoryBytes, 0d, 1d)
+                : (double?)null;
+            Metrics.Add(new("RAM", $"{FormatBytes(Snapshot.AvailableMemoryBytes)} available / {FormatBytes(Snapshot.TotalMemoryBytes)} total", ramRatio));
             Metrics.Add(new("Process", $"{FormatBytes(Snapshot.ProcessMemoryBytes)} RSS · {FormatBytes(Snapshot.ManagedMemoryBytes)} managed"));
             Metrics.Add(new("Data root", Snapshot.DataRoot));
-            Metrics.Add(new("Storage", $"{FormatBytes(Snapshot.DataRootFreeBytes)} free / {FormatBytes(Snapshot.DataRootTotalBytes)} total"));
+            var storageRatio = Snapshot.DataRootTotalBytes > 0
+                ? Math.Clamp(1d - (double)Snapshot.DataRootFreeBytes / Snapshot.DataRootTotalBytes, 0d, 1d)
+                : (double?)null;
+            Metrics.Add(new("Storage", $"{FormatBytes(Snapshot.DataRootFreeBytes)} free / {FormatBytes(Snapshot.DataRootTotalBytes)} total", storageRatio));
             Metrics.Add(new("Databases", FormatBytes(Snapshot.DatabaseBytes)));
 
             Gpus.Clear();
@@ -232,7 +238,11 @@ public partial class SystemOverviewViewModel : ObservableObject
     }
 }
 
-public sealed record SystemMetricViewModel(string Name, string Value);
+public sealed record SystemMetricViewModel(string Name, string Value, double? Ratio = null)
+{
+    public bool HasRatio => Ratio.HasValue;
+    public double ProgressValue => Math.Clamp(Ratio ?? 0, 0, 1) * 100;
+}
 
 public sealed record PrivacyAuditItemViewModel(string Name, string Status, string Detail);
 
@@ -259,6 +269,10 @@ public sealed class GpuInfoViewModel
         : _gpu.MemoryTotalBytes.HasValue
             ? $"{SystemOverviewViewModel.FormatBytes(_gpu.MemoryTotalBytes.Value)} total"
             : "VRAM unavailable";
+    public bool HasMemoryRatio => _gpu.MemoryUsedBytes.HasValue && _gpu.MemoryTotalBytes is > 0;
+    public double MemoryProgressValue => HasMemoryRatio
+        ? Math.Clamp((double)_gpu.MemoryUsedBytes!.Value / _gpu.MemoryTotalBytes!.Value, 0, 1) * 100
+        : 0;
     public GpuInfoViewModel(GpuInfo gpu) => _gpu = gpu;
 }
 

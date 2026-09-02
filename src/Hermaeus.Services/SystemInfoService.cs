@@ -237,7 +237,11 @@ public sealed class SystemInfoService : ISystemInfoService
 
     private static async Task<List<GpuInfo>> TryNvidiaSmiAsync(CancellationToken ct)
     {
-        var output = await RunCommandAsync("nvidia-smi",
+        var executable = ProcessManagement.ExecutableResolver.FindOnPath("nvidia-smi");
+        if (executable is null)
+            return [];
+
+        var output = await RunCommandAsync(executable,
             ["--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits"],
             ct);
         if (string.IsNullOrWhiteSpace(output))

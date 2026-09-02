@@ -143,5 +143,25 @@ public sealed class SystemInfoServiceTests
     {
         var vm = new GpuInfoViewModel(new GpuInfo { Name = "AMD Radeon RX 7900 XTX", MemoryTotalBytes = 20_000_000_000, Provider = "registry", Status = "OK" });
         Assert.EndsWith("total", vm.Memory, StringComparison.Ordinal);
+        Assert.False(vm.HasMemoryRatio);
+    }
+
+    [Fact]
+    public void Resource_bars_are_available_only_for_complete_observed_values()
+    {
+        var gpu = new GpuInfoViewModel(new GpuInfo
+        {
+            Name = "NVIDIA test GPU",
+            MemoryUsedBytes = 4_000_000_000,
+            MemoryTotalBytes = 8_000_000_000,
+            Provider = "nvml",
+            Status = "OK"
+        });
+        var metric = new SystemMetricViewModel("RAM", "4 GB available / 8 GB total", 0.5);
+
+        Assert.True(gpu.HasMemoryRatio);
+        Assert.Equal(50, gpu.MemoryProgressValue);
+        Assert.True(metric.HasRatio);
+        Assert.Equal(50, metric.ProgressValue);
     }
 }

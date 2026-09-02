@@ -41,6 +41,11 @@
                                            TextWrapping="Wrap"
                                            FontWeight="SemiBold"
                                            FontSize="13" />
+                                <ProgressBar IsVisible="{Binding HasRatio}"
+                                             Value="{Binding ProgressValue}"
+                                             Minimum="0" Maximum="100"
+                                             Height="6"
+                                             ToolTip.Tip="Observed proportion currently in use. It is omitted when the source did not provide both values." />
                             </StackPanel>
                         </Border>
                     </DataTemplate>
@@ -67,6 +72,11 @@
                                         <StackPanel Spacing="2">
                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
                                             <TextBlock Text="{Binding Memory}" FontSize="12" Opacity="0.65" />
+                                            <ProgressBar IsVisible="{Binding HasMemoryRatio}"
+                                                         Value="{Binding MemoryProgressValue}"
+                                                         Minimum="0" Maximum="100"
+                                                         Height="6"
+                                                         ToolTip.Tip="Observed VRAM use for this GPU. It is omitted when process or device memory is unknown." />
                                             <TextBlock Text="{Binding Provider}" FontSize="11" Opacity="0.4" />
                                             <TextBlock Text="{Binding Status}" FontSize="11" Opacity="0.4" />
                                         </StackPanel>

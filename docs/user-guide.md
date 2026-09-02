@@ -279,8 +279,11 @@ than deleting live rows mid-ingest.
 control whether memory and Recall context may be injected into Chat. The Chat
 environment description reports only enabled context sources. The command
 palette can search the local Recall index even when Recall injection into Chat
-is disabled. A pinned memory remains visibly marked in its row and exposes
-**Unpin** directly, so the state does not depend on a toast.
+is disabled. The Memories view puts pinned memories in a clearly labelled
+section at the top, where **Unpin** is available directly. Agent workspace
+notes and generated workspace profiles are shown in Agent, not mixed into
+ordinary Memories. The RAG ingest plan is analysis context and is not saved
+as a normal memory.
 
 Open **History** on a memory to inspect its immutable revisions. Recorded time
 and established effective time are shown separately, alongside adjacent

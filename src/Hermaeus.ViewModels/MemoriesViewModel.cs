@@ -23,6 +23,8 @@ public partial class MemoriesViewModel : ViewModelBase
     private CancellationTokenSource? _searchTextCts;
 
     public UiBoundCollection<MemoryItemViewModel> Memories { get; } = [];
+    public UiBoundCollection<MemoryItemViewModel> PinnedMemories { get; } = [];
+    public UiBoundCollection<MemoryItemViewModel> OtherMemories { get; } = [];
     public UiBoundCollection<MemoryRevisionItemViewModel> RevisionTimeline { get; } = [];
     public UiBoundCollection<KnowledgeContradictionProposalViewModel> ContradictionProposals { get; } = [];
 
@@ -66,10 +68,14 @@ public partial class MemoriesViewModel : ViewModelBase
         _activityViewModel = activityViewModel;
         _selectedCategory = "All";
         Memories.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoMemories));
+        PinnedMemories.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasPinnedMemories));
+        OtherMemories.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasOtherMemories));
         ContradictionProposals.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasContradictionProposals));
     }
 
     public bool HasNoMemories => Memories.Count == 0;
+    public bool HasPinnedMemories => PinnedMemories.Count > 0;
+    public bool HasOtherMemories => OtherMemories.Count > 0;
     public bool HasSelectedMemory => SelectedMemory is not null;
     public bool HasContradictionProposals => ContradictionProposals.Count > 0;
     public bool HasActivity => _activityViewModel is not null;
@@ -229,11 +235,7 @@ public partial class MemoriesViewModel : ViewModelBase
             if (SelectedConversationFilter is not null)
                 results = results.Where(m => string.Equals(m.SourceConversationId, SelectedConversationFilter.ConversationId, StringComparison.Ordinal)).ToList();
 
-            Memories.Clear();
-            foreach (var memory in results.OrderByDescending(m => m.IsPinned).ThenByDescending(m => MemoryLifecycle.ComputeEffectiveImportance(m)))
-            {
-                Memories.Add(ToViewModel(memory));
-            }
+            ReplaceMemoryCollections(results);
 
             TotalCount = Memories.Count;
         }
@@ -306,6 +308,8 @@ public partial class MemoriesViewModel : ViewModelBase
             if (revision is not null)
                 await _knowledge.HardDeleteAsync(memoryId, revision.RevisionId);
             Memories.Remove(item);
+            PinnedMemories.Remove(item);
+            OtherMemories.Remove(item);
             _toasts.Show("Memory deleted", "The memory has been removed.", ToastKind.Info);
         }
         catch (Exception ex)
@@ -514,7 +518,21 @@ public partial class MemoriesViewModel : ViewModelBase
 
             var item = Memories.FirstOrDefault(m => m.Id == memoryId);
             if (item is not null)
+            {
                 item.IsPinned = memory.IsPinned;
+                if (memory.IsPinned)
+                {
+                    OtherMemories.Remove(item);
+                    if (!PinnedMemories.Contains(item))
+                        PinnedMemories.Add(item);
+                }
+                else
+                {
+                    PinnedMemories.Remove(item);
+                    if (!OtherMemories.Contains(item))
+                        OtherMemories.Add(item);
+                }
+            }
 
             _toasts.Show(memory.IsPinned ? "Memory pinned" : "Memory unpinned", "", ToastKind.Info);
         }
@@ -540,7 +558,11 @@ public partial class MemoriesViewModel : ViewModelBase
 
             var item = Memories.FirstOrDefault(m => m.Id == memoryId);
             if (item is not null)
-                Memories.Remove(item);  // Remove from view if archiving
+            {
+                Memories.Remove(item);
+                PinnedMemories.Remove(item);
+                OtherMemories.Remove(item);
+            }
 
             _toasts.Show(memory.IsArchived ? "Memory archived" : "Memory restored", "", ToastKind.Info);
         }
@@ -556,16 +578,28 @@ public partial class MemoriesViewModel : ViewModelBase
         try
         {
             var memories = await _store.GetAllAsync(includeArchived: false);
-            Memories.Clear();
-            foreach (var memory in memories.OrderByDescending(m => m.IsPinned).ThenByDescending(m => MemoryLifecycle.ComputeEffectiveImportance(m)))
-            {
-                Memories.Add(ToViewModel(memory));
-            }
+            ReplaceMemoryCollections(memories);
             TotalCount = Memories.Count;
         }
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    private void ReplaceMemoryCollections(IEnumerable<Memory> memories)
+    {
+        Memories.Clear();
+        PinnedMemories.Clear();
+        OtherMemories.Clear();
+        foreach (var memory in memories
+                     .Where(item => item.Scope != MemoryScope.Workspace)
+                     .OrderByDescending(item => item.IsPinned)
+                     .ThenByDescending(item => MemoryLifecycle.ComputeEffectiveImportance(item)))
+        {
+            var item = ToViewModel(memory);
+            Memories.Add(item);
+            (item.IsPinned ? PinnedMemories : OtherMemories).Add(item);
         }
     }
 

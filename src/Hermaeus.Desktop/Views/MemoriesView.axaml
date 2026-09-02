@@ -110,7 +110,37 @@
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                     Background="{DynamicResource SubtleFillColorSecondaryBrush}">
                 <ScrollViewer MaxHeight="600" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{Binding Memories}">
+                    <StackPanel>
+                    <StackPanel IsVisible="{Binding HasPinnedMemories}" Spacing="0">
+                        <TextBlock Text="Pinned memories" FontSize="14" FontWeight="SemiBold" Padding="12,12,12,6"
+                                   ToolTip.Tip="Pinned memories are shown first and are never auto-archived." />
+                        <ItemsControl ItemsSource="{Binding PinnedMemories}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:MemoryItemViewModel">
+                                    <Border Padding="12,8" BorderThickness="0,0,0,1"
+                                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontSize="13" />
+                                                <TextBlock Text="{Binding CategoryDisplay}" FontSize="10" Opacity="0.55" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <Button Content="Unpin" Command="{Binding #Root.DataContext.TogglePinCommand}"
+                                                        CommandParameter="{Binding Id}" FontSize="11" Padding="8,5"
+                                                        ToolTip.Tip="Move this memory back to the other memories section." />
+                                                <Button Content="Delete" Command="{Binding #Root.DataContext.DeleteMemoryCommand}"
+                                                        CommandParameter="{Binding Id}" FontSize="11" Padding="8,5"
+                                                        ToolTip.Tip="Permanently deletes this memory. This cannot be undone." />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <TextBlock Text="Other memories" FontSize="14" FontWeight="SemiBold" Padding="12,12,12,6"
+                               IsVisible="{Binding HasOtherMemories}" />
+                    <ItemsControl ItemsSource="{Binding OtherMemories}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:MemoryItemViewModel">
                                 <Border Padding="12" BorderThickness="0,0,0,1"
@@ -190,6 +220,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    </StackPanel>
                 </ScrollViewer>
             </Border>
 

@@ -29,6 +29,14 @@ limit.
   subject to the existing redirect, MIME, magic, size, decode, and atomic-cache
   guards. Quick Chat now sends with Enter or Ctrl+Enter and shows processing
   state while a request is active.
+- Windows voice preview now uses native `winmm` playback instead of opening a
+  media player through the WAV file association. Data-root selection opens its
+  safe migration confirmation immediately, and the Services editor exposes
+  the exact GPU offload count beside the effective offload state.
+- Workspace-generated profile memories are deduplicated per workspace and
+  excluded from ordinary Memories. Benchmark detail refresh keeps the current
+  run bound to its replacement row, and Lab evidence detail can be copied
+  with its persisted records and provenance.
 - Agent workspace reads now preserve complete default file content through the
   executor, report search and glob caps explicitly, and allow confirmed
   deletion of stopped historical top-level runs with their persisted sub-tasks.

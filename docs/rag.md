@@ -104,6 +104,12 @@ derive honestly.
 
 ### Dataset Manager
 
+The question workspace keeps **Dataset Manager** collapsed by default so the
+selected datasets, answer, diagnostics, sources, and ingest controls have a
+clear order. Expand it when managing dataset health or watched folders. The
+parent-child retrieval checkbox has a tooltip explaining that it retrieves
+child matches together with their indexed parent context.
+
 Each dataset card in the manager shows chunk/source counts, missing and stale
 file counts, and duplicate-source counts, with these actions:
 

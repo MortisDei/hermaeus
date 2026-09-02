@@ -269,7 +269,7 @@
                                     MinWidth="280" MaxWidth="390"
                                     Margin="0,0,12,12"
                                     Padding="14"
-                                    Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                    Background="#171A17"
                                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                     BorderThickness="1" CornerRadius="8">
                                 <StackPanel Spacing="6">
@@ -436,9 +436,9 @@
                                             <!-- r29 doc 02 2.4: reuses ModelProfileItemViewModel.IsExpanded,
                                                  which had no other consumer once the Expander went. -->
                                             <ToggleButton.Flyout>
-                                                <Flyout Placement="BottomEdgeAlignedRight"
+                                                <Flyout Placement="BottomEdgeAlignedLeft"
                                                         PlacementConstraintAdjustment="SlideX,FlipY,ResizeX,ResizeY">
-                                                    <ScrollViewer MaxWidth="720" MaxHeight="520"
+                                                    <ScrollViewer MinWidth="640" MaxWidth="720" MaxHeight="520"
                                                                   HorizontalContentAlignment="Stretch"
                                                                   VerticalScrollBarVisibility="Auto"
                                                                   HorizontalScrollBarVisibility="Disabled">

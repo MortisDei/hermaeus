@@ -89,8 +89,30 @@ public sealed class WorkspaceMemoryStore : IAgentWorkspaceMemoryStore
         if (entry.CreatedAt == default)
             entry.CreatedAt = entry.UpdatedAt;
 
-        var memory = ToMemory(entry);
         var current = await _memories.GetByIdAsync(entry.Id, ct);
+        if (current is null && IsAutomaticWorkspaceProfile(entry))
+        {
+            var existingProfiles = (await _memories.GetByScopeAsync(
+                    MemoryScope.Workspace, entry.WorkspaceRoot, includeArchived: false, ct))
+                .Where(IsAutomaticWorkspaceProfile)
+                .OrderByDescending(memory => memory.UpdatedAt)
+                .ToList();
+            var canonical = existingProfiles.FirstOrDefault();
+            if (canonical is not null)
+            {
+                entry.Id = canonical.Id;
+                entry.CreatedAt = canonical.CreatedAt;
+                current = canonical;
+                foreach (var duplicate in existingProfiles.Skip(1))
+                {
+                    var revision = await _knowledge.GetCurrentRevisionAsync(duplicate.Id, ct);
+                    if (revision is not null)
+                        await _knowledge.HardDeleteAsync(duplicate.Id, revision.RevisionId, ct);
+                }
+            }
+        }
+
+        var memory = ToMemory(entry);
         if (current is null)
         {
             await _knowledge.CreateAssertionAsync(new KnowledgeRevisionDraft(
@@ -109,6 +131,16 @@ public sealed class WorkspaceMemoryStore : IAgentWorkspaceMemoryStore
         }
         return entry;
     }
+
+    private static bool IsAutomaticWorkspaceProfile(Memory memory) =>
+        string.Equals(memory.Title, "Workspace profile", StringComparison.Ordinal)
+        && memory.Tags.Contains("auto", StringComparer.OrdinalIgnoreCase)
+        && memory.Tags.Contains("profile", StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsAutomaticWorkspaceProfile(AgentWorkspaceMemoryEntry entry) =>
+        string.Equals(entry.Title, "Workspace profile", StringComparison.Ordinal)
+        && entry.Tags.Contains("auto", StringComparer.OrdinalIgnoreCase)
+        && entry.Tags.Contains("profile", StringComparer.OrdinalIgnoreCase);
 
     public async Task DeleteAsync(string workspaceRoot, string id, CancellationToken ct = default)
     {

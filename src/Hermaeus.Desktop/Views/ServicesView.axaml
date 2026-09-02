@@ -390,17 +390,10 @@
                                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
                                             <ComboBox ItemsSource="{Binding GpuPlacementOptions}"
                                                       SelectedItem="{Binding GpuPlacementSelection}"
-                                                      Width="76"
+                                                      Width="96"
                                                       FontSize="12"
                                                       IsEnabled="{Binding CanEdit}"
                                                       ToolTip.Tip="GPU placement intent: CPU, runtime Auto, all layers, or an exact layer count." />
-                                            <NumericUpDown Value="{Binding GpuLayers}"
-                                                           Minimum="1" Maximum="999"
-                                                           Increment="1"
-                                                           Width="48"
-                                                           IsVisible="{Binding IsExactGpuPlacement}"
-                                                           IsEnabled="{Binding CanEdit}"
-                                                           ToolTip.Tip="Exact GPU layer count" />
                                         </StackPanel>
                                     </Grid>
 
@@ -420,6 +413,13 @@
                                                        ToolTip.Tip="CPU thread count" />
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBlock Text="Offload:" Opacity="0.6" FontSize="13" />
+                                            <NumericUpDown Value="{Binding GpuLayers}"
+                                                           Minimum="1" Maximum="999"
+                                                           Increment="1"
+                                                           Width="96"
+                                                           IsVisible="{Binding IsExactGpuPlacement}"
+                                                           IsEnabled="{Binding CanEdit}"
+                                                           ToolTip.Tip="Exact number of model layers placed on the GPU. Active only when GPU placement is Exact." />
                                             <TextBlock Text="{Binding EffectiveOffloadLabel}" FontSize="13" />
                                         </StackPanel>
                                         <TextBlock Grid.Column="2" Text="Parallel slots:" Opacity="0.6" FontSize="13" VerticalAlignment="Center" />

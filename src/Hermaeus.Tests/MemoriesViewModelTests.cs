@@ -83,6 +83,35 @@ public sealed class MemoriesViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_memories_stay_out_of_normal_memories_and_pinned_rows_are_grouped_first()
+    {
+        using var temp = new TempDir();
+        var (vm, conversations, memories, _) = NewViewModel(temp);
+        await conversations.InitializeAsync();
+        await memories.InitializeAsync();
+
+        await memories.SaveAsync(new Memory { Id = "global-pinned", Content = "Pinned fact", IsPinned = true });
+        await memories.SaveAsync(new Memory { Id = "global-other", Content = "Other fact" });
+        await memories.SaveAsync(new Memory
+        {
+            Id = "workspace-profile",
+            Scope = MemoryScope.Workspace,
+            ScopeId = temp.PathFor("workspace"),
+            Title = "Workspace profile",
+            Content = "RAG ingest plan should remain workspace-scoped.",
+            Category = "workspace",
+            Tags = ["workspace", "profile", "auto"]
+        });
+        Assert.Equal(MemoryScope.Workspace, (await memories.GetByIdAsync("workspace-profile"))!.Scope);
+
+        await vm.InitializeAsync();
+
+        Assert.Equal(["global-pinned", "global-other"], vm.Memories.Select(item => item.Id));
+        Assert.Equal(["global-pinned"], vm.PinnedMemories.Select(item => item.Id));
+        Assert.Equal(["global-other"], vm.OtherMemories.Select(item => item.Id));
+    }
+
+    [Fact]
     public async Task ExportConversationCsv_requires_a_selected_conversation_and_writes_a_file()
     {
         using var temp = new TempDir();

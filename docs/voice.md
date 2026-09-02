@@ -175,9 +175,9 @@ Audio feedback is a separate bounded semantic cue service. It covers only the
 reviewed task, runtime, long-operation, and recording events, with per-event
 defaults, volume, mute, visual equivalents, and suppression while TTS speaks.
 It never cues ordinary token arrival, clicks, navigation, or high GPU use.
-Windows playback keeps the WAV path as an argument to a fixed PowerShell
-script rather than interpolating it into command text; temporary cue files are
-deleted after playback.
+Windows playback uses the native winmm `PlaySound` API directly, so a preview
+does not open a media player or depend on the WAV file association. Temporary
+cue files are deleted after playback.
 
 ## Audio Data and Privacy Lifecycle
 

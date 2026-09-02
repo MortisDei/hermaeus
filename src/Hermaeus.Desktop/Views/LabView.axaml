@@ -153,7 +153,11 @@
                                          Hint="{Binding EvidenceEmptyHint}"
                                          Margin="12" />
               <StackPanel Spacing="8" IsVisible="{Binding HasSelection}">
-                <TextBlock Text="Evidence detail" FontSize="18" FontWeight="SemiBold" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <TextBlock Text="Evidence detail" FontSize="18" FontWeight="SemiBold" />
+                  <Button Grid.Column="1" Content="Copy" Command="{Binding CopyEvidenceDetailCommand}"
+                          ToolTip.Tip="Copy the selected Lab result, persisted evidence records, raw JSON, and provenance to the clipboard." />
+                </Grid>
                 <TextBlock Text="{Binding SelectedExperience.EvidenceRecordLabel}" FontWeight="SemiBold" />
                 <TextBlock Text="{Binding SelectedExperience.Experience.Id}" FontFamily="Consolas" TextWrapping="Wrap" />
                 <TextBlock Text="Normalized outcome" FontWeight="SemiBold" />

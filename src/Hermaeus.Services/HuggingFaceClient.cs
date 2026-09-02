@@ -149,7 +149,7 @@ public sealed class HuggingFaceClient
                 if (!doc.RootElement.TryGetProperty("avatarUrl", out var avatar)
                     || avatar.ValueKind != JsonValueKind.String
                     || !TryValidateAvatarUrl(avatar.GetString(), out var validated))
-                    return null;
+                    continue;
                 return validated;
             }
             catch (OperationCanceledException)
@@ -158,7 +158,7 @@ public sealed class HuggingFaceClient
             }
             catch
             {
-                return null;
+                continue;
             }
         }
 

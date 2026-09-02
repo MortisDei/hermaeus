@@ -24,6 +24,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly ModelDownloadService _downloader;
     private readonly ModelInventoryService _inventory;
     private readonly IActivityRecorder? _activity;
+    private readonly IRuntimeLogService? _runtimeLogs;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
     private readonly List<LlmModel> _modelCache = [];
     private readonly object _modelCacheLock = new();
@@ -123,9 +124,10 @@ public partial class ModelManagementViewModel : ObservableObject
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null,
-        ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null)
+        ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null, IRuntimeLogService? runtimeLogs = null)
     {
         _activity = activity;
+        _runtimeLogs = runtimeLogs;
         _llm = llm;
         _profiles = profiles;
         _toasts = toasts;
@@ -134,7 +136,7 @@ public partial class ModelManagementViewModel : ObservableObject
         _services = services;
         _manifest = manifest;
         _hf = hf;
-        _artwork = artwork ?? new HuggingFaceArtworkService();
+        _artwork = artwork ?? new HuggingFaceArtworkService(runtimeLogs: runtimeLogs);
         _downloader = downloader;
         _inventory = inventory ?? new ModelInventoryService(manifest);
     }
@@ -612,6 +614,19 @@ public partial class ModelManagementViewModel : ObservableObject
         }
     }
 
+    private static string? ResolveHfPublisher(string repoId, string? author)
+    {
+        if (!string.IsNullOrWhiteSpace(author)
+            && !author.Contains('/', StringComparison.Ordinal)
+            && !author.Any(char.IsControl)
+            && !string.Equals(author, ".", StringComparison.Ordinal)
+            && !string.Equals(author, "..", StringComparison.Ordinal))
+            return author.Trim();
+
+        var owner = repoId.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return string.IsNullOrWhiteSpace(owner) ? null : owner;
+    }
+
     private static void ApplyManifestState(ModelProfileItemViewModel item, IReadOnlyList<ModelManifestEntry> manifestEntries)
     {
         var entry = FindManifestEntry(manifestEntries, item.ModelId);
@@ -1071,6 +1086,7 @@ public partial class ModelManagementViewModel : ObservableObject
             return;
         }
 
+        LogNetwork($"Hugging Face update check started: linked models={candidates.Count}");
         IsCheckingUpdates = true;
         try
         {
@@ -1103,15 +1119,18 @@ public partial class ModelManagementViewModel : ObservableObject
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    LogNetwork($"Hugging Face repository and revision resolution started: repo={group.Key}");
                     card = await _hf.GetModelCardAsync(group.Key, cts.Token);
                     revision = !string.IsNullOrWhiteSpace(card?.Sha) ? card.Sha : "main";
                     tree = await _hf.GetTreeAsync(group.Key, revision, cts.Token);
                     if (card is not null)
-                        authorAvatarUrl = await _hf.GetAuthorAvatarUrlAsync(card.Author, cts.Token);
+                        authorAvatarUrl = await _hf.GetAuthorAvatarUrlAsync(ResolveHfPublisher(group.Key, card.Author), cts.Token);
+                    LogNetwork($"Hugging Face repository and revision resolution completed: repo={group.Key} revision={revision} card={(card is not null ? "available" : "unavailable")} tree={(tree is not null ? "available" : "unavailable")} avatar={(authorAvatarUrl is not null ? "available" : "unavailable")}");
                 }
-                catch
+                catch (Exception ex)
                 {
                     tree = null;
+                    LogNetwork($"Hugging Face repository and revision resolution failed: repo={group.Key} error={ex.GetType().Name}", RuntimeLogLevel.Warning);
                 }
 
                 foreach (var (item, entry) in group)
@@ -1160,8 +1179,17 @@ public partial class ModelManagementViewModel : ObservableObject
                             && !candidate.Item.HasArtworkForDisplay)
                         .Select(candidate => candidate.Item)
                         .ToList();
+                    var revisionMatches = group.Count(candidate => string.Equals(candidate.Entry.RevisionSha, revision, StringComparison.OrdinalIgnoreCase));
+                    var verifiedManifests = group.Count(candidate => IsVerifiedManifest(candidate.Entry));
+                    var withoutCustomAvatars = group.Count(candidate => !candidate.Item.HasCustomAvatar);
+                    var withoutDisplayedArtwork = group.Count(candidate => !candidate.Item.HasArtworkForDisplay);
+                    LogNetwork($"Hugging Face artwork declaration gate evaluated: repo={group.Key} revision={revision} card=available tree=available eligible-models={artworkItems.Count} candidates={group.Count()} revision-matches={revisionMatches} verified-manifests={verifiedManifests} without-custom-avatar={withoutCustomAvatars} without-displayed-artwork={withoutDisplayedArtwork}");
                     if (artworkItems.Count > 0)
                         await BackfillArtworkAsync(group.Key, card, tree, revision, artworkItems, authorAvatarUrl);
+                }
+                else
+                {
+                    LogNetwork($"Hugging Face artwork declaration gate stopped: repo={group.Key} revision={revision} card={(card is null ? "unavailable" : "available")} tree={(tree is null ? "unavailable" : "available")}", RuntimeLogLevel.Warning);
                 }
             }
 
@@ -1191,6 +1219,7 @@ public partial class ModelManagementViewModel : ObservableObject
     {
         try
         {
+            LogNetwork($"Hugging Face artwork backfill started: repo={repoId} revision={revision} models={items.Count}");
             var result = await _artwork.FetchAsync(
                 repoId,
                 card,
@@ -1205,14 +1234,19 @@ public partial class ModelManagementViewModel : ObservableObject
             }
 
             RecordArtworkOutcome(repoId, revision, result);
+            LogNetwork($"Hugging Face artwork model-card binding completed: repo={repoId} revision={revision} source={result.EffectiveSourceKind} state={result.State} path={(result.CachePath is null ? "none" : "available")}");
         }
         catch (Exception ex)
         {
             // Artwork is decoration. A failed backfill must never turn a
             // completed update check into a failed model-management action.
             RecordArtworkFailure(repoId, revision, ex);
+            LogNetwork($"Hugging Face artwork backfill failed after acquisition attempt: repo={repoId} revision={revision} error={ex.GetType().Name}", RuntimeLogLevel.Warning);
         }
     }
+
+    private void LogNetwork(string message, RuntimeLogLevel level = RuntimeLogLevel.Info) =>
+        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, level, RuntimeLogCategory.Network, message));
 
     private void RecordArtworkOutcome(string repoId, string revision, HfArtworkResult result)
     {
@@ -1664,7 +1698,7 @@ public partial class ModelManagementViewModel : ObservableObject
             repo.License = card?.License ?? "unknown";
             var authorAvatarUrl = card is null
                 ? null
-                : await _hf.GetAuthorAvatarUrlAsync(card.Author, ct);
+                : await _hf.GetAuthorAvatarUrlAsync(ResolveHfPublisher(repo.RepoId, card.Author), ct);
             ct.ThrowIfCancellationRequested();
 
             if (tree is null)

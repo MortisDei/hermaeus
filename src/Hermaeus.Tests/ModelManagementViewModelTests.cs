@@ -601,6 +601,7 @@ public sealed class ModelManagementViewModelTests
         var image = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
         var handler = new PublisherAvatarArtworkHandler(revision, modelHash, modelBytes.Length, image);
         using var http = new HttpClient(handler);
+        var logs = new RuntimeLogService(settings);
         var vm = new ModelManagementViewModel(
             new ScriptedModelsLlm(() => []),
             new ModelProfileService(settings),
@@ -611,7 +612,8 @@ public sealed class ModelManagementViewModelTests
             manifest,
             new HuggingFaceClient(http),
             new ModelDownloadService(),
-            artwork: new HuggingFaceArtworkService(http));
+            artwork: new HuggingFaceArtworkService(http),
+            runtimeLogs: logs);
 
         await vm.RefreshAsync();
         await vm.CheckForUpdatesCommand.ExecuteAsync(null);
@@ -622,6 +624,10 @@ public sealed class ModelManagementViewModelTests
         Assert.Equal(HfArtworkSourceKind.HuggingFaceAuthorAvatar, item.ArtworkSource);
         Assert.Contains("Publisher avatar fallback", item.ArtworkTooltip, StringComparison.Ordinal);
         Assert.NotNull(item.ArtworkPath);
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("update check started", StringComparison.Ordinal));
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("repository and revision resolution completed", StringComparison.Ordinal));
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("artwork declaration gate evaluated", StringComparison.Ordinal));
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("model-card binding completed", StringComparison.Ordinal));
         Assert.Collection(handler.RequestedUrls,
             cardUrl => Assert.Contains("/api/models/org/repo", cardUrl, StringComparison.Ordinal),
             treeUrl =>

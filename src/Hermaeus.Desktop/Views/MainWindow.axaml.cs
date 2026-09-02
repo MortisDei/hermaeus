@@ -24,6 +24,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         Opened += OnOpened;
         AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
+        AddHandler(KeyDownEvent, OnQuickChatKeyDown, RoutingStrategies.Tunnel);
     }
 
     private static void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e) =>
@@ -35,6 +36,13 @@ public partial class MainWindow : Window
         {
             vm.Agent.RequestDraftPatchPreview = ShowDraftPatchPreviewAsync;
             vm.Agent.RequestCopyToClipboard = async text =>
+            {
+                if (Clipboard is not { } clipboard)
+                    return false;
+                try { await clipboard.SetTextAsync(text); return true; }
+                catch { return false; }
+            };
+            vm.Lab.RequestCopyToClipboard = async text =>
             {
                 if (Clipboard is not { } clipboard)
                     return false;
@@ -126,6 +134,8 @@ public partial class MainWindow : Window
 
     private void OnQuickChatKeyDown(object? sender, KeyEventArgs e)
     {
+        if (!ReferenceEquals(e.Source, QuickChatInput))
+            return;
         if (e.Key is not (Key.Return or Key.Enter)
             || e.KeyModifiers is not (KeyModifiers.None or KeyModifiers.Control)
             || DataContext is not MainWindowViewModel vm)

@@ -31,14 +31,14 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
                 process.WorkingSet64, RuntimeTelemetrySourceKind.ProcessCounter,
                 RuntimeTelemetryTrustState.ProcessScoped, observedAt,
                 "process-working-set", "Operating-system working set for the matching runtime process."));
-            var gpuMemory = await TryCaptureNvidiaProcessMemoryAsync(request.ProcessId, ct);
+            var (gpuMemory, gpuMemorySource) = await TryCaptureNvidiaProcessMemoryAsync(request.ProcessId, ct);
             samples.Add(Sample(
                 request, processInstance, RuntimeTelemetryMetric.ProcessGpuMemoryBytes,
                 gpuMemory, gpuMemory.HasValue ? RuntimeTelemetrySourceKind.ProcessCounter : RuntimeTelemetrySourceKind.Unknown,
                 gpuMemory.HasValue ? RuntimeTelemetryTrustState.ProcessScoped : RuntimeTelemetryTrustState.Unknown,
-                observedAt, gpuMemory.HasValue ? "nvidia-smi-process-gpu-memory" : "process-gpu-unavailable",
+                observedAt, gpuMemory.HasValue ? gpuMemorySource : "process-gpu-unavailable",
                 gpuMemory.HasValue
-                    ? "NVIDIA nvidia-smi process memory for the matching runtime PID."
+                    ? $"NVIDIA {gpuMemorySource} process memory for the matching runtime PID."
                     : "No trustworthy per-process GPU memory counter is available from this source."));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
@@ -65,16 +65,20 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         return samples;
     }
 
-    private static async Task<long?> TryCaptureNvidiaProcessMemoryAsync(int processId, CancellationToken ct)
+    private static async Task<(long? Bytes, string Source)> TryCaptureNvidiaProcessMemoryAsync(int processId, CancellationToken ct)
     {
-        if (ExecutableResolver.FindOnPath("nvidia-smi") is null)
-            return null;
+        if (NvidiaProcessMemoryProbe.TryGetBytes(processId, out var nvmlBytes))
+            return (nvmlBytes, "nvml-process-gpu-memory");
+
+        var executable = ExecutableResolver.FindOnPath("nvidia-smi");
+        if (executable is null)
+            return (null, "process-gpu-unavailable");
 
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "nvidia-smi",
+                FileName = executable,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -85,12 +89,14 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         process.StartInfo.ArgumentList.Add("--format=csv,noheader,nounits");
         try
         {
-            if (!process.Start()) return null;
+            if (!process.Start()) return (null, "process-gpu-unavailable");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(2));
             var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
-            return process.ExitCode == 0 && ProcessGpuMemoryParser.TryGetBytes(output, processId, out var bytes) ? bytes : null;
+            return process.ExitCode == 0 && ProcessGpuMemoryParser.TryGetBytes(output, processId, out var bytes)
+                ? (bytes, "nvidia-smi-process-gpu-memory")
+                : (null, "process-gpu-unavailable");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -100,7 +106,7 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
             catch { }
-            return null;
+            return (null, "process-gpu-unavailable");
         }
     }
 

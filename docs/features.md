@@ -161,7 +161,10 @@ See the [RAG reference](rag.md).
 - Memories are a local, reviewable store of durable facts with categories,
   tags, scopes, importance, recall statistics, pinning, archive, expiry, and
   confirmed deletion. Pinned rows show a persistent Pinned state and an Unpin
-  action instead of relying on a transient notification.
+  action instead of relying on a transient notification, and the Memories
+  view groups pinned rows at the top. Agent workspace notes and generated
+  workspace profiles remain on the Agent surface rather than appearing as
+  ordinary memories.
 - Search blends full-text and embedding similarity when an embedding model is
   available, with a bounded keyword fallback when it is not. Archived and
   expired memories are excluded from search and injection.

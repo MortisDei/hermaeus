@@ -73,7 +73,7 @@ public sealed class ConversationExportService
                 md.AppendLine();
             }
             md.AppendLine(string.IsNullOrWhiteSpace(message.Content) && !string.IsNullOrWhiteSpace(message.ReasoningContent)
-                ? "No final answer was returned."
+                ? "The model returned reasoning but no final answer."
                 : message.Content.Trim());
         }
 

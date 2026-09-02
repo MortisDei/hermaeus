@@ -129,6 +129,35 @@ public sealed class MemoryScopeTests
     }
 
     [Fact]
+    public async Task Automatic_workspace_profiles_collapse_duplicate_rows_on_upsert()
+    {
+        using var temp = new TempDir();
+        var memories = NewStore(temp, out var settings);
+        var store = new WorkspaceMemoryStore(memories, settings);
+        var root = temp.PathFor("ws");
+
+        var first = await store.UpsertAsync(new AgentWorkspaceMemoryEntry
+        {
+            WorkspaceRoot = root,
+            Title = "Workspace profile",
+            Body = "old summary",
+            Tags = ["workspace", "profile", "auto"]
+        });
+        var second = await store.UpsertAsync(new AgentWorkspaceMemoryEntry
+        {
+            WorkspaceRoot = root,
+            Title = "Workspace profile",
+            Body = "new summary",
+            Tags = ["workspace", "profile", "auto"]
+        });
+
+        var listed = Assert.Single(await store.ListAsync(root));
+        Assert.Equal(first.Id, second.Id);
+        Assert.Equal(first.Id, listed.Id);
+        Assert.Equal("new summary", listed.Body);
+    }
+
+    [Fact]
     public async Task Legacy_memory_json_files_are_imported_once_and_renamed()
     {
         using var temp = new TempDir();

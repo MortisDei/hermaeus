@@ -2220,7 +2220,7 @@ public partial class AgentViewModel : ViewModelBase
             {
                 WorkspaceRoot = WorkspaceRoot,
                 Title = "Workspace profile",
-                Body = $"{report.Summary}\n\nRAG ingest plan: {report.RagIngestPlan}",
+                Body = report.Summary,
                 Tags = ["workspace", "profile", "auto"]
             });
             await RefreshWorkspaceMemoryAsync();

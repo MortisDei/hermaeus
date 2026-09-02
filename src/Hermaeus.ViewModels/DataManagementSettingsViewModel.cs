@@ -36,7 +36,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     private readonly SemaphoreSlim _dataRootMigrationGate = new(1, 1);
     private int _dataRootEditVersion;
 
-    public Action? RequestDataRootPicker { get; set; }
+    public Func<Task>? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
     public Action? RequestRestoreBackupPicker { get; set; }
@@ -95,7 +95,12 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         settings.DataManagement.LlamaRuntimeVariant = LlamaRuntimeVariant;
     }
 
-    [RelayCommand] private void BrowseDataRoot() => RequestDataRootPicker?.Invoke();
+    [RelayCommand]
+    private async Task BrowseDataRootAsync()
+    {
+        if (RequestDataRootPicker is not null)
+            await RequestDataRootPicker();
+    }
     [RelayCommand] private void BrowseLocalAiAssetsRoot() => RequestLocalAiAssetsRootPicker?.Invoke();
     [RelayCommand] private void BrowseBackupDirectory() => RequestBackupDirectoryPicker?.Invoke();
     [RelayCommand] private void BrowseRestoreBackup() => RequestRestoreBackupPicker?.Invoke();

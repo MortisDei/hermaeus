@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using System.Text;
 using System.Text.Json;
 
 namespace Hermaeus.ViewModels;
@@ -616,6 +617,7 @@ public partial class LabViewModel : ViewModelBase
     public UiBoundCollection<LabRecipeRowViewModel> RecipeOptions { get; } = [];
     public Func<EmpiricalExperience, Task<bool>>? ConfirmRemoval { get; set; }
     public Func<LabApplyReview, Task<bool>>? ConfirmApply { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
     public bool CanStartRun => !IsRunActive && !IsRecipeRunning && !IsBusy;
     public bool CanRunRecipe => !IsRunActive && !IsRecipeRunning && !IsBusy;
     public bool CanReviewCurrentRun => GetReviewRun() is
@@ -738,6 +740,47 @@ public partial class LabViewModel : ViewModelBase
         if (ids.Length == 0) return;
         try { ExportJson = await _store.ExportAsync(ids); StatusMessage = $"Prepared {ids.Length} record(s) for copy or save."; }
         catch (Exception ex) { _toasts.Show("Could not export evidence", ex.Message, ToastKind.Error, 5000); }
+    }
+
+    [RelayCommand]
+    private async Task CopyEvidenceDetailAsync()
+    {
+        if (SelectedExperience is null)
+            return;
+        if (RequestCopyToClipboard is null)
+        {
+            StatusMessage = "Clipboard access is unavailable in this session.";
+            return;
+        }
+
+        var copied = await RequestCopyToClipboard(BuildEvidenceDetail(SelectedExperience));
+        StatusMessage = copied
+            ? "Copied Lab evidence detail."
+            : "Could not copy Lab evidence detail.";
+    }
+
+    internal static string BuildEvidenceDetail(ExperienceRowViewModel row)
+    {
+        var text = new StringBuilder();
+        text.AppendLine("Lab evidence detail");
+        text.AppendLine($"Record: {row.Id}");
+        text.AppendLine($"Domain: {row.Domain}");
+        text.AppendLine($"Outcome: {row.OutcomeLabel}");
+        text.AppendLine($"Status: {row.StatusLabel}");
+        text.AppendLine();
+        foreach (var evidence in row.EvidenceRecords)
+        {
+            text.AppendLine($"Evidence {evidence.Id}");
+            text.AppendLine($"Created: {evidence.CreatedAtUtc:O}");
+            text.AppendLine($"Domain: {evidence.Domain}");
+            text.AppendLine($"Outcome: {evidence.Outcome.Outcome} - {evidence.Outcome.Detail}");
+            text.AppendLine($"Context: {evidence.ContextJson}");
+            text.AppendLine($"Action: {evidence.ActionJson}");
+            foreach (var provenance in evidence.Provenance)
+                text.AppendLine($"Source: {provenance.Source.Title} ({provenance.Source.EvidenceOrigin})");
+            text.AppendLine();
+        }
+        return text.ToString().TrimEnd();
     }
 
     [RelayCommand]

@@ -516,6 +516,11 @@ the model sees next step that only the first one ran.
 - Approval-gated draft patch queue with approval metadata and task-state
   persistence.
 
+Generated workspace profiles are scoped, canonicalized per workspace, and
+kept on the Agent workspace surface. They do not become ordinary Memories,
+and the RAG ingest plan remains analysis output rather than a durable memory
+body.
+
 ### Native tool calling
 
 When the configured model/provider supports OpenAI-style tool calling

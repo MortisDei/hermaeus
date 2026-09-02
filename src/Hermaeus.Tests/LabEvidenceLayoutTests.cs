@@ -35,11 +35,12 @@ public sealed class LabEvidenceLayoutTests
         var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "ModelManagementView.axaml");
         var doc = XDocument.Load(path);
         var flyout = doc.Descendants().Single(element => element.Name.LocalName == "Flyout"
-            && (string?)element.Attribute("Placement") == "BottomEdgeAlignedRight");
+            && (string?)element.Attribute("Placement") == "BottomEdgeAlignedLeft");
         var scrollViewer = flyout.Descendants().Single(element => element.Name.LocalName == "ScrollViewer");
 
         Assert.Equal("SlideX,FlipY,ResizeX,ResizeY", (string?)flyout.Attribute("PlacementConstraintAdjustment"));
         Assert.Null((string?)scrollViewer.Attribute("Width"));
+        Assert.Equal("640", (string?)scrollViewer.Attribute("MinWidth"));
         Assert.Equal("720", (string?)scrollViewer.Attribute("MaxWidth"));
         Assert.Equal("520", (string?)scrollViewer.Attribute("MaxHeight"));
         Assert.Equal("Auto", (string?)scrollViewer.Attribute("VerticalScrollBarVisibility"));
