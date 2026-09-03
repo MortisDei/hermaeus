@@ -33,6 +33,22 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [ObservableProperty] private string _settingsError = string.Empty;
     [ObservableProperty] private bool _dataRootMigrationPending;
 
+    private string _effectiveDataRootAtComposition = string.Empty;
+
+    public string EffectiveDataRootDirectory => _effectiveDataRootAtComposition;
+    public string DataRootStateSummary
+    {
+        get
+        {
+            var configured = SettingsService.ResolveDataRoot(_settings.Settings);
+            if (string.IsNullOrWhiteSpace(_effectiveDataRootAtComposition)
+                || ModelPathSafety.AreSameLocalPath(configured, _effectiveDataRootAtComposition))
+                return $"Configured and effective: {configured}";
+
+            return $"Configured: {configured}. Currently effective: {_effectiveDataRootAtComposition}. Restart Hermaeus to reload all stores and cached views.";
+        }
+    }
+
     private readonly SemaphoreSlim _dataRootMigrationGate = new(1, 1);
     private int _dataRootEditVersion;
 
@@ -63,11 +79,14 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     public void ReloadFrom(AppSettings settings)
     {
         _dataRootEditVersion++;
+        _effectiveDataRootAtComposition = SettingsService.ResolveDataRoot(settings);
         DataRootDirectory = settings.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = settings.DataManagement.LocalAiAssetsRoot;
         LlamaRuntimeVariant = settings.DataManagement.LlamaRuntimeVariant;
         UpdateLlamaRuntimeVariantStatus(settings);
         UpdateMigrationPreview();
+        OnPropertyChanged(nameof(EffectiveDataRootDirectory));
+        OnPropertyChanged(nameof(DataRootStateSummary));
         UpdateLocalAiAssetsStatus();
         _ = RefreshArtworkCacheStatusAsync();
     }
@@ -111,7 +130,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     /// stored" (r6 01-first-five-minutes.md 1.2) has a one-click answer.
     /// </summary>
     [RelayCommand]
-    private void OpenDataRoot() => OpenFolder(_resolveDataRoot());
+    private void OpenDataRoot() => OpenFolder(EffectiveDataRootDirectory);
 
     [RelayCommand]
     private void OpenLocalAiAssetsRoot() => OpenFolder(LocalAiAssetsRoot);
@@ -287,6 +306,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     {
         _dataRootEditVersion++;
         UpdateMigrationPreview();
+        OnPropertyChanged(nameof(DataRootStateSummary));
         _ = RefreshArtworkCacheStatusAsync();
     }
     partial void OnLocalAiAssetsRootChanged(string value) => UpdateLocalAiAssetsStatus();

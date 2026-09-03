@@ -1,6 +1,7 @@
 using Hermaeus.Agent.Services;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Desktop;
 using Hermaeus.Rag;
 using Hermaeus.Rag.Eval;
 using Hermaeus.Rag.Pipeline;
@@ -101,6 +102,95 @@ public sealed class MainWindowViewModelStartupTests
             commandRegistry, palette, activity, settings, toasts, logs, new ConversationExportService(), recallIndexing);
 
         return new Harness(main, llm, logs, toasts, convStore);
+    }
+
+    [Fact]
+    public async Task Startup_loads_configured_data_root_before_composing_data_backed_stores()
+    {
+        using var temp = new TempDir();
+        var settingsPath = temp.PathFor("settings.json");
+        var configuredRoot = temp.PathFor("selected-data-root");
+        var writer = new SettingsService(settingsPath);
+        var candidate = writer.Settings.Clone();
+        candidate.DataManagement.DataRootDirectory = configuredRoot;
+        await writer.SaveAsync(candidate);
+
+        var loaded = new SettingsService(settingsPath);
+        App.LoadSettingsBeforeComposition(loaded);
+
+        Assert.Equal(Path.GetFullPath(configuredRoot), SettingsService.ResolveDataRoot(loaded.Settings));
+
+        var conversations = new ConversationStore(loaded);
+        var rag = new SqliteRagStore(loaded);
+        var agent = new FileAgentTaskStateStore(loaded);
+        await conversations.InitializeAsync();
+        await rag.InitializeAsync();
+        await agent.InitializeAsync();
+
+        Assert.True(File.Exists(Path.Combine(configuredRoot, "conversations.db")));
+        Assert.True(File.Exists(Path.Combine(configuredRoot, "agent", "task_index.db")));
+    }
+
+    [Fact]
+    public async Task Startup_settings_load_does_not_capture_the_UI_synchronization_context()
+    {
+        using var temp = new TempDir();
+        var settingsPath = temp.PathFor("settings.json");
+        var configuredRoot = temp.PathFor("selected-data-root");
+        var writer = new SettingsService(settingsPath);
+        var candidate = writer.Settings.Clone();
+        candidate.DataManagement.DataRootDirectory = configuredRoot;
+        await writer.SaveAsync(candidate);
+
+        var loaded = new SettingsService(settingsPath);
+        var loadTask = Task.Run(() =>
+        {
+            var previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(new BlockingSynchronizationContext());
+            try
+            {
+                App.LoadSettingsBeforeComposition(loaded);
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previous);
+            }
+        });
+
+        var completed = await Task.WhenAny(loadTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(loadTask, completed);
+        await loadTask;
+        Assert.Equal(Path.GetFullPath(configuredRoot), SettingsService.ResolveDataRoot(loaded.Settings));
+    }
+
+    [Fact]
+    public async Task Data_storage_distinguishes_persisted_root_from_current_effective_root_until_restart()
+    {
+        using var temp = new TempDir();
+        var service = NewSettings(temp);
+        var oldRoot = temp.PathFor("old-data-root");
+        var newRoot = temp.PathFor("new-data-root");
+        service.Settings.DataManagement.DataRootDirectory = oldRoot;
+
+        var viewModel = new DataManagementSettingsViewModel(
+            service,
+            new BackupService(service),
+            new FakeToasts(),
+            () => SettingsService.ResolveDataRoot(service.Settings));
+        viewModel.ReloadFrom(service.Settings);
+
+        var candidate = service.Settings.Clone();
+        candidate.DataManagement.DataRootDirectory = newRoot;
+        await service.SaveAsync(candidate);
+
+        Assert.Contains($"Configured: {Path.GetFullPath(newRoot)}", viewModel.DataRootStateSummary, StringComparison.Ordinal);
+        Assert.Contains($"Currently effective: {Path.GetFullPath(oldRoot)}", viewModel.DataRootStateSummary, StringComparison.Ordinal);
+        Assert.Contains("Restart Hermaeus", viewModel.DataRootStateSummary, StringComparison.Ordinal);
+    }
+
+    private sealed class BlockingSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) { }
     }
 
     /// <summary>doc 04 4.1 guard: the registry is the app's public self-description

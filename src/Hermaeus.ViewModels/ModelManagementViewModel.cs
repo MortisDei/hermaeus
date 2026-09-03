@@ -55,11 +55,15 @@ public partial class ModelManagementViewModel : ObservableObject
     [ObservableProperty] private string _autoTuneAllStatus = string.Empty;
     [ObservableProperty] private bool   _isOrganizing;
     [ObservableProperty] private string _organizeStatus = string.Empty;
+    [ObservableProperty] private ModelProfileItemViewModel? _selectedProfile;
+
+    public bool HasSelectedProfile => SelectedProfile is not null;
 
     private volatile bool _isTuneInProgress;
     private CancellationTokenSource? _autoTuneAllCts;
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
+    partial void OnSelectedProfileChanged(ModelProfileItemViewModel? value) => OnPropertyChanged(nameof(HasSelectedProfile));
 
     private void ApplyFilter()
     {
@@ -117,10 +121,62 @@ public partial class ModelManagementViewModel : ObservableObject
     public Func<int, Task<bool>>? RequestEmptyDirectoryCleanupConfirmation { get; set; }
     public Func<ModelDeletionPlan, Task<bool>>? RequestDeleteModelConfirmation { get; set; }
     public Func<ModelDeletionPlan, Task<CompanionDisableChoice>>? RequestCompanionDisableConfirmation { get; set; }
+    public Func<ModelDeletionPlan, Task<bool>>? RequestCompanionRemovalConfirmation { get; set; }
     public Action<string>? RequestNavigate { get; set; }
 
     [RelayCommand]
     private void OpenServices() => RequestNavigate?.Invoke("services");
+
+    [RelayCommand]
+    private void OpenProfileEditor(ModelProfileItemViewModel? item) => SelectedProfile = item;
+
+    [RelayCommand]
+    private void CloseProfileEditor() => SelectedProfile = null;
+
+    [RelayCommand]
+    private async Task ClearCompanionAsync(ModelCompanionViewModel? item)
+    {
+        if (item is null || string.IsNullOrWhiteSpace(item.ModelId)
+            || string.IsNullOrWhiteSpace(item.LocalFilePath)
+            || RequestCompanionRemovalConfirmation is null)
+            return;
+
+        var assetsRoot = _settings.Settings.DataManagement.LocalAiAssetsRoot;
+        if (!ModelPathSafety.TryResolveFileUnderRoot(assetsRoot, item.LocalFilePath, out var normalized, out var error))
+        {
+            _toasts.Show("Cannot clear companion", error, ToastKind.Warning, 7000);
+            return;
+        }
+
+        var existing = await _manifest.FindAsync(item.ModelId);
+        if (existing is null || !existing.Companions.Any(companion =>
+                ModelPathSafety.AreSameLocalPath(companion.LocalFilePath, normalized)))
+            return;
+
+        var files = File.Exists(normalized) ? new[] { normalized } : Array.Empty<string>();
+        var description = files.Length == 0
+            ? $"Clear the stale companion mapping for {normalized}? No regular file is present, so no file will be deleted."
+            : $"Delete the companion file {normalized} and clear its mapping from {Path.GetFileName(item.ModelId)}?";
+        var plan = new ModelDeletionPlan(item.ModelId, files, description, Path.GetFullPath(assetsRoot));
+        if (!await RequestCompanionRemovalConfirmation(plan))
+            return;
+
+        if (files.Length > 0)
+        {
+            var remaining = ModelDeletionService.DeleteExact(plan);
+            if (remaining.Count > 0)
+            {
+                _toasts.Show("Companion removal incomplete", string.Join(", ", remaining), ToastKind.Warning, 7000);
+                return;
+            }
+        }
+
+        await _manifest.RemoveCompanionAsync(item.ModelId, normalized);
+        InvalidateModelInventory();
+        ForceRefresh = true;
+        await RefreshAsync();
+        _toasts.Show("Companion cleared", $"Removed {Path.GetFileName(normalized)} from the model's known companion mappings.", ToastKind.Info);
+    }
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null,
@@ -2383,14 +2439,19 @@ public sealed class ModelCatalogSectionViewModel(string title)
 
 public sealed class ModelCompanionViewModel
 {
+    public string ModelId { get; }
+    public string LocalFilePath { get; }
     public string FileName { get; }
     public string RoleLabel { get; }
     public string StateLabel { get; }
     public string StateTooltip { get; }
+    public bool CanClear => !string.IsNullOrWhiteSpace(LocalFilePath);
 
-    public ModelCompanionViewModel(ModelCompanionManifestEntry companion)
+    public ModelCompanionViewModel(ModelCompanionManifestEntry companion, string modelId = "")
     {
-        FileName = Path.GetFileName(companion.LocalFilePath);
+        ModelId = modelId;
+        LocalFilePath = companion.LocalFilePath;
+        FileName = Path.GetFileName(LocalFilePath);
         RoleLabel = ModelManagementViewModel.CompanionRoleLabelForDisplay(companion.Role);
         var exists = false;
         var sizeMatches = false;
@@ -2506,6 +2567,14 @@ public partial class ModelProfileItemViewModel : ObservableObject
 
     public bool HasCustomAvatar => !string.IsNullOrWhiteSpace(Avatar);
     public bool HasArtworkForDisplay => !HasCustomAvatar && !string.IsNullOrWhiteSpace(ArtworkPath);
+    public bool ShowArtworkFallback => !HasCustomAvatar && !HasArtworkForDisplay;
+    public string ArtworkFallbackGlyph => _catalogRole switch
+    {
+        ModelCatalogRole.Embedding => "E",
+        ModelCatalogRole.Reranker => "R",
+        ModelCatalogRole.Companion => "C",
+        _ => "AI"
+    };
     public string ArtworkSourceLabel => ArtworkSource switch
     {
         HfArtworkSourceKind.RepositoryFile or HfArtworkSourceKind.HuggingFaceSocialThumbnail => "Repository-declared artwork",
@@ -2674,6 +2743,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasCustomAvatar));
         OnPropertyChanged(nameof(HasArtworkForDisplay));
+        OnPropertyChanged(nameof(ShowArtworkFallback));
         OnPropertyChanged(nameof(ArtworkTooltip));
     }
 
@@ -2697,6 +2767,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
     partial void OnArtworkPathChanged(string? value)
     {
         OnPropertyChanged(nameof(HasArtworkForDisplay));
+        OnPropertyChanged(nameof(ShowArtworkFallback));
         OnPropertyChanged(nameof(ArtworkTooltip));
     }
 
@@ -2726,6 +2797,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         ApplyCompanionDetails(manifest);
         OnPropertyChanged(nameof(CatalogRole));
         OnPropertyChanged(nameof(RoleLabel));
+        OnPropertyChanged(nameof(ArtworkFallbackGlyph));
         OnPropertyChanged(nameof(CatalogSearchText));
     }
 
@@ -2735,7 +2807,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         if (manifest is not null)
         {
             foreach (var companion in manifest.Companions.Where(c => !string.IsNullOrWhiteSpace(c.LocalFilePath)))
-                Companions.Add(new ModelCompanionViewModel(companion));
+                Companions.Add(new ModelCompanionViewModel(companion, ModelId));
         }
 
         OnPropertyChanged(nameof(HasCompanionDetails));

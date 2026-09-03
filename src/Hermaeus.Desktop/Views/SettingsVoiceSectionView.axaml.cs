@@ -23,6 +23,7 @@ public partial class SettingsVoiceSectionView : UserControl
         if (button.Parent is not Visual row) return;
         if (row.GetVisualDescendants().OfType<AutoCompleteBox>().FirstOrDefault() is not { } box) return;
 
+        PrepareVoiceList(box);
         box.Focus();
         box.IsDropDownOpen = true;
     }
@@ -36,9 +37,25 @@ public partial class SettingsVoiceSectionView : UserControl
             // contains the selected voice. VoiceDisplay ignores this transient
             // clear, and the closed handler restores the visible value when
             // the user dismisses the popup without choosing anything.
-            box.Tag = box.Text;
-            box.Text = string.Empty;
+            // The opening event is raised before the popup applies its filter.
+            // Clear the transient search value on the next input pass as well,
+            // so repeated opens cannot retain the previous voice as a filter.
+            PrepareVoiceList(box);
+            Dispatcher.UIThread.Post(
+                () =>
+                {
+                    if (box.IsDropDownOpen)
+                        box.Text = string.Empty;
+                },
+                DispatcherPriority.Input);
         }
+    }
+
+    private static void PrepareVoiceList(AutoCompleteBox box)
+    {
+        if (box.Tag is null)
+            box.Tag = box.Text;
+        box.Text = string.Empty;
     }
 
     private static void OnChannelVoiceDropDownClosed(object? sender, EventArgs e)

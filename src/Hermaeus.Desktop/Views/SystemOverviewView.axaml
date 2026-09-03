@@ -4,7 +4,7 @@
              x:Class="Hermaeus.Desktop.Views.SystemOverviewView"
              x:DataType="vm:SystemOverviewViewModel">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="24" Spacing="16">
+        <StackPanel Margin="24" Spacing="16" MaxWidth="1280" HorizontalAlignment="Center">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <StackPanel Grid.Column="0" Spacing="2">
                     <TextBlock Text="System Overview" FontSize="22" FontWeight="SemiBold" />
@@ -52,6 +52,20 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <Border Classes="settings-card" Padding="10">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Details" VerticalAlignment="Center" FontSize="11" Opacity="0.55" Margin="0,0,6,0" />
+                    <Button Content="Dashboard" Command="{Binding ShowOverviewDetailCommand}" Padding="9,4" CornerRadius="6"
+                            ToolTip.Tip="Keep the at-a-glance hardware and workload view in focus." />
+                    <Button Content="Startup" Command="{Binding ShowStartupDetailCommand}" Padding="9,4" CornerRadius="6"
+                            IsEnabled="{Binding HasStartupBreakdown}"
+                            ToolTip.Tip="Inspect the last measured startup breakdown." />
+                    <Button Content="Privacy" Command="{Binding ShowPrivacyDetailCommand}" Padding="9,4" CornerRadius="6"
+                            ToolTip.Tip="Inspect configured outbound destinations and privacy posture." />
+                </StackPanel>
+            </Border>
+
+            <StackPanel IsVisible="{Binding IsOverviewDetailVisible}" Spacing="16">
             <!-- r19 6.2: hardware (GPU/VRAM, Components) reads before the privacy
                  audit, not buried under it. -->
             <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
@@ -123,9 +137,15 @@
                 </Border>
             </Grid>
 
-            <Expander Header="Whole-workload resources" IsExpanded="True">
+            <Border Classes="settings-card" Padding="14">
                 <StackPanel Spacing="10">
-                    <TextBlock Text="{Binding ResourceStatus}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Whole-workload resources" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ResourceStatus}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="Observed / planned / Unknown" FontSize="10" Opacity="0.5" VerticalAlignment="Center" />
+                    </Grid>
                     <ItemsControl ItemsSource="{Binding ResourceConsumers}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:ResourceConsumerReceiptViewModel">
@@ -173,13 +193,18 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
-            </Expander>
+            </Border>
+            </StackPanel>
 
             <!-- r27 01 1.5: the startup breakdown was already measured and already
                  formatted into one Info line in the runtime log, which nobody
                  reads. It is the only evidence a round changed startup at all. -->
-            <Expander Header="Last startup" IsExpanded="False" IsVisible="{Binding HasStartupBreakdown}">
+            <Border Classes="settings-card" Padding="14" IsVisible="{Binding IsStartupDetailVisible}">
                 <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Text="Last startup" FontSize="16" FontWeight="SemiBold" />
+                        <Button Grid.Column="1" Content="Back to dashboard" Command="{Binding ShowOverviewDetailCommand}" Padding="9,4" CornerRadius="6" />
+                    </Grid>
                     <TextBlock Text="{Binding StartupTotal}" FontWeight="SemiBold" />
                     <ItemsControl ItemsSource="{Binding StartupPhases}">
                         <ItemsControl.ItemTemplate>
@@ -213,22 +238,23 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
-            </Expander>
+            </Border>
 
-            <Expander Header="Privacy audit - what can leave this machine" IsExpanded="True">
+            <Border Classes="settings-card" Padding="14" IsVisible="{Binding IsPrivacyDetailVisible}">
                 <StackPanel Spacing="10">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                         <TextBlock Grid.Column="0"
-                                   Text="Local-first posture, remote data paths, secret storage, and exposed services"
-                                   FontSize="12"
-                                   Opacity="0.62"
-                                   TextWrapping="Wrap" />
+                                   Text="Privacy audit"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
                         <Button Grid.Column="1"
-                                Content="Refresh"
-                                Command="{Binding RefreshPrivacyAuditCommand}"
-                                IsEnabled="{Binding !IsRefreshing}"
-                                ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
+                                Content="Back to dashboard"
+                                Command="{Binding ShowOverviewDetailCommand}" Padding="9,4" CornerRadius="6" />
                     </Grid>
+                    <TextBlock Text="Local-first posture, remote data paths, secret storage, and exposed services" FontSize="12" Opacity="0.62" TextWrapping="Wrap" />
+                    <Button Content="Refresh privacy audit" Command="{Binding RefreshPrivacyAuditCommand}"
+                            IsEnabled="{Binding !IsRefreshing}" HorizontalAlignment="Left"
+                            ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
                     <TextBlock Text="{Binding PrivacyAuditSummary}" FontSize="13" FontWeight="SemiBold" />
                     <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">
                         <ItemsControl.ItemTemplate>
@@ -255,7 +281,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
-            </Expander>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

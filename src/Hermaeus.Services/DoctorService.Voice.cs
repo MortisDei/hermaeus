@@ -37,7 +37,7 @@ public sealed partial class DoctorService
             isNativeKokoro
                 ? health.Status == VoiceHealthStatus.Healthy
                     ? "Installed"
-                    : nativeKokoro?.IsInstalled == true
+                    : nativeKokoro?.HasInstalledModel == true
                         ? "Retry Kokoro (native) health"
                         : "Install Kokoro (native)"
                 : "Open Settings",

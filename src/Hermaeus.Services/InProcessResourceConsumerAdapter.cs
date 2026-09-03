@@ -77,7 +77,7 @@ public static class ResourceConsumerAdapters
 
     public static IResourceConsumerAdapter Kokoro(Func<bool> isLoaded) =>
         InProcess(
-            "tts.kokoro",
+            ResourceConsumerIds.NativeKokoro,
             ResourceConsumerKind.TextToSpeech,
             "NativeKokoroVoiceProvider",
             ResourcePriorityClass.Foreground,

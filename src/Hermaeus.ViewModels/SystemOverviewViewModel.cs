@@ -27,6 +27,27 @@ public partial class SystemOverviewViewModel : ObservableObject
     [ObservableProperty] private bool _isRefreshing;
     [ObservableProperty] private SystemSnapshot? _snapshot;
     [ObservableProperty] private string _resourceStatus = "No workload resource snapshot captured.";
+    [ObservableProperty] private string _activeDetail = "overview";
+
+    public bool IsOverviewDetailVisible => ActiveDetail == "overview";
+    public bool IsStartupDetailVisible => ActiveDetail == "startup";
+    public bool IsPrivacyDetailVisible => ActiveDetail == "privacy";
+
+    partial void OnActiveDetailChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsOverviewDetailVisible));
+        OnPropertyChanged(nameof(IsStartupDetailVisible));
+        OnPropertyChanged(nameof(IsPrivacyDetailVisible));
+    }
+
+    [RelayCommand]
+    private void ShowOverviewDetail() => ActiveDetail = "overview";
+
+    [RelayCommand]
+    private void ShowStartupDetail() => ActiveDetail = "startup";
+
+    [RelayCommand]
+    private void ShowPrivacyDetail() => ActiveDetail = "privacy";
 
     public SystemOverviewViewModel(
         ISystemInfoService system,
@@ -183,10 +204,15 @@ public partial class SystemOverviewViewModel : ObservableObject
                 .Sum(ComponentBytes);
             var unknownCount = allocations.SelectMany(allocation => allocation.Components)
                 .Count(component => !component.ObservedBytes.HasValue && !component.ReservedBytes.HasValue && !component.PredictedBytes.HasValue);
+            var state = allocations.Length == 0 && consumer.Kind == ResourceConsumerKind.Reranker
+                ? "Registered, lazy until a RAG query needs reranking"
+                : allocations.Length == 0
+                    ? "Registered, not resident"
+                    : string.Join(", ", allocations.Select(a => a.LifecycleState));
             ResourceConsumers.Add(new ResourceConsumerReceiptViewModel(
                 consumer.ConsumerId,
                 consumer.Kind.ToString(),
-                allocations.Length == 0 ? "Registered, not resident" : string.Join(", ", allocations.Select(a => a.LifecycleState)),
+                state,
                 gpuBytes == 0 && !knownComponents.Any(component => component.ResourceKind == ResourceKind.DeviceMemory) ? "Unknown" : FormatBytes(gpuBytes),
                 systemBytes == 0 && !knownComponents.Any(component => component.ResourceKind == ResourceKind.SystemResidentMemory) ? "Unknown" : FormatBytes(systemBytes),
                 unknownCount == 0 ? "" : $"{unknownCount} component(s) Unknown"));

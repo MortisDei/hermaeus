@@ -2787,8 +2787,29 @@ public partial class ChatViewModel : ViewModelBase
         // r24 doc 02 2.2/06: never on the send path - fire and forget, off the
         // caller's await chain, so a slow embedding endpoint cannot slow a send.
         if (_recallIndexing is not null)
-            _ = Task.Run(() => _recallIndexing.IndexConversationAsync(conv));
+            _ = Task.Run(() => RunRecallIndexingAsync(conv));
         await RefreshMemoryStatusAsync();
+    }
+
+    private async Task RunRecallIndexingAsync(Conversation conversation)
+    {
+        try
+        {
+            await _recallIndexing!.IndexConversationAsync(conversation);
+        }
+        catch (OperationCanceledException)
+        {
+            // This background operation has no caller waiting on it. Cancellation
+            // is expected during shutdown and is deliberately observed here.
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                $"Chat recall indexing deferred: {ex.GetType().Name}: {ex.Message}"));
+        }
     }
 
     private async Task RunConversationMemoryAsync(string conversationId)

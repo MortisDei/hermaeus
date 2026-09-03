@@ -291,6 +291,7 @@ public sealed class SettingsService : ISettingsService
             NormalizeSettings(candidate);
             currentDataRoot = ResolveDataRoot(candidate);
             ValidateDataRoot(currentDataRoot);
+            await EnsureDataRootWritableAsync(currentDataRoot);
 
             migration = previousDataRootDirectory is null
                 ? null
@@ -617,6 +618,14 @@ public sealed class SettingsService : ISettingsService
         var full = Path.GetFullPath(path);
         if (string.Equals(full, root, ModelPathSafety.LocalPathComparison))
             throw new IOException("Hermaeus data root cannot be the filesystem root.");
+    }
+
+    private static async Task EnsureDataRootWritableAsync(string path)
+    {
+        Directory.CreateDirectory(path);
+        var probePath = Path.Combine(path, $".hermaeus-write-probe-{Guid.NewGuid():N}.tmp");
+        await AtomicFile.WriteAllTextAsync(probePath, "write probe");
+        File.Delete(probePath);
     }
 
     private static async Task WriteTextAtomicAsync(string path, string content)

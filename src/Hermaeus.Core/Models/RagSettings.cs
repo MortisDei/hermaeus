@@ -67,4 +67,10 @@ public class RagSettings
     /// vs Services split), since it only ever adds; the port/process concerns
     /// that would put a knob on Services don't apply here.</summary>
     public int RefreshWatchedSourcesEveryHours { get; set; } = 0;
+
+    /// <summary>
+    /// Dataset ids selected for the next RAG question. Null means first use;
+    /// an empty list is an intentional choice to include no datasets.
+    /// </summary>
+    public List<string>? LastQueryDatasetIds { get; set; }
 }

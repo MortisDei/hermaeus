@@ -62,7 +62,7 @@
                                 <Grid Grid.Column="2" ColumnDefinitions="*,Auto">
                                     <AutoCompleteBox Grid.Column="0"
                                                      x:Name="ChannelVoiceBox"
-                                                     ItemsSource="{Binding $parent[ItemsControl].DataContext.ChannelVoiceOptions}"
+                                                     ItemsSource="{Binding VoiceOptions}"
                                                      Text="{Binding VoiceDisplay, Mode=TwoWay}"
                                                      FilterMode="Contains"
                                                      MinimumPrefixLength="0"

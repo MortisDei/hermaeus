@@ -76,6 +76,20 @@ public sealed class AgentWorkbenchLayoutTests
     }
 
     [Fact]
+    public void Secondary_workbench_areas_have_explicit_navigation_commands()
+    {
+        var source = System.IO.File.ReadAllText(AgentViewPath());
+
+        Assert.Contains("<TextBlock Text=\"Changes\"", source, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Workspace\"", source, StringComparison.Ordinal);
+        Assert.Contains("Content=\"History\"", source, StringComparison.Ordinal);
+        Assert.Contains("ShowChangesTabCommand", source, StringComparison.Ordinal);
+        Assert.Contains("ShowWorkspaceTabCommand", source, StringComparison.Ordinal);
+        Assert.Contains("ShowHistoryTabCommand", source, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding NewTaskCommand}\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_run_tab_explains_the_approval_gated_workflow_and_current_next_action()
     {
         var source = System.IO.File.ReadAllText(AgentViewPath());

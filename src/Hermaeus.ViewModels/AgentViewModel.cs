@@ -880,6 +880,12 @@ public partial class AgentViewModel : ViewModelBase
     [RelayCommand]
     private void ShowRunTab() => SelectedTabIndex = RunTabIndex;
 
+    [RelayCommand]
+    private void ShowWorkspaceTab() => SelectedTabIndex = WorkspaceTabIndex;
+
+    [RelayCommand]
+    private void ShowHistoryTab() => SelectedTabIndex = HistoryTabIndex;
+
     private static readonly HashSet<AgentTaskStatus> RewindEligibleStatuses =
     [
         AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked,

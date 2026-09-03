@@ -154,6 +154,24 @@ public sealed class ModelManifestStore
         }
     }
 
+    /// <summary>Removes one companion mapping while preserving the primary model entry.</summary>
+    public async Task RemoveCompanionAsync(string modelPath, string companionPath, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var entries = await LoadUnlockedAsync(ct);
+            var parent = entries.FirstOrDefault(entry => ModelPathSafety.AreSameLocalPath(entry.FilePath, modelPath));
+            if (parent is null)
+                return;
+
+            parent.Companions.RemoveAll(companion =>
+                ModelPathSafety.AreSameLocalPath(companion.LocalFilePath, companionPath));
+            await SaveUnlockedAsync(entries, ct);
+        }
+        finally { _gate.Release(); }
+    }
+
     private static string NormalizeKey(string path) =>
         string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFullPath(path.Trim());
 }

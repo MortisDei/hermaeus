@@ -7,6 +7,7 @@ using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
+using System.Xml.Linq;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -56,8 +57,14 @@ public sealed class RagQuestionBoxTests
         vm.QuestionText = "  Who is Hermaeus Mora?  ";
 
         Assert.Single(vm.QueryDatasetOptions);
-        Assert.True(vm.QueryDatasetOptions[0].IsIncluded,
-            "loading RAG datasets should include the selected dataset by default");
+        Assert.False(vm.QueryDatasetOptions[0].IsIncluded,
+            "the first RAG question should require an explicit dataset choice");
+
+        await vm.QueryCommand.ExecuteAsync(null);
+        Assert.Equal("Choose at least one dataset before asking a question.", vm.StatusMessage);
+        Assert.Equal("  Who is Hermaeus Mora?  ", vm.QuestionText);
+
+        vm.QueryDatasetOptions[0].IsIncluded = true;
 
         await vm.QueryCommand.ExecuteAsync(null);
 
@@ -75,6 +82,7 @@ public sealed class RagQuestionBoxTests
         var (vm, _, _) = await NewAsync(temp, new ThrowingLlm());
         vm.ChatModelProvider = () => "fake";
         vm.QuestionText = "Who is Hermaeus Mora?";
+        vm.QueryDatasetOptions[0].IsIncluded = true;
 
         await vm.QueryCommand.ExecuteAsync(null);
 
@@ -92,6 +100,7 @@ public sealed class RagQuestionBoxTests
         var (vm, _, _) = await NewAsync(temp, new ThrowingLlm());
         vm.ChatModelProvider = () => "fake";
         vm.QuestionText = "first";
+        vm.QueryDatasetOptions[0].IsIncluded = true;
 
         var run = vm.QueryCommand.ExecuteAsync(null);
         vm.QuestionText = "second";
@@ -120,6 +129,26 @@ public sealed class RagQuestionBoxTests
 
         Assert.Contains(first.Id, traceDatasetId, StringComparison.Ordinal);
         Assert.Contains(second.Id, traceDatasetId, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RAG_secondary_areas_are_explicit_subviews_with_back_paths()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var path = Path.Combine(root, "src", "Hermaeus.Desktop", "Views", "RagView.axaml");
+        var doc = XDocument.Load(path);
+        var source = File.ReadAllText(path);
+
+        Assert.Contains(doc.Descendants().Where(element => element.Name.LocalName == "Button"), element =>
+            (string?)element.Attribute("Content") == "Sources");
+        Assert.Contains(doc.Descendants().Where(element => element.Name.LocalName == "Button"), element =>
+            (string?)element.Attribute("Content") == "Diagnostics");
+        Assert.Equal(2, doc.Descendants().Count(element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute("Content") == "Back to Ask"));
+        Assert.Contains("IsVisible=\"{Binding IsSourcesSubview}\"", source, StringComparison.Ordinal);
+        Assert.Contains("IsVisible=\"{Binding IsDiagnosticsSubview}\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"Sources\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"Diagnostics\"", source, StringComparison.Ordinal);
     }
 
     private sealed class ThrowingLlm : ILlmService

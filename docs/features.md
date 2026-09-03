@@ -52,14 +52,22 @@ for Knowledge behavior in Chat.
   Ollama, and OpenAI-compatible profiles are supported, with explicit
   localhost, model, port, and launch configuration.
 - Data-root changes use an explicit confirmation and the existing safe
-  migration boundary. Ordinary Settings autosave does not move an existing
+  migration boundary. The Data Storage page distinguishes the configured root
+  from the root currently effective for composed stores and tells the user to
+  restart after a change. Ordinary Settings autosave does not move an existing
   workspace, and llama.cpp pruning only deletes validated owned superseded
-  version directories while protecting the selected runtime.
+  version directories while protecting the selected runtime. Persisted caches
+  and state resolve beneath the effective root; selecting a root requires a
+  bounded write check, and cache-write failures remain visible instead of being
+  reported as successful persistence.
 - Managed llama.cpp update and recovery honor explicit backend choices. Auto is
   re-evaluated from current hardware when installation is required, may use a
   compatible accelerated fallback, and records the selected backend separately
   from the still-Auto preference. Missing or unlaunchable GPU backends are
   refused instead of silently becoming CPU.
+  Update identity uses the verified upstream b-numbered release tag and
+  SHA256-checked archive, with `--version` output captured from both stdout and
+  stderr. Help text or a zero exit code alone never proves build identity.
   Known upstream archive wrapper directories are removed at the owned version
   boundary, while flat upstream packages are accepted as well; mixed layouts
   fail closed and legacy nested installations remain discoverable and protected.
@@ -150,6 +158,11 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
 - The RAG question panel can include an explicit combination of datasets per
   question. Its multi-select scope is separate from the single-dataset
   manager controls used for ingest, reindex, and evaluation.
+- On an empty RAG install, the panel can create a version-local **Hermaeus
+  Help** dataset through the normal ingestion pipeline. First-use question
+  scope is intentionally empty and asks the user to select at least one
+  dataset; later selections are persisted. Sources and Diagnostics are explicit
+  secondary views with a Back path, so the answer area stays discoverable.
 - RAG has a native evaluation harness with retrieval metrics, refusal handling,
   cancellation, and export. The separate [eval harness plan](rag-eval-harness.md)
   describes proposed expansion beyond the shipped surface.
@@ -166,8 +179,10 @@ See the [RAG reference](rag.md).
   workspace profiles remain on the Agent surface rather than appearing as
   ordinary memories.
 - Search blends full-text and embedding similarity when an embedding model is
-  available, with a bounded keyword fallback when it is not. Archived and
-  expired memories are excluded from search and injection.
+  available, with a bounded keyword fallback when it is not. Weak semantic
+  candidates are excluded from ordinary recall while pinned memories remain
+  eligible. Archived and expired memories are excluded from search and
+  injection.
 - Chat can propose, update, or forget memories through bounded markers. Only a
   memory actually injected into that turn can be updated or forgotten, and
   marker syntax never reaches the persisted transcript.

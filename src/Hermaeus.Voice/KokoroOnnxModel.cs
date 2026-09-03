@@ -239,7 +239,7 @@ internal sealed class KokoroOnnxModel : IDisposable
     {
         if (_resourceCoordinator is null)
             return null;
-        const string consumerId = "tts.kokoro";
+        const string consumerId = ResourceConsumerIds.NativeKokoro;
         _resourceCoordinator.RegisterConsumer(new ResourceConsumerDescriptor(
             consumerId,
             ResourceConsumerKind.TextToSpeech,
@@ -255,7 +255,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             // Keep the descriptor sequence identical to ResourceConsumerAdapters.Kokoro.
             [ResourceKind.DeviceMemory, ResourceKind.SystemResidentMemory]));
         var proposal = new ResourceAllocation(
-            "inprocess-tts.kokoro",
+            $"inprocess-{ResourceConsumerIds.NativeKokoro}",
             consumerId,
             null,
             ResourceLifecycleState.Planned,
@@ -277,7 +277,7 @@ internal sealed class KokoroOnnxModel : IDisposable
         return await _resourceCoordinator.AcquireAsync(new ResourceAdmissionRequest(
             consumerId,
             proposal,
-            callerId: "tts.kokoro.load",
+            callerId: $"{ResourceConsumerIds.NativeKokoro}.load",
             allowUnknown: true), ct);
     }
 
@@ -425,7 +425,7 @@ internal sealed class KokoroOnnxModel : IDisposable
 
         _session?.Dispose();
         _session = null;
-        _resourceCoordinator?.ReleaseAllocation("inprocess-tts.kokoro");
+        _resourceCoordinator?.ReleaseAllocation($"inprocess-{ResourceConsumerIds.NativeKokoro}");
         _unavailable = false;
         _voiceStyleCache.Clear();
         _loadedAssetsRoot = null;
@@ -452,7 +452,7 @@ internal sealed class KokoroOnnxModel : IDisposable
     public void Dispose()
     {
         _session?.Dispose();
-        _resourceCoordinator?.ReleaseAllocation("inprocess-tts.kokoro");
+        _resourceCoordinator?.ReleaseAllocation($"inprocess-{ResourceConsumerIds.NativeKokoro}");
         _gate.Dispose();
     }
 }

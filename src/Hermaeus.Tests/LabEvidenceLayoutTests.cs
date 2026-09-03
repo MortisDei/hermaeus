@@ -30,25 +30,41 @@ public sealed class LabEvidenceLayoutTests
     }
 
     [Fact]
-    public void Model_configuration_flyout_has_work_area_constraints_without_a_fixed_width()
+    public void Model_configuration_subview_has_work_area_constraints_without_a_fixed_width()
     {
         var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "ModelManagementView.axaml");
         var doc = XDocument.Load(path);
-        var flyout = doc.Descendants().Single(element => element.Name.LocalName == "Flyout"
-            && (string?)element.Attribute("Placement") == "BottomEdgeAlignedLeft");
-        var scrollViewer = flyout.Descendants().Single(element => element.Name.LocalName == "ScrollViewer");
+        var editor = doc.Descendants().Single(element => element.Name.LocalName == "Border"
+            && (string?)element.Attribute("IsVisible") == "{Binding HasSelectedProfile}");
+        var scrollViewer = editor.Descendants().Single(element => element.Name.LocalName == "ScrollViewer");
 
-        Assert.Equal("SlideX,FlipY,ResizeX,ResizeY", (string?)flyout.Attribute("PlacementConstraintAdjustment"));
         Assert.Null((string?)scrollViewer.Attribute("Width"));
-        Assert.Equal("640", (string?)scrollViewer.Attribute("MinWidth"));
-        Assert.Equal("720", (string?)scrollViewer.Attribute("MaxWidth"));
-        Assert.Equal("520", (string?)scrollViewer.Attribute("MaxHeight"));
+        Assert.Equal("620", (string?)scrollViewer.Attribute("MaxHeight"));
         Assert.Equal("Auto", (string?)scrollViewer.Attribute("VerticalScrollBarVisibility"));
         Assert.Equal("Disabled", (string?)scrollViewer.Attribute("HorizontalScrollBarVisibility"));
+        Assert.Contains(editor.Descendants(), element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute("Content") == "Save model profile");
 
         var modelList = doc.Descendants().Single(element => element.Name.LocalName == "ScrollViewer"
             && element.Attributes().Any(attribute => attribute.Name.LocalName == "Name"
                 && (string?)attribute == "ModelListScrollViewer"));
         Assert.Equal("Disabled", (string?)modelList.Attribute("HorizontalScrollBarVisibility"));
+    }
+
+    [Fact]
+    public void Model_cards_use_equal_grid_tracks_without_clipping_variable_content()
+    {
+        var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "ModelManagementView.axaml");
+        var doc = XDocument.Load(path);
+        var cards = doc.Descendants().Single(element => element.Name.LocalName == "ItemsControl"
+            && (string?)element.Attribute("ItemsSource") == "{Binding Models}");
+        var panel = cards.Descendants().Single(element => element.Name.LocalName == "ItemsPanelTemplate");
+        var uniformGrid = panel.Elements().Single(element => element.Name.LocalName == "UniformGrid");
+
+        Assert.Equal("3", (string?)uniformGrid.Attribute("Columns"));
+        var card = cards.Descendants().Single(element => element.Name.LocalName == "Border"
+            && (string?)element.Attribute("MinHeight") == "320");
+        Assert.Null((string?)card.Attribute("MaxHeight"));
+        Assert.Null((string?)card.Attribute("Width"));
     }
 }

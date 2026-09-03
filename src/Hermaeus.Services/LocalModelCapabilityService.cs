@@ -37,9 +37,22 @@ public sealed record LlamaRuntimeCapabilityFacts(
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
 
+public enum CapabilityCacheWriteState
+{
+    NotAttempted,
+    Succeeded,
+    Failed
+}
+
+public sealed record CapabilityCacheWriteResult(
+    string Path,
+    CapabilityCacheWriteState State,
+    string? Error = null);
+
 public sealed record LocalModelCapabilityProbe(
     LocalModelCapabilities Capabilities,
-    IReadOnlyList<CapabilityDrift> Drift);
+    IReadOnlyList<CapabilityDrift> Drift,
+    CapabilityCacheWriteResult? CacheWrite = null);
 
 /// <summary>Combines bounded GGUF facts with executable and live /props evidence.</summary>
 public sealed class LocalModelCapabilityService
@@ -378,7 +391,8 @@ public sealed class LocalModelCapabilityService
         var gguf = await Task.Run(() => GgufMetadataReader.TryRead(modelPath), ct);
         var help = await ReadHelpAsync(executablePath, ct);
         if (help is null && string.IsNullOrWhiteSpace(propsJson) && cached is not null)
-            return new LocalModelCapabilityProbe(cached, []);
+            return new LocalModelCapabilityProbe(cached, [],
+                new CapabilityCacheWriteResult(CapabilityCachePath, CapabilityCacheWriteState.NotAttempted));
 
         var previous = await TryGetPreviousSnapshotAsync(modelPath, executablePath, ct);
         var runtime = ParseProps(propsJson, ParseHelp(help));
@@ -386,11 +400,22 @@ public sealed class LocalModelCapabilityService
         var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(executablePath, help, ct);
         var modelIdentity = RuntimeIdentityFactory.CreateModelIdentity(modelPath, gguf);
         var result = Combine(modelPath, gguf, runtime, runtimeIdentity, modelIdentity, observedAtUtc);
-        try { await SaveCacheAsync(modelPath, executablePath, result, ct, runtimeIdentity, modelIdentity); }
+        var cachePath = CapabilityCachePath;
+        CapabilityCacheWriteResult cacheWrite;
+        try
+        {
+            await SaveCacheAsync(cachePath, modelPath, executablePath, result, ct, runtimeIdentity, modelIdentity);
+            cacheWrite = new CapabilityCacheWriteResult(cachePath, CapabilityCacheWriteState.Succeeded);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
-                $"Capability cache write failed at '{CapabilityCachePath}': {ex.Message}"));
+                $"Capability cache write failed at '{cachePath}': {ex.Message}"));
+            cacheWrite = new CapabilityCacheWriteResult(cachePath, CapabilityCacheWriteState.Failed, ex.Message);
         }
         var drift = Compare(previous, result);
         if (drift.Count > 0)
@@ -402,7 +427,7 @@ public sealed class LocalModelCapabilityService
                 "llama.cpp capabilities changed",
                 string.Join(" ", drift.Select(change => change.Detail)));
         }
-        return new LocalModelCapabilityProbe(result, drift);
+        return new LocalModelCapabilityProbe(result, drift, cacheWrite);
     }
 
     public async Task<LocalModelCapabilities?> TryGetCachedAsync(string modelPath, string executablePath, CancellationToken ct = default)
@@ -498,6 +523,7 @@ public sealed class LocalModelCapabilityService
     }
 
     private async Task SaveCacheAsync(
+        string cachePath,
         string modelPath,
         string executablePath,
         LocalModelCapabilities capabilities,
@@ -505,7 +531,6 @@ public sealed class LocalModelCapabilityService
         RuntimeIdentityV2? knownRuntimeIdentity = null,
         ModelIdentityV2? knownModelIdentity = null)
     {
-        var cachePath = CapabilityCachePath;
         await CapabilityCacheWriteGate.WaitAsync(ct);
         try
         {
@@ -542,7 +567,7 @@ public sealed class LocalModelCapabilityService
         }
     }
 
-    private string CapabilityCachePath => Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "capability-cache.json");
+    internal string CapabilityCachePath => Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "capability-cache.json");
 
     private static FileStream OpenSharedRead(string path) => new(
         path,

@@ -1,5 +1,9 @@
 using System.Text.Json;
+using Hermaeus.Agent.Services;
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
+using Hermaeus.Desktop;
+using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Xunit;
 
@@ -333,6 +337,125 @@ public sealed class RuntimeIdentityAndCapabilityTests
 
         Assert.Equal(CapabilityState.Unknown, result.ReasoningOutput.State);
         Assert.Equal(CapabilityState.Unknown, result.EmbeddedMtp.State);
+    }
+
+    [Fact]
+    public async Task Capability_cache_uses_the_effective_root_across_restart_and_recomposed_siblings()
+    {
+        using var temp = new TempDir();
+        var settingsPath = temp.PathFor("settings/settings.json");
+        var oldRoot = temp.PathFor("old-root");
+        var newRoot = temp.PathFor("new-root");
+        var modelPath = temp.PathFor("model.gguf");
+        var executablePath = temp.PathFor("llama-server.exe");
+        File.WriteAllText(modelPath, "model fixture");
+        File.WriteAllText(executablePath, "runtime fixture");
+
+        var writer = new SettingsService(settingsPath);
+        var candidate = writer.Settings.Clone();
+        candidate.DataManagement.DataRootDirectory = oldRoot;
+        await writer.SaveAsync(candidate);
+
+        var loaded = new SettingsService(settingsPath);
+        App.LoadSettingsBeforeComposition(loaded);
+        Assert.Equal(Path.GetFullPath(oldRoot), SettingsService.ResolveDataRoot(loaded.Settings));
+
+        var logs = new RuntimeLogService(loaded);
+        var capability = new LocalModelCapabilityService(loaded, logs);
+        var first = await capability.ProbeWithDriftAsync(modelPath, executablePath, "{}");
+        var oldCachePath = Path.Combine(oldRoot, "capability-cache.json");
+        Assert.Equal(CapabilityCacheWriteState.Succeeded, first.CacheWrite?.State);
+        Assert.True(File.Exists(oldCachePath));
+        Assert.NotNull(await capability.TryGetCachedAsync(modelPath, executablePath));
+
+        var changed = loaded.Settings.Clone();
+        changed.DataManagement.DataRootDirectory = newRoot;
+        await loaded.SaveAsync(changed, oldRoot);
+
+        var newCachePath = Path.Combine(newRoot, "capability-cache.json");
+        Assert.Equal(Path.GetFullPath(newRoot), SettingsService.ResolveDataRoot(loaded.Settings));
+        Assert.Equal(newCachePath, capability.CapabilityCachePath);
+        Assert.True(File.Exists(newCachePath));
+        Assert.False(File.Exists(oldCachePath));
+
+        Directory.Delete(newRoot, recursive: true);
+        Assert.False(Directory.Exists(newRoot));
+
+        var restarted = new SettingsService(settingsPath);
+        App.LoadSettingsBeforeComposition(restarted);
+        Assert.Equal(Path.GetFullPath(newRoot), SettingsService.ResolveDataRoot(restarted.Settings));
+
+        var restartedLogs = new RuntimeLogService(restarted);
+        var restartedCapability = new LocalModelCapabilityService(restarted, restartedLogs);
+        var second = await restartedCapability.ProbeWithDriftAsync(modelPath, executablePath, "{}");
+        Assert.Equal(CapabilityCacheWriteState.Succeeded, second.CacheWrite?.State);
+        Assert.Equal(newCachePath, restartedCapability.CapabilityCachePath);
+        Assert.True(File.Exists(newCachePath));
+        Assert.NotNull(await restartedCapability.TryGetCachedAsync(modelPath, executablePath));
+        Assert.False(File.Exists(oldCachePath));
+
+        var conversations = new ConversationStore(restarted);
+        var memories = new MemoryStore(restarted);
+        var rag = new SqliteRagStore(restarted);
+        var agent = new FileAgentTaskStateStore(restarted);
+        await conversations.InitializeAsync();
+        await memories.InitializeAsync();
+        await rag.InitializeAsync();
+        await agent.InitializeAsync();
+
+        var persistedLogs = new RuntimeLogService(restarted);
+        persistedLogs.Add(new RuntimeLogEntry(
+            DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Service, "path contract fixture"));
+        var manifest = new ModelManifestStore(restarted);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = "fixture/repository",
+            Source = "manual"
+        });
+        await new SqliteTraceStore(restarted).AppendAsync(new TraceRecord
+        {
+            Kind = TraceKind.System,
+            Operation = "path-contract-fixture"
+        });
+        new AppLifecycleJournalService(restarted).RecordStartup();
+
+        Assert.True(File.Exists(Path.Combine(newRoot, "conversations.db")));
+        Assert.True(File.Exists(Path.Combine(newRoot, "memories.db")));
+        Assert.True(File.Exists(Path.Combine(newRoot, "agent", "task_index.db")));
+        Assert.True(File.Exists(Path.Combine(newRoot, "model-manifest.json")));
+        Assert.True(File.Exists(Path.Combine(newRoot, "traces.db")));
+        Assert.True(File.Exists(Path.Combine(newRoot, "lifecycle.json")));
+        Assert.StartsWith(Path.GetFullPath(newRoot), persistedLogs.GetLogFilePath(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Capability_cache_reports_an_observed_write_failure_and_settings_rejects_the_root()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        var blockedRoot = temp.PathFor("blocked-root");
+        File.WriteAllText(blockedRoot, "a file, not a directory");
+        var candidate = settings.Settings.Clone();
+        candidate.DataManagement.DataRootDirectory = blockedRoot;
+
+        await Assert.ThrowsAnyAsync<IOException>(() => settings.SaveAsync(candidate));
+
+        settings.Settings.DataManagement.DataRootDirectory = blockedRoot;
+        var modelPath = temp.PathFor("model.gguf");
+        var executablePath = temp.PathFor("llama-server.exe");
+        File.WriteAllText(modelPath, "model fixture");
+        File.WriteAllText(executablePath, "runtime fixture");
+        var logs = new RuntimeLogService(settings);
+        var capability = new LocalModelCapabilityService(settings, logs);
+
+        var result = await capability.ProbeWithDriftAsync(modelPath, executablePath, "{}");
+
+        Assert.Equal(CapabilityCacheWriteState.Failed, result.CacheWrite?.State);
+        Assert.Equal(Path.Combine(Path.GetFullPath(blockedRoot), "capability-cache.json"), result.CacheWrite?.Path);
+        Assert.NotEqual(CapabilityCacheWriteState.Succeeded, result.CacheWrite?.State);
+        Assert.Contains(logs.GetEntries(), entry =>
+            entry.Message.Contains("Capability cache write failed", StringComparison.Ordinal));
     }
 
     private static RuntimeCapabilityObservation Observation(string id, CapabilityState state) =>

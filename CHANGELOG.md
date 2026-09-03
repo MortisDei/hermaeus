@@ -22,6 +22,11 @@ limit.
   than failed, and duplicate same-revision artwork reports are suppressed.
 - RAG questions can now include an explicit combination of datasets, while
   ingest, reindex, and evaluation retain their single-dataset controls.
+- RAG question scope now starts empty on first use, persists explicit later
+  selections, and prompts before a question can run without a selected dataset.
+  An empty RAG install can create a version-local Hermaeus Help dataset through
+  the normal ingestion and citation pipeline, with Sources and Diagnostics
+  initially collapsed.
 - Hugging Face artwork checks now continue after a missing repository thumbnail
   by using a separately labelled, exact-host publisher/avatar fallback. The
   fallback retains immutable repository/revision provenance, shares only
@@ -33,6 +38,15 @@ limit.
   media player through the WAV file association. Data-root selection opens its
   safe migration confirmation immediately, and the Services editor exposes
   the exact GPU offload count beside the effective offload state.
+- Windows packaging now validates `-SkipRestore` runtime targets and removes
+  incomplete package output after failures.
+- Managed llama.cpp GPU updates now capture `--version` from stdout and stderr,
+  use the verified upstream release tag and SHA256-checked archive as stable
+  identity evidence, and refuse help-only or otherwise unverified identities.
+- Data-root persistence now write-probes the selected effective root before
+  publishing settings. Capability-cache writes report their actual path and
+  failure state, while sibling persisted stores continue to resolve beneath
+  the current root after startup and root changes.
 - Workspace-generated profile memories are deduplicated per workspace and
   excluded from ordinary Memories. Benchmark detail refresh keeps the current
   run bound to its replacement row, and Lab evidence detail can be copied
@@ -42,6 +56,9 @@ limit.
   deletion of stopped historical top-level runs with their persisted sub-tasks.
 - Activity is folded into the Memories surface as a collapsed section, and
   model tiles and system overview sections regain bounded visual grouping.
+- Memory recall now drops weak semantic candidates before injection while
+  preserving pinned memories, and observed background embedding failures are
+  recorded instead of becoming unobserved task exceptions.
 - RAG Enter-to-send follows the shared Chat setting, including multiline input
   when the configured modifier is not pressed.
 - Native Kokoro resource admission now reuses the provider's registered

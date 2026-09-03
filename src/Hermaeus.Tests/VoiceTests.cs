@@ -1,4 +1,5 @@
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Hermaeus.Voice;
 using static Hermaeus.Tests.Helpers;
@@ -183,9 +184,9 @@ internal static class VoiceTests
         // registration must be equivalent, or every native load is refused
         // before ONNX Runtime is even constructed.
         registry.RegisterConsumer(new ResourceConsumerDescriptor(
-            "tts.kokoro",
+            ResourceConsumerIds.NativeKokoro,
             ResourceConsumerKind.TextToSpeech,
-            ResourceOwnerIdentity.InProcess("tts.kokoro"),
+            ResourceOwnerIdentity.InProcess(ResourceConsumerIds.NativeKokoro),
             nameof(NativeKokoroVoiceProvider),
             ResourcePriorityClass.Foreground,
             ResourceReclaimability.Cooperative,

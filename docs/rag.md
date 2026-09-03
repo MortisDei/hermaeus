@@ -15,7 +15,9 @@ traces, versioned SQLite schema migrations, and native eval support.
    choose a duplicate policy to skip unchanged sources, replace them, or just
    report what would happen. Use **Stop** during ingest to cancel long runs.
 4. In **Datasets included in this question**, select one or more datasets, then
-   ask your question. The box empties on send and the question
+   ask your question. On first use no dataset is selected, so the question
+   box prompts you to choose one rather than silently querying the first
+   dataset. The box empties on send and the question
    is shown above the answer it produced; a question that failed goes back in
    the box so it can be edited and retried. Answers are written by the model
    Chat has selected, falling back to Settings > LLM's default.
@@ -271,6 +273,23 @@ outcome without holding anything open for the life of the process.
 - **Open in chat** on a Dataset Manager card starts a new conversation with
   that dataset pre-attached.
 
+### First-use help and question scope
+
+When no dataset exists, the RAG panel offers **Create Hermaeus Help dataset**
+when the build includes its version-local help documents. This uses the same
+local-folder ingestion, embedding, generation publication, citation, and
+provenance path as a user-selected folder. It does not create a special
+retrieval route. The normal ingest controls remain available for creating a
+user dataset.
+
+The question scope is an explicit multi-select. Its selection is independent
+of the single dataset controls used for ingest, reindex, and evaluation. The
+selection is saved for the next RAG question; a missing dataset is ignored
+when the list is rebuilt. Sources and Diagnostics are explicit secondary views
+in the workspace navigation bar, each with a Back path, so the answer remains
+the first-use focus. Asking with no selected dataset produces
+an actionable prompt and does not clear the question.
+
 ### Reranker
 
 - Reranker install: The ONNX cross-encoder reranker assets are not downloaded
@@ -296,6 +315,11 @@ outcome without holding anything open for the life of the process.
   byte ceiling. A single dataset that exceeds the byte ceiling is queried but
   not retained in cache, so very large embedding sets cannot grow memory use
   without limit.
+- The reranker is lazy. **Registered, lazy until a RAG query needs reranking**
+  means its consumer is known to whole-workload accounting but no verified
+  ONNX session is resident yet. A query that cannot load verified assets falls
+  back to the fused retrieval order; inspect the query trace for reranker
+  scores rather than treating residency as the only usage signal.
 
 ## Scale and the memory budget
 

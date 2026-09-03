@@ -63,6 +63,8 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     }
 
     public bool IsInstalled => _model.AssetsPresent(NormalizeVoice(_settings.Settings.Tts.Speaker));
+    /// <summary>Model-file presence is installation evidence, independent of ONNX health.</summary>
+    public bool HasInstalledModel => File.Exists(KokoroOnnxModel.ModelPath(ResolveAssetsDirectory(_settings.Settings)));
     public bool IsLoaded => _model.IsLoaded;
     public string AdmissionFailureReason => _model.LastAdmissionFailure;
 

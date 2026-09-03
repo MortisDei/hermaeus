@@ -58,6 +58,11 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // Settings determine every data-backed singleton's path. Load them
+            // before resolving the graph, otherwise constructors and early
+            // cached projections can bind to the default root and survive the
+            // later asynchronous settings load.
+            LoadSettingsBeforeComposition(sp.GetRequiredService<ISettingsService>());
             var vm     = sp.GetRequiredService<MainWindowViewModel>();
             var window = new MainWindow
             {
@@ -121,7 +126,6 @@ public partial class App : Application
 
             var phaseTimer = Stopwatch.StartNew();
             var settingsService = sp.GetRequiredService<ISettingsService>();
-            await settingsService.LoadAsync();
             var ui = settingsService.Settings.Ui;
             AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
             AppThemeService.Apply(ui.Theme);
@@ -213,6 +217,16 @@ public partial class App : Application
         {
             Console.Error.WriteLine($"Hermaeus startup initialization failed: {ex}");
         }
+    }
+
+    internal static void LoadSettingsBeforeComposition(ISettingsService settings)
+    {
+        // OnFrameworkInitializationCompleted runs on Avalonia's UI thread.
+        // SettingsService performs asynchronous file I/O, whose continuation
+        // can capture that thread. Run the bounded bootstrap off the UI
+        // synchronization context so composition does not deadlock before a
+        // MainWindow exists.
+        Task.Run(settings.LoadAsync).GetAwaiter().GetResult();
     }
 
     /// <summary>

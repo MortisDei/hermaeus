@@ -240,6 +240,37 @@ public partial class RagViewModel : ObservableObject
     public UiBoundCollection<RagDatasetManagerItemViewModel> DatasetManagerItems { get; } = [];
     public UiBoundCollection<RagDatasetQueryOptionViewModel> QueryDatasetOptions { get; } = [];
 
+    public bool HasDatasets => Datasets.Count > 0;
+    public const string QuerySubview = "query";
+    public const string SourcesSubview = "sources";
+    public const string DiagnosticsSubview = "diagnostics";
+
+    [ObservableProperty] private string _activeSubview = QuerySubview;
+    public bool IsQuerySubview => ActiveSubview == QuerySubview;
+    public bool IsSourcesSubview => ActiveSubview == SourcesSubview;
+    public bool IsDiagnosticsSubview => ActiveSubview == DiagnosticsSubview;
+
+    partial void OnActiveSubviewChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsQuerySubview));
+        OnPropertyChanged(nameof(IsSourcesSubview));
+        OnPropertyChanged(nameof(IsDiagnosticsSubview));
+    }
+
+    [RelayCommand]
+    private void ShowQuerySubview() => ActiveSubview = QuerySubview;
+
+    [RelayCommand]
+    private void ShowSourcesSubview() => ActiveSubview = SourcesSubview;
+
+    [RelayCommand]
+    private void ShowDiagnosticsSubview() => ActiveSubview = DiagnosticsSubview;
+    public bool ShowBundledHelpOnboarding => !HasDatasets && Directory.Exists(BundledHelpDirectory);
+    public string BundledHelpDirectory => ResolveBundledHelpDirectory();
+    public string BundledHelpStatus => ShowBundledHelpOnboarding
+        ? "Create a searchable, version-local help dataset from the Hermaeus documentation bundled with this build."
+        : string.Empty;
+
     /// <summary>The settings service is exposed for the desktop input handler,
     /// matching ChatView's shared Enter-to-send policy.</summary>
     public ISettingsService Settings => _settings;
@@ -374,21 +405,21 @@ public partial class RagViewModel : ObservableObject
         try
         {
             var previousSelectedId = SelectedDataset?.Id;
-            var previousIncludedIds = QueryDatasetOptions.Where(option => option.IsIncluded)
-                .Select(option => option.Id)
-                .ToHashSet(StringComparer.Ordinal);
             var all = await _query.GetDatasetsAsync();
             Datasets.Clear();
             foreach (var d in all) Datasets.Add(d);
+            OnPropertyChanged(nameof(HasDatasets));
+            OnPropertyChanged(nameof(ShowBundledHelpOnboarding));
+            OnPropertyChanged(nameof(BundledHelpStatus));
             SelectedDataset = Datasets.FirstOrDefault(d => d.Id == previousSelectedId)
                 ?? Datasets.FirstOrDefault();
             QueryDatasetOptions.Clear();
-            var hasPreviousSelection = previousIncludedIds.Any(id => Datasets.Any(dataset => dataset.Id == id));
-            var includedIds = hasPreviousSelection
-                ? previousIncludedIds
-                : SelectedDataset is null
-                    ? new HashSet<string>(StringComparer.Ordinal)
-                    : new HashSet<string>([SelectedDataset.Id], StringComparer.Ordinal);
+            var savedIncludedIds = _settings.Settings.Rag.LastQueryDatasetIds;
+            var includedIds = savedIncludedIds is null
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : savedIncludedIds
+                    .Where(id => Datasets.Any(dataset => dataset.Id == id))
+                    .ToHashSet(StringComparer.Ordinal);
             foreach (var dataset in Datasets)
             {
                 var option = new RagDatasetQueryOptionViewModel(dataset, includedIds.Contains(dataset.Id))
@@ -418,7 +449,13 @@ public partial class RagViewModel : ObservableObject
             : SelectedDataset is not null && QueryDatasetOptions.Count == 0
                 ? [SelectedDataset.Name]
                 : [];
-        if (datasetIds.Length == 0 || string.IsNullOrWhiteSpace(QuestionText)) return;
+        if (string.IsNullOrWhiteSpace(QuestionText)) return;
+        if (datasetIds.Length == 0)
+        {
+            StatusMessage = "Choose at least one dataset before asking a question.";
+            IsError = false;
+            return;
+        }
 
         // The box empties on send, the way the chat composer does, so a sent
         // question never looks like an unsent one. The text is not lost: it is
@@ -502,6 +539,33 @@ public partial class RagViewModel : ObservableObject
 
     [RelayCommand]
     private void StopQuery() => _cts?.Cancel();
+
+    [RelayCommand(CanExecute = nameof(CanCreateBundledHelpDataset))]
+    private async Task CreateBundledHelpDatasetAsync()
+    {
+        if (!CanCreateBundledHelpDataset())
+            return;
+
+        var previousName = NewDatasetName;
+        var previousPath = IngestPath;
+        var previousWebLoader = EnableWebLoader;
+        var previousPolicy = IngestPolicy;
+        try
+        {
+            NewDatasetName = "Hermaeus Help";
+            IngestPath = BundledHelpDirectory;
+            EnableWebLoader = false;
+            IngestPolicy = IngestDuplicatePolicy.Replace;
+            await IngestAsync();
+        }
+        finally
+        {
+            NewDatasetName = previousName;
+            IngestPath = previousPath;
+            EnableWebLoader = previousWebLoader;
+            IngestPolicy = previousPolicy;
+        }
+    }
 
     [RelayCommand(CanExecute = nameof(CanIngest))]
     private async Task IngestAsync()
@@ -1178,9 +1242,10 @@ public partial class RagViewModel : ObservableObject
     private void StopEval() => _evalCts?.Cancel();
 
     private bool CanQuery()  => !IsQuerying && !IsIngesting
-                                && (QueryDatasetOptions.Any(option => option.IsIncluded)
-                                    || (QueryDatasetOptions.Count == 0 && SelectedDataset is not null))
+                                && Datasets.Count > 0
                                 && !string.IsNullOrWhiteSpace(QuestionText);
+    private bool CanCreateBundledHelpDataset() => !IsIngesting && !IsQuerying && !HasDatasets
+                                                  && Directory.Exists(BundledHelpDirectory);
     private bool CanIngest() => !IsIngesting && !IsQuerying
                                 && !string.IsNullOrWhiteSpace(NewDatasetName)
                                 && (EnableWebLoader
@@ -1341,8 +1406,47 @@ public partial class RagViewModel : ObservableObject
 
     private void OnQueryDatasetSelectionChanged()
     {
+        _settings.Settings.Rag.LastQueryDatasetIds = QueryDatasetOptions
+            .Where(option => option.IsIncluded)
+            .Select(option => option.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        _ = PersistQueryDatasetSelectionAsync();
         OnPropertyChanged(nameof(QueryDatasetSelectionLabel));
         QueryCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task PersistQueryDatasetSelectionAsync()
+    {
+        try
+        {
+            await _settings.SaveAsync();
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Rag,
+                $"RAG dataset selection could not be persisted: {ex.Message}"));
+        }
+    }
+
+    private static string ResolveBundledHelpDirectory()
+    {
+        var direct = Path.Combine(AppContext.BaseDirectory, "BundledHelp");
+        if (Directory.Exists(direct))
+            return direct;
+
+        var packageDocs = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "docs"));
+        return Directory.Exists(packageDocs) ? packageDocs : direct;
+    }
+
+    partial void OnIsIngestingChanged(bool value)
+    {
+        IngestCommand.NotifyCanExecuteChanged();
+        QueryCommand.NotifyCanExecuteChanged();
+        CreateBundledHelpDatasetCommand.NotifyCanExecuteChanged();
     }
     partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnWebUrlListChanged(string value) => IngestCommand.NotifyCanExecuteChanged();

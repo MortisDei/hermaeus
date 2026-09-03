@@ -719,7 +719,9 @@ public partial class MainWindowViewModel : ViewModelBase
         // r24 doc 02 2.0: deletion propagates, always - a record that survives
         // its own source is treated as a bug of the highest severity in that doc.
         if (_recallIndexing is not null)
-            _ = Task.Run(() => _recallIndexing.RemoveConversationAsync(item.Id));
+            _ = Task.Run(() => ObserveRecallOperationAsync(
+                () => _recallIndexing.RemoveConversationAsync(item.Id),
+                $"remove conversation {item.Id} from Recall"));
         _toasts.Show("Conversation deleted", $"\"{item.Title}\" was removed.", ToastKind.Info);
     }
 
@@ -776,7 +778,9 @@ public partial class MainWindowViewModel : ViewModelBase
         conv.RecallExcluded = item.IsRecallExcluded;
         await _store.SaveAsync(conv);
         if (_recallIndexing is not null)
-            _ = Task.Run(() => _recallIndexing.IndexConversationAsync(conv));
+            _ = Task.Run(() => ObserveRecallOperationAsync(
+                () => _recallIndexing.IndexConversationAsync(conv),
+                $"index conversation {conv.Id} in Recall"));
 
         // In-place update only: a full LoadConversationsAsync() reload here would replace every
         // ConversationItemViewModel instance out from under the open details flyout on each save
@@ -903,6 +907,26 @@ public partial class MainWindowViewModel : ViewModelBase
         Memories.IsActivityExpanded = true;
         ActivePanel = "memories";
         RunBackgroundTaskAsync("load memories and activity", () => Memories.InitializeCommand.ExecuteAsync(null));
+    }
+
+    private async Task ObserveRecallOperationAsync(Func<Task> operation, string description)
+    {
+        try
+        {
+            await operation();
+        }
+        catch (OperationCanceledException)
+        {
+            // Background recall work is cancelled during shutdown; observe it.
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                $"Recall operation deferred ({description}): {ex.GetType().Name}: {ex.Message}"));
+        }
     }
     [RelayCommand] private void ResumeSetup()           => ActivePanel = "wizard";
     [RelayCommand]

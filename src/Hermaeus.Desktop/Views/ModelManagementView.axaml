@@ -231,12 +231,105 @@
                    FontSize="13" Margin="0,0,0,12"
                    Foreground="{Binding IsError, Converter={x:Static views:ErrorColorConverter.Instance}}" />
 
+        <!-- Keep model configuration in the page flow. A popup was too wide for
+             the desktop viewport and clipped the lower controls; this subview
+             gets its own bounded scroll surface instead. -->
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding HasSelectedProfile}"
+                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="16"
+                Margin="0,0,0,14">
+            <ScrollViewer MaxHeight="620"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel DataContext="{Binding SelectedProfile}" Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding EffectiveName}" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="Model-specific defaults and metadata" FontSize="11" Opacity="0.65" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="Close" Command="{Binding DataContext.CloseProfileEditorCommand, ElementName=Root}"
+                                Padding="10,5" ToolTip.Tip="Close model configuration without changing saved values." />
+                    </Grid>
+                    <Grid ColumnDefinitions="1.1*,1.2*,0.9*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="8">
+                        <TextBox Grid.Row="0" Grid.Column="0" Text="{Binding DisplayName}" PlaceholderText="Display name" Padding="10,6"
+                                 ToolTip.Tip="Friendly name shown in the model picker instead of the raw provider ID." />
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Description}" PlaceholderText="Description" Padding="10,6"
+                                 ToolTip.Tip="Optional note shown alongside the model in pickers." />
+                        <TextBox Grid.Row="0" Grid.Column="2" Text="{Binding TagsText}" PlaceholderText="Tags" Padding="10,6"
+                                 ToolTip.Tip="Comma-separated tags used for filtering and display." />
+                        <NumericUpDown Grid.Row="1" Grid.Column="0" Value="{Binding DefaultTemperature}" PlaceholderText="Temperature" Minimum="0" Maximum="2" Increment="0.05" FormatString="F2"
+                                       ToolTip.Tip="Per-model sampling temperature override." />
+                        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding DefaultContextSize}" PlaceholderText="Context" Minimum="128" Maximum="2097152" Increment="512"
+                                       ToolTip.Tip="Per-model context override. Blank uses the runtime default." />
+                        <ComboBox Grid.Row="1" Grid.Column="2" ItemsSource="{Binding KvCacheTypeOptions}" SelectedItem="{Binding DefaultKvCacheType}"
+                                  PlaceholderText="KV cache" ToolTip.Tip="Per-model KV cache precision override." />
+                        <CheckBox Grid.Row="2" Grid.Column="0" Content="Preserve reasoning" IsChecked="{Binding DefaultPreserveReasoning}"
+                                  ToolTip.Tip="Per-model reasoning preservation override." />
+                        <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding DefaultMaxTokens}" PlaceholderText="Max tokens" Minimum="0" Maximum="262144" Increment="256"
+                                       ToolTip.Tip="Per-model maximum reply length." />
+                        <NumericUpDown Grid.Row="2" Grid.Column="2" Value="{Binding DefaultTopP}" PlaceholderText="Top P" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2"
+                                       ToolTip.Tip="Per-model nucleus sampling override." />
+                        <NumericUpDown Grid.Row="3" Grid.Column="0" Value="{Binding DefaultTopK}" PlaceholderText="Top K" Minimum="0" Maximum="500" Increment="1"
+                                       ToolTip.Tip="Per-model top-K sampling override." />
+                        <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding DefaultMinP}" PlaceholderText="Min P" Minimum="0" Maximum="1" Increment="0.01" FormatString="F2"
+                                       ToolTip.Tip="Per-model min-P sampling override." />
+                        <NumericUpDown Grid.Row="3" Grid.Column="2" Value="{Binding DefaultRepeatPenalty}" PlaceholderText="Repeat penalty" Minimum="0.5" Maximum="2" Increment="0.05" FormatString="F2"
+                                       ToolTip.Tip="Per-model repeat penalty override." />
+                        <NumericUpDown Grid.Row="4" Grid.Column="0" Value="{Binding DefaultFrequencyPenalty}" PlaceholderText="Frequency penalty" Minimum="-2" Maximum="2" Increment="0.1" FormatString="F1"
+                                       ToolTip.Tip="Per-model frequency penalty override." />
+                        <NumericUpDown Grid.Row="4" Grid.Column="1" Value="{Binding DefaultPresencePenalty}" PlaceholderText="Presence penalty" Minimum="-2" Maximum="2" Increment="0.1" FormatString="F1"
+                                       ToolTip.Tip="Per-model presence penalty override." />
+                        <TextBox Grid.Row="4" Grid.Column="2" Text="{Binding Avatar}" PlaceholderText="Avatar/icon label" Padding="10,6"
+                                 ToolTip.Tip="Short label or initials used as this model's avatar." />
+                        <CheckBox Grid.Row="5" Grid.Column="0" Content="Visible" IsChecked="{Binding IsVisible}"
+                                  ToolTip.Tip="Whether this model appears in the chat model picker." />
+                        <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8">
+                            <Button Content="Save model profile" Command="{Binding DataContext.SaveProfileCommand, ElementName=Root}" CommandParameter="{Binding}"
+                                    ToolTip.Tip="Save this model's picker defaults and metadata." />
+                            <Button Content="Reset" Command="{Binding DataContext.ResetProfileCommand, ElementName=Root}" CommandParameter="{Binding}"
+                                    ToolTip.Tip="Clear this model's picker defaults and metadata." />
+                        </StackPanel>
+                        <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" Spacing="4" IsVisible="{Binding HasTuneProfile}">
+                            <TextBlock Text="Saved auto-tune profile" FontSize="11" FontWeight="SemiBold" Opacity="0.75" />
+                            <Grid ColumnDefinitions="140,140,160" ColumnSpacing="8">
+                                <NumericUpDown Grid.Column="0" Value="{Binding TunedGpuLayers}" Minimum="0" Maximum="999" Increment="1"
+                                               PlaceholderText="GPU layers" ToolTip.Tip="GPU layers from the saved auto-tune profile." />
+                                <NumericUpDown Grid.Column="1" Value="{Binding TunedThreads}" Minimum="1" Maximum="128" Increment="1"
+                                               PlaceholderText="Threads" ToolTip.Tip="CPU threads from the saved auto-tune profile." />
+                                <NumericUpDown Grid.Column="2" Value="{Binding TunedContextSize}" Minimum="128" Maximum="2097152" Increment="512"
+                                               PlaceholderText="Context" ToolTip.Tip="Context size from the saved auto-tune profile." />
+                            </Grid>
+                            <TextBlock Text="These values are shared with Services and apply to a server only after its configuration is saved and started."
+                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="3" Spacing="6" IsVisible="{Binding HasRepoLink}">
+                            <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="6">
+                                <CheckBox Content="Automatically manage known companions" IsChecked="{Binding AutoManageCompanionAssets}"
+                                          ToolTip.Tip="Allow only explicitly mapped, verified companions to be managed on updates." />
+                                <Button Content="Reacquire known companions" Command="{Binding DataContext.ReacquireCompanionsCommand, ElementName=Root}" CommandParameter="{Binding}"
+                                        IsVisible="{Binding CanReacquireCompanions}" Padding="8,3"
+                                        ToolTip.Tip="Reacquire only hash-verified compatible companions." />
+                                <Button Content="{Binding ManualCompanionRepairLabel}" Command="{Binding DataContext.OpenServicesCommand, ElementName=Root}"
+                                        IsVisible="{Binding RequiresManualCompanionRepair}" Padding="8,3"
+                                        ToolTip.Tip="Open Services to browse or clear a companion with no verified replacement." />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding CompanionStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
         <!-- Model list.
              r29 doc 02: a wrapping grid of fixed-width tiles instead of twelve
              full-width rows, each of which packed name, raw name, provider,
              size, tags, fit, tune summary, update state and a date into one
-             line of small grey text. Every control from the old expander body
-             moved verbatim into the Configure flyout; none was dropped. -->
+             line of small grey text. Model-specific configuration lives in the
+             bounded page-flow subview above. -->
         <ScrollViewer x:Name="ModelListScrollViewer"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
@@ -258,16 +351,18 @@
                                 <ItemsControl ItemsSource="{Binding Models}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
-                                            <WrapPanel />
+                                            <UniformGrid Columns="3" />
                                         </ItemsPanelTemplate>
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate DataType="vm:ModelProfileItemViewModel">
-                            <!-- Fixed width, free height: a WrapPanel of variable-width
-                                 tiles produces ragged columns. -->
+                            <!-- UniformGrid gives each row the same measured height.
+                                 Content is allowed to grow, so equal sizing never
+                                 depends on clipping optional metadata or actions. -->
                             <Border Classes="model-card"
-                                    MinWidth="280" MaxWidth="390"
-                                    Margin="0,0,12,12"
+                                    MinHeight="320"
+                                    HorizontalAlignment="Stretch"
+                                    Margin="6"
                                     Padding="14"
                                     Background="#171A17"
                                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
@@ -280,7 +375,9 @@
                                                 Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                                                 ToolTip.Tip="{Binding ArtworkTooltip}">
                                             <Grid>
-                                                <TextBlock Text="AI" HorizontalAlignment="Center"
+                                                <TextBlock Text="{Binding ArtworkFallbackGlyph}"
+                                                           IsVisible="{Binding ShowArtworkFallback}"
+                                                           HorizontalAlignment="Center"
                                                            VerticalAlignment="Center" FontSize="10"
                                                            FontWeight="SemiBold" />
                                                 <TextBlock Text="{Binding Avatar}"
@@ -384,7 +481,7 @@
                                         <ItemsControl ItemsSource="{Binding Companions}" Margin="0,4,0,0">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate DataType="vm:ModelCompanionViewModel">
-                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,2">
+                                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,2">
                                                         <TextBlock Grid.Column="0" Text="{Binding FileName}"
                                                                    TextTrimming="CharacterEllipsis" FontSize="11" />
                                                         <TextBlock Grid.Column="1" Text="{Binding RoleLabel}"
@@ -394,6 +491,12 @@
                                                                 ToolTip.Tip="{Binding StateTooltip}">
                                                             <TextBlock Text="{Binding StateLabel}" FontSize="10" FontWeight="SemiBold" />
                                                         </Border>
+                                                        <Button Grid.Column="3" Content="Clear"
+                                                                IsVisible="{Binding CanClear}"
+                                                                Command="{Binding DataContext.ClearCompanionCommand, ElementName=Root}"
+                                                                CommandParameter="{Binding}"
+                                                                Padding="6,2" FontSize="10"
+                                                                ToolTip.Tip="Delete this companion file when present and remove its stale mapping from the model." />
                                                     </Grid>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
@@ -427,230 +530,16 @@
                                                 FontSize="12" Padding="10,4" CornerRadius="6"
                                                 VerticalAlignment="Center"
                                                 ToolTip.Tip="{Binding AutoTuneTooltip}" />
-                                        <ToggleButton Grid.Column="2" Classes="icon-btn"
+                                        <Button Grid.Column="2" Classes="icon-btn"
                                                       VerticalAlignment="Center"
-                                                      IsChecked="{Binding IsExpanded}"
-                                                      ToolTip.Tip="Configure this model's overrides">
+                                                      Command="{Binding DataContext.OpenProfileEditorCommand, ElementName=Root}"
+                                                      CommandParameter="{Binding}"
+                                                      ToolTip.Tip="Open this model's configuration subview">
                                             <PathIcon Data="M19.14 12.94a7.6 7.6 0 0 0 .05-.94 7.6 7.6 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.62l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.17 8.86a.5.5 0 0 0 .12.62l2.03 1.58c-.03.31-.05.63-.05.94s.02.63.05.94l-2.03 1.58a.5.5 0 0 0-.12.62l1.92 3.32c.13.22.38.3.6.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.62l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
                                                       Width="14" Height="14" />
                                             <!-- r29 doc 02 2.4: reuses ModelProfileItemViewModel.IsExpanded,
                                                  which had no other consumer once the Expander went. -->
-                                            <ToggleButton.Flyout>
-                                                <Flyout Placement="BottomEdgeAlignedLeft"
-                                                        PlacementConstraintAdjustment="SlideX,FlipY,ResizeX,ResizeY">
-                                                    <ScrollViewer MinWidth="640" MaxWidth="720" MaxHeight="520"
-                                                                  HorizontalContentAlignment="Stretch"
-                                                                  VerticalScrollBarVisibility="Auto"
-                                                                  HorizontalScrollBarVisibility="Disabled">
-                                                        <StackPanel HorizontalAlignment="Stretch" Spacing="6">
-                                                            <TextBlock Text="{Binding EffectiveName}"
-                                                                       FontSize="14" FontWeight="SemiBold" />
-                                                            <TextBlock Text="Model-specific defaults and metadata"
-                                                                       FontSize="11" Opacity="0.65" />
-                                                            <Grid ColumnDefinitions="1.1*,1.2*,0.9*"
-                                                                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
-                                                                  ColumnSpacing="10"
-                                                                  RowSpacing="8"
-                                                                  Margin="0,4,0,0">
-                                                                <TextBox Grid.Row="0" Grid.Column="0"
-                                                                         Text="{Binding DisplayName}"
-                                                                         PlaceholderText="Display name"
-                                                                         CornerRadius="6"
-                                                                         Padding="10,6"
-                                                                         ToolTip.Tip="Friendly name shown in the model picker instead of the raw provider ID." />
-                                                                <TextBox Grid.Row="0" Grid.Column="1"
-                                                                         Text="{Binding Description}"
-                                                                         PlaceholderText="Description"
-                                                                         CornerRadius="6"
-                                                                         Padding="10,6"
-                                                                         ToolTip.Tip="Optional note shown alongside the model in pickers." />
-                                                                <TextBox Grid.Row="0" Grid.Column="2"
-                                                                         Text="{Binding TagsText}"
-                                                                         PlaceholderText="tags"
-                                                                         CornerRadius="6"
-                                                                         Padding="10,6"
-                                                                         ToolTip.Tip="Comma-separated tags used for grouping and benchmark leaderboards." />
-
-                                                                <NumericUpDown Grid.Row="1" Grid.Column="0"
-                                                                               Value="{Binding DefaultTemperature}"
-                                                                               PlaceholderText="Default temp"
-                                                                               Minimum="0"
-                                                                               Maximum="2"
-                                                                               Increment="0.1"
-                                                                               FormatString="F1"
-                                                                               ToolTip.Tip="Per-model default temperature, overriding the global Settings > LLM value for this model only." />
-                                                                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="3">
-                                                                    <TextBlock Text="Runtime defaults" FontSize="11" Opacity="0.65" />
-                                                                    <NumericUpDown Value="{Binding DefaultContextSize}"
-                                                                                   PlaceholderText="{Binding ContextWatermark}"
-                                                                                   Minimum="0"
-                                                                                   Maximum="262144"
-                                                                                   Increment="512"
-                                                                                   ToolTip.Tip="Default context window size in tokens for this model." />
-                                                                    <ComboBox ItemsSource="{Binding KvCacheTypeOptions}"
-                                                                              SelectedItem="{Binding DefaultKvCacheType}"
-                                                                              ToolTip.Tip="Default KV cache precision applied to both K and V when this model is selected." />
-                                                                    <StackPanel Spacing="3" IsVisible="{Binding HasTuneProfile}">
-                                                                        <TextBlock Text="Saved auto-tune profile" FontSize="11" Opacity="0.65" />
-                                                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                                                                            <NumericUpDown Grid.Column="0"
-                                                                                           Value="{Binding TunedGpuLayers}"
-                                                                                           Minimum="-1"
-                                                                                           Maximum="100000"
-                                                                                           Increment="1"
-                                                                                           ToolTip.Tip="Saved llama.cpp GPU layer setting. -1 means all layers. This edits the shared tune profile only." />
-                                                                            <NumericUpDown Grid.Column="1"
-                                                                                           Value="{Binding TunedThreads}"
-                                                                                           Minimum="1"
-                                                                                           Maximum="4096"
-                                                                                           Increment="1"
-                                                                                           ToolTip.Tip="Saved llama.cpp thread setting. This edits the shared tune profile only." />
-                                                                        </Grid>
-                                                                        <NumericUpDown Value="{Binding TunedContextSize}"
-                                                                                       PlaceholderText="{Binding TuneProfileContextWatermark}"
-                                                                                       Minimum="128"
-                                                                                       Maximum="2097152"
-                                                                                       Increment="512"
-                                                                                       ToolTip.Tip="Saved llama.cpp context setting. Save the model profile to persist intentional edits; restart or save the Services configuration before a running service uses it." />
-                                                                        <TextBlock Text="Extra arguments and live process overrides remain on Services, where trust checks and start/stop state are visible."
-                                                                                   FontSize="10" Opacity="0.65" TextWrapping="Wrap" />
-                                                                    </StackPanel>
-                                                                </StackPanel>
-                                                                <NumericUpDown Grid.Row="1" Grid.Column="2"
-                                                                               Value="{Binding DefaultMaxTokens}"
-                                                                               PlaceholderText="Max tokens"
-                                                                               Minimum="0"
-                                                                               Maximum="262144"
-                                                                               Increment="256"
-                                                                               ToolTip.Tip="Per-model default max reply length in tokens, overriding the global default." />
-
-                                                                <NumericUpDown Grid.Row="2" Grid.Column="0"
-                                                                               Value="{Binding DefaultTopP}"
-                                                                               PlaceholderText="Top P"
-                                                                               Minimum="0"
-                                                                               Maximum="1"
-                                                                               Increment="0.05"
-                                                                               FormatString="F2"
-                                                                               ToolTip.Tip="Per-model nucleus sampling override. Leave blank to use the provider's own default." />
-                                                                <NumericUpDown Grid.Row="2" Grid.Column="1"
-                                                                               Value="{Binding DefaultTopK}"
-                                                                               PlaceholderText="Top K"
-                                                                               Minimum="0"
-                                                                               Maximum="500"
-                                                                               Increment="1"
-                                                                               ToolTip.Tip="Per-model top-K sampling override. llama.cpp/Ollama only." />
-                                                                <NumericUpDown Grid.Row="2" Grid.Column="2"
-                                                                               Value="{Binding DefaultMinP}"
-                                                                               PlaceholderText="Min P"
-                                                                               Minimum="0"
-                                                                               Maximum="1"
-                                                                               Increment="0.01"
-                                                                               FormatString="F2"
-                                                                               ToolTip.Tip="Per-model min-P sampling override. llama.cpp/Ollama only." />
-
-                                                                <NumericUpDown Grid.Row="3" Grid.Column="0"
-                                                                               Value="{Binding DefaultRepeatPenalty}"
-                                                                               PlaceholderText="Repeat penalty"
-                                                                               Minimum="0.5"
-                                                                               Maximum="2"
-                                                                               Increment="0.05"
-                                                                               FormatString="F2"
-                                                                               ToolTip.Tip="Per-model repeat penalty override. 1.0 is no penalty." />
-                                                                <NumericUpDown Grid.Row="3" Grid.Column="1"
-                                                                               Value="{Binding DefaultFrequencyPenalty}"
-                                                                               PlaceholderText="Frequency penalty"
-                                                                               Minimum="-2"
-                                                                               Maximum="2"
-                                                                               Increment="0.1"
-                                                                               FormatString="F1"
-                                                                               ToolTip.Tip="Per-model frequency penalty override. OpenAI-compatible endpoints only." />
-                                                                <NumericUpDown Grid.Row="3" Grid.Column="2"
-                                                                               Value="{Binding DefaultPresencePenalty}"
-                                                                               PlaceholderText="Presence penalty"
-                                                                               Minimum="-2"
-                                                                               Maximum="2"
-                                                                               Increment="0.1"
-                                                                               FormatString="F1"
-                                                                               ToolTip.Tip="Per-model presence penalty override. OpenAI-compatible endpoints only." />
-
-                                                                <StackPanel Grid.Row="4" Grid.Column="0"
-                                                                            Orientation="Horizontal"
-                                                                            Spacing="8">
-                                                                    <CheckBox Content="Visible"
-                                                                              IsChecked="{Binding IsVisible}"
-                                                                              FontSize="12"
-                                                                              ToolTip.Tip="Whether this model appears in the chat model picker. Unchecking hides it without deleting it." />
-                                                                </StackPanel>
-                                                                <TextBox Grid.Row="4" Grid.Column="1"
-                                                                         Text="{Binding Avatar}"
-                                                                         PlaceholderText="Avatar/icon label"
-                                                                         CornerRadius="6"
-                                                                         Padding="10,6"
-                                                                         ToolTip.Tip="Short label or initials shown as this model's avatar in chat." />
-                                                                <StackPanel Grid.Row="4" Grid.Column="2"
-                                                                            Orientation="Horizontal"
-                                                                            Spacing="8"
-                                                                            HorizontalAlignment="Right">
-                                                                    <Button Content="Save model profile"
-                                                                            Command="{Binding DataContext.SaveProfileCommand, ElementName=Root}"
-                                                                            CommandParameter="{Binding}"
-                                                                            ToolTip.Tip="Saves this model's picker defaults and metadata. Runtime process settings are saved separately on Services." />
-                                                                    <Button Content="Reset"
-                                                                            Command="{Binding DataContext.ResetProfileCommand, ElementName=Root}"
-                                                                            CommandParameter="{Binding}"
-                                                                            ToolTip.Tip="Clears this model's picker defaults and metadata. The saved auto-tune runtime profile remains separate and is shown above." />
-                                                                </StackPanel>
-
-                                                                <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3"
-                                                                            Spacing="6"
-                                                                            IsVisible="{Binding HasRepoLink}">
-                                                                    <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="6">
-                                                                        <CheckBox Content="Automatically manage known companions"
-                                                                                  IsChecked="{Binding AutoManageCompanionAssets}"
-                                                                                  FontSize="12"
-                                                                                  ToolTip.Tip="When enabled, model updates may download or replace only explicitly source-mapped, SHA256-verified projector and MTP files for this model. Disabling prompts before removing existing companion files." />
-                                                                        <Button Content="Reacquire known companions"
-                                                                                Command="{Binding DataContext.ReacquireCompanionsCommand, ElementName=Root}"
-                                                                                CommandParameter="{Binding}"
-                                                                                IsVisible="{Binding CanReacquireCompanions}"
-                                                                                FontSize="11" Padding="8,3" CornerRadius="6"
-                                                                                ToolTip.Tip="Reviews and reacquires only hash-verified compatible companions from the linked repository's current revision. It never changes a server's selected draft model; choose any replacement explicitly in Services." />
-                                                                        <Button Content="{Binding ManualCompanionRepairLabel}"
-                                                                                Command="{Binding DataContext.OpenServicesCommand, ElementName=Root}"
-                                                                                IsVisible="{Binding RequiresManualCompanionRepair}"
-                                                                                FontSize="11" Padding="8,3" CornerRadius="6"
-                                                                                ToolTip.Tip="No verified replacement is available. Open Services to browse or clear the affected companion explicitly." />
-                                                                    </WrapPanel>
-                                                                    <TextBlock Text="{Binding CompanionStatus}"
-                                                                               FontSize="11"
-                                                                               Opacity="0.7"
-                                                                               VerticalAlignment="Center"
-                                                                               TextWrapping="Wrap" />
-                                                                </StackPanel>
-
-                                                                <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"
-                                                                            Orientation="Horizontal"
-                                                                            Spacing="8"
-                                                                            IsVisible="{Binding IsLocalGguf}">
-                                                                    <Button Content="{Binding RepoId, Converter={x:Static views:RepoLinkLabelConverter.Instance}}"
-                                                                            Command="{Binding DataContext.LinkToHuggingFaceRepoCommand, ElementName=Root}"
-                                                                            CommandParameter="{Binding}"
-                                                                            FontSize="12" Padding="10,4" CornerRadius="6"
-                                                                            ToolTip.Tip="Links this model to a Hugging Face repo (org/repo) so &quot;Check for updates&quot; can compare it. Validated against the model-card API before saving." />
-                                                                    <Button Content="{Binding IsUpdating, Converter={x:Static views:BoolToTextConverter.Instance}, ConverterParameter='Updating...|Update'}"
-                                                                            Command="{Binding DataContext.UpdateModelCommand, ElementName=Root}"
-                                                                            CommandParameter="{Binding}"
-                                                                            IsVisible="{Binding UpdateStatus, Converter={x:Static views:UpdateAvailableConverter.Instance}}"
-                                                                            IsEnabled="{Binding !IsRunning}"
-                                                                            FontSize="12" Padding="10,4" CornerRadius="6"
-                                                                            ToolTip.Tip="Downloads the update to a .update.tmp file, verifies its hash against the repo, then atomically swaps it in. Refuses while the model is running." />
-                                                                </StackPanel>
-                                                            </Grid>
-                                                        </StackPanel>
-                                                    </ScrollViewer>
-                                                </Flyout>
-                                            </ToggleButton.Flyout>
-                                        </ToggleButton>
+                                        </Button>
                                         <Button Grid.Column="3" Classes="icon-btn"
                                                 IsVisible="{Binding IsLocalGguf}"
                                                 ToolTip.Tip="Delete this local model"

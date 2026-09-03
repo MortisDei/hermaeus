@@ -79,6 +79,14 @@ public partial class ModelManagementView : UserControl
             var dialog = new CompanionDisableDialog(plan);
             return await dialog.ShowDialog<CompanionDisableChoice>(owner);
         };
+
+        vm.RequestCompanionRemovalConfirmation = async plan =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+            var dialog = new ConfirmActionDialog("Clear companion", plan.Description);
+            return await dialog.ShowDialog<bool>(owner);
+        };
     }
 
     /// <summary>

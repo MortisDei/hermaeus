@@ -1943,11 +1943,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         var facts = await LocalModelCapabilityService.ProbeRuntimeAsync(executablePath);
         IReadOnlyList<CapabilityDrift> drift = [];
         LocalModelCapabilities? capabilities = null;
+        CapabilityCacheWriteResult? cacheWrite = null;
         if (_capabilityService is not null && File.Exists(ModelPath))
         {
             var probe = await _capabilityService.ProbeWithDriftAsync(ModelPath, executablePath);
             drift = probe.Drift;
             capabilities = probe.Capabilities;
+            cacheWrite = probe.CacheWrite;
         }
         RunOnUi(() =>
         {
@@ -1960,11 +1962,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                 _runtimeSpeculativeTypes.Add(type);
             SupportsPromptThreads = facts.SupportsPromptThreads;
             RuntimeCapabilitiesKnown = facts.HelpProbeSucceeded;
-            RuntimeCapabilityStatus = facts.HelpProbeSucceeded
+            var capabilityStatus = facts.HelpProbeSucceeded
                 ? facts.SpeculativeTypes.Count == 0
                     ? "This llama-server advertises no speculative types."
                     : $"Runtime speculative types: {string.Join(", ", facts.SpeculativeTypes)}."
                 : "Could not read selected llama-server help. Runtime-only options stay unavailable.";
+            RuntimeCapabilityStatus = cacheWrite?.State == CapabilityCacheWriteState.Failed
+                ? $"{capabilityStatus} Capability cache persistence failed at '{cacheWrite.Path}': {cacheWrite.Error}"
+                : capabilityStatus;
             OnPropertyChanged(nameof(SupportsNgramDecoding));
             OnPropertyChanged(nameof(SupportsDraftModelDecoding));
             OnPropertyChanged(nameof(SupportsPromptThreads));

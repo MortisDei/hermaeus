@@ -21,6 +21,8 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
 
     public VoiceChannel Channel { get; }
     public string DisplayName { get; }
+    /// <summary>Shared live catalogue owned by the parent voice settings view model.</summary>
+    public UiBoundCollection<string> VoiceOptions { get; }
 
     [ObservableProperty] private bool _enabled;
     [ObservableProperty] private string _voiceId = string.Empty;
@@ -55,10 +57,14 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
         }
     }
 
-    public VoiceChannelSettingViewModel(VoiceChannel channel, string displayName)
+    public VoiceChannelSettingViewModel(
+        VoiceChannel channel,
+        string displayName,
+        UiBoundCollection<string>? voiceOptions = null)
     {
         Channel = channel;
         DisplayName = displayName;
+        VoiceOptions = voiceOptions ?? [];
     }
 
     partial void OnEnabledChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
@@ -356,7 +362,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
             var hasConfig = tts.Channels.TryGetValue(channel.ToString(), out var config);
             var enabled = hasConfig ? config!.Enabled : channel == VoiceChannel.Chat;
             var voiceId = ResolveChannelVoiceId(tts, config);
-            VoiceChannels.Add(new VoiceChannelSettingViewModel(channel, channel.ToString()) { Enabled = enabled, VoiceId = voiceId });
+            VoiceChannels.Add(new VoiceChannelSettingViewModel(channel, channel.ToString(), ChannelVoiceOptions)
+            { Enabled = enabled, VoiceId = voiceId });
         }
 
         AutoSpeakChatReplies = tts.AutoSpeakChatReplies;

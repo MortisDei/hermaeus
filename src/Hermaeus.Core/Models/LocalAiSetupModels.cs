@@ -78,4 +78,6 @@ public sealed record LocalAiSetupResult(
     bool Success,
     string Log,
     string? UpdatedPath = null,
-    LlamaRuntimeVariant? SelectedVariant = null);
+    LlamaRuntimeVariant? SelectedVariant = null,
+    string? VerifiedReleaseTag = null,
+    string? VerifiedArtifactSha256 = null);

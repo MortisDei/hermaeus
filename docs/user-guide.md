@@ -39,7 +39,10 @@ you change Data Root later, use the in-app migration flow rather than moving
 live database files by hand. After entering or choosing a different root,
 review the current and destination paths and choose **Move data...**. Hermaeus
 asks for confirmation before moving an existing workspace; ordinary Settings
-autosave never performs that migration implicitly.
+autosave never performs that migration implicitly. The Data Storage page shows
+both the configured root and the root currently effective for composed stores.
+Restart Hermaeus after a successful change so every store and cached view is
+composed against the selected root.
 
 Choose a chat backend next. For managed llama.cpp, use **Install managed
 llama.cpp** before reaching Doctor. You can then choose an existing GGUF or
@@ -87,7 +90,8 @@ installation is required, prefers the hardware's primary accelerated backend,
 and may select another compatible accelerated asset when upstream does not
 publish that preferred package. The selected backend is recorded separately as
 the last installed backend; Auto itself remains Auto. If no compatible GPU
-asset is available or the selected build fails its launch probe, Hermaeus
+asset is available or the selected build fails executable or build-identity
+validation, Hermaeus
 refuses the update with an explanation rather than silently replacing it with a
 CPU build. CPU is still available when selected explicitly. Fresh managed
 archives are stored under one Hermaeus build directory; older nested archive
@@ -97,7 +101,17 @@ The Data Storage panel shows the configured request and the last installed
 backend separately. The latter is installation history, not a replacement for
 Auto and not proof of which executable a currently running process uses. The
 active process identity remains tied to the Services executable and Chat
-runtime telemetry.
+runtime telemetry. Persisted capability cache and sibling state resolve beneath
+the effective Data Root. A root change is write-probed before settings are
+published, and a capability-cache write failure is shown as a failure with its
+path rather than as successful persistence.
+
+For a GPU update, Hermaeus runs the downloaded executable with `--version` and
+captures both output streams. Current llama.cpp Windows builds write their
+version/build identity to stderr. The verified upstream release tag and
+SHA256-checked archive remain the stable identity evidence when a runtime's
+version text cannot be parsed. `--help`, a help-shaped output, or exit code 0
+alone is never accepted as identity proof.
 
 Capability status is evidence-scoped. `Available` means the selected runtime,
 and the selected model where relevant, advertised or demonstrated the feature.
@@ -145,6 +159,12 @@ only the Services path for **Browse** or **Clear projector**. Recovery resolves
 the current repository revision and hash-verified compatible candidates, but it
 never changes a server's configured projector or draft path. Selecting a
 replacement in Services remains an explicit user action.
+
+The model card's companion list also has a **Clear** action for a stale or unwanted
+mapping. After confirmation it removes only that companion file under the Local AI
+assets root, when the file is present, and removes only that mapping from the
+primary model's manifest. It does not delete the primary model or unrelated
+companions.
 
 When the model card declares a Hugging Face thumbnail, the selected repository
 and its download cards may show it as optional repository artwork. Hermaeus
@@ -266,7 +286,12 @@ Knowledge/RAG, conversations, and Agent task history.
 
 **Knowledge** ingests files into local RAG datasets. In the RAG panel, select
 one or more datasets for each question from **Datasets included in this
-question**. Attach one dataset to a Chat conversation from the Knowledge
+question**. The first time the panel is used, none is selected and asking
+prompts for an explicit choice. The last choice is retained for later
+questions. If no dataset exists, **Create Hermaeus Help dataset** offers to
+ingest the version-local help documents shipped with this build through the
+normal pipeline, with ordinary citations and provenance. The normal folder
+ingest path remains available. Attach one dataset to a Chat conversation from the Knowledge
 picker. Retrieval is bounded and cited; weak
 matches are omitted instead of forced into every answer. Reindex after changing
 the embedding model. Dataset Manager shows the published generation history,
@@ -282,8 +307,9 @@ palette can search the local Recall index even when Recall injection into Chat
 is disabled. The Memories view puts pinned memories in a clearly labelled
 section at the top, where **Unpin** is available directly. Agent workspace
 notes and generated workspace profiles are shown in Agent, not mixed into
-ordinary Memories. The RAG ingest plan is analysis context and is not saved
-as a normal memory.
+ordinary Memories. Weak semantic memory candidates are left out of ordinary
+recall, while pinned memories remain eligible. The RAG ingest plan is analysis
+context and is not saved as a normal memory.
 
 Open **History** on a memory to inspect its immutable revisions. Recorded time
 and established effective time are shown separately, alongside adjacent

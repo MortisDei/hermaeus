@@ -259,7 +259,7 @@
 
                                 <!-- ── Config grid ───────────────────────── -->
                                 <Grid ColumnDefinitions="100,*,Auto"
-                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                                       RowSpacing="8" ColumnSpacing="10">
 
                                     <!-- Executable -->
@@ -402,16 +402,19 @@
                                                Text="Threads" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
                                     <Grid Grid.Row="4" Grid.Column="1"
-                                          ColumnDefinitions="140,Auto,Auto,120,Auto,*"
-                                          ColumnSpacing="16">
-                                        <NumericUpDown Value="{Binding Threads}"
+                                          RowDefinitions="Auto,Auto"
+                                          ColumnDefinitions="140,*,140,120,*"
+                                          RowSpacing="6" ColumnSpacing="10">
+                                        <NumericUpDown Grid.Row="0" Grid.Column="0"
+                                                       Value="{Binding Threads}"
                                                        Minimum="1" Maximum="128"
                                                        Increment="1"
                                                        HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="CPU thread count" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <StackPanel Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="4"
+                                                    Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBlock Text="Offload:" Opacity="0.6" FontSize="13" />
                                             <NumericUpDown Value="{Binding GpuLayers}"
                                                            Minimum="1" Maximum="999"
@@ -420,10 +423,9 @@
                                                            IsVisible="{Binding IsExactGpuPlacement}"
                                                            IsEnabled="{Binding CanEdit}"
                                                            ToolTip.Tip="Exact number of model layers placed on the GPU. Active only when GPU placement is Exact." />
-                                            <TextBlock Text="{Binding EffectiveOffloadLabel}" FontSize="13" />
                                         </StackPanel>
-                                        <TextBlock Grid.Column="2" Text="Parallel slots:" Opacity="0.6" FontSize="13" VerticalAlignment="Center" />
-                                        <NumericUpDown Grid.Column="3"
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Parallel slots:" Opacity="0.6" FontSize="13" VerticalAlignment="Center" />
+                                        <NumericUpDown Grid.Row="1" Grid.Column="1"
                                                        Value="{Binding Slots}"
                                                        Minimum="1" Maximum="32"
                                                        Increment="1"
@@ -431,31 +433,20 @@
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Parallel request slots (--parallel N). Each slot can own an in-flight request and its context. Use 1 for one-user chat when you want the full context and KV cache reserved for that conversation." />
-                                        <CheckBox Grid.Column="4"
+                                        <CheckBox Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="3"
                                                   IsChecked="{Binding AutoStart}"
                                                   Content="Auto-start"
                                                   FontSize="13"
                                                   VerticalAlignment="Center" />
                                     </Grid>
 
-                                    <!-- Extra args -->
-                                    <TextBlock Grid.Row="5" Grid.Column="0"
-                                               Text="Extra args" VerticalAlignment="Center"
-                                               Opacity="0.6" FontSize="13" />
-                                    <TextBox Grid.Row="5" Grid.Column="1"
-                                             Text="{Binding ExtraArgs}"
-                                             PlaceholderText="--flash-attn --mlock  etc."
-                                             FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding CanEdit}"
-                                             ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning. Quote a value containing spaces, e.g. --mmproj &quot;C:\models\a b\proj.gguf&quot;; a backslash is only an escape before a quote or another backslash, so plain Windows paths like C:\models\proj.gguf do not need to be escaped." />
-
                                     <!-- r18 04-llama-server-engine-options.md 4.1: first-class
                                          engine options. Defaults (f16/auto/off) are byte-identical
                                          to pre-r18 launches; nothing here is ever forced. -->
-                                    <TextBlock Grid.Row="6" Grid.Column="0"
+                                    <TextBlock Grid.Row="5" Grid.Column="0"
                                                Text="KV cache / engine" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
-                                    <StackPanel Grid.Row="6" Grid.Column="1" Spacing="6">
+                                    <StackPanel Grid.Row="5" Grid.Column="1" Spacing="6">
                                         <Grid ColumnDefinitions="Auto,110,Auto,140" ColumnSpacing="8">
                                             <TextBlock Text="KV cache:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                                             <ComboBox Grid.Column="1"
@@ -492,10 +483,10 @@
 
                                     <!-- R32 adaptive inference envelope. Defaults are Fixed
                                          and conservative; relaxed fields remain explicit. -->
-                                    <TextBlock Grid.Row="7" Grid.Column="0"
+                                    <TextBlock Grid.Row="6" Grid.Column="0"
                                                Text="Adaptive launch" VerticalAlignment="Top"
                                                Opacity="0.6" FontSize="13" />
-                                    <StackPanel Grid.Row="7" Grid.Column="1" Spacing="6">
+                                    <StackPanel Grid.Row="6" Grid.Column="1" Spacing="6">
                                         <Grid ColumnDefinitions="Auto,150,Auto,140" ColumnSpacing="8">
                                             <TextBlock Text="Mode:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                                             <ComboBox Grid.Column="1"
@@ -577,6 +568,14 @@
                                 <!-- ── Advanced engine options ───────────── -->
                                 <Expander Header="Advanced engine options" IsExpanded="False">
                                     <StackPanel Spacing="8" Margin="0,8,0,0">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Extra args" FontSize="12" FontWeight="SemiBold" />
+                                            <TextBox Text="{Binding ExtraArgs}"
+                                                     PlaceholderText="--flash-attn --mlock  etc."
+                                                     FontSize="13" CornerRadius="6" Padding="10,6"
+                                                     IsEnabled="{Binding CanEdit}"
+                                                     ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning. Quote a value containing spaces, e.g. --mmproj &quot;C:\models\a b\proj.gguf&quot;; a backslash is only an escape before a quote or another backslash, so plain Windows paths like C:\models\proj.gguf do not need to be escaped." />
+                                        </StackPanel>
                                         <StackPanel Orientation="Horizontal" Spacing="16">
                                             <CheckBox IsChecked="{Binding MemoryLock}"
                                                       Content="--mlock (keep model pinned in RAM)"

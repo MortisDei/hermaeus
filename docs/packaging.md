@@ -129,6 +129,13 @@ dotnet restore Hermaeus.sln -r win-x64
 pwsh ./build.ps1 -SkipRestore -Runtime win-x64
 ```
 
+`-SkipRestore` validates both publish projects before changing `dist/`. If the
+requested RID is not present in the restore assets, the script stops with a
+command-specific message instead of reaching `NETSDK1047`. Publish scratch
+directories are removed on success and failure, and an incomplete package is
+removed when packaging fails. A package is ready only after the executable,
+layout, archive, and checksum validations complete.
+
 Framework-dependent packages require the .NET 10 runtime on the target machine.
 Self-contained packages include the runtime and are larger.
 

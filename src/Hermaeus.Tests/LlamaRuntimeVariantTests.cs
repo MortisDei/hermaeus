@@ -422,6 +422,40 @@ public sealed class LlamaRuntimeVariantTests
     public void ShouldRejectGpuRuntime_is_terminal_at_cpu(LlamaRuntimeVariant variant, bool probeOk, bool expected)
         => Assert.Equal(expected, DoctorService.ShouldRejectGpuRuntime(variant, probeOk));
 
+    [Fact]
+    public void Successful_zero_exit_without_build_identity_is_not_called_a_launch_failure()
+    {
+        Assert.Equal(
+            LlamaProbeFailureKind.IdentityUnverified,
+            DoctorService.ClassifyLlamaProbe(probeStarted: true, exitCode: 0, buildIdentityVerified: false));
+        Assert.True(DoctorService.ShouldRejectGpuRuntime(LlamaRuntimeVariant.Cuda, true, 0, false));
+        Assert.False(DoctorService.ShouldRejectGpuRuntime(LlamaRuntimeVariant.Cpu, true, 0, false));
+    }
+
+    [Theory]
+    [InlineData("version: 0.3.0-dev (build 10782, commit 0ba6499c3)\nbuilt with Clang 20.1.8 for Windows x86_64", 10782)]
+    [InlineData("version: 0.3.0-dev (build 10786, commit de8656bd9)\nbuilt with Clang 20.1.8 for Windows x86_64", 10786)]
+    [InlineData("----- common params -----\n--version show version and build info", null)]
+    public void Current_llama_windows_probe_output_requires_a_real_build_identity(string output, int? expected)
+        => Assert.Equal(expected, DoctorService.TryParseLlamaBuild(output));
+
+    [Fact]
+    public void Verified_release_artifact_can_supply_identity_when_version_is_not_parseable()
+    {
+        Assert.True(DoctorService.IsLlamaUpdateIdentityVerified(null, 10782, verifiedArtifact: true));
+        Assert.False(DoctorService.IsLlamaUpdateIdentityVerified(10786, 10782, verifiedArtifact: true));
+        Assert.False(DoctorService.IsLlamaUpdateIdentityVerified(null, 10782, verifiedArtifact: false));
+    }
+
+    [Theory]
+    [InlineData(false, null, false, "CouldNotStart")]
+    [InlineData(true, null, false, "TimedOut")]
+    [InlineData(true, 1, false, "NonZeroExit")]
+    [InlineData(true, 0, true, "None")]
+    public void Probe_classification_keeps_start_exit_and_identity_failures_distinct(
+        bool started, int? exitCode, bool identity, string expected)
+        => Assert.Equal(expected, DoctorService.ClassifyLlamaProbe(started, exitCode, identity).ToString());
+
     [Theory]
     [InlineData(true, true, 999, true)]   // GPU + CPU build -> advise
     [InlineData(true, false, 0, true)]    // GPU + zero offload -> advise

@@ -303,7 +303,12 @@ public sealed class LlamaServerSetupService
             var result = await DownloadExtractAndLocateAsync(
                 versionedInstallPath, release.Url, release.AssetName, release.Sha256,
                 $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
-            return result with { SelectedVariant = release.Variant };
+            return result with
+            {
+                SelectedVariant = release.Variant,
+                VerifiedReleaseTag = result.Success ? release.TagName : null,
+                VerifiedArtifactSha256 = result.Success ? release.Sha256 : null
+            };
         }
         catch (OperationCanceledException)
         {

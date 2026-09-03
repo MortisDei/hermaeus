@@ -58,6 +58,8 @@ public sealed class MemoryHybridRecallTests
         var results = await store.SearchAsync("local model runtime");
 
         Assert.Contains(results, m => m.Id == "m1");
+        Assert.DoesNotContain(results, m => m.Id == "m2");
+        Assert.DoesNotContain(results, m => m.Id == "m3");
         var top = results.OrderByDescending(m => m.RelevanceScore).First();
         Assert.Equal("m1", top.Id);
         Assert.True(top.RelevanceScore > 0, "the top hybrid result should carry a positive relevance score");
@@ -111,6 +113,24 @@ public sealed class MemoryHybridRecallTests
         Assert.Single(results);
         Assert.NotNull(results[0].RelevanceScore);
         Assert.True(results[0].RelevanceScore > 0);
+    }
+
+    [Fact]
+    public async Task Weak_ordinary_memories_are_not_used_to_fill_the_budget_but_pinned_memories_remain_eligible()
+    {
+        using var temp = new TempDir();
+        var store = NewHybridStore(temp, out _);
+        await store.InitializeAsync();
+
+        await store.SaveAsync(new Memory { Id = "relevant", Content = "User runs llama.cpp for local inference." });
+        await store.SaveAsync(new Memory { Id = "ordinary-unrelated", Content = "User's unrelated lunch plans and grocery list." });
+        await store.SaveAsync(new Memory { Id = "pinned-unrelated", Content = "Pinned context retained by deliberate user choice.", IsPinned = true });
+
+        var results = await store.SearchAsync("local model runtime");
+
+        Assert.Contains(results, memory => memory.Id == "relevant");
+        Assert.DoesNotContain(results, memory => memory.Id == "ordinary-unrelated");
+        Assert.Contains(results, memory => memory.Id == "pinned-unrelated");
     }
 
     [Fact]

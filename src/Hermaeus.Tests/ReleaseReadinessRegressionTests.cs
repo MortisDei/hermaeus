@@ -132,6 +132,10 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Contains("$appDir = Join-Path $packageDir \"app\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("$iconDir = Join-Path $packageDir \"icons\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("$localApiDir = Join-Path $appDir \"LocalApi\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("function Remove-BuildTemporaryOutput", buildScript, StringComparison.Ordinal);
+        Assert.Contains("function Assert-RuntimeRestoreTarget", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Assert-RuntimeRestoreTarget $project $Runtime", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Assert-RuntimeRestoreTarget $localApiProject $Runtime", buildScript, StringComparison.Ordinal);
         Assert.Contains("Build-NativeLauncher $Runtime $launcherPath", buildScript, StringComparison.Ordinal);
         Assert.Contains("Assert-WindowsPackageLayout $packageDir", buildScript, StringComparison.Ordinal);
         Assert.Contains("\"app/Hermaeus.Desktop.exe\"", buildScript, StringComparison.Ordinal);
@@ -146,8 +150,12 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.DoesNotContain("$env:ComSpec", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("-no_logo", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Set-Content -NoNewline -Encoding ASCII (Join-Path $packageDir \"Launch-Hermaeus.cmd\")", buildScript, StringComparison.Ordinal);
+        Assert.Contains("if (-not $buildSucceeded)", buildScript, StringComparison.Ordinal);
+        Assert.Contains("incomplete Windows package output was removed", buildScript, StringComparison.Ordinal);
 
         Assert.Contains("minimal open-source launcher", packaging, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Publish scratch", packaging, StringComparison.Ordinal);
+        Assert.Contains("directories are removed on success and failure", packaging, StringComparison.Ordinal);
         Assert.Contains("app\\Hermaeus.Desktop.exe", packaging, StringComparison.Ordinal);
         Assert.Contains("src/Hermaeus.Launcher/launcher.c", packaging, StringComparison.Ordinal);
         Assert.Contains("Hermaeus.exe", userGuide, StringComparison.Ordinal);

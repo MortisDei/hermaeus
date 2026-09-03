@@ -11,6 +11,11 @@ namespace Hermaeus.Services;
 /// </summary>
 public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
 {
+    // A hybrid scan currently scores every embedded row so paraphrases can be
+    // found. It must still refuse weak semantic matches before they reach the
+    // prompt, otherwise an unrelated history row becomes context merely
+    // because it has an embedding.
+    private const double MinimumRecallRelevance = 0.40;
     private const int SchemaVersion = 6;
     private const int KnowledgeSchemaVersion = 2;
     private const int MaxBackfillAttemptsPerRow = 5;
@@ -1533,7 +1538,7 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
         // service configured at save time) still becomes vector-recallable
         // once one is available, without taxing the next chat send.
         if (embeddingBlob is null && _embeddings is not null)
-            _ = Task.Run(() => RunEmbeddingBackfillAsync(CancellationToken.None));
+            _ = Task.Run(RunEmbeddingBackfillObservedAsync);
     }
 
     /// <summary>Legacy fixture adapter for permanent deletion.</summary>
@@ -1607,12 +1612,17 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
             // or not hybrid recall is available.
             for (var i = 0; i < ftsResults.Count; i++)
                 ftsResults[i].RelevanceScore = 1.0 / (i + 1);
-            return await ExpandOneHopRelationshipsAsync(c, ftsResults, ct);
+            return await ExpandOneHopRelationshipsAsync(c, ApplyRelevanceFloor(ftsResults), ct);
         }
 
         var hybridResults = await HybridRerankAsync(c, q, ftsResults, ct);
-        return await ExpandOneHopRelationshipsAsync(c, hybridResults, ct);
+        return await ExpandOneHopRelationshipsAsync(c, ApplyRelevanceFloor(hybridResults), ct);
     }
+
+    private static List<Memory> ApplyRelevanceFloor(IEnumerable<Memory> candidates) =>
+        candidates
+            .Where(memory => memory.IsPinned || memory.RelevanceScore is >= MinimumRecallRelevance)
+            .ToList();
 
     /// <summary>
     /// Adds direct relationship targets after the normal lexical/vector search
@@ -1680,12 +1690,12 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
         }
 
         var currentPrimary = primaryResults.Where(m => !KnowledgeRelationshipSemantics.IsSuperseded(m));
-        return currentPrimary
+        return ApplyRelevanceFloor(currentPrimary
             .Concat(expanded)
             .OrderByDescending(m => m.IsPinned)
             .ThenByDescending(m => m.RelevanceScore)
             .Take(100)
-            .ToList();
+            .ToList());
     }
 
     /// <summary>
@@ -1890,6 +1900,25 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
         }
     }
 
+    private async Task RunEmbeddingBackfillObservedAsync()
+    {
+        try
+        {
+            await RunEmbeddingBackfillAsync(CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Rag,
+                $"Embedding backfill deferred: {ex.GetType().Name}: {ex.Message}"));
+        }
+    }
+
     private async Task<IResourceAdmissionLease?> AcquireBackfillLeaseAsync(
         string consumerId,
         string lifecycleService,
@@ -1999,7 +2028,7 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
         var cleared = await cmd.ExecuteNonQueryAsync(ct);
 
         if (cleared > 0)
-            _ = Task.Run(() => RunEmbeddingBackfillAsync(CancellationToken.None));
+            _ = Task.Run(RunEmbeddingBackfillObservedAsync);
 
         return cleared;
     }
