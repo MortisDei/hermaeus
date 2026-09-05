@@ -128,6 +128,16 @@ public partial class ModelManagementViewModel : ObservableObject
     private void OpenServices() => RequestNavigate?.Invoke("services");
 
     [RelayCommand]
+    private void OpenHuggingFaceWorkspace() => IsHfBrowserExpanded = true;
+
+    [RelayCommand]
+    private void CloseHuggingFaceWorkspace()
+    {
+        CancelHfSelection();
+        IsHfBrowserExpanded = false;
+    }
+
+    [RelayCommand]
     private void OpenProfileEditor(ModelProfileItemViewModel? item) => SelectedProfile = item;
 
     [RelayCommand]
@@ -176,6 +186,84 @@ public partial class ModelManagementViewModel : ObservableObject
         ForceRefresh = true;
         await RefreshAsync();
         _toasts.Show("Companion cleared", $"Removed {Path.GetFileName(normalized)} from the model's known companion mappings.", ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private Task ClearStaleCompanionsAsync(ModelProfileItemViewModel? item) =>
+        ClearCompanionsAsync(item, CompanionClearScope.Stale);
+
+    [RelayCommand]
+    private Task ClearUnknownCompanionsAsync(ModelProfileItemViewModel? item) =>
+        ClearCompanionsAsync(item, CompanionClearScope.Unknown);
+
+    [RelayCommand]
+    private Task ClearReviewableCompanionsAsync(ModelProfileItemViewModel? item) =>
+        ClearCompanionsAsync(item, CompanionClearScope.Reviewable);
+
+    private enum CompanionClearScope
+    {
+        Stale,
+        Unknown,
+        Reviewable
+    }
+
+    private async Task ClearCompanionsAsync(ModelProfileItemViewModel? item, CompanionClearScope scope)
+    {
+        if (item is null || RequestCompanionRemovalConfirmation is null)
+            return;
+
+        var candidates = item.Companions
+            .Where(companion => scope switch
+            {
+                CompanionClearScope.Stale => companion.StateLabel == "Stale",
+                CompanionClearScope.Unknown => companion.StateLabel == "Unknown",
+                _ => companion.StateLabel is "Missing" or "Stale" or "Unknown"
+            })
+            .ToList();
+        if (candidates.Count == 0)
+            return;
+
+        var assetsRoot = _settings.Settings.DataManagement.LocalAiAssetsRoot;
+        var normalizedPaths = new List<string>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            if (!ModelPathSafety.TryResolveFileUnderRoot(assetsRoot, candidate.LocalFilePath, out var normalized, out var error))
+            {
+                _toasts.Show("Cannot clear companions", error, ToastKind.Warning, 7000);
+                return;
+            }
+
+            normalizedPaths.Add(normalized);
+        }
+
+        var files = normalizedPaths.Where(File.Exists).Distinct(ModelPathSafety.LocalPathComparer).ToArray();
+        var description = files.Length == 0
+            ? $"Clear {candidates.Count} companion mapping(s) from {Path.GetFileName(item.ModelId)}? No regular companion file will be deleted. Present companions remain unchanged."
+            : $"Delete {files.Length} reviewable companion file(s) and clear {candidates.Count} mapping(s) from {Path.GetFileName(item.ModelId)}? Present companions remain unchanged.";
+        var plan = new ModelDeletionPlan(item.ModelId, files, description, Path.GetFullPath(assetsRoot));
+        if (!await RequestCompanionRemovalConfirmation(plan))
+            return;
+
+        if (files.Length > 0)
+        {
+            var remaining = ModelDeletionService.DeleteExact(plan);
+            if (remaining.Count > 0)
+            {
+                _toasts.Show("Companion removal incomplete", string.Join(", ", remaining), ToastKind.Warning, 7000);
+                return;
+            }
+        }
+
+        foreach (var path in normalizedPaths.Distinct(ModelPathSafety.LocalPathComparer))
+            await _manifest.RemoveCompanionAsync(item.ModelId, path);
+
+        InvalidateModelInventory();
+        ForceRefresh = true;
+        await RefreshAsync();
+        var receipt = $"Cleared {candidates.Count} reviewable companion mapping(s); deleted {files.Length} file(s). Present companions were preserved.";
+        _activity.RecordSafe("models.companions.clear", item.ModelId, ActivityOutcome.Succeeded,
+            "Companion cleanup completed", receipt);
+        _toasts.Show("Companion cleanup complete", receipt, ToastKind.Info, 8000);
     }
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
@@ -2561,6 +2649,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         $"{companion.FileName} {companion.RoleLabel} {companion.StateLabel}"));
     public UiBoundCollection<ModelCompanionViewModel> Companions { get; } = [];
     public bool HasCompanionDetails => Companions.Count > 0;
+    public bool HasUnknownCompanions => Companions.Any(companion => companion.StateLabel == "Unknown");
+    public bool HasReviewableCompanions => Companions.Any(companion => companion.StateLabel is "Missing" or "Stale" or "Unknown");
     public string CompanionSummary => !HasCompanionDetails
         ? string.Empty
         : $"Companions: {string.Join(", ", Companions.GroupBy(c => c.StateLabel).OrderBy(g => g.Key).Select(g => $"{g.Count()} {g.Key.ToLowerInvariant()}"))}";
@@ -2811,6 +2901,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasCompanionDetails));
+        OnPropertyChanged(nameof(HasUnknownCompanions));
+        OnPropertyChanged(nameof(HasReviewableCompanions));
         OnPropertyChanged(nameof(CompanionSummary));
         OnPropertyChanged(nameof(CompanionSearchText));
         OnPropertyChanged(nameof(CatalogSearchText));

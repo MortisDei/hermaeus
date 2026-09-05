@@ -333,8 +333,9 @@ public static class AdaptiveInferencePlanner
 
     /// <summary>
     /// Moves one currently generated, compatible prior-success candidate to
-    /// the front without bypassing the configured baseline or changing the
-    /// bounded candidate set. A fresh admission plan is still required.
+    /// candidate #1 without changing the bounded candidate set. The configured
+    /// baseline remains present as the next candidate and a fresh admission
+    /// plan is still required for every attempt.
     /// </summary>
     public static AdaptiveInferencePlan PreferCandidate(
         AdaptiveInferencePlan plan,

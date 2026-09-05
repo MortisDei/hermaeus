@@ -209,10 +209,10 @@ public sealed class VoiceSettingsTests
         Assert.Contains("provider-voice-2", vm.ChannelVoiceOptions);
     }
 
-    /// <summary>Avalonia's ComboBox has no free-text entry mode; the channel voice picker
-    /// uses AutoCompleteBox instead, so a hand-typed voice id still works for providers
-    /// that cannot enumerate voices (TtsVoices then holds nothing) - the channel row's
-    /// VoiceDisplay setter accepts any text regardless of ChannelVoiceOptions membership.</summary>
+    /// <summary>The channel voice picker is an editable ComboBox, so a hand-typed voice id
+    /// still works for providers that cannot enumerate voices (TtsVoices then holds nothing).
+    /// The channel row's VoiceDisplay setter accepts any text regardless of membership in the
+    /// provider catalogue.</summary>
     [Fact]
     public async Task A_provider_that_cannot_enumerate_voices_leaves_manual_entry_working()
     {

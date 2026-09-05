@@ -59,6 +59,20 @@ public sealed class ResourceAdmissionTests
     }
 
     [Fact]
+    public async Task Unregistered_consumer_is_refused_at_admission_even_when_unknown_is_allowed()
+    {
+        using var coordinator = CreateCoordinator();
+        var request = new ResourceAdmissionRequest(
+            "not-registered", DeviceAllocation("unregistered", 100, "not-registered"), Policy(),
+            callerId: "test", allowUnknown: true);
+
+        var refusal = await Assert.ThrowsAsync<ResourceAdmissionException>(() => coordinator.AcquireAsync(request));
+
+        Assert.Contains(refusal.Plan.UnknownComponents,
+            unknown => unknown.Code == "resource-consumer-unregistered");
+    }
+
+    [Fact]
     public async Task Concurrent_acquires_cannot_both_reserve_the_same_headroom()
     {
         using var coordinator = CreateCoordinator(usedDeviceBytes: 100);
@@ -89,6 +103,9 @@ public sealed class ResourceAdmissionTests
 
         await using var second = await coordinator.AcquireAsync(Request("chat", DeviceAllocation("chat-b", 100), policy));
         Assert.True(first.IsReleased);
+        var expiredReceipt = Assert.Single(coordinator.RecentReleaseReceipts);
+        Assert.Equal(first.LeaseId, expiredReceipt.ReservationId);
+        Assert.Equal("reservation expired", expiredReceipt.Reason);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -118,6 +135,22 @@ public sealed class ResourceAdmissionTests
         coordinator.ReleaseAllocation(active.AllocationId);
         captured = await registry.CaptureSnapshotAsync(new ResourceSnapshotCapture(Hardware()));
         Assert.Empty(captured.Allocations);
+    }
+
+    [Fact]
+    public async Task Release_receipt_preserves_the_caller_reason()
+    {
+        using var coordinator = CreateCoordinator();
+        coordinator.RegisterConsumer(Descriptor("chat"));
+        await using var lease = await coordinator.AcquireAsync(Request("chat", DeviceAllocation("chat", 100)));
+
+        await lease.ReleaseAsync("chat startup failed after process launch");
+
+        var receipt = Assert.Single(coordinator.RecentReleaseReceipts);
+        Assert.Equal(lease.LeaseId, receipt.ReservationId);
+        Assert.Equal(lease.Plan.PlanId, receipt.PlanId);
+        Assert.Equal("chat", receipt.ConsumerId);
+        Assert.Equal("chat startup failed after process launch", receipt.Reason);
     }
 
     [Fact]

@@ -61,6 +61,10 @@ public sealed partial class DoctorService
                 backend,
                 "Security");
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return BuildCheck(

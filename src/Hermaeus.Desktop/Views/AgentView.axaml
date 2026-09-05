@@ -23,7 +23,7 @@
 
          The decision strip is outside the tabs on purpose: the thing the agent
          is waiting on is never behind a tab. -->
-    <Grid RowDefinitions="Auto,Auto,Auto,*">
+    <Grid RowDefinitions="Auto,Auto,*">
 
         <!-- Status line. One row, fixed height, nothing here can grow. -->
         <Border Grid.Row="0" Padding="12,8" MaxHeight="64"
@@ -237,33 +237,7 @@
             </StackPanel>
         </Border>
 
-        <!-- The decision strip remains outside this navigation bar and the
-             tab strip is hidden. These explicit destinations make the large
-             workbench areas read as pages while retaining the existing,
-             independently scrolling content and safety state. -->
-        <Border Grid.Row="2" Padding="12,8"
-                BorderThickness="0,0,0,1"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBlock Text="Agent workspace" VerticalAlignment="Center" FontSize="11" Opacity="0.55" Margin="0,0,8,0" />
-                <Button Content="Run" Command="{Binding ShowRunTabCommand}" Padding="10,4" CornerRadius="6"
-                        ToolTip.Tip="Open the live run, response, and next action." />
-                <Button Command="{Binding ShowChangesTabCommand}" Padding="10,4" CornerRadius="6"
-                        ToolTip.Tip="Open proposed and applied changes for review.">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Text="Changes" />
-                        <TextBlock Text="{Binding PendingPatchCount, StringFormat='({0})'}"
-                                   IsVisible="{Binding ShowPendingPatchBadge}" FontSize="11" Opacity="0.7" />
-                    </StackPanel>
-                </Button>
-                <Button Content="Workspace" Command="{Binding ShowWorkspaceTabCommand}" Padding="10,4" CornerRadius="6"
-                        ToolTip.Tip="Open workspace policy, files, memory, and risk evidence." />
-                <Button Content="History" Command="{Binding ShowHistoryTabCommand}" Padding="10,4" CornerRadius="6"
-                        ToolTip.Tip="Open recent tasks and scenario history." />
-            </StackPanel>
-        </Border>
-
-        <TabControl Grid.Row="3" SelectedIndex="{Binding SelectedTabIndex}">
+        <TabControl Grid.Row="2" SelectedIndex="{Binding SelectedTabIndex}">
 
             <TabItem Header="Run">
                 <ScrollViewer Padding="24,16" VerticalScrollBarVisibility="Auto">
@@ -1366,14 +1340,36 @@
                                     <Button Content="Run suite"
                                             Command="{Binding ScenarioSuite.RunSuiteCommand}"
                                             Padding="12,6" CornerRadius="6" />
-                                    <Button Content="Cancel"
-                                            Command="{Binding ScenarioSuite.CancelSuiteCommand}"
-                                            IsVisible="{Binding ScenarioSuite.IsRunning}"
-                                            Padding="12,6" CornerRadius="6" />
                                     <TextBlock Text="{Binding ScenarioSuite.StatusMessage}"
                                                FontSize="11" Opacity="0.6" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis" />
+                                               TextTrimming="CharacterEllipsis"
+                                               IsVisible="{Binding !ScenarioSuite.IsRunning}" />
                                 </StackPanel>
+                                <Border IsVisible="{Binding ScenarioSuite.IsRunning}"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="{Binding ScenarioSuite.RunningHeadline}"
+                                                       FontSize="13" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding ScenarioSuite.ScenarioProgressLabel}"
+                                                       FontSize="12" />
+                                            <TextBlock Text="{Binding ScenarioSuite.CurrentScenarioLabel}"
+                                                       FontSize="11" Opacity="0.75" />
+                                            <TextBlock Text="{Binding ScenarioSuite.CurrentStepLabel}"
+                                                       FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding ScenarioSuite.RunningCountsLabel}"
+                                                       FontSize="11" Opacity="0.75" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="Cancel suite"
+                                                Command="{Binding ScenarioSuite.CancelSuiteCommand}"
+                                                Padding="12,6" CornerRadius="6"
+                                                VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
                                 <TextBlock Text="{Binding ScenarioSuite.HeadlineResult}"
                                            FontSize="12" FontWeight="SemiBold"
                                            IsVisible="{Binding !!ScenarioSuite.HeadlineResult.Length}"

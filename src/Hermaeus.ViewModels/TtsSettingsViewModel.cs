@@ -21,7 +21,11 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
 
     public VoiceChannel Channel { get; }
     public string DisplayName { get; }
-    /// <summary>Shared live catalogue owned by the parent voice settings view model.</summary>
+    /// <summary>
+    /// Per-row catalogue owned by this channel. Each editable ComboBox gets its
+    /// own collection instance so a provider refresh cannot share stale items
+    /// or selection state between rows.
+    /// </summary>
     public UiBoundCollection<string> VoiceOptions { get; }
 
     [ObservableProperty] private bool _enabled;
@@ -47,9 +51,9 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
                 return;
             }
 
-            // AutoCompleteBox clears its text while opening and when its
-            // popup closes without a selection. An empty edit is not a
-            // deliberate channel reset, so preserve the last real choice.
+            // An empty edit is not a deliberate channel reset. The explicit
+            // default sentinel remains the way to select the global voice,
+            // while transient empty edits preserve the last real choice.
             if (string.IsNullOrWhiteSpace(value))
                 return;
 
@@ -104,8 +108,9 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
     public UiBoundCollection<AudioFeedbackToggleViewModel> AudioFeedbackEvents { get; } = [];
 
-    /// <summary>r24: the channel voice picker's suggestion list - the default-voice sentinel
-    /// followed by the active provider's own voices, kept live as <see cref="TtsVoices"/> refreshes.</summary>
+    /// <summary>r24: the channel voice picker's catalogue - the default-voice sentinel
+    /// followed by the active provider's own voices. Each channel receives a
+    /// separate snapshot from this parent catalogue.</summary>
     public UiBoundCollection<string> ChannelVoiceOptions { get; } = [VoiceChannelSettingViewModel.DefaultVoiceLabel];
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
@@ -291,6 +296,12 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         ChannelVoiceOptions.Add(VoiceChannelSettingViewModel.DefaultVoiceLabel);
         foreach (var voice in TtsVoices)
             ChannelVoiceOptions.Add(voice);
+        foreach (var channel in VoiceChannels)
+        {
+            channel.VoiceOptions.Clear();
+            foreach (var voice in ChannelVoiceOptions)
+                channel.VoiceOptions.Add(voice);
+        }
         OnPropertyChanged(nameof(ChannelVoiceOptionsAreProviderSupplied));
         OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
     }
@@ -362,8 +373,11 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
             var hasConfig = tts.Channels.TryGetValue(channel.ToString(), out var config);
             var enabled = hasConfig ? config!.Enabled : channel == VoiceChannel.Chat;
             var voiceId = ResolveChannelVoiceId(tts, config);
-            VoiceChannels.Add(new VoiceChannelSettingViewModel(channel, channel.ToString(), ChannelVoiceOptions)
-            { Enabled = enabled, VoiceId = voiceId });
+            var channelViewModel = new VoiceChannelSettingViewModel(channel, channel.ToString())
+            { Enabled = enabled, VoiceId = voiceId };
+            foreach (var option in ChannelVoiceOptions)
+                channelViewModel.VoiceOptions.Add(option);
+            VoiceChannels.Add(channelViewModel);
         }
 
         AutoSpeakChatReplies = tts.AutoSpeakChatReplies;

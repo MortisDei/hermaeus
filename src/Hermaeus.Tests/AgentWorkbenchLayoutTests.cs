@@ -76,16 +76,14 @@ public sealed class AgentWorkbenchLayoutTests
     }
 
     [Fact]
-    public void Secondary_workbench_areas_have_explicit_navigation_commands()
+    public void Secondary_workbench_areas_are_tabs_and_run_can_open_changes()
     {
         var source = System.IO.File.ReadAllText(AgentViewPath());
 
         Assert.Contains("<TextBlock Text=\"Changes\"", source, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Workspace\"", source, StringComparison.Ordinal);
-        Assert.Contains("Content=\"History\"", source, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Workspace\"", source, StringComparison.Ordinal);
+        Assert.Contains("Header=\"History\"", source, StringComparison.Ordinal);
         Assert.Contains("ShowChangesTabCommand", source, StringComparison.Ordinal);
-        Assert.Contains("ShowWorkspaceTabCommand", source, StringComparison.Ordinal);
-        Assert.Contains("ShowHistoryTabCommand", source, StringComparison.Ordinal);
         Assert.Contains("Command=\"{Binding NewTaskCommand}\"", source, StringComparison.Ordinal);
     }
 

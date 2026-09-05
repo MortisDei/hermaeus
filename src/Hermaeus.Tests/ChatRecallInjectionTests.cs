@@ -46,7 +46,7 @@ public sealed class ChatRecallInjectionTests
         var settings = NewSettings(temp);
         settings.Settings.Memory.RecallInjectionEnabled = true;
         var hit = new RecallHit(RecallKind.Message, "Old chat about KV cache", "we settled on flash attention off",
-            DateTime.UtcNow, "", 0.02, new RecallTarget(ConversationId: "c-old", MessageIndex: 3));
+            DateTime.UtcNow, "", 1.0, new RecallTarget(ConversationId: "c-old", MessageIndex: 3));
         var recall = NewRecallService([hit]);
         var llm = new CapturingLlm();
         var vm = BuildChatViewModel(settings, llm, recall);
@@ -110,7 +110,7 @@ public sealed class ChatRecallInjectionTests
         var settings = NewSettings(temp);
         settings.Settings.Memory.RecallInjectionEnabled = true;
         var hit = new RecallHit(RecallKind.Message, "Keyword match", "a lexical result",
-            DateTime.UtcNow, "", 0.02, new RecallTarget(ConversationId: "c-old", MessageIndex: 1));
+            DateTime.UtcNow, "", 1.0, new RecallTarget(ConversationId: "c-old", MessageIndex: 1));
         var recall = NewRecallService([hit], withEmbeddings: false);
         var llm = new CapturingLlm();
         var vm = BuildChatViewModel(settings, llm, recall);

@@ -244,17 +244,20 @@ public partial class RagViewModel : ObservableObject
     public const string QuerySubview = "query";
     public const string SourcesSubview = "sources";
     public const string DiagnosticsSubview = "diagnostics";
+    public const string DatasetManagerSubview = "dataset-manager";
 
     [ObservableProperty] private string _activeSubview = QuerySubview;
     public bool IsQuerySubview => ActiveSubview == QuerySubview;
     public bool IsSourcesSubview => ActiveSubview == SourcesSubview;
     public bool IsDiagnosticsSubview => ActiveSubview == DiagnosticsSubview;
+    public bool IsDatasetManagerSubview => ActiveSubview == DatasetManagerSubview;
 
     partial void OnActiveSubviewChanged(string value)
     {
         OnPropertyChanged(nameof(IsQuerySubview));
         OnPropertyChanged(nameof(IsSourcesSubview));
         OnPropertyChanged(nameof(IsDiagnosticsSubview));
+        OnPropertyChanged(nameof(IsDatasetManagerSubview));
     }
 
     [RelayCommand]
@@ -265,6 +268,9 @@ public partial class RagViewModel : ObservableObject
 
     [RelayCommand]
     private void ShowDiagnosticsSubview() => ActiveSubview = DiagnosticsSubview;
+
+    [RelayCommand]
+    private void ShowDatasetManagerSubview() => ActiveSubview = DatasetManagerSubview;
     public bool ShowBundledHelpOnboarding => !HasDatasets && Directory.Exists(BundledHelpDirectory);
     public string BundledHelpDirectory => ResolveBundledHelpDirectory();
     public string BundledHelpStatus => ShowBundledHelpOnboarding

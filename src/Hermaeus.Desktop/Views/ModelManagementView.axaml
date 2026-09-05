@@ -3,7 +3,6 @@
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:views="using:Hermaeus.Desktop.Views"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
-             xmlns:conv="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
              x:Name="Root"
              x:Class="Hermaeus.Desktop.Views.ModelManagementView"
              x:DataType="vm:ModelManagementViewModel">
@@ -47,6 +46,11 @@
             <Button Command="{Binding RefreshCommand}"
                     Content="Refresh" Padding="14,7" CornerRadius="6" FontSize="13"
                     ToolTip.Tip="Reloads the model list from all enabled providers." />
+            <Button Command="{Binding OpenHuggingFaceWorkspaceCommand}"
+                    Content="Browse Hugging Face"
+                    IsVisible="{Binding !IsHfBrowserExpanded}"
+                    Padding="14,7" CornerRadius="6" FontSize="13"
+                    ToolTip.Tip="Open the staged Hugging Face model acquisition workspace." />
         </WrapPanel>
 
         <TextBlock DockPanel.Dock="Top"
@@ -64,157 +68,10 @@
                    IsVisible="{Binding AutoTuneAllStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
                    FontSize="12" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,10" />
 
-        <Expander DockPanel.Dock="Top"
-                  Header="Get models from Hugging Face"
-                  IsExpanded="{Binding IsHfBrowserExpanded}"
-                  Margin="0,0,0,12">
-            <StackPanel Spacing="10" Margin="0,10,0,0">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <TextBox Grid.Column="0"
-                             Text="{Binding HfSearchQuery}"
-                             PlaceholderText="Search GGUF repos, e.g. 'llama 3 instruct'"
-                             CornerRadius="6"
-                             Padding="10,6"
-                             KeyDown="OnHfSearchKeyDown" />
-                    <Button Grid.Column="1"
-                            Content="Search"
-                            Command="{Binding SearchHuggingFaceCommand}"
-                            IsEnabled="{Binding !IsSearchingHf}"
-                            Padding="14,7" CornerRadius="6"
-                            ToolTip.Tip="Searches huggingface.co/api/models, filtered to GGUF repos. Manual only." />
-                </Grid>
-
-                <TextBlock Text="{Binding HfBrowserStatus}"
-                           IsVisible="{Binding HfBrowserStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                           FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
-
-                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsLoadingHfFiles}"
-                             Height="4" ToolTip.Tip="Reading repository metadata and calculating local hardware fit." />
-
-                <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{Binding HfSearchResults}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="vm:HfRepoResultViewModel">
-                                <Button Command="{Binding $parent[ItemsControl].DataContext.SelectHfRepoCommand}"
-                                        CommandParameter="{Binding}"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Left"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Padding="6,4"
-                                        ToolTip.Tip="{Binding Downloads, StringFormat='{}{0:N0} downloads'}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Border Width="30" Height="30" CornerRadius="5"
-                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
-                                            <TextBlock Text="HF" HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center" FontSize="10"
-                                                       FontWeight="SemiBold" />
-                                        </Border>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding RepoId}" />
-                                            <TextBlock Text="{Binding Downloads, StringFormat='{}{0:N0} downloads'}"
-                                                       FontSize="10" Opacity="0.55" />
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-
-                <StackPanel Spacing="6" IsVisible="{Binding SelectedHfRepo, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
-                        <Border Grid.Column="0" Width="42" Height="42" CornerRadius="6"
-                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                ToolTip.Tip="{Binding SelectedHfRepo.ArtworkTooltip}">
-                            <Grid>
-                                <TextBlock Text="HF" HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" FontSize="11"
-                                           FontWeight="SemiBold" />
-                                <Image Source="{Binding SelectedHfRepo.ArtworkPath, Converter={x:Static views:ArtworkFileToBitmapConverter.Instance}}"
-                                       IsVisible="{Binding SelectedHfRepo.HasArtwork}"
-                                       Stretch="UniformToFill" />
-                            </Grid>
-                        </Border>
-                        <TextBlock Grid.Column="1" FontSize="13" FontWeight="SemiBold"
-                                   VerticalAlignment="Center" TextWrapping="Wrap">
-                            <Run Text="Files in " /> <Run Text="{Binding SelectedHfRepo.RepoId}" /> <Run Text=" (license: " /> <Run Text="{Binding SelectedHfRepo.License}" /> <Run Text=")" />
-                        </TextBlock>
-                    </Grid>
-                    <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding HfFiles}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="vm:HfFileResultViewModel">
-                                  <StackPanel Spacing="2" Margin="0,4">
-                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="10">
-                                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="5"
-                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                                ToolTip.Tip="{Binding ArtworkTooltip}">
-                                            <Grid>
-                                                <TextBlock Text="HF" HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center" FontSize="10"
-                                                           FontWeight="SemiBold" />
-                                                <Image Source="{Binding ArtworkPath, Converter={x:Static views:ArtworkFileToBitmapConverter.Instance}}"
-                                                       IsVisible="{Binding HasArtwork}"
-                                                       Stretch="UniformToFill" />
-                                            </Grid>
-                                        </Border>
-                                        <TextBlock Grid.Column="1" Text="{Binding FileName}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                        <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
-                                        <Border Grid.Column="3" CornerRadius="4" Padding="6,1"
-                                                VerticalAlignment="Center"
-                                                IsVisible="{Binding FitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                                                Background="{Binding FitTier, Converter={x:Static views:FitTierBrushConverter.Instance}}"
-                                                ToolTip.Tip="{Binding FitReason}">
-                                            <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
-                                        </Border>
-                                        <TextBlock Grid.Column="3" Text="{Binding CheckingLabel}"
-                                                   IsVisible="{Binding IsChecking}"
-                                                   FontSize="10" Opacity="0.65"
-                                                   VerticalAlignment="Center" />
-                                        <Button Grid.Column="4"
-                                                Content="{Binding DownloadStateLabel}"
-                                                Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
-                                                CommandParameter="{Binding}"
-                                                IsEnabled="{Binding CanDownload}"
-                                                FontSize="12" Padding="10,4" CornerRadius="6"
-                                                ToolTip.Tip="Downloads the whole file set into its own folder under Models\LLM\, each file SHA256-verified against the repo before use." />
-                                    </Grid>
-
-                                    <!-- r27 04-models-arrive-complete.md 4.1: a GGUF model is
-                                         frequently not one file. Shards are part of the download
-                                         or the download is refused; a projector and an MTP draft
-                                         head are offered, on by default. -->
-                                    <TextBlock Text="{Binding SetSummary}"
-                                               IsVisible="{Binding HasCompanions}"
-                                               FontSize="11"
-                                               Opacity="0.55"
-                                               TextWrapping="Wrap" />
-                                    <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding HasCompanions}">
-                                        <CheckBox IsChecked="{Binding IncludeProjector}"
-                                                  IsVisible="{Binding HasProjector}"
-                                                  Content="{Binding ProjectorSelectionLabel}"
-                                                  FontSize="11"
-                                                  ToolTip.Tip="A vision projector candidate. Explicit mappings or verified GGUF metadata may select it automatically; layout-only candidates require this checkbox as your confirmation." />
-                                        <CheckBox IsChecked="{Binding IncludeDraftHead}"
-                                                  IsVisible="{Binding HasDraftHead}"
-                                                  Content="{Binding DraftHeadSelectionLabel}"
-                                                  FontSize="11"
-                                                  ToolTip.Tip="An MTP draft-head candidate. Explicit mappings or matching GGUF metadata may select it automatically; layout-only candidates require this checkbox as your confirmation." />
-                                    </StackPanel>
-                                    <TextBlock Text="{Binding CompanionReviewLabel}"
-                                               IsVisible="{Binding HasReviewRequiredCompanions}"
-                                               FontSize="11"
-                                               Opacity="0.7"
-                                               TextWrapping="Wrap" />
-                                  </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </StackPanel>
-            </StackPanel>
-        </Expander>
+        <views:HuggingFaceWorkspaceView DockPanel.Dock="Top"
+                                         DataContext="{Binding}"
+                                         IsVisible="{Binding IsHfBrowserExpanded}"
+                                         Margin="0,0,0,12" />
 
         <TextBox DockPanel.Dock="Top"
                  Text="{Binding FilterText}"
@@ -310,6 +167,24 @@
                             <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="6">
                                 <CheckBox Content="Automatically manage known companions" IsChecked="{Binding AutoManageCompanionAssets}"
                                           ToolTip.Tip="Allow only explicitly mapped, verified companions to be managed on updates." />
+                                <Button Content="Clear stale"
+                                        Command="{Binding DataContext.ClearStaleCompanionsCommand, ElementName=Root}"
+                                        CommandParameter="{Binding}"
+                                        IsVisible="{Binding HasStaleCompanions}"
+                                        Padding="8,3"
+                                        ToolTip.Tip="Delete stale companion files and remove only their mappings. Present companions remain unchanged." />
+                                <Button Content="Clear unknown"
+                                        Command="{Binding DataContext.ClearUnknownCompanionsCommand, ElementName=Root}"
+                                        CommandParameter="{Binding}"
+                                        IsVisible="{Binding HasUnknownCompanions}"
+                                        Padding="8,3"
+                                        ToolTip.Tip="Delete companion files without sufficient evidence and remove only their mappings after confirmation." />
+                                <Button Content="Clear reviewable"
+                                        Command="{Binding DataContext.ClearReviewableCompanionsCommand, ElementName=Root}"
+                                        CommandParameter="{Binding}"
+                                        IsVisible="{Binding HasReviewableCompanions}"
+                                        Padding="8,3"
+                                        ToolTip.Tip="Clear all missing, stale, or unknown companions in one confirmed action. Present companions are preserved." />
                                 <Button Content="Reacquire known companions" Command="{Binding DataContext.ReacquireCompanionsCommand, ElementName=Root}" CommandParameter="{Binding}"
                                         IsVisible="{Binding CanReacquireCompanions}" Padding="8,3"
                                         ToolTip.Tip="Reacquire only hash-verified compatible companions." />

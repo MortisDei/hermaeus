@@ -34,7 +34,7 @@ public sealed class RecallServiceTests
         }
     }
 
-    private static RecallHit Hit(RecallKind kind, string title, double score = 0) =>
+    private static RecallHit Hit(RecallKind kind, string title, double score = 1.0) =>
         new(kind, title, "snippet", DateTime.UtcNow, "", score, new RecallTarget(ConversationId: "c1"));
 
     [Fact]
@@ -120,6 +120,31 @@ public sealed class RecallServiceTests
         var result = await service.SearchAsync("   ");
 
         Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task Weak_source_hits_are_filtered_before_reciprocal_rank_fusion()
+    {
+        var source = new FakeSource("Conversations", [
+            Hit(RecallKind.Message, "strong", 0.8),
+            Hit(RecallKind.Message, "weak", 0.02)]);
+        var service = new RecallService([source], new FakeEmbeddingService());
+
+        var result = await service.SearchAsync("query");
+
+        Assert.Single(result.Hits);
+        Assert.Equal("strong", result.Hits[0].Title);
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_is_not_converted_into_an_omitted_source()
+    {
+        var source = new FakeSource("Conversations", [Hit(RecallKind.Message, "m1")], delay: TimeSpan.FromSeconds(10));
+        var service = new RecallService([source], new FakeEmbeddingService());
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SearchAsync("query", ct: cts.Token));
     }
 
     [Theory]

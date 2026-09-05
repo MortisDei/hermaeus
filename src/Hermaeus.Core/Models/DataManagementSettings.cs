@@ -21,6 +21,19 @@ public class DataManagementSettings
     public string DataRootDirectory { get; set; } = string.Empty;
 
     /// <summary>
+    /// A confirmed destination awaiting the next process start. The active
+    /// root remains <see cref="DataRootDirectory"/> until bootstrap moves and
+    /// verifies the workspace before any data-backed service is composed.
+    /// </summary>
+    public string PendingDataRootDirectory { get; set; } = string.Empty;
+
+    /// <summary>Last bootstrap migration outcome, retained as a user-visible receipt.</summary>
+    public string DataRootMigrationReceipt { get; set; } = string.Empty;
+
+    /// <summary>Serialized preview evidence retained until bootstrap migration finishes.</summary>
+    public string PendingDataRootMigrationPlan { get; set; } = string.Empty;
+
+    /// <summary>
     /// Root directory for local AI assets (models, voices, rerankers, Python venvs).
     /// </summary>
     public string LocalAiAssetsRoot { get; set; } = string.Empty;

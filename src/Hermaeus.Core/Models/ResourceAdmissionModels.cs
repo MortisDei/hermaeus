@@ -109,6 +109,19 @@ public sealed record ResourceReservationSummary(
     IReadOnlyDictionary<string, long> DeviceBytes,
     long SystemBytes);
 
+/// <summary>
+/// Auditable lifecycle evidence for a reservation release. The coordinator
+/// keeps a bounded in-memory receipt trail so admission diagnostics can say
+/// why capacity became available without pretending that a release persisted
+/// a durable resource reservation.
+/// </summary>
+public sealed record ResourceReleaseReceipt(
+    string ReservationId,
+    string PlanId,
+    string ConsumerId,
+    string Reason,
+    DateTime ReleasedAtUtc);
+
 public sealed record ResourceWorkloadPlan
 {
     public string PlanId { get; }

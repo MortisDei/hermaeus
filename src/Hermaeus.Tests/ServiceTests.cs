@@ -2264,7 +2264,8 @@ namespace Hermaeus.Tests
             Equal("http://127.0.0.1:9000", settings.Settings.Llm.LlamaCppBaseUrl, "llm section should apply base URL");
             Equal(true, settings.Settings.Llm.OpenAiEnabled, "llm section should apply remote toggle");
             Equal(temp.PathFor("reranker"), settings.Settings.Rag.RerankerModelPath, "rag section should apply reranker path");
-            Equal(temp.PathFor("data"), settings.Settings.DataManagement.DataRootDirectory, "data section should apply data root");
+            Equal(temp.PathFor("initial-data"), settings.Settings.DataManagement.DataRootDirectory, "data section should keep the active root until restart");
+            Equal(temp.PathFor("data"), settings.Settings.DataManagement.PendingDataRootDirectory, "data section should queue the confirmed root for startup");
             Equal(temp.PathFor("ai"), settings.Settings.DataManagement.LocalAiAssetsRoot, "data section should apply AI assets root");
             Equal("Dark", settings.Settings.Ui.Theme, "ui section should apply theme");
             Equal(true, settings.Settings.Ui.EnableGlobalHotkeys, "ui section should apply global hotkey toggle");

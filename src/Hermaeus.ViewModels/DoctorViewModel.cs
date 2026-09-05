@@ -139,21 +139,21 @@ public partial class DoctorViewModel : ObservableObject
     [RelayCommand]
     private async Task ScanAsync()
     {
-        await ScanCoreAsync(showIssueToast: false);
+        await ScanCoreAsync(showIssueToast: false, CancellationToken.None);
     }
 
-    public async Task RunStartupScanAsync()
+    public async Task RunStartupScanAsync(CancellationToken ct = default)
     {
-        await ScanCoreAsync(showIssueToast: true);
+        await ScanCoreAsync(showIssueToast: true, ct);
     }
 
-    private async Task ScanCoreAsync(bool showIssueToast)
+    private async Task ScanCoreAsync(bool showIssueToast, CancellationToken ct)
     {
         if (IsScanning) return;
         IsScanning = true;
         try
         {
-            var report = await _doctor.ScanAsync();
+            var report = await _doctor.ScanAsync(ct);
             Checks.Clear();
             foreach (var check in report.Checks)
                 Checks.Add(check);
@@ -170,6 +170,10 @@ public partial class DoctorViewModel : ObservableObject
                 errors > 0 ? ActivityOutcome.Failed : warnings > 0 ? ActivityOutcome.Partial : ActivityOutcome.Succeeded,
                 "Doctor scan completed",
                 errors + warnings > 0 ? $"{errors} error(s), {warnings} warning(s)" : string.Empty);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Summary = "Doctor scan cancelled.";
         }
         catch (Exception ex)
         {
@@ -312,7 +316,7 @@ public partial class DoctorViewModel : ObservableObject
             if (idx >= 0)
             {
                 var existing = Checks[idx];
-                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, string.Join(Environment.NewLine, _embeddingLogLines), existing.Category);
+                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, string.Join(Environment.NewLine, _embeddingLogLines), existing.Category, existing.ActionKind, existing.ActionTarget);
                 // replace item to notify UI
                 Checks[idx] = updated;
             }
@@ -485,9 +489,17 @@ public partial class DoctorViewModel : ObservableObject
     [RelayCommand]
     private async Task RunFix(DoctorCheck? check)
     {
-        if (check is null || !check.CanFix)
+        // Older callers and tests can still construct a non-ready DoctorCheck
+        // with the legacy CanFix-only shape. The rendered UI uses HasAction,
+        // while this narrow compatibility path keeps direct command callers
+        // working until they refresh their report.
+        var hasLegacyAction = check is not null
+            && check.ActionKind == DoctorActionKind.None
+            && check.CanFix
+            && check.Status != DoctorCheckStatus.Ready;
+        if (check is null || (!check.HasAction && !hasLegacyAction))
         {
-            _toasts.Show("No fix available", "This check does not provide an automated fix yet.", ToastKind.Info, 4000);
+            _toasts.Show("No action available", "This check is informational or has no action available in its current state.", ToastKind.Info, 4000);
             return;
         }
 
@@ -552,7 +564,7 @@ public partial class DoctorViewModel : ObservableObject
             return;
         }
 
-        if (check.Key == "app-update")
+        if ((check.ActionKind == DoctorActionKind.OpenExternal || hasLegacyAction) && check.Key == "app-update")
         {
             if (RequestOpenUrl is null)
             {

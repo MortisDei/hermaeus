@@ -20,6 +20,12 @@ public partial class ConfirmActionDialog : Window
         MessageText.Text = message;
     }
 
+    public ConfirmActionDialog(string title, string message, string cancelLabel, string confirmLabel) : this(title, message)
+    {
+        CancelButton.Content = cancelLabel;
+        ConfirmButton.Content = confirmLabel;
+    }
+
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
     private void OnConfirmClick(object? sender, RoutedEventArgs e) => Close(true);

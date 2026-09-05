@@ -93,13 +93,36 @@ public sealed class VoiceChannelPickerTests
     }
 
     [Fact]
-    public void Channel_picker_clears_the_default_sentinel_before_filtering_a_named_catalogue()
+    public async Task Every_channel_owns_a_fresh_voice_catalogue_snapshot()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var voices = new DelayedVoiceService();
+        using var vm = NewTtsSettingsViewModel(settings, voices);
+        vm.ReloadFrom(settings.Settings);
+        await voices.WaitForCallAsync(0);
+        vm.TtsVoices.Clear();
+        vm.TtsVoices.Add("af_heart");
+
+        Assert.Equal(vm.VoiceChannels.Count, vm.VoiceChannels.Select(channel => channel.VoiceOptions).Distinct().Count());
+        Assert.All(vm.VoiceChannels, channel =>
+            Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel, "af_heart"], channel.VoiceOptions));
+    }
+
+    [Fact]
+    public void Channel_picker_uses_an_editable_unfiltered_combo_box_for_catalogue_reopens()
     {
         var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
         var view = File.ReadAllText(Path.Combine(repoRoot, "src", "Hermaeus.Desktop", "Views", "SettingsVoiceSectionView.axaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(repoRoot, "src", "Hermaeus.Desktop", "Views", "SettingsVoiceSectionView.axaml.cs"));
 
-        Assert.Contains("DropDownOpening=\"OnChannelVoiceDropDownOpening\"", view, StringComparison.Ordinal);
-        Assert.Contains("DropDownClosed=\"OnChannelVoiceDropDownClosed\"", view, StringComparison.Ordinal);
+        Assert.Contains("<ComboBox", view, StringComparison.Ordinal);
+        Assert.Contains("IsEditable=\"True\"", view, StringComparison.Ordinal);
+        Assert.Contains("IsTextSearchEnabled=\"False\"", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoCompleteBox", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("VoicePickerState", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("DropDownOpening", view, StringComparison.Ordinal);
+        Assert.DoesNotContain("DropDownClosed", view, StringComparison.Ordinal);
     }
 
     private sealed class DelayedVoiceService : ITtsService

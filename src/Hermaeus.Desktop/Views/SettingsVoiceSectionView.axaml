@@ -47,38 +47,17 @@
                             <Grid ColumnDefinitions="140,Auto,*" ColumnSpacing="12">
                                 <CheckBox Grid.Column="0" IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="13" />
                                 <TextBlock Grid.Column="1" Text="Voice" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
-                                <!-- r24: lists the active provider's own voices (the same seam
-                                     RefreshTtsVoicesCommand populates TtsVoices from, prefixed
-                                     with the default-voice sentinel). Avalonia's ComboBox has no
-                                     free-text entry mode; AutoCompleteBox is the native
-                                     editable-with-suggestions control, so typed text that matches
-                                     nothing still works for providers that cannot enumerate
-                                     voices (TtsVoices then holds just "default"). -->
-                                <!-- r29 doc 01 1.2: MinimumPrefixLength 0 plus the chevron.
-                                     Without them this renders as a bare TextBox that shows
-                                     nothing until the user guesses a first character, so a
-                                     control whose whole job is "choose one of the provider's
-                                     voices" was reported twice as a missing dropdown. -->
-                                <Grid Grid.Column="2" ColumnDefinitions="*,Auto">
-                                    <AutoCompleteBox Grid.Column="0"
-                                                     x:Name="ChannelVoiceBox"
-                                                     ItemsSource="{Binding VoiceOptions}"
-                                                     Text="{Binding VoiceDisplay, Mode=TwoWay}"
-                                                     FilterMode="Contains"
-                                                     MinimumPrefixLength="0"
-                                                     DropDownOpening="OnChannelVoiceDropDownOpening"
-                                                     DropDownClosed="OnChannelVoiceDropDownClosed"
-                                                     FontSize="12"
-                                                     HorizontalAlignment="Stretch" />
-                                    <Button Grid.Column="1"
-                                            Classes="icon-btn"
-                                            Margin="2,0,0,0"
-                                            VerticalAlignment="Center"
-                                            ToolTip.Tip="Show the available voices"
-                                            Click="OnShowChannelVoiceList">
-                                        <PathIcon Data="M7 10l5 5 5-5z" Width="12" Height="12" />
-                                    </Button>
-                                </Grid>
+                                <!-- The editable ComboBox keeps the provider catalogue and the
+                                     persisted or hand-entered voice id in one control. Text search
+                                     is disabled so reopening the popup cannot retain the previous
+                                     selection as a filter. -->
+                                <ComboBox Grid.Column="2"
+                                          ItemsSource="{Binding VoiceOptions}"
+                                          Text="{Binding VoiceDisplay, Mode=TwoWay}"
+                                          IsEditable="True"
+                                          IsTextSearchEnabled="False"
+                                          FontSize="12"
+                                          HorizontalAlignment="Stretch" />
                             </Grid>
                             <TextBlock Text="Spoken text is sent to the remote voice provider."
                                        FontSize="11" Opacity="0.55" Foreground="Orange" Margin="152,2,0,0"

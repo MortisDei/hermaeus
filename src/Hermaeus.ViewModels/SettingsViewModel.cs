@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Collections.Specialized;
+using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -207,7 +208,12 @@ public partial class SettingsViewModel : ViewModelBase
         SubscribeToAutoSave(Mcp, SettingsGroup.Mcp);
         SubscribeToAutoSave(LocalApi, SettingsGroup.LocalApi);
         SubscribeToAutoSave(Tts, SettingsGroup.Tts);
-        SubscribeToAutoSave(Data, SettingsGroup.Data);
+        // A data-root edit is an explicit, confirmed migration operation.  It
+        // must never enter the ordinary debounce path while its confirmation
+        // dialog is open: that path intentionally strips an unconfirmed root,
+        // and used to clear the Data dirty group before the confirmed commit
+        // could see it.
+        Data.PropertyChanged += OnDataManagementPropertyChanged;
         Tts.VoiceChannels.CollectionChanged += OnTtsCollectionChanged;
         Tts.AudioFeedbackEvents.CollectionChanged += OnTtsCollectionChanged;
         HookTtsChildren();
@@ -288,12 +294,12 @@ public partial class SettingsViewModel : ViewModelBase
     public Task SaveAsync() => SaveCoreAsync(showToast: true, CancellationToken.None, allowDataRootMigration: false);
 
     private async Task SaveCoreAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration,
-        bool applyRuntimeState = true)
+        bool applyRuntimeState = true, DataMigrationPlan? migrationPlan = null)
     {
         await _saveGate.WaitAsync(ct);
         try
         {
-            await SaveCoreLockedAsync(showToast, ct, allowDataRootMigration, applyRuntimeState);
+            await SaveCoreLockedAsync(showToast, ct, allowDataRootMigration, applyRuntimeState, migrationPlan);
         }
         finally
         {
@@ -302,7 +308,7 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     private async Task SaveCoreLockedAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration,
-        bool applyRuntimeState)
+        bool applyRuntimeState, DataMigrationPlan? migrationPlan = null)
     {
         var dirtyGroups = CaptureDirtyGroups();
         if (Llm.HasUnmigratedOpenAiApiKey)
@@ -318,7 +324,7 @@ public partial class SettingsViewModel : ViewModelBase
             await Llm.ApplyToAsync(candidate);
         if (dirtyGroups.ContainsKey(SettingsGroup.Rag))
             Rag.ApplyTo(candidate);
-        if (dirtyGroups.ContainsKey(SettingsGroup.Data))
+        if (allowDataRootMigration || dirtyGroups.ContainsKey(SettingsGroup.Data))
             Data.ApplyTo(candidate);
         if (dirtyGroups.ContainsKey(SettingsGroup.Ui))
             Ui.ApplyTo(candidate);
@@ -347,7 +353,17 @@ public partial class SettingsViewModel : ViewModelBase
         try
         {
             PersistenceStatus = "Saving";
-            var result = await _svc.SaveAsync(candidate, previousDataRoot);
+            if (allowDataRootMigration)
+            {
+                // The running app owns SQLite/WAL/log handles beneath the
+                // effective root. Queue the operation for bootstrap instead
+                // of moving active files underneath those owners.
+                candidate.DataManagement.PendingDataRootDirectory = candidate.DataManagement.DataRootDirectory;
+                candidate.DataManagement.PendingDataRootMigrationPlan = JsonSerializer.Serialize(
+                    migrationPlan ?? BuildDataRootMigrationPlan(previousDataRoot, candidate.DataManagement.DataRootDirectory));
+                candidate.DataManagement.DataRootDirectory = previousDataRoot;
+            }
+            var result = await _svc.SaveAsync(candidate, allowDataRootMigration ? null : previousDataRoot);
             ClearDirtyGroups(dirtyGroups);
             if (result.DataMigrated && showToast)
             {
@@ -367,9 +383,11 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
-        PersistenceStatus = "Saved";
+        PersistenceStatus = allowDataRootMigration ? "Restart required" : "Saved";
         IsSaved = true;
-        if (showToast)
+        if (allowDataRootMigration && showToast)
+            _toasts.Show("Data migration scheduled", "Restart Hermaeus to move and verify the data folder before services open.", ToastKind.Success, 7000);
+        else if (showToast)
             _toasts.Show("Settings saved", "Hermaeus settings were updated.", ToastKind.Success);
         if (applyRuntimeState)
             await EnsureLocalApiRunningStateAsync();
@@ -422,6 +440,18 @@ public partial class SettingsViewModel : ViewModelBase
         if (_isReloading)
             return;
         ScheduleAutoSave(group);
+    }
+
+    private void OnDataManagementPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isReloading || e.PropertyName is nameof(DataManagementSettingsViewModel.DataRootDirectory)
+            or nameof(DataManagementSettingsViewModel.DataMigrationPreview)
+            or nameof(DataManagementSettingsViewModel.DataRootMigrationPending)
+            or nameof(DataManagementSettingsViewModel.DataRootStateSummary)
+            or nameof(DataManagementSettingsViewModel.EffectiveDataRootDirectory))
+            return;
+
+        ScheduleAutoSave(SettingsGroup.Data);
     }
 
     private void ScheduleAutoSave(SettingsGroup group)
@@ -630,8 +660,11 @@ public partial class SettingsViewModel : ViewModelBase
         Tts.ApplyVoiceOrchestrationTo(settings.Tts);
     }
 
-    private Task CommitDataRootMigrationAsync() =>
-        SaveCoreAsync(showToast: true, CancellationToken.None, allowDataRootMigration: true);
+    private Task CommitDataRootMigrationAsync(DataMigrationPlan plan) =>
+        SaveCoreAsync(showToast: true, CancellationToken.None, allowDataRootMigration: true, migrationPlan: plan);
+
+    private DataMigrationPlan BuildDataRootMigrationPlan(string previousDataRoot, string nextDataRoot) =>
+        _svc.PreviewDataRootMigration(previousDataRoot, nextDataRoot);
 
     private string ResolveDataRoot()
     {

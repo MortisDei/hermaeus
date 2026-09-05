@@ -72,7 +72,7 @@ public sealed class SettingsViewModelSaveLifecycleTests
     }
 
     [Fact]
-    public async Task Successful_save_migrates_data_and_clears_the_settings_error()
+    public async Task Confirmed_data_root_change_is_staged_without_moving_live_data()
     {
         using var temp = new TempDir();
         var oldRoot = temp.PathFor("old-root");
@@ -89,8 +89,12 @@ public sealed class SettingsViewModelSaveLifecycleTests
         await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
 
         Assert.Equal(string.Empty, vm.SettingsError);
-        Assert.Equal(newRoot, settings.Settings.DataManagement.DataRootDirectory);
-        Assert.True(File.Exists(Path.Combine(newRoot, "conversations.db")));
+        Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.Equal(newRoot, settings.Settings.DataManagement.PendingDataRootDirectory);
+        Assert.Equal(newRoot, vm.Data.DataRootDirectory);
+        Assert.True(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+        Assert.False(File.Exists(Path.Combine(newRoot, "conversations.db")));
+        Assert.Contains("Restart Hermaeus", vm.Data.DataMigrationPreview, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -143,7 +147,7 @@ public sealed class SettingsViewModelSaveLifecycleTests
     }
 
     [Fact]
-    public async Task Confirmed_data_root_change_uses_existing_migration_and_persists_at_commit_boundary()
+    public async Task Confirmed_data_root_change_queues_startup_migration_at_commit_boundary()
     {
         using var temp = new TempDir();
         var oldRoot = temp.PathFor("old-root");
@@ -158,11 +162,122 @@ public sealed class SettingsViewModelSaveLifecycleTests
         vm.Data.DataRootDirectory = newRoot;
         await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
 
-        Assert.Equal(newRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.Equal(newRoot, settings.Settings.DataManagement.PendingDataRootDirectory);
         Assert.Equal(newRoot, vm.Data.DataRootDirectory);
-        Assert.True(File.Exists(Path.Combine(newRoot, "conversations.db")));
-        Assert.False(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+        Assert.True(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+        Assert.False(File.Exists(Path.Combine(newRoot, "conversations.db")));
         Assert.False(vm.Data.DataRootMigrationPending);
+    }
+
+    [Fact]
+    public async Task Restart_decision_is_separate_from_migration_confirmation_and_restart_later_keeps_the_pending_root()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+        vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
+        var restartPrompts = 0;
+        var restarts = 0;
+        vm.Data.RequestDataRootMigrationRestartDecision = () =>
+        {
+            restartPrompts++;
+            return Task.FromResult(false);
+        };
+        vm.Data.RequestApplicationRestart = () =>
+        {
+            restarts++;
+            return Task.CompletedTask;
+        };
+
+        vm.Data.DataRootDirectory = newRoot;
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, restartPrompts);
+        Assert.Equal(0, restarts);
+        Assert.Equal(newRoot, settings.Settings.DataManagement.PendingDataRootDirectory);
+        Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.True(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+    }
+
+    [Fact]
+    public async Task Restart_now_callback_is_invoked_only_after_the_migration_is_staged()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+        vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
+        vm.Data.RequestDataRootMigrationRestartDecision = () => Task.FromResult(true);
+        var restartRoot = string.Empty;
+        vm.Data.RequestApplicationRestart = () =>
+        {
+            restartRoot = settings.Settings.DataManagement.DataRootDirectory;
+            return Task.CompletedTask;
+        };
+
+        vm.Data.DataRootDirectory = newRoot;
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+
+        Assert.Equal(oldRoot, restartRoot);
+        Assert.Equal(newRoot, settings.Settings.DataManagement.PendingDataRootDirectory);
+        Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
+    }
+
+    [Fact]
+    public async Task Confirmed_data_root_edit_is_not_moved_while_the_app_is_running()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        vm.Data.DataRootDirectory = newRoot;
+
+        vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+
+        Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.Equal(newRoot, settings.Settings.DataManagement.PendingDataRootDirectory);
+        Assert.Equal(newRoot, vm.Data.DataRootDirectory);
+        Assert.True(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+        Assert.False(File.Exists(Path.Combine(newRoot, "conversations.db")));
+        vm.Shutdown();
+    }
+
+    [Fact]
+    public async Task Reload_after_migration_preserves_the_composed_effective_root_until_restart()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+        vm.Data.DataRootDirectory = newRoot;
+        vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
+
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+        vm.Reload();
+
+        Assert.Contains($"Configured: {Path.GetFullPath(newRoot)}", vm.Data.DataRootStateSummary, StringComparison.Ordinal);
+        Assert.Contains($"Currently effective: {Path.GetFullPath(oldRoot)}", vm.Data.DataRootStateSummary, StringComparison.Ordinal);
+        vm.Shutdown();
     }
 
     [Fact]

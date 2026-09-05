@@ -2187,6 +2187,10 @@ public partial class ChatViewModel : ViewModelBase
                     await _memoryStore.MarkRecalledAsync(injectedIds, ct);
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,

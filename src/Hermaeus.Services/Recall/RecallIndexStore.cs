@@ -450,7 +450,7 @@ public sealed class RecallIndexStore
 
         if (_embeddings is null)
         {
-            for (var i = 0; i < ftsResults.Count; i++) ftsResults[i].RelevanceScore = 1.0 / (i + 1);
+            AssignLexicalRelevance(ftsResults);
             return (ftsResults, true);
         }
 
@@ -461,21 +461,31 @@ public sealed class RecallIndexStore
             timeoutCts.CancelAfter(QueryEmbedTimeout);
             queryVector = await _embeddings.EmbedAsync(query, timeoutCts.Token);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception)
         {
-            for (var i = 0; i < ftsResults.Count; i++) ftsResults[i].RelevanceScore = 1.0 / (i + 1);
+            AssignLexicalRelevance(ftsResults);
             return (ftsResults, true);
         }
 
         var ftsRank = new Dictionary<string, double>(StringComparer.Ordinal);
-        for (var i = 0; i < ftsResults.Count; i++) ftsRank[ftsResults[i].Id] = 1.0 / (i + 1);
+        var lexicalScore = new Dictionary<string, double>(StringComparer.Ordinal);
+        for (var i = 0; i < ftsResults.Count; i++)
+        {
+            ftsRank[ftsResults[i].Id] = 1.0 / (i + 1);
+            lexicalScore[ftsResults[i].Id] = 1.0 - (0.5 * i / Math.Max(1, ftsResults.Count));
+        }
         var candidates = new Dictionary<string, RecallEntry>(StringComparer.Ordinal);
         foreach (var e in ftsResults) candidates[e.Id] = e;
+        var nonFtsScores = new List<(string Id, double Score)>();
 
         var embCmd = c.CreateCommand();
         embCmd.CommandText = string.IsNullOrEmpty(projectScope)
-            ? "SELECT id, embedding, embedding_dim FROM recall_entries WHERE kind = $kind AND embedding IS NOT NULL"
-            : "SELECT id, embedding, embedding_dim FROM recall_entries WHERE kind = $kind AND embedding IS NOT NULL AND project_id = $pid";
+            ? "SELECT id, embedding, embedding_dim FROM recall_entries WHERE kind = $kind AND is_archived = 0 AND embedding IS NOT NULL"
+            : "SELECT id, embedding, embedding_dim FROM recall_entries WHERE kind = $kind AND is_archived = 0 AND embedding IS NOT NULL AND project_id = $pid";
         embCmd.Parameters.AddWithValue("$kind", kind);
         if (!string.IsNullOrEmpty(projectScope)) embCmd.Parameters.AddWithValue("$pid", projectScope);
 
@@ -496,10 +506,50 @@ public sealed class RecallIndexStore
                     var ftsScore = ftsRank.GetValueOrDefault(id, 0.0);
                     e.RelevanceScore = (0.5 * ftsScore) + (0.5 * cosine);
                 }
+                else
+                {
+                    nonFtsScores.Add((id, 0.5 * cosine));
+                }
             }
         }
 
-        var results = candidates.Values.OrderByDescending(e => e.RelevanceScore).Take(100).ToList();
+        var idsToHydrate = nonFtsScores
+            .OrderByDescending(item => item.Score)
+            .Take(100)
+            .Select(item => item.Id)
+            .ToList();
+        if (idsToHydrate.Count > 0)
+        {
+            var scoreById = nonFtsScores.ToDictionary(item => item.Id, item => item.Score, StringComparer.Ordinal);
+            var hydrate = c.CreateCommand();
+            var parameters = idsToHydrate.Select((_, index) => $"$id{index}").ToArray();
+            hydrate.CommandText = $@"
+                SELECT * FROM recall_entries
+                WHERE is_archived = 0 AND id IN ({string.Join(",", parameters)})";
+            for (var i = 0; i < idsToHydrate.Count; i++)
+                hydrate.Parameters.AddWithValue(parameters[i], idsToHydrate[i]);
+
+            await using var hydrateReader = await hydrate.ExecuteReaderAsync(ct);
+            while (await hydrateReader.ReadAsync(ct))
+            {
+                var entry = Map(hydrateReader);
+                entry.RelevanceScore = scoreById.GetValueOrDefault(entry.Id);
+                candidates[entry.Id] = entry;
+            }
+        }
+
+        // FTS hits without a compatible embedding remain genuine lexical
+        // candidates. Keep them on the same calibrated scale as the explicit
+        // embedding fallback instead of letting reciprocal rank discard every
+        // result after the second row.
+        foreach (var entry in candidates.Values.Where(entry => entry.RelevanceScore <= 0))
+            entry.RelevanceScore = lexicalScore.GetValueOrDefault(entry.Id);
+
+        var results = candidates.Values
+            .Where(entry => entry.RelevanceScore >= MinimumRecallRelevance)
+            .OrderByDescending(e => e.RelevanceScore)
+            .Take(100)
+            .ToList();
         return (results, false);
     }
 
@@ -754,6 +804,14 @@ public sealed class RecallIndexStore
             .ToList();
 
         return terms.Count == 0 ? string.Empty : string.Join(" AND ", terms.Select(t => $"\"{t}\"*"));
+    }
+
+    private const double MinimumRecallRelevance = 0.40;
+
+    private static void AssignLexicalRelevance(IReadOnlyList<RecallEntry> results)
+    {
+        for (var i = 0; i < results.Count; i++)
+            results[i].RelevanceScore = 1.0 - (0.5 * i / Math.Max(1, results.Count));
     }
 
     private static byte[] ToBlob(float[] vector)

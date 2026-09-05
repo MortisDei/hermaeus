@@ -8,7 +8,6 @@
 
     <UserControl.Resources>
         <views:DoctorStatusColorConverter x:Key="DoctorStatusColor" />
-        <views:DoctorFixLabelConverter x:Key="DoctorFixLabel" />
     </UserControl.Resources>
 
     <Grid>
@@ -82,17 +81,13 @@
                                         <TextBlock Text="{Binding Summary}" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                                        <Button Content="{Binding FixLabel, Converter={StaticResource DoctorFixLabel}}"
-                                                IsEnabled="{Binding CanFix}"
+                                        <Button Content="{Binding ActionLabel}"
+                                                IsVisible="{Binding HasAction}"
+                                                IsEnabled="{Binding !DataContext.IsScanning, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                 Command="{Binding $parent[ItemsControl].DataContext.RunFixCommand}"
                                                 CommandParameter="{Binding}"
                                                 Padding="10,5" CornerRadius="6"
-                                                ToolTip.Tip="Runs the suggested fix for this specific check." />
-                                        <Button Content="Copy"
-                                                Command="{Binding $parent[ItemsControl].DataContext.CopyDiagnosticsCommand}"
-                                                CommandParameter="{Binding}"
-                                                Padding="10,5" CornerRadius="6"
-                                                ToolTip.Tip="Copies this one check's status and detail to the clipboard." />
+                                                ToolTip.Tip="{Binding ActionTooltip}" />
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock Text="{Binding Detail}" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />

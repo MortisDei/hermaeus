@@ -167,6 +167,23 @@ public sealed class RecallIndexStoreTests
     }
 
     [Fact]
+    public async Task Embedded_entry_without_lexical_overlap_is_a_dense_candidate()
+    {
+        using var temp = new TempDir();
+        var s = NewSettings(temp);
+        var store = new RecallIndexStore(s, new ConstantEmbeddingService());
+        await store.UpsertBatchAsync([Entry("message", "c1", "0", "stored semantic content")]);
+        await store.RunEmbeddingBackfillAsync();
+
+        var (results, keywordOnly) = await store.SearchAsync("message", "query wording with no overlap", "");
+
+        Assert.False(keywordOnly);
+        var hit = Assert.Single(results);
+        Assert.Equal("message:c1:0", hit.Id);
+        Assert.True(hit.RelevanceScore >= 0.4);
+    }
+
+    [Fact]
     public async Task A_dimension_mismatched_embedding_is_skipped_for_semantic_scoring_not_scored_as_garbage()
     {
         using var temp = new TempDir();
@@ -191,7 +208,7 @@ public sealed class RecallIndexStoreTests
         var (results, keywordOnly) = await store.SearchAsync("message", "drifted", "");
         Assert.False(keywordOnly);
         var hit = Assert.Single(results);
-        Assert.Equal(0.0, hit.RelevanceScore); // never reranked, since the mismatched vector was skipped
+        Assert.True(hit.RelevanceScore > 0.0); // lexical evidence remains, but no bogus cosine score is added
     }
 
     [Fact]
@@ -233,5 +250,16 @@ public sealed class RecallIndexStoreTests
 
         public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
             Task.FromResult(texts.Select(_ => new[] { 1f, 2f, 3f, 4f }).ToList());
+    }
+
+    private sealed class ConstantEmbeddingService : IEmbeddingService
+    {
+        public int Dimensions => 4;
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default) =>
+            Task.FromResult(new[] { 1f, 0f, 0f, 0f });
+
+        public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+            Task.FromResult(texts.Select(_ => new[] { 1f, 0f, 0f, 0f }).ToList());
     }
 }

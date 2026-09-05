@@ -13,6 +13,7 @@ namespace Hermaeus.Services;
 public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
 {
     private const int LowPriorityQueueCap = 3;
+    private const int QueueCapacity = 16;
 
     private sealed record QueueEntry(VoiceUtterance Utterance);
 
@@ -64,12 +65,19 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
             if (utterance.Priority == VoicePriority.Critical)
             {
                 _queue.RemoveAll(e => e.Utterance.Priority == VoicePriority.Low);
+                if (_queue.Count >= QueueCapacity)
+                {
+                    var evicted = _queue.FindLastIndex(e => e.Utterance.Priority != VoicePriority.Critical);
+                    _queue.RemoveAt(evicted >= 0 ? evicted : _queue.Count - 1);
+                }
                 _queue.Insert(0, new QueueEntry(utterance));
                 _playbackCts?.Cancel();
             }
             else
             {
                 if (utterance.Priority == VoicePriority.Low && _queue.Count >= LowPriorityQueueCap)
+                    return Task.CompletedTask;
+                if (_queue.Count >= QueueCapacity)
                     return Task.CompletedTask;
                 _queue.Add(new QueueEntry(utterance));
             }

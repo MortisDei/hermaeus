@@ -54,7 +54,9 @@ for Knowledge behavior in Chat.
 - Data-root changes use an explicit confirmation and the existing safe
   migration boundary. The Data Storage page distinguishes the configured root
   from the root currently effective for composed stores and tells the user to
-  restart after a change. Ordinary Settings autosave does not move an existing
+  restart after a change. Startup migration verifies copied file length and
+  SHA256 before committing the new root and records a retryable receipt on
+  failure. Ordinary Settings autosave does not move an existing
   workspace, and llama.cpp pruning only deletes validated owned superseded
   version directories while protecting the selected runtime. Persisted caches
   and state resolve beneath the effective root; selecting a root requires a
@@ -109,8 +111,12 @@ for Knowledge behavior in Chat.
   separate and comparable only under a compatible fingerprint.
 - System Overview shows the current whole-workload resource snapshot: registered
   Chat, embeddings, Lab, voice, and in-process consumers; predicted or observed
-  device and system allocations; whole-device totals; and explicit Unknown
-  reasons. Services shows the admission receipt for each managed start.
+  device and system allocations; whole-device totals; and explicit evidence
+  states. Active values identify observed or planned bytes, while missing
+  component attribution, not-resident consumers, and lazy consumers remain
+  distinct. Whole-device totals are not assigned to a process or component.
+  It also shows recent release receipts with the caller's reason.
+  Services shows the admission receipt for each managed start.
   Admission uses short-lived reservations to prevent concurrent approvals from
   relying on the same stale headroom. It never stops, unloads, or changes
   another consumer, and Unknown is never treated as zero.
@@ -161,8 +167,9 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
 - On an empty RAG install, the panel can create a version-local **Hermaeus
   Help** dataset through the normal ingestion pipeline. First-use question
   scope is intentionally empty and asks the user to select at least one
-  dataset; later selections are persisted. Sources and Diagnostics are explicit
-  secondary views with a Back path, so the answer area stays discoverable.
+  dataset; later selections are persisted. Ask, Manage, Sources, and Diagnostics
+  are explicit workspace views, keeping persistent dataset administration
+  separate from per-question context selection and evidence inspection.
 - RAG has a native evaluation harness with retrieval metrics, refusal handling,
   cancellation, and export. The separate [eval harness plan](rag-eval-harness.md)
   describes proposed expansion beyond the shipped surface.
@@ -180,9 +187,9 @@ See the [RAG reference](rag.md).
   ordinary memories.
 - Search blends full-text and embedding similarity when an embedding model is
   available, with a bounded keyword fallback when it is not. Weak semantic
-  candidates are excluded from ordinary recall while pinned memories remain
-  eligible. Archived and expired memories are excluded from search and
-  injection.
+  candidates are excluded from ordinary recall. Pinning affects prominence
+  only after relevance, so a pinned but unrelated memory is not injected.
+  Archived and expired memories are excluded from search and injection.
 - Chat can propose, update, or forget memories through bounded markers. Only a
   memory actually injected into that turn can be updated or forgotten, and
   marker syntax never reaches the persisted transcript.
@@ -311,8 +318,10 @@ See the [Benchmarks reference](benchmarks.md).
 
 Voice is optional and off by default. Native Kokoro, managed local providers,
 and remote OpenAI voice are supported, with provider-specific setup and
-configuration. Per-channel pickers use the active provider's discovered voice
-names without hardcoding a provider catalogue. Local speech recognition uses
+configuration. Per-channel pickers use an editable, unfiltered ComboBox backed
+by the active provider's discovered voice names without hardcoding a provider
+catalogue. A provider that cannot enumerate voices still accepts a manually
+entered voice id. Local speech recognition uses
 an in-process Whisper model when installed; remote transcription is explicit.
 Captured and uploaded audio is transient and is not persisted or attached to
 conversations.
@@ -333,7 +342,9 @@ See the [Voice reference](voice.md).
 The setup wizard makes Data Root, AI Assets, runtime, model, and optional voice
 choices explicit. Doctor checks actual paths, executable readiness, runtimes,
 models, storage, RAG, voice, GPU, secrets, and update information. Remediation
-actions show their target and plan before a user approves them.
+actions show their target and plan before a user approves them. Ready
+informational checks do not expose a repair or navigation action; warning and
+other non-ready actions are contextual to the check.
 
 Doctor, Services, and Activity report observed state. They do not turn missing,
 unreachable, or unverified components into a false Ready state.

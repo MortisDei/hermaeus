@@ -74,6 +74,19 @@ public partial class SettingsView : UserControl
             return await dialog.ShowDialog<bool>(owner);
         };
 
+        vm.Data.RequestDataRootMigrationRestartDecision = async () =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+
+            var dialog = new ConfirmActionDialog(
+                "Data migration scheduled",
+                "Hermaeus must restart before the data folder can be moved safely.",
+                "Restart later",
+                "Restart now");
+            return await dialog.ShowDialog<bool>(owner);
+        };
+
         vm.Data.RequestLocalAiAssetsRootPicker = async () =>
         {
             var folders = await PickFolderAsync("Choose local AI assets folder");

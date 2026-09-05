@@ -13,10 +13,12 @@
             <StackPanel Orientation="Horizontal"
                         HorizontalAlignment="Right"
                         Spacing="8">
-                <Button Content="Cancel"
+                <Button x:Name="CancelButton"
+                        Content="Cancel"
                         MinWidth="90"
                         Click="OnCancelClick" />
-                <Button Content="Confirm"
+                <Button x:Name="ConfirmButton"
+                        Content="Confirm"
                         MinWidth="90"
                         Click="OnConfirmClick" />
             </StackPanel>

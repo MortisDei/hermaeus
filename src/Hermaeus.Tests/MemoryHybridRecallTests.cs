@@ -116,21 +116,89 @@ public sealed class MemoryHybridRecallTests
     }
 
     [Fact]
-    public async Task Weak_ordinary_memories_are_not_used_to_fill_the_budget_but_pinned_memories_remain_eligible()
+    public async Task Keyword_fallback_keeps_more_than_two_genuine_lexical_matches()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var store = new MemoryStore(settings);
+        await store.InitializeAsync();
+
+        await store.SaveAsync(new Memory { Id = "pizza", Content = "Pizza pairs well with a medium-bodied red wine." });
+        await store.SaveAsync(new Memory { Id = "pasta", Content = "Pasta can pair with red wine." });
+        await store.SaveAsync(new Memory { Id = "cheese", Content = "Cheese also pairs with red wine." });
+
+        var results = await store.SearchAsync("wine");
+
+        Assert.Equal(3, results.Count);
+        Assert.All(results, result => Assert.True(result.RelevanceScore >= 0.4));
+    }
+
+    [Fact]
+    public async Task Unembedded_rows_keep_more_than_two_genuine_lexical_matches_with_a_configured_embedder()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var plainStore = new MemoryStore(settings);
+        await plainStore.InitializeAsync();
+        await plainStore.SaveAsync(new Memory { Id = "pizza", Content = "Pizza pairs well with a medium-bodied red wine." });
+        await plainStore.SaveAsync(new Memory { Id = "pasta", Content = "Pasta can pair with red wine." });
+        await plainStore.SaveAsync(new Memory { Id = "cheese", Content = "Cheese also pairs with red wine." });
+
+        var hybridStore = new MemoryStore(settings, new TopicEmbeddingService());
+        var results = await hybridStore.SearchAsync("wine");
+
+        Assert.Equal(3, results.Count);
+        Assert.All(results, result => Assert.True(result.RelevanceScore >= 0.4));
+    }
+
+    [Fact]
+    public async Task Weak_ordinary_and_unrelated_pinned_memories_are_not_injected_by_recall()
     {
         using var temp = new TempDir();
         var store = NewHybridStore(temp, out _);
         await store.InitializeAsync();
 
         await store.SaveAsync(new Memory { Id = "relevant", Content = "User runs llama.cpp for local inference." });
+        await store.SaveAsync(new Memory { Id = "pinned-relevant", Content = "Pinned note: user runs llama.cpp for local inference.", IsPinned = true });
         await store.SaveAsync(new Memory { Id = "ordinary-unrelated", Content = "User's unrelated lunch plans and grocery list." });
         await store.SaveAsync(new Memory { Id = "pinned-unrelated", Content = "Pinned context retained by deliberate user choice.", IsPinned = true });
 
         var results = await store.SearchAsync("local model runtime");
 
         Assert.Contains(results, memory => memory.Id == "relevant");
+        Assert.Contains(results, memory => memory.Id == "pinned-relevant");
         Assert.DoesNotContain(results, memory => memory.Id == "ordinary-unrelated");
-        Assert.Contains(results, memory => memory.Id == "pinned-unrelated");
+        Assert.DoesNotContain(results, memory => memory.Id == "pinned-unrelated");
+    }
+
+    [Fact]
+    public async Task A_model_generated_absence_conclusion_cannot_hide_later_positive_evidence()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var store = new MemoryStore(settings);
+        await store.InitializeAsync();
+
+        await store.SaveAsync(new Memory
+        {
+            Id = "old-negative",
+            Content = "No prior discussion about food paired with wine was found.",
+            IsPinned = true
+        });
+        await store.SaveAsync(new Memory
+        {
+            Id = "later-positive",
+            Content = "Recommended wine pairing for meat lovers pizza."
+        });
+
+        var results = await store.SearchAsync("wine pizza");
+
+        Assert.Contains(results, memory => memory.Id == "later-positive");
+        Assert.DoesNotContain(results, memory => memory.Id == "old-negative");
     }
 
     [Fact]

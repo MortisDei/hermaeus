@@ -105,6 +105,7 @@ no enumerated devices.
 | `07-deferred-audit.md` | Disposition of every item that was open in `deferred.md` at R32 planning time |
 | `08-roadmap.md` | Dependency spine, batches, verification, live gates, descope order, and explicit rejections |
 | `09-adversarial-reconciliation.md` | Adversarial-review dispositions and the evidence-backed CI trigger/check topology |
+| `10-corrective-closure.md` | Current corrective-pass evidence, owner live gates, and unresolved runtime observations |
 
 ## Scope traceability
 

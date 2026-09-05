@@ -1148,4 +1148,61 @@ public sealed class ModelManagementViewModelTests
         Assert.Null(await manifest.FindAsync(companionPath));
         Assert.True(File.Exists(modelPath));
     }
+
+    [Fact]
+    public async Task Bulk_companion_cleanup_removes_only_reviewable_files_and_preserves_present_assets()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        var stalePath = Path.Combine(modelDir, "mmproj-stale.gguf");
+        var presentPath = Path.Combine(modelDir, "mmproj-present.gguf");
+        var unknownPath = Path.Combine(modelDir, "mmproj-unknown.gguf");
+        File.WriteAllText(modelPath, "model");
+        File.WriteAllText(stalePath, "stale");
+        File.WriteAllText(presentPath, "present");
+
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            Companions =
+            [
+                new ModelCompanionManifestEntry { LocalFilePath = stalePath, Role = "projector", SizeBytes = 99 },
+                new ModelCompanionManifestEntry { LocalFilePath = presentPath, Role = "projector", SizeBytes = 7 },
+                new ModelCompanionManifestEntry { LocalFilePath = unknownPath, Role = "draft_head", RequiresUserConfirmation = true }
+            ]
+        });
+
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), new ModelProfileService(settings), new FakeToasts(), settings,
+            new FakeSystemInfo(), NewServicesViewModel(settings), manifest, new HuggingFaceClient(), new ModelDownloadService());
+        var item = new ModelProfileItemViewModel(
+            new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" },
+            new ModelProfile { ModelId = modelPath });
+        var primary = await manifest.FindAsync(modelPath);
+        item.ApplyCatalogClassification(ModelCatalogRole.ChatGeneration, null, primary);
+        ModelDeletionPlan? confirmedPlan = null;
+        vm.RequestCompanionRemovalConfirmation = plan =>
+        {
+            confirmedPlan = plan;
+            return Task.FromResult(true);
+        };
+
+        await vm.ClearReviewableCompanionsCommand.ExecuteAsync(item);
+
+        Assert.NotNull(confirmedPlan);
+        Assert.Single(confirmedPlan!.Files);
+        Assert.Contains("Present companions remain unchanged", confirmedPlan.Description, StringComparison.Ordinal);
+        Assert.False(File.Exists(stalePath));
+        Assert.True(File.Exists(presentPath));
+        var remaining = await manifest.FindAsync(modelPath);
+        Assert.NotNull(remaining);
+        Assert.Single(remaining!.Companions);
+        Assert.Equal(presentPath, remaining.Companions[0].LocalFilePath);
+    }
 }

@@ -130,6 +130,30 @@ public sealed class CompositeLlmRoutingTests
         Assert.Equal(File.GetLastWriteTimeUtc(modelPath), model.ModifiedAt);
     }
 
+    [Fact]
+    public async Task Llama_stream_cancellation_does_not_become_an_error_event()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        using var service = new LlamaCppService(
+            settings,
+            new RuntimeLogService(settings),
+            new HttpClient(new CancellationHandler()));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => DrainAsync(
+            service.StreamChatAsync("model", [new ChatMessage("user", "hello")], ct: cancellation.Token),
+            cancellation.Token));
+    }
+
+    private static async Task DrainAsync(IAsyncEnumerable<LlmStreamEvent> events, CancellationToken ct)
+    {
+        await foreach (var _ in events.WithCancellation(ct))
+        {
+        }
+    }
+
     private sealed class PassthroughSecretStore : ISecretStore
     {
         public bool IsReference(string value) => false;
@@ -142,6 +166,15 @@ public sealed class CompositeLlmRoutingTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             throw new InvalidOperationException($"Unexpected HTTP call to {request.RequestUri} - this provider must not be reached for this scenario.");
+    }
+
+    private sealed class CancellationHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("The cancellation regression handler should not reach this line.");
+        }
     }
 
     private sealed class QueueHandler : HttpMessageHandler

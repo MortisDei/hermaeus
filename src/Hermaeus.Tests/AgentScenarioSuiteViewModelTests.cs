@@ -3,6 +3,7 @@ using Hermaeus.Agent.Services;
 using Hermaeus.Core.Services;
 using Hermaeus.ViewModels;
 using Xunit;
+using static Hermaeus.Tests.Helpers;
 
 namespace Hermaeus.Tests;
 
@@ -37,13 +38,18 @@ public sealed class AgentScenarioSuiteViewModelTests
     {
         public Func<AgentScenario, string, Task<AgentScenarioRunResult>>? OnRunScenario { get; set; }
         public Func<IReadOnlyList<AgentScenario>, string, Task<AgentScenarioSuiteResult>>? OnRunSuite { get; set; }
+        public Func<IReadOnlyList<AgentScenario>, string, IProgress<string>?, CancellationToken, Task<AgentScenarioSuiteResult>>? OnRunSuiteWithProgress { get; set; }
 
         public Task<AgentScenarioRunResult> RunScenarioAsync(AgentScenario scenario, string modelId, IProgress<string>? progress = null, CancellationToken ct = default) =>
             OnRunScenario?.Invoke(scenario, modelId)
             ?? Task.FromResult(new AgentScenarioRunResult(scenario.Manifest.Id, scenario.Manifest.Title, true, [], 1, 10, "Complete", null));
 
-        public Task<AgentScenarioSuiteResult> RunSuiteAsync(IReadOnlyList<AgentScenario> scenarios, string modelId, IProgress<string>? progress = null, CancellationToken ct = default) =>
-            OnRunSuite?.Invoke(scenarios, modelId) ?? Task.FromResult(DefaultSuite(scenarios, modelId));
+        public Task<AgentScenarioSuiteResult> RunSuiteAsync(IReadOnlyList<AgentScenario> scenarios, string modelId, IProgress<string>? progress = null, CancellationToken ct = default)
+        {
+            if (OnRunSuiteWithProgress is not null)
+                return OnRunSuiteWithProgress(scenarios, modelId, progress, ct);
+            return OnRunSuite?.Invoke(scenarios, modelId) ?? Task.FromResult(DefaultSuite(scenarios, modelId));
+        }
 
         private static AgentScenarioSuiteResult DefaultSuite(IReadOnlyList<AgentScenario> scenarios, string modelId) => new()
         {
@@ -69,6 +75,7 @@ public sealed class AgentScenarioSuiteViewModelTests
         Assert.Equal("built-in", row.SourceLabel);
         Assert.Null(row.Passed);
         Assert.Equal("Not run", row.StatusLabel);
+        Assert.Equal(string.Empty, vm.RunningHeadline);
     }
 
     [Fact]
@@ -145,7 +152,51 @@ public sealed class AgentScenarioSuiteViewModelTests
         Assert.False(row2.Passed);
         Assert.Contains("check-x", row2.FailedCheckSummary);
         Assert.Equal("1/2 passed - report in eval-runs/suite-1", vm.HeadlineResult);
+        Assert.Equal("2 / 2 complete", vm.ScenarioProgressLabel);
+        Assert.Equal("1 passed · 1 failed", vm.RunningCountsLabel);
         Assert.False(vm.IsRunning);
+    }
+
+    [Fact]
+    public async Task Running_suite_exposes_partial_waiting_state_and_cancel()
+    {
+        var scenarios = new List<AgentScenario>
+        {
+            BuildScenario("s1", "One", [], isBuiltIn: true),
+            BuildScenario("s2", "Two", [], isBuiltIn: true)
+        };
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new FakeAgentScenarioRunner
+        {
+            OnRunSuiteWithProgress = async (_, _, progress, ct) =>
+            {
+                progress!.Report("1/2: s1");
+                progress.Report("s1 step 3: WaitingForUser");
+                entered.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                throw new InvalidOperationException("cancellation should have ended the wait");
+            }
+        };
+        var vm = new AgentScenarioSuiteViewModel(new FakeAgentScenarioStore(scenarios), runner, new FakeToasts()) { ModelId = "m1" };
+        await vm.LoadScenariosAsync();
+
+        var run = vm.RunSuiteCommand.ExecuteAsync(null);
+        await entered.Task;
+        await WaitForAsync(() => vm.CurrentStepLabel.Contains("WaitingForUser", StringComparison.Ordinal), "visible scenario step");
+
+        Assert.True(vm.IsRunning);
+        Assert.Equal("Running scenario suite", vm.RunningHeadline);
+        Assert.Equal("0 / 2 complete", vm.ScenarioProgressLabel);
+        Assert.Equal("Current scenario: One (s1)", vm.CurrentScenarioLabel);
+        Assert.Equal("Current step: 3 - WaitingForUser", vm.CurrentStepLabel);
+        Assert.Equal("0 passed · 0 failed", vm.RunningCountsLabel);
+
+        vm.CancelSuiteCommand.Execute(null);
+        await run;
+
+        Assert.False(vm.IsRunning);
+        Assert.Equal("Suite run canceled.", vm.StatusMessage);
+        Assert.Equal("0 / 2 complete", vm.ScenarioProgressLabel);
     }
 
     [Fact]
@@ -160,6 +211,7 @@ public sealed class AgentScenarioSuiteViewModelTests
 
         Assert.False(vm.IsRunning);
         Assert.Equal("Suite run canceled.", vm.StatusMessage);
+        Assert.Equal("0 / 1 complete", vm.ScenarioProgressLabel);
     }
 
     [Fact]

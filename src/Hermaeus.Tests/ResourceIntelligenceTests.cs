@@ -51,6 +51,21 @@ public sealed class ResourceIntelligenceTests
     }
 
     [Fact]
+    public async Task Component_ids_are_scoped_to_their_allocation()
+    {
+        var registry = new ResourceConsumerRegistry();
+        registry.RegisterConsumer(Descriptor("consumer-a", ResourceOwnerIdentity.InProcess("component-a")));
+        registry.RegisterConsumer(Descriptor("consumer-b", ResourceOwnerIdentity.InProcess("component-b")));
+
+        registry.RegisterAllocation(Allocation("allocation-a", "consumer-a", [Component("weights")]));
+        registry.RegisterAllocation(Allocation("allocation-b", "consumer-b", [Component("weights")]));
+
+        var snapshot = await registry.CaptureSnapshotAsync(new ResourceSnapshotCapture(Hardware()));
+        Assert.Equal(2, snapshot.Allocations.Count);
+        Assert.All(snapshot.Allocations, allocation => Assert.Equal("weights", Assert.Single(allocation.Components).ComponentId));
+    }
+
+    [Fact]
     public void A_component_cannot_also_be_a_top_level_allocation()
     {
         var registry = new ResourceConsumerRegistry();

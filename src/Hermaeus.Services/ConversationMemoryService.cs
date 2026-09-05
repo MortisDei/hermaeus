@@ -384,7 +384,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
     {
         var existing = await _memories.GetAllAsync(includeArchived: true, ct);
 
-        foreach (var memory in memories)
+        foreach (var memory in memories.Where(memory => !MemoryExtractionService.IsUnsupportedAbsenceConclusion(memory.Content)))
         {
             memory.SourceConversationId ??= conversationId;
             memory.Source ??= new SourceReference(ProvenanceKind.Memory, MemoryExtractionService.TitleFrom(memory.Content), Locator: conversationId, Snippet: memory.Content, Timestamp: DateTime.UtcNow);

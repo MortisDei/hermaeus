@@ -66,6 +66,31 @@ public sealed class DoctorAdvisoryTests
         Assert.Equal("Tray supported", check.Summary);
     }
 
+    [Fact]
+    public void Doctor_actions_are_contextual_and_ready_checks_have_no_action()
+    {
+        var ready = DoctorService.BuildCheck(
+            "data-root", "Data root", DoctorCheckStatus.Ready, "Ready", "detail",
+            "Open Settings", true, "diagnostics", "Data");
+        var warning = DoctorService.BuildCheck(
+            "data-root", "Data root", DoctorCheckStatus.Warning, "Needs attention", "detail",
+            "Open Settings", true, "diagnostics", "Data");
+        var fix = DoctorService.BuildCheck(
+            "assets", "Assets", DoctorCheckStatus.Warning, "Missing", "detail",
+            "Install assets", true, "diagnostics", "Runtime");
+        var external = DoctorService.BuildCheck(
+            "app-update", "App update", DoctorCheckStatus.Info, "Available", "detail",
+            "Open Releases", true, "diagnostics", "Updates");
+
+        Assert.False(ready.HasAction);
+        Assert.Equal(DoctorActionKind.None, ready.ActionKind);
+        Assert.True(warning.HasAction);
+        Assert.Equal(DoctorActionKind.Navigate, warning.ActionKind);
+        Assert.Contains("relevant Hermaeus settings", warning.ActionTooltip, StringComparison.Ordinal);
+        Assert.Equal(DoctorActionKind.Fix, fix.ActionKind);
+        Assert.Equal(DoctorActionKind.OpenExternal, external.ActionKind);
+    }
+
     /// <summary>
     /// The GPU-present-but-zero-layers advisory used to fire purely from
     /// static configuration, even for a server that was never started - a

@@ -311,8 +311,10 @@
                         <Flyout Placement="Bottom">
                             <StackPanel Width="300" Spacing="7">
                                 <TextBlock Text="Live model telemetry" FontSize="14" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding Telemetry.RuntimeIdentity, StringFormat='Runtime: {0}'}" FontSize="11" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding Telemetry.ModelIdentity, StringFormat='Model: {0}'}" FontSize="11" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Telemetry.RuntimeIdentity, StringFormat='Runtime: {0}'}" FontSize="11" TextWrapping="Wrap"
+                                           ToolTip.Tip="{Binding Telemetry.RuntimeIdentity}" />
+                                <TextBlock Text="{Binding Telemetry.ModelIdentity, StringFormat='Model: {0}'}" FontSize="11" TextWrapping="Wrap"
+                                           ToolTip.Tip="{Binding Telemetry.ModelIdentity}" />
                                 <TextBlock Text="{Binding Telemetry.DecodeRate, StringFormat='Decode: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.PromptThroughput, StringFormat='Prompt: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.TimeToFirstToken, StringFormat='Time to first content: {0}'}" FontSize="11" />

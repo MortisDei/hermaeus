@@ -1610,8 +1610,7 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
             // still attach a rank-based relevance score so downstream memory
             // injection selection always has a real score to weigh, whether
             // or not hybrid recall is available.
-            for (var i = 0; i < ftsResults.Count; i++)
-                ftsResults[i].RelevanceScore = 1.0 / (i + 1);
+            AssignLexicalRelevance(ftsResults);
             return await ExpandOneHopRelationshipsAsync(c, ApplyRelevanceFloor(ftsResults), ct);
         }
 
@@ -1621,7 +1620,8 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
 
     private static List<Memory> ApplyRelevanceFloor(IEnumerable<Memory> candidates) =>
         candidates
-            .Where(memory => memory.IsPinned || memory.RelevanceScore is >= MinimumRecallRelevance)
+            .Where(memory => !MemoryExtractionService.IsUnsupportedAbsenceConclusion(memory.Content)
+                && memory.RelevanceScore is >= MinimumRecallRelevance)
             .ToList();
 
     /// <summary>
@@ -1713,17 +1713,24 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
             timeoutCts.CancelAfter(_queryEmbedTimeout);
             queryVector = await _embeddings!.EmbedAsync(q, timeoutCts.Token);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             LogQueryEmbedFallbackOnce(ex);
-            for (var i = 0; i < ftsResults.Count; i++)
-                ftsResults[i].RelevanceScore = 1.0 / (i + 1);
+            AssignLexicalRelevance(ftsResults);
             return ftsResults;
         }
 
         var ftsRank = new Dictionary<string, double>(StringComparer.Ordinal);
+        var lexicalScore = new Dictionary<string, double>(StringComparer.Ordinal);
         for (var i = 0; i < ftsResults.Count; i++)
+        {
             ftsRank[ftsResults[i].Id] = 1.0 / (i + 1);
+            lexicalScore[ftsResults[i].Id] = 1.0 - (0.5 * i / Math.Max(1, ftsResults.Count));
+        }
 
         var candidates = new Dictionary<string, Memory>(StringComparer.Ordinal);
         foreach (var m in ftsResults) candidates[m.Id] = m;
@@ -1761,7 +1768,12 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
                 // silently return 0.0 - indistinguishable from "no semantic
                 // match" unless tracked separately.
                 if (vector.Length != queryVector.Length)
+                {
                     mismatchCount++;
+                    if (candidates.TryGetValue(id, out var mismatched))
+                        mismatched.RelevanceScore = lexicalScore.GetValueOrDefault(id);
+                    continue;
+                }
                 var cosine = Math.Max(0.0, CosineSimilarity(queryVector, vector));
 
                 if (candidates.TryGetValue(id, out var m))
@@ -1812,7 +1824,7 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
         // An FTS hit whose row has no embedding yet (not backfilled, or the
         // embed call failed) keeps its rank-only score instead of dropping out.
         foreach (var m in candidates.Values.Where(m => m.RelevanceScore is null))
-            m.RelevanceScore = ftsRank.GetValueOrDefault(m.Id, 0.0);
+            m.RelevanceScore = lexicalScore.GetValueOrDefault(m.Id, 0.0);
 
         return candidates.Values
             .OrderByDescending(m => m.IsPinned)
@@ -1880,6 +1892,10 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
                     await update.ExecuteNonQueryAsync(ct);
                     _backfillState.Remove(id);
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch
                 {
                     var attempts = (_backfillState.TryGetValue(id, out var previous) ? previous.Attempts : 0) + 1;
@@ -1897,6 +1913,20 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
             if (lease is not null && !lease.IsReleased)
                 await lease.ReleaseAsync("memory embedding backfill completed");
             _backfillGate.Release();
+        }
+    }
+
+    // FTS rank gives an ordering, not a calibrated semantic probability.  Do
+    // not feed reciprocal rank into MinimumRecallRelevance: with a 0.40 floor
+    // that silently discarded every genuine lexical match after the second.
+    private static void AssignLexicalRelevance(IEnumerable<Memory> results)
+    {
+        var ordered = results as IReadOnlyList<Memory> ?? results.ToList();
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            // Keep the FTS ordering meaningful for downstream selection while
+            // keeping every actual lexical candidate above the semantic floor.
+            ordered[i].RelevanceScore = 1.0 - (0.5 * i / Math.Max(1, ordered.Count));
         }
     }
 

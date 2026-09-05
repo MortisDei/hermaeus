@@ -24,6 +24,7 @@ public sealed class ResourceCoordinator : IResourceCoordinator, IDisposable
     private readonly SemaphoreSlim _decisionGate = new(1, 1);
     private readonly Dictionary<string, ActiveReservation> _reservations = new(StringComparer.Ordinal);
     private readonly LinkedList<ResourceWorkloadPlan> _recentPlans = [];
+    private readonly LinkedList<ResourceReleaseReceipt> _recentReleaseReceipts = [];
     private bool _disposed;
 
     public ResourceCoordinator(IResourceSnapshotSource snapshots, IResourceConsumerRegistry registry)
@@ -38,6 +39,16 @@ public sealed class ResourceCoordinator : IResourceCoordinator, IDisposable
         {
             _decisionGate.Wait();
             try { return _recentPlans.ToArray(); }
+            finally { _decisionGate.Release(); }
+        }
+    }
+
+    public IReadOnlyList<ResourceReleaseReceipt> RecentReleaseReceipts
+    {
+        get
+        {
+            _decisionGate.Wait();
+            try { return _recentReleaseReceipts.ToArray(); }
             finally { _decisionGate.Release(); }
         }
     }
@@ -76,6 +87,10 @@ public sealed class ResourceCoordinator : IResourceCoordinator, IDisposable
             var snapshot = await _snapshots.CaptureAsync(ct);
             var plan = BuildPlan(snapshot, request);
             RememberPlan(plan);
+            if (!snapshot.Consumers.Any(consumer => string.Equals(
+                    consumer.ConsumerId, request.RequestedConsumerId, StringComparison.Ordinal)))
+                throw new ResourceAdmissionException(plan,
+                    "The requested workload has no registered consumer descriptor.");
             if (plan.Feasibility == ResourcePlanFeasibility.DoesNotFit)
                 throw new ResourceAdmissionException(plan, "The requested workload exceeds the current whole-workload headroom.");
             if (plan.Feasibility == ResourcePlanFeasibility.Unknown && !request.AllowUnknown)
@@ -126,13 +141,16 @@ public sealed class ResourceCoordinator : IResourceCoordinator, IDisposable
         }
     }
 
-    internal async Task ReleaseAsync(ActiveReservation reservation, CancellationToken ct)
+    internal async Task ReleaseAsync(ActiveReservation reservation, string reason, CancellationToken ct)
     {
         await _decisionGate.WaitAsync(ct);
         try
         {
             if (_reservations.Remove(reservation.ReservationId))
+            {
                 reservation.MarkReleased();
+                RememberRelease(reservation, reason);
+            }
         }
         finally
         {
@@ -286,7 +304,23 @@ public sealed class ResourceCoordinator : IResourceCoordinator, IDisposable
         {
             _reservations.Remove(reservation.ReservationId);
             reservation.MarkReleased();
+            RememberRelease(reservation, "reservation expired");
         }
+    }
+
+    private void RememberRelease(ActiveReservation reservation, string reason)
+    {
+        var boundedReason = string.IsNullOrWhiteSpace(reason) ? "released" : reason.Trim();
+        if (boundedReason.Length > 512)
+            boundedReason = boundedReason[..512];
+        _recentReleaseReceipts.AddFirst(new ResourceReleaseReceipt(
+            reservation.ReservationId,
+            reservation.Plan.PlanId,
+            reservation.Plan.RequestedConsumerId,
+            boundedReason,
+            DateTime.UtcNow));
+        while (_recentReleaseReceipts.Count > 32)
+            _recentReleaseReceipts.RemoveLast();
     }
 
     private void EnsureActive(ActiveReservation reservation)
@@ -380,7 +414,7 @@ public sealed class ResourceCoordinator : IResourceCoordinator, IDisposable
             owner.CompleteAsync(reservation, allocation, ct);
 
         public Task ReleaseAsync(string reason = "released", CancellationToken ct = default) =>
-            owner.ReleaseAsync(reservation, ct);
+            owner.ReleaseAsync(reservation, reason, ct);
 
         public async ValueTask DisposeAsync()
         {

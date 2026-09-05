@@ -1,3 +1,5 @@
+using Hermaeus.Core.Services;
+
 namespace Hermaeus.Services;
 
 /// <summary>
@@ -24,10 +26,13 @@ public static class DataRootManifest
     private const string SettingsFileName = "settings.json";
     private const string ProcessLockFileName = "hermaeus.lock";
 
-    public static IEnumerable<(string SourcePath, string RelativePath)> EnumerateAll(string root)
+    public static (IReadOnlyList<(string SourcePath, string RelativePath)> Included,
+        IReadOnlyList<DataMigrationExclusion> Excluded) Inspect(string root)
     {
+        var included = new List<(string SourcePath, string RelativePath)>();
+        var excluded = new List<DataMigrationExclusion>();
         if (!Directory.Exists(root))
-            yield break;
+            return (included, excluded);
 
         foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
@@ -35,12 +40,28 @@ public static class DataRootManifest
                 Path.GetDirectoryName(path),
                 root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
                 ModelPathSafety.LocalPathComparison);
-            if (isRootFile
-                && (string.Equals(Path.GetFileName(path), SettingsFileName, ModelPathSafety.LocalPathComparison)
-                    || string.Equals(Path.GetFileName(path), ProcessLockFileName, ModelPathSafety.LocalPathComparison)))
+            var name = Path.GetFileName(path);
+            if (isRootFile && string.Equals(name, SettingsFileName, ModelPathSafety.LocalPathComparison))
+            {
+                excluded.Add(new DataMigrationExclusion(name, "settings bootstrap file"));
                 continue;
+            }
 
-            yield return (path, Path.GetRelativePath(root, path));
+            if (isRootFile && string.Equals(name, ProcessLockFileName, ModelPathSafety.LocalPathComparison))
+            {
+                excluded.Add(new DataMigrationExclusion(name, "active process lock"));
+                continue;
+            }
+
+            included.Add((path, Path.GetRelativePath(root, path)));
         }
+
+        return (included, excluded);
+    }
+
+    public static IEnumerable<(string SourcePath, string RelativePath)> EnumerateAll(string root)
+    {
+        foreach (var file in Inspect(root).Included)
+            yield return file;
     }
 }

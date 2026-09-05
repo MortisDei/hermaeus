@@ -48,6 +48,7 @@ public interface IResourceSnapshotSource
 public interface IResourceCoordinator
 {
     IReadOnlyList<ResourceWorkloadPlan> RecentPlans { get; }
+    IReadOnlyList<ResourceReleaseReceipt> RecentReleaseReceipts { get; }
 
     void RegisterConsumer(ResourceConsumerDescriptor descriptor);
     Task<ResourceSnapshot> CaptureSnapshotAsync(CancellationToken ct = default);

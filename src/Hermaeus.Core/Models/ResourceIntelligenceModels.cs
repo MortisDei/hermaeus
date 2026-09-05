@@ -172,6 +172,12 @@ public sealed record ResourceConsumerDescriptor
 
 public sealed record ResourceAllocationComponent
 {
+    /// <summary>
+    /// Stable within its owning allocation. Cross-allocation uniqueness is
+    /// expressed by the full identity tuple (AllocationId, ComponentId,
+    /// ResourceKind, DeviceId), so independent workloads may both contain a
+    /// component named "weights".
+    /// </summary>
     public string ComponentId { get; }
     public ResourceComponentKind Kind { get; }
     public ResourceKind ResourceKind { get; }

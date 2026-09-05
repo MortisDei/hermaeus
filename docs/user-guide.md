@@ -42,7 +42,13 @@ asks for confirmation before moving an existing workspace; ordinary Settings
 autosave never performs that migration implicitly. The Data Storage page shows
 both the configured root and the root currently effective for composed stores.
 Restart Hermaeus after a successful change so every store and cached view is
-composed against the selected root.
+composed against the selected root. Startup migration verifies each copied file
+before committing the destination; a failed attempt keeps the old root active,
+leaves the pending destination available for retry, and records the outcome in
+Data Storage. After scheduling a move, a second dialog offers **Restart now**
+or **Restart later**. Restart later leaves the current effective root active;
+Restart now performs the controlled application restart required for bootstrap
+migration. No active files move before that bootstrap step.
 
 Choose a chat backend next. For managed llama.cpp, use **Install managed
 llama.cpp** before reaching Doctor. You can then choose an existing GGUF or
@@ -194,7 +200,9 @@ runtime/model/hardware/configuration fingerprint.
 
 **System Overview** also shows a whole-workload resource snapshot. It lists
 registered consumers and their active allocations, whole-device memory totals,
-and Unknown observations that prevent false precision. Each managed server's
+and evidence states that prevent false precision. Active values identify
+observed or planned bytes; a component attribution gap, a non-resident
+consumer, and a lazy consumer are shown separately. Each managed server's
 Services card shows the admission receipt used for its start. Reservations are
 short-lived concurrency guards only. They do not stop or unload another
 consumer, change settings, or attribute a whole-device total to one process.
@@ -228,7 +236,8 @@ provider into a local one merely because the desktop app itself is local.
 RAG, and voice readiness. A failed check does not silently change the machine.
 Where Hermaeus can remediate a problem, inspect the plan and explicitly approve
 the download or write. Details remain available in Doctor, Activity, and
-Runtime Logs.
+Runtime Logs. Ready informational checks do not expose a repair or navigation
+action; non-ready checks expose only the action relevant to that check.
 
 If managed llama.cpp is missing, use onboarding's install action or Doctor's
 download action. Hermaeus selects the newest compatible b-numbered upstream
@@ -300,6 +309,12 @@ or failed ingest leaves the prior generation in place. Removing missing sources
 requires separate confirmation and publishes a replacement generation rather
 than deleting live rows mid-ingest.
 
+The RAG workspace separates **Ask**, **Manage**, **Sources**, and
+**Diagnostics**. Use **Manage** for persistent dataset administration,
+ingestion, watched folders, reindexing, and deletion. The dataset scope in
+**Ask** remains question-specific and does not change the selected dataset used
+by management actions.
+
 **Memories** are durable, reviewable facts stored under Data Root. Settings
 control whether memory and Recall context may be injected into Chat. The Chat
 environment description reports only enabled context sources. The command
@@ -308,8 +323,9 @@ is disabled. The Memories view puts pinned memories in a clearly labelled
 section at the top, where **Unpin** is available directly. Agent workspace
 notes and generated workspace profiles are shown in Agent, not mixed into
 ordinary Memories. Weak semantic memory candidates are left out of ordinary
-recall, while pinned memories remain eligible. The RAG ingest plan is analysis
-context and is not saved as a normal memory.
+recall. Pinning affects prominence only after relevance, so a pinned but
+unrelated memory is not injected. The RAG ingest plan is analysis context and
+is not saved as a normal memory.
 
 Open **History** on a memory to inspect its immutable revisions. Recorded time
 and established effective time are shown separately, alongside adjacent
@@ -501,9 +517,12 @@ the provider in Services or Settings, use Doctor for readiness, and check
 Runtime Logs if synthesis fails. A missing, integrity, or load failure from
 native Kokoro exposes **Open Doctor** directly in its Services status row
 because Doctor owns the verified asset diagnosis and repair action. Remote
-voice providers receive the text sent for speech. **Settings > Voice** lists the active provider's discovered names
-for per-channel voice routing, while **Services > Voice** keeps the explicit
-Save Config action for provider, device, speed, and process settings.
+voice providers receive the text sent for speech. **Settings > Voice** lists the
+active provider's discovered names in editable, unfiltered per-channel
+selectors. Reopening a selector does not reuse the previous voice as a filter,
+and a provider without a catalogue still permits a manually entered voice id.
+**Services > Voice** keeps the explicit Save Config action for provider, device,
+speed, and process settings.
 
 ## Activity, logs, and troubleshooting
 

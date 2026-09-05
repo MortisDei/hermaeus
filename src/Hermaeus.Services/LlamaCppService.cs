@@ -100,6 +100,10 @@ public sealed class LlamaCppService : IDisposable
             _modelsFetchDown[baseUrl] = false;
             return models;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             // r14 4.3: log once per up->down transition; repeats within the same
@@ -170,6 +174,10 @@ public sealed class LlamaCppService : IDisposable
             }
 
             return null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -289,6 +297,10 @@ public sealed class LlamaCppService : IDisposable
             }
             return (true, resp, string.Empty);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return (false, null, $"\n\n*llama.cpp error: {ex.Message}*");
@@ -303,6 +315,10 @@ public sealed class LlamaCppService : IDisposable
         {
             var body = await resp.Content.ReadAsStringAsync(ct);
             return body.Length > MaxErrorBodyChars ? body[..MaxErrorBodyChars] + "..." : body;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {

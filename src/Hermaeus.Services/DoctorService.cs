@@ -200,7 +200,7 @@ public sealed partial class DoctorService : IDoctorService
         return result;
     }
 
-    private static DoctorCheck BuildCheck(
+    internal static DoctorCheck BuildCheck(
         string key,
         string title,
         DoctorCheckStatus status,
@@ -210,7 +210,16 @@ public sealed partial class DoctorService : IDoctorService
         bool canFix,
         string diagnostics,
         string category)
-        => new(key, title, status, summary, detail, fixLabel, canFix, diagnostics, category);
+    {
+        var actionKind = !canFix || status == DoctorCheckStatus.Ready
+            ? DoctorActionKind.None
+            : fixLabel.StartsWith("Open Releases", StringComparison.OrdinalIgnoreCase)
+                ? DoctorActionKind.OpenExternal
+                : fixLabel.StartsWith("Open ", StringComparison.OrdinalIgnoreCase)
+                    ? DoctorActionKind.Navigate
+                    : DoctorActionKind.Fix;
+        return new DoctorCheck(key, title, status, summary, detail, fixLabel, canFix, diagnostics, category, actionKind);
+    }
 
     private static async Task<(bool Ok, string Detail)> TryWriteAsync(string root, CancellationToken ct)
     {
@@ -221,6 +230,10 @@ public sealed partial class DoctorService : IDoctorService
             await File.WriteAllTextAsync(probe, "ok", ct);
             File.Delete(probe);
             return (true, root);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

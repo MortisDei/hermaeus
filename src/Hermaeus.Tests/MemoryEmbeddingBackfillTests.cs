@@ -198,6 +198,25 @@ public sealed class MemoryEmbeddingBackfillTests
     }
 
     [Fact]
+    public async Task RunEmbeddingBackfillAsync_preserves_caller_cancellation()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var plainStore = new MemoryStore(settings);
+        await plainStore.InitializeAsync();
+        await plainStore.SaveAsync(new Memory { Id = "m1", Content = "row" });
+
+        var embeddings = new CountingEmbeddingService { HangForever = true };
+        var store = new MemoryStore(settings, embeddings, queryEmbedTimeout: TimeSpan.FromMilliseconds(50));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.RunEmbeddingBackfillAsync(cts.Token));
+        Assert.Equal(1, embeddings.CallCount);
+    }
+
+    [Fact]
     public async Task RunEmbeddingBackfillAsync_logs_one_warning_per_batch_not_per_row()
     {
         using var temp = new TempDir();

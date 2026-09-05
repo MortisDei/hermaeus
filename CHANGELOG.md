@@ -13,6 +13,22 @@ limit.
 
 ### Changed
 
+- R32 corrective work now completes pending Data Root moves at startup with
+  per-file length and SHA256 verification, preserving the old active root and a
+  retryable receipt when a move fails. The RAG surface separates Ask, Manage,
+  Sources, and Diagnostics; Hugging Face acquisition has a dedicated workspace;
+  and model cards support confirmed bulk cleanup of stale or unknown companions
+  without deleting present assets.
+- System Overview now summarizes component health and recent resource release
+  receipts, Doctor exposes only contextual repair actions, and each Settings
+  voice channel owns its discovered voice catalogue so selector state cannot
+  leak between rows. Scenario Evals now exposes bounded current/total,
+  scenario, step, pass/fail, and cancellation state while a run is active.
+  Resource receipts distinguish observed and planned bytes, not-resident and
+  lazy consumers, and incomplete component attribution without assigning
+  whole-device totals to a process. Recall preserves caller cancellation
+  through embedding backfill and keeps dense candidates that have no lexical
+  overlap.
 - Startup recovery now marks persisted Agent runs with no execution owner as
   `Interrupted`, including active child-plan entries, with an explicit reason;
   active `Running` tasks remain protected from deletion. Recall incremental
@@ -57,8 +73,10 @@ limit.
 - Activity is folded into the Memories surface as a collapsed section, and
   model tiles and system overview sections regain bounded visual grouping.
 - Memory recall now drops weak semantic candidates before injection while
-  preserving pinned memories, and observed background embedding failures are
-  recorded instead of becoming unobserved task exceptions.
+  treating pinning as prominence rather than a relevance bypass; observed
+  background embedding failures are recorded instead of becoming unobserved
+  task exceptions. Model-generated absence conclusions are not promoted to
+  durable memories.
 - RAG Enter-to-send follows the shared Chat setting, including multiline input
   when the configured modifier is not pressed.
 - Native Kokoro resource admission now reuses the provider's registered

@@ -79,6 +79,31 @@ public sealed class VoiceOrchestratorTests
     }
 
     [Fact]
+    public async Task Normal_priority_queue_has_a_finite_capacity()
+    {
+        using var temp = new TempDir();
+        var provider = new ControlledVoiceProvider();
+        using var orchestrator = CreateOrchestrator(temp, provider);
+
+        await orchestrator.EnqueueAsync(new VoiceUtterance("blocks the queue", VoiceChannel.Chat));
+        var first = await provider.NextStartedAsync();
+        for (var index = 1; index <= 16; index++)
+            await orchestrator.EnqueueAsync(new VoiceUtterance($"queued-{index}", VoiceChannel.Chat));
+        await orchestrator.EnqueueAsync(new VoiceUtterance("over capacity", VoiceChannel.Chat));
+
+        first.Complete();
+        for (var index = 1; index <= 16; index++)
+        {
+            var queued = await provider.NextStartedAsync();
+            Assert.Equal($"queued-{index}", queued.Request.Text);
+            queued.Complete();
+        }
+        await provider.WaitForCompletedAsync(17);
+
+        Assert.DoesNotContain(provider.Completed, call => call.Request.Text == "over capacity");
+    }
+
+    [Fact]
     public async Task Duplicate_dedupe_key_drops_the_second_queued_utterance()
     {
         using var temp = new TempDir();

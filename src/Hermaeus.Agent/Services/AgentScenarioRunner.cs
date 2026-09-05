@@ -37,8 +37,13 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
         _evalStore = evalStore;
     }
 
-    public Task<AgentScenarioRunResult> RunScenarioAsync(AgentScenario scenario, string modelId, IProgress<string>? progress = null, CancellationToken ct = default) =>
-        RunScenarioCoreAsync(scenario, modelId, Guid.NewGuid().ToString("N"), progress, ct);
+    public async Task<AgentScenarioRunResult> RunScenarioAsync(AgentScenario scenario, string modelId, IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        progress?.Report($"1/1: {scenario.Manifest.Id}");
+        var result = await RunScenarioCoreAsync(scenario, modelId, Guid.NewGuid().ToString("N"), progress, ct);
+        progress?.Report($"completed 1/1: {scenario.Manifest.Id} - {(result.Passed ? "PASS" : "FAIL")}");
+        return result;
+    }
 
     public async Task<AgentScenarioSuiteResult> RunSuiteAsync(IReadOnlyList<AgentScenario> scenarios, string modelId, IProgress<string>? progress = null, CancellationToken ct = default)
     {
@@ -50,6 +55,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
             progress?.Report($"{i + 1}/{scenarios.Count}: {scenario.Manifest.Id}");
             var result = await RunScenarioCoreAsync(scenario, modelId, suite.Id, progress, ct);
             suite.Results.Add(result);
+            progress?.Report($"completed {suite.Results.Count}/{scenarios.Count}: {scenario.Manifest.Id} - {(result.Passed ? "PASS" : "FAIL")}");
         }
 
         suite.FinishedAt = DateTime.UtcNow;

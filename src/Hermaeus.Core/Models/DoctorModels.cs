@@ -11,6 +11,14 @@ public enum DoctorCheckStatus
     Info
 }
 
+public enum DoctorActionKind
+{
+    None,
+    Fix,
+    Navigate,
+    OpenExternal
+}
+
 public sealed record DoctorCheck(
     string Key,
     string Title,
@@ -20,8 +28,22 @@ public sealed record DoctorCheck(
     string FixLabel,
     bool CanFix,
     string Diagnostics,
-    string Category)
+    string Category,
+    DoctorActionKind ActionKind = DoctorActionKind.None,
+    string ActionTarget = "")
 {
+    public bool HasAction => CanFix && ActionKind != DoctorActionKind.None;
+
+    public string ActionLabel => FixLabel;
+
+    public string ActionTooltip => ActionKind switch
+    {
+        DoctorActionKind.Fix => $"Runs the suggested fix for {Title}.",
+        DoctorActionKind.Navigate => $"Opens the relevant Hermaeus settings for {Title}.",
+        DoctorActionKind.OpenExternal => "Opens the latest Hermaeus release information in your browser.",
+        _ => string.Empty
+    };
+
     public string StatusLabel => Status switch
     {
         DoctorCheckStatus.Ready => "Ready",

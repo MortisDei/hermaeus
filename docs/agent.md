@@ -1014,6 +1014,14 @@ filter, rejects at capture time). A claim the model attempted and the filter
 rejected passes this check by construction, since it was never stored; only a
 claim that reached the store some other way fails it.
 
+The Scenario Evals panel exposes a bounded running state while a suite or
+single scenario is executing. It shows completed and total scenarios where
+known, the current scenario id and title, the current step/status, observed
+pass/fail counts, and a Cancel suite action. It does not manufacture a
+percentage or timing estimate. Completed rows retain the actual PASS or FAIL
+result, including failed checks, and a cancelled run retains its partial
+counts.
+
 ## Manual Verification
 
 The agent can now build and test its own work through the fixed `run_command`

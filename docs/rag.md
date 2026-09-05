@@ -106,11 +106,12 @@ derive honestly.
 
 ### Dataset Manager
 
-The question workspace keeps **Dataset Manager** collapsed by default so the
-selected datasets, answer, diagnostics, sources, and ingest controls have a
-clear order. Expand it when managing dataset health or watched folders. The
-parent-child retrieval checkbox has a tooltip explaining that it retrieves
-child matches together with their indexed parent context.
+The RAG workspace separates **Ask**, **Manage**, **Sources**, and
+**Diagnostics**. **Ask** owns the question and per-question dataset scope.
+**Manage** owns persistent dataset health, ingestion, watched folders, and
+reindexing. **Sources** and **Diagnostics** are evidence views for the last
+query. The parent-child retrieval checkbox has a tooltip explaining that it
+retrieves child matches together with their indexed parent context.
 
 Each dataset card in the manager shows chunk/source counts, missing and stale
 file counts, and duplicate-source counts, with these actions:

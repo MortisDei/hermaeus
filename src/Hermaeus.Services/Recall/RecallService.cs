@@ -25,6 +25,7 @@ public sealed class RecallService
     private static readonly TimeSpan DefaultSourceTimeout = TimeSpan.FromSeconds(3);
     private const double RrfK = 60.0;
     private const int TopK = 50;
+    private const double MinimumSourceRelevance = 0.40;
 
     private readonly IReadOnlyList<IRecallSource> _sources;
     private readonly IEmbeddingService? _embeddings;
@@ -73,6 +74,10 @@ public sealed class RecallService
             // The per-source timeout fired, not the caller's own cancellation.
             return (source, [], true);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception)
         {
             // A source that throws is omitted and named, never let it crash the search.
@@ -86,7 +91,12 @@ public sealed class RecallService
         foreach (var list in perSourceRanked)
         {
             for (var i = 0; i < list.Count; i++)
-                scored.Add(list[i] with { Score = 1.0 / (i + RrfK) });
+            {
+                var hit = list[i];
+                if (hit.Score < MinimumSourceRelevance)
+                    continue;
+                scored.Add(hit with { Score = 1.0 / (i + RrfK) });
+            }
         }
 
         return scored.OrderByDescending(h => h.Score).Take(TopK).ToList();

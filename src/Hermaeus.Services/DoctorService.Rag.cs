@@ -32,6 +32,10 @@ public sealed partial class DoctorService
                 $"Datasets: {datasets.Count}",
                 "RAG");
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return BuildCheck(
@@ -78,6 +82,10 @@ public sealed partial class DoctorService
                 true,
                 ok ? $"Dimensions: {embedding.Length}" : "No embedding returned.",
                 "RAG");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

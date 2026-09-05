@@ -23,19 +23,21 @@
             </Grid>
 
             <Grid ColumnDefinitions="*,*"
-                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="16"
                   RowSpacing="16">
-                <views:SettingsLlmSectionView Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Llm}" />
-                <views:SettingsRagSectionView Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Rag}" />
-                <views:SettingsVoiceSectionView Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Tts}" />
-                <views:SettingsDataSectionView Grid.Row="3" Grid.Column="0" DataContext="{Binding Data}" />
-                <views:SettingsLocalAiSetupSectionView Grid.Row="3" Grid.Column="1" DataContext="{Binding LocalAiSetup}" />
-                <views:SettingsUiSectionView Grid.Row="4" Grid.Column="0" DataContext="{Binding Ui}" />
-                <views:SettingsMemorySectionView Grid.Row="4" Grid.Column="1" DataContext="{Binding Memory}" />
-                <views:SettingsMcpSectionView Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Mcp}" />
-                <views:SettingsLocalApiSectionView Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding LocalApi}" />
-                <views:SettingsTrustSectionView Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Trust}" />
+                <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Text="Runtime and knowledge" FontSize="15" FontWeight="SemiBold" Opacity="0.8" />
+                <views:SettingsLlmSectionView Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Llm}" />
+                <views:SettingsRagSectionView Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Rag}" />
+                <views:SettingsVoiceSectionView Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Tts}" />
+                <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Text="Workspace and app" FontSize="15" FontWeight="SemiBold" Opacity="0.8" />
+                <views:SettingsDataSectionView Grid.Row="5" Grid.Column="0" DataContext="{Binding Data}" />
+                <views:SettingsLocalAiSetupSectionView Grid.Row="5" Grid.Column="1" DataContext="{Binding LocalAiSetup}" />
+                <views:SettingsUiSectionView Grid.Row="6" Grid.Column="0" DataContext="{Binding Ui}" />
+                <views:SettingsMemorySectionView Grid.Row="6" Grid.Column="1" DataContext="{Binding Memory}" />
+                <views:SettingsMcpSectionView Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Mcp}" />
+                <views:SettingsLocalApiSectionView Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding LocalApi}" />
+                <views:SettingsTrustSectionView Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Trust}" />
             </Grid>
 
             <StackPanel Orientation="Horizontal" Spacing="10">

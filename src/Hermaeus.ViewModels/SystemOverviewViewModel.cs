@@ -21,12 +21,15 @@ public partial class SystemOverviewViewModel : ObservableObject
     public UiBoundCollection<ResourceConsumerReceiptViewModel> ResourceConsumers { get; } = [];
     public UiBoundCollection<ResourceDeviceReceiptViewModel> ResourceDevices { get; } = [];
     public UiBoundCollection<ResourceUnknownViewModel> ResourceUnknowns { get; } = [];
+    public UiBoundCollection<ResourceReleaseReceiptViewModel> ResourceReleaseReceipts { get; } = [];
 
     [ObservableProperty] private string _privacyAuditSummary = string.Empty;
     [ObservableProperty] private string _status = "Ready.";
     [ObservableProperty] private bool _isRefreshing;
     [ObservableProperty] private SystemSnapshot? _snapshot;
+    [ObservableProperty] private string _healthSummary = "No component health snapshot captured.";
     [ObservableProperty] private string _resourceStatus = "No workload resource snapshot captured.";
+    [ObservableProperty] private bool _hasResourceReleaseReceipts;
     [ObservableProperty] private string _activeDetail = "overview";
 
     public bool IsOverviewDetailVisible => ActiveDetail == "overview";
@@ -160,6 +163,7 @@ public partial class SystemOverviewViewModel : ObservableObject
             Components.Clear();
             foreach (var component in Snapshot.Components)
                 Components.Add(new ComponentStatusViewModel(component));
+            HealthSummary = BuildHealthSummary(Snapshot.Components);
 
             await RefreshResourceSnapshotAsync();
 
@@ -183,6 +187,8 @@ public partial class SystemOverviewViewModel : ObservableObject
         ResourceConsumers.Clear();
         ResourceDevices.Clear();
         ResourceUnknowns.Clear();
+        ResourceReleaseReceipts.Clear();
+        HasResourceReleaseReceipts = false;
         if (_resourceCoordinator is null)
         {
             ResourceStatus = "Workload resource admission is unavailable.";
@@ -195,14 +201,10 @@ public partial class SystemOverviewViewModel : ObservableObject
             var allocations = resourceSnapshot.Allocations
                 .Where(allocation => string.Equals(allocation.ConsumerId, consumer.ConsumerId, StringComparison.Ordinal))
                 .ToArray();
-            var knownComponents = allocations.SelectMany(allocation => allocation.Components)
-                .Where(component => component.ObservedBytes.HasValue || component.ReservedBytes.HasValue || component.PredictedBytes.HasValue)
-                .ToArray();
-            var gpuBytes = knownComponents.Where(component => component.ResourceKind == ResourceKind.DeviceMemory)
-                .Sum(ComponentBytes);
-            var systemBytes = knownComponents.Where(component => component.ResourceKind == ResourceKind.SystemResidentMemory)
-                .Sum(ComponentBytes);
-            var unknownCount = allocations.SelectMany(allocation => allocation.Components)
+            var components = allocations.SelectMany(allocation => allocation.Components).ToArray();
+            var gpu = DescribeResourceMetric(resourceSnapshot, consumer.ConsumerId, allocations, components, ResourceKind.DeviceMemory);
+            var system = DescribeResourceMetric(resourceSnapshot, consumer.ConsumerId, allocations, components, ResourceKind.SystemResidentMemory);
+            var unknownCount = components
                 .Count(component => !component.ObservedBytes.HasValue && !component.ReservedBytes.HasValue && !component.PredictedBytes.HasValue);
             var state = allocations.Length == 0 && consumer.Kind == ResourceConsumerKind.Reranker
                 ? "Registered, lazy until a RAG query needs reranking"
@@ -213,9 +215,11 @@ public partial class SystemOverviewViewModel : ObservableObject
                 consumer.ConsumerId,
                 consumer.Kind.ToString(),
                 state,
-                gpuBytes == 0 && !knownComponents.Any(component => component.ResourceKind == ResourceKind.DeviceMemory) ? "Unknown" : FormatBytes(gpuBytes),
-                systemBytes == 0 && !knownComponents.Any(component => component.ResourceKind == ResourceKind.SystemResidentMemory) ? "Unknown" : FormatBytes(systemBytes),
-                unknownCount == 0 ? "" : $"{unknownCount} component(s) Unknown"));
+                gpu.Display,
+                system.Display,
+                unknownCount == 0 ? "" : gpu.HasObservedEvidence || system.HasObservedEvidence
+                    ? $"{unknownCount} component(s) attribution incomplete"
+                    : $"{unknownCount} component(s) not observed"));
         }
 
         foreach (var device in resourceSnapshot.DeviceTotals)
@@ -227,13 +231,79 @@ public partial class SystemOverviewViewModel : ObservableObject
         foreach (var unknown in resourceSnapshot.Unknowns)
             ResourceUnknowns.Add(new ResourceUnknownViewModel(unknown.Code, unknown.Detail, unknown.ConsumerId));
 
-        ResourceStatus = $"Updated {resourceSnapshot.CapturedAtUtc.ToLocalTime():T}; {resourceSnapshot.Consumers.Count} consumer(s), {resourceSnapshot.Unknowns.Count} Unknown observation(s).";
+        foreach (var release in _resourceCoordinator.RecentReleaseReceipts)
+            ResourceReleaseReceipts.Add(new ResourceReleaseReceiptViewModel(
+                release.ConsumerId,
+                release.Reason,
+                release.ReleasedAtUtc.ToLocalTime().ToString("T")));
+        HasResourceReleaseReceipts = ResourceReleaseReceipts.Count > 0;
+
+        ResourceStatus = $"Updated {resourceSnapshot.CapturedAtUtc.ToLocalTime():T}; {resourceSnapshot.Consumers.Count} consumer(s), {resourceSnapshot.Unknowns.Count} evidence gap(s), {ResourceReleaseReceipts.Count} recent release receipt(s).";
     }
 
-    private static long ComponentBytes(ResourceAllocationComponent component) =>
-        component.ObservedBytes ?? component.ReservedBytes ?? component.PredictedBytes ?? 0;
+    private static ResourceMetricSummary DescribeResourceMetric(
+        ResourceSnapshot snapshot,
+        string consumerId,
+        IReadOnlyList<ResourceAllocation> allocations,
+        IReadOnlyList<ResourceAllocationComponent> components,
+        ResourceKind kind)
+    {
+        var parentObservations = snapshot.AuthoritativeObservations
+            .Where(observation => string.Equals(observation.ConsumerId, consumerId, StringComparison.Ordinal)
+                && observation.Scope is ResourceObservationScope.Consumer or ResourceObservationScope.Allocation
+                && observation.ResourceKind == kind
+                && observation.ValueBytes.HasValue
+                && observation.TrustState != ResourceObservationTrustState.Unknown)
+            .ToArray();
+        var consumerObservations = parentObservations
+            .Where(observation => observation.Scope == ResourceObservationScope.Consumer)
+            .ToArray();
+        var selectedParentObservations = consumerObservations.Length > 0
+            ? consumerObservations
+            : parentObservations.Where(observation => observation.Scope == ResourceObservationScope.Allocation).ToArray();
+        if (selectedParentObservations.Length > 0)
+        {
+            var observedBytes = selectedParentObservations.Sum(observation => observation.ValueBytes!.Value);
+            return new ResourceMetricSummary($"{FormatResourceBytes(observedBytes)} observed", HasObservedEvidence: true);
+        }
 
-    private static string FormatOptionalBytes(long? bytes) => bytes.HasValue ? FormatBytes(bytes.Value) : "Unknown";
+        var observedComponents = components
+            .Where(component => component.ResourceKind == kind && component.ObservedBytes.HasValue)
+            .ToArray();
+        if (observedComponents.Length > 0)
+        {
+            var observedBytes = observedComponents.Sum(component => component.ObservedBytes!.Value);
+            return new ResourceMetricSummary($"{FormatResourceBytes(observedBytes)} observed", HasObservedEvidence: true);
+        }
+
+        var plannedComponents = components
+            .Where(component => component.ResourceKind == kind && !component.ObservedBytes.HasValue
+                && (component.ReservedBytes.HasValue || component.PredictedBytes.HasValue))
+            .ToArray();
+        if (plannedComponents.Length > 0)
+        {
+            var plannedBytes = plannedComponents.Sum(component => component.ReservedBytes ?? component.PredictedBytes ?? 0);
+            return new ResourceMetricSummary($"{FormatResourceBytes(plannedBytes)} planned", HasObservedEvidence: false);
+        }
+
+        return allocations.Count == 0
+            ? new ResourceMetricSummary("Not resident", HasObservedEvidence: false)
+            : new ResourceMetricSummary("Not observed", HasObservedEvidence: false);
+    }
+
+    private static string FormatResourceBytes(long bytes) => bytes == 0 ? "0 B" : FormatBytes(bytes);
+
+    private sealed record ResourceMetricSummary(string Display, bool HasObservedEvidence);
+
+    private static string BuildHealthSummary(IReadOnlyList<ComponentStatus> components)
+    {
+        var healthy = components.Count(component => component.Status is "Ready" or "Present" or "OK");
+        var attention = components.Count(component => component.Status is "Missing" or "Not set" or "Low");
+        var unknown = components.Count - healthy - attention;
+        return $"{healthy} healthy · {attention} need attention · {unknown} Unknown";
+    }
+
+    private static string FormatOptionalBytes(long? bytes) => bytes.HasValue ? FormatResourceBytes(bytes.Value) : "Unknown";
 
     [RelayCommand]
     private async Task RefreshPrivacyAuditAsync()
@@ -283,6 +353,8 @@ public sealed record ResourceConsumerReceiptViewModel(
 public sealed record ResourceDeviceReceiptViewModel(string DeviceId, string Used, string Capacity);
 
 public sealed record ResourceUnknownViewModel(string Code, string Detail, string? ConsumerId);
+
+public sealed record ResourceReleaseReceiptViewModel(string ConsumerId, string Reason, string ReleasedAt);
 
 public sealed class GpuInfoViewModel
 {

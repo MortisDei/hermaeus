@@ -59,6 +59,10 @@ public sealed class OllamaService : IDisposable
                     });
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
             catch { }
         }
 
@@ -82,6 +86,10 @@ public sealed class OllamaService : IDisposable
                 _contextLengthCache[cacheKey] = value;
 
             return contextLength;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -218,6 +226,10 @@ public sealed class OllamaService : IDisposable
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
             return (true, resp, string.Empty);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

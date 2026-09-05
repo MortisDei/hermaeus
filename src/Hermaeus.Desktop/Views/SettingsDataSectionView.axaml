@@ -19,6 +19,7 @@
             </Grid>
             <TextBlock Text="{Binding DataRootStateSummary}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
             <TextBlock Text="{Binding DataMigrationPreview}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding DataRootMigrationReceipt}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
             <Button Command="{Binding ConfirmDataRootMigrationCommand}"
                     Content="Move data..."
                     IsVisible="{Binding DataRootMigrationPending}"

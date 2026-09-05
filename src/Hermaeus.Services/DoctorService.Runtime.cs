@@ -277,6 +277,10 @@ public sealed partial class DoctorService
             await http.GetAsync($"{baseUrl.TrimEnd('/')}/health", timeout.Token);
             return true;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             return false;
@@ -696,10 +700,11 @@ public sealed partial class DoctorService
     }
 
     /// <summary>
-    /// A non-CPU variant is refused unless its executable starts, exits zero,
-    /// and reports a recognizable build identity. A successful process launch
-    /// with unrecognized output is a parser/identity failure, not a launch
-    /// failure, but it is still unsafe to install over a working GPU backend.
+    /// A non-CPU variant is refused unless its executable starts and exits
+    /// zero, then identity is established either by recognizable version text
+    /// or by the separately verified release-tag and SHA256 artifact evidence.
+    /// A successful process launch with neither evidence remains unsafe to
+    /// install over a working GPU backend.
     /// </summary>
     public static bool ShouldRejectGpuRuntime(LlamaRuntimeVariant installedVariant, bool versionProbeSucceeded)
         => ShouldRejectGpuRuntime(installedVariant, probeStarted: true, exitCode: 0, versionProbeSucceeded);

@@ -86,6 +86,16 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private string _headlineResult = string.Empty;
     [ObservableProperty] private string _modelId = string.Empty;
+    [ObservableProperty] private string _runningHeadline = string.Empty;
+    [ObservableProperty] private string _scenarioProgressLabel = string.Empty;
+    [ObservableProperty] private string _currentScenarioLabel = string.Empty;
+    [ObservableProperty] private string _currentStepLabel = string.Empty;
+    [ObservableProperty] private string _runningCountsLabel = string.Empty;
+
+    private int _runningTotal;
+    private int _completedCount;
+    private int _passedCount;
+    private int _failedCount;
 
     public int ScenarioCount => Scenarios.Count;
 
@@ -137,10 +147,11 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
         foreach (var row in Scenarios)
             row.ResetResult();
 
+        ResetRunningProgress(_loadedScenarios.Count, "Running scenario suite");
         _cts = new CancellationTokenSource();
         try
         {
-            var progress = new Progress<string>(msg => StatusMessage = msg);
+            var progress = new Progress<string>(UpdateRunningProgress);
             var suite = await _runner.RunSuiteAsync(_loadedScenarios, ModelId, progress, _cts.Token);
             foreach (var result in suite.Results)
             {
@@ -148,6 +159,7 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
                 row?.ApplyResult(result);
             }
 
+            ApplyFinalCounts(suite.Results, _loadedScenarios.Count);
             HeadlineResult = $"{suite.PassedCount}/{suite.Total} passed - report in eval-runs/{suite.Id}";
         }
         catch (OperationCanceledException)
@@ -174,12 +186,15 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
 
         IsRunning = true;
         row.ResetResult();
+        ResetRunningProgress(1, $"Running scenario: {row.Title}");
+        CurrentScenarioLabel = FormatScenarioLabel(row.Id);
         _cts = new CancellationTokenSource();
         try
         {
-            var progress = new Progress<string>(msg => StatusMessage = msg);
+            var progress = new Progress<string>(UpdateRunningProgress);
             var result = await _runner.RunScenarioAsync(scenario, ModelId, progress, _cts.Token);
             row.ApplyResult(result);
+            ApplyFinalCounts([result], 1);
             StatusMessage = result.Passed ? $"{row.Id}: passed." : $"{row.Id}: failed.";
         }
         catch (OperationCanceledException)
@@ -201,6 +216,95 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     private void CancelSuite() => _cts?.Cancel();
 
     private bool CanRun() => !IsRunning && !IsLoading && !string.IsNullOrWhiteSpace(ModelId) && Scenarios.Count > 0;
+
+    private void ResetRunningProgress(int total, string headline)
+    {
+        _runningTotal = total;
+        _completedCount = 0;
+        _passedCount = 0;
+        _failedCount = 0;
+        RunningHeadline = headline;
+        ScenarioProgressLabel = $"0 / {total} complete";
+        CurrentScenarioLabel = "Current scenario: preparing...";
+        CurrentStepLabel = "Current step: preparing scenario";
+        RunningCountsLabel = "0 passed · 0 failed";
+    }
+
+    private void UpdateRunningProgress(string message)
+    {
+        StatusMessage = message;
+        if (message.StartsWith("completed ", StringComparison.OrdinalIgnoreCase))
+        {
+            var separator = message.IndexOf(": ", StringComparison.Ordinal);
+            if (separator > "completed ".Length)
+            {
+                var countText = message["completed ".Length..separator];
+                var counts = countText.Split('/', 2, StringSplitOptions.TrimEntries);
+                if (counts.Length == 2 && int.TryParse(counts[0], out var completed) && int.TryParse(counts[1], out var total))
+                {
+                    _completedCount = Math.Clamp(completed, 0, total);
+                    _runningTotal = total;
+                    ScenarioProgressLabel = $"{_completedCount} / {_runningTotal} complete";
+                }
+
+                var resultText = message[(separator + 2)..];
+                var resultSeparator = resultText.LastIndexOf(" - ", StringComparison.Ordinal);
+                var scenarioId = resultSeparator >= 0 ? resultText[..resultSeparator] : resultText;
+                var outcome = resultSeparator >= 0 ? resultText[(resultSeparator + 3)..] : string.Empty;
+                CurrentScenarioLabel = FormatScenarioLabel(scenarioId);
+                CurrentStepLabel = string.IsNullOrWhiteSpace(outcome)
+                    ? "Current step: finished"
+                    : $"Current step: finished - {outcome}";
+                if (string.Equals(outcome, "PASS", StringComparison.OrdinalIgnoreCase))
+                    _passedCount++;
+                else if (string.Equals(outcome, "FAIL", StringComparison.OrdinalIgnoreCase))
+                    _failedCount++;
+                RunningCountsLabel = $"{_passedCount} passed · {_failedCount} failed";
+                return;
+            }
+        }
+
+        var firstSeparator = message.IndexOf(": ", StringComparison.Ordinal);
+        if (firstSeparator > 0)
+        {
+            var prefix = message[..firstSeparator];
+            var counts = prefix.Split('/', 2, StringSplitOptions.TrimEntries);
+            if (counts.Length == 2 && int.TryParse(counts[0], out _) && int.TryParse(counts[1], out var total))
+            {
+                _runningTotal = total;
+                ScenarioProgressLabel = $"{_completedCount} / {_runningTotal} complete";
+                CurrentScenarioLabel = FormatScenarioLabel(message[(firstSeparator + 2)..]);
+                CurrentStepLabel = "Current step: preparing scenario";
+                return;
+            }
+        }
+
+        var stepMarker = message.IndexOf(" step ", StringComparison.Ordinal);
+        var stepSeparator = stepMarker >= 0 ? message.IndexOf(": ", stepMarker, StringComparison.Ordinal) : -1;
+        if (stepMarker > 0 && stepSeparator > stepMarker)
+        {
+            var scenarioId = message[..stepMarker];
+            var stepNumber = message[(stepMarker + " step ".Length)..stepSeparator];
+            CurrentScenarioLabel = FormatScenarioLabel(scenarioId);
+            CurrentStepLabel = $"Current step: {stepNumber} - {message[(stepSeparator + 2)..]}";
+        }
+    }
+
+    private void ApplyFinalCounts(IReadOnlyList<AgentScenarioRunResult> results, int total)
+    {
+        _runningTotal = total;
+        _completedCount = results.Count;
+        _passedCount = results.Count(result => result.Passed);
+        _failedCount = results.Count - _passedCount;
+        ScenarioProgressLabel = $"{_completedCount} / {_runningTotal} complete";
+        RunningCountsLabel = $"{_passedCount} passed · {_failedCount} failed";
+    }
+
+    private string FormatScenarioLabel(string scenarioId)
+    {
+        var row = Scenarios.FirstOrDefault(candidate => string.Equals(candidate.Id, scenarioId, StringComparison.Ordinal));
+        return row is null ? $"Current scenario: {scenarioId}" : $"Current scenario: {row.Title} ({row.Id})";
+    }
 
     partial void OnIsRunningChanged(bool value) => RunSuiteCommand.NotifyCanExecuteChanged();
     partial void OnIsLoadingChanged(bool value) => RunSuiteCommand.NotifyCanExecuteChanged();

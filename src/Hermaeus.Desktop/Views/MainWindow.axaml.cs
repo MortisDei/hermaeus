@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -99,6 +100,7 @@ public partial class MainWindow : Window
                     "kept exactly as it is - nothing is deleted.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.Settings.Data.RequestApplicationRestart = RestartApplicationAsync;
             vm.Palette.PropertyChanged += OnPaletteViewModelPropertyChanged;
 
             if (vm.Settings.StartMinimized)
@@ -158,6 +160,33 @@ public partial class MainWindow : Window
             DataContext = viewModel
         };
         return await modal.ShowDialog<bool>(this);
+    }
+
+    private async Task RestartApplicationAsync()
+    {
+        if (_closeAfterShutdown || DataContext is not MainWindowViewModel vm)
+            return;
+
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+            throw new InvalidOperationException("The current application path is unavailable, so Hermaeus cannot restart itself.");
+
+        await vm.ShutdownAsync();
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = processPath,
+            UseShellExecute = false,
+            WorkingDirectory = Environment.CurrentDirectory
+        };
+        foreach (var argument in Environment.GetCommandLineArgs().Skip(1))
+            startInfo.ArgumentList.Add(argument);
+
+        if (Process.Start(startInfo) is null)
+            throw new InvalidOperationException("Hermaeus could not start the replacement process.");
+
+        _closeAfterShutdown = true;
+        Close();
     }
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)

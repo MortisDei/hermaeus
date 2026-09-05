@@ -76,6 +76,14 @@ public sealed class MemoryExtractionSchemaTests
         Assert.Equal(0.8, memories[0].ImportanceScore);
     }
 
+    [Theory]
+    [InlineData("No prior discussion about food paired with wine was found.")]
+    [InlineData("I could not find any earlier conversation mentioning wine.")]
+    public void Search_state_absence_conclusions_are_recognized_without_rejecting_the_extractor(string content)
+    {
+        Assert.True(MemoryExtractionService.IsUnsupportedAbsenceConclusion(content));
+    }
+
     // ── the constrained and unconstrained paths through auto-summary ──
 
     private sealed class ConstraintCapturingLlm : ILlmService
@@ -198,5 +206,20 @@ public sealed class MemoryExtractionSchemaTests
         await service.RunAutoSummaryAsync("conv-1");
 
         Assert.Empty(await memories.GetAllAsync(includeArchived: true));
+    }
+
+    [Fact]
+    public async Task Auto_summary_does_not_promote_a_model_generated_absence_conclusion()
+    {
+        using var temp = new TempDir();
+        var response = """
+            {"memories":[{"content":"No prior discussion about food paired with wine was found.","category":"facts","importance":1,"tags":["search"]}]}
+            """;
+        var (service, memories, _) = await BuildAsync(temp, supportsConstraints: true, response);
+
+        await service.RunAutoSummaryAsync("conv-1");
+
+        Assert.DoesNotContain(await memories.GetAllAsync(includeArchived: true),
+            memory => memory.Content.Contains("prior discussion", StringComparison.OrdinalIgnoreCase));
     }
 }
