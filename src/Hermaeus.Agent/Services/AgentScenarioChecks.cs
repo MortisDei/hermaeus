@@ -11,6 +11,7 @@ namespace Hermaeus.Agent.Services;
 /// </summary>
 public static class AgentScenarioChecks
 {
+    public const string EvaluatorContractVersion = AgentScenarioEvidenceContract.EvaluatorContractVersion;
     private static readonly string[] ReadTools = ["read_file", "summarize_file"];
 
     public static IReadOnlyList<AgentScenarioCheckResult> Evaluate(

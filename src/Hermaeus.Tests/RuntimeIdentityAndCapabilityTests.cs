@@ -458,6 +458,28 @@ public sealed class RuntimeIdentityAndCapabilityTests
             entry.Message.Contains("Capability cache write failed", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Capability_cache_replaces_an_existing_file_after_reading_it()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        var dataRoot = temp.PathFor("data");
+        Directory.CreateDirectory(dataRoot);
+        settings.Settings.DataManagement.DataRootDirectory = dataRoot;
+        await File.WriteAllTextAsync(Path.Combine(dataRoot, "capability-cache.json"), "[]");
+
+        var modelPath = temp.PathFor("model.gguf");
+        var executablePath = temp.PathFor("llama-server.exe");
+        await File.WriteAllTextAsync(modelPath, "model fixture");
+        await File.WriteAllTextAsync(executablePath, "runtime fixture");
+        var capability = new LocalModelCapabilityService(settings, new RuntimeLogService(settings));
+
+        var result = await capability.ProbeWithDriftAsync(modelPath, executablePath, "{}");
+
+        Assert.Equal(CapabilityCacheWriteState.Succeeded, result.CacheWrite?.State);
+        Assert.NotEqual("[]", await File.ReadAllTextAsync(Path.Combine(dataRoot, "capability-cache.json")));
+    }
+
     private static RuntimeCapabilityObservation Observation(string id, CapabilityState state) =>
         RuntimeCapabilityObservation.Create(id, state, "test", "bounded", Runtime(), null, null, DateTime.UnixEpoch);
 

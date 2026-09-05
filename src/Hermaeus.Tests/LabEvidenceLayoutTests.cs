@@ -67,4 +67,24 @@ public sealed class LabEvidenceLayoutTests
         Assert.Null((string?)card.Attribute("MaxHeight"));
         Assert.Null((string?)card.Attribute("Width"));
     }
+
+    [Fact]
+    public void Model_cards_render_tune_metadata_as_independent_wrappable_fields()
+    {
+        var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "ModelManagementView.axaml");
+        var doc = XDocument.Load(path);
+        var tunePanel = doc.Descendants().Single(element => element.Name.LocalName == "Border"
+            && (string?)element.Attribute("IsVisible") == "{Binding TuneSummary, Converter={x:Static views:NotEmptyConverter.Instance}}");
+        var fields = tunePanel.Descendants().Where(element => element.Name.LocalName == "Border").ToList();
+        Assert.Equal(3, fields.Count);
+        Assert.DoesNotContain(tunePanel.Descendants(), element => element.Name.LocalName == "WrapPanel");
+        var bindings = fields
+            .SelectMany(field => field.Descendants().Where(element => element.Name.LocalName == "TextBlock"))
+            .Select(element => (string?)element.Attribute("Text"))
+            .ToList();
+
+        Assert.Contains("{Binding TunedGpuLayersDisplay}", bindings);
+        Assert.Contains("{Binding TunedThreads, StringFormat='{}{0} threads'}", bindings);
+        Assert.Contains("{Binding TunedContextSize, StringFormat='Context {0:N0}'}", bindings);
+    }
 }

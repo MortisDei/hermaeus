@@ -9,9 +9,34 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [Unreleased]
+## [0.40.0-beta] - 2026-09-05
 
 ### Changed
+
+- Model cards now render saved tune metadata as independently wrappable GPU,
+  thread, and context fields. Scenario Eval suite and row Run actions now use
+  truthful command availability and the row binding resolves through the
+  ItemsControl data context. Foreground embedding queries are prioritized over
+  queued optional backfill, while physical gate, request, parse, coalescing,
+  payload, and logical timings are recorded without query text. Recall document
+  search scans the storage embedding index and FTS candidates before bounded
+  content hydration, and returns calibrated source relevance so useful document
+  hits are not discarded as tiny RRF ordering scores.
+- R32 chat diagnostics now report preparation as wall-clock time across the
+  concurrent memory, RAG, recall, and project-state branches instead of adding
+  overlapping spans. Identical foreground query-embedding requests share one
+  cancellable request, while lexical fallback and caller cancellation remain
+  intact. Identical memory searches share the complete retrieval work while
+  returning independent result lists. Scenario Eval results from both suite and
+  individual runs now persist model-content, scenario-definition,
+  evaluator-contract, runtime, timestamp,
+  counts, and check-detail evidence, and mismatched evidence is shown as stale.
+  Capability-cache replacement now closes the existing read handle before the
+  atomic write. The observed background embedding admission denial remains an
+  explicit bounded deferral when whole-workload headroom is insufficient.
+- The four Avalonia framework packages are now pinned coherently to 12.1.2.
+  AvaloniaEdit remains on its separate 12.0.0 package line; no new framework
+  controls or backend-selection changes are included.
 
 - R32 corrective work now completes pending Data Root moves at startup with
   per-file length and SHA256 verification, preserving the old active root and a
@@ -132,9 +157,9 @@ limit.
   the same managed GPU-placement owner shown on Services.
 - Native Kokoro health failures in Services now link directly to Doctor, which
   owns the verified asset diagnosis and repair action.
-- R32 development is prepared as `0.39.0-beta`; no release or tag is created
+- R32 development is prepared as `0.40.0-beta`; no release or tag is created
   by this work.
-- R32 dependency closeout migrates the Avalonia framework packages to 12.1.1,
+- R32 dependency closeout migrates the Avalonia framework packages to 12.1.2,
   AvaloniaEdit to its latest compatible stable 12.0.0 release, and the
   required Tmds.DBus.Protocol floor to 0.94.1. Clipboard and drag/drop paths
   use Avalonia 12 typed transfer APIs while preserving their existing user

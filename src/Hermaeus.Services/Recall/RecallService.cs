@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Rag.Embeddings;
@@ -30,15 +31,18 @@ public sealed class RecallService
     private readonly IReadOnlyList<IRecallSource> _sources;
     private readonly IEmbeddingService? _embeddings;
     private readonly TimeSpan _sourceTimeout;
+    private readonly IRuntimeLogService? _runtimeLogs;
 
     public RecallService(
         IEnumerable<IRecallSource> sources,
         IEmbeddingService? embeddings = null,
-        TimeSpan? sourceTimeout = null)
+        TimeSpan? sourceTimeout = null,
+        IRuntimeLogService? runtimeLogs = null)
     {
         _sources = sources.ToList();
         _embeddings = embeddings;
         _sourceTimeout = sourceTimeout ?? DefaultSourceTimeout;
+        _runtimeLogs = runtimeLogs;
     }
 
     public async Task<RecallResult> SearchAsync(string query, string projectScope = "", CancellationToken ct = default)
@@ -46,11 +50,18 @@ public sealed class RecallService
         if (string.IsNullOrWhiteSpace(query))
             return new RecallResult([], [], _embeddings is null);
 
+        var totalClock = Stopwatch.StartNew();
         var results = await Task.WhenAll(_sources.Select(s => RunOneAsync(s, query, projectScope, ct)));
+
+        _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Debug,
+            RuntimeLogCategory.Rag,
+            $"Recall search completed; total_ms={totalClock.ElapsedMilliseconds}, sources={string.Join(",", results.Select(result => $"{result.Source.Name}:{result.Hits.Count} hits/{result.ElapsedMs} ms"))}, omitted={string.Join(",", results.Where(result => result.Failed).Select(result => result.Source.Name))}."));
 
         var omitted = new List<string>();
         var ranked = new List<IReadOnlyList<RecallHit>>();
-        foreach (var (source, hits, failed) in results)
+        foreach (var (source, hits, failed, _) in results)
         {
             if (failed) omitted.Add(source.Name);
             else ranked.Add(hits);
@@ -59,20 +70,21 @@ public sealed class RecallService
         return new RecallResult(Fuse(ranked), omitted, _embeddings is null);
     }
 
-    private async Task<(IRecallSource Source, IReadOnlyList<RecallHit> Hits, bool Failed)> RunOneAsync(
+    private async Task<(IRecallSource Source, IReadOnlyList<RecallHit> Hits, bool Failed, long ElapsedMs)> RunOneAsync(
         IRecallSource source, string query, string projectScope, CancellationToken ct)
     {
+        var clock = Stopwatch.StartNew();
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(_sourceTimeout);
             var hits = await source.SearchAsync(query, projectScope, timeoutCts.Token);
-            return (source, hits, false);
+            return (source, hits, false, clock.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // The per-source timeout fired, not the caller's own cancellation.
-            return (source, [], true);
+            return (source, [], true, clock.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -81,7 +93,7 @@ public sealed class RecallService
         catch (Exception)
         {
             // A source that throws is omitted and named, never let it crash the search.
-            return (source, [], true);
+            return (source, [], true, clock.ElapsedMilliseconds);
         }
     }
 

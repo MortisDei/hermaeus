@@ -23,7 +23,8 @@ public readonly record struct ChatSendTiming(
     int ReasoningEventCount = 0,
     long ReasoningCharacterCount = 0,
     string ProviderTag = "",
-    string OperationId = "")
+    string OperationId = "",
+    long PreparationMs = 0)
 {
     /// <summary>A send whose pre-first-token wait exceeds this is worth a WARNING, not just an Info line.</summary>
     public const long SlowSendThresholdMs = 10_000;
@@ -35,8 +36,14 @@ public readonly record struct ChatSendTiming(
     /// </summary>
     public const double CpuSpeedPromptThreshold = 200;
 
-    /// <summary>Everything the user experienced as "silence" before the first received content delta: recall through content.</summary>
-    public long PreFirstTokenMs => RecallMs + SelectMs + LessonMs + RagMs + RecallInjectionMs + PromptBuildMs + FirstTokenMs;
+    /// <summary>
+    /// Everything the user experienced as silence before the first received
+    /// content delta. Preparation is a wall-clock span over concurrent branches;
+    /// the individual stage fields are component spans and must not be summed.
+    /// </summary>
+    public long PreFirstTokenMs => (PreparationMs > 0
+        ? PreparationMs
+        : RecallMs + SelectMs + LessonMs + RagMs + RecallInjectionMs + PromptBuildMs) + FirstTokenMs;
 
     /// <summary>
     /// Time between the first streamed event of any kind and the first
@@ -58,6 +65,9 @@ public readonly record struct ChatSendTiming(
         var s = $"recall {RecallMs} ms, select {SelectMs} ms, lesson {LessonMs} ms, rag {RagMs} ms, " +
                 $"recall-inject {RecallInjectionMs} ms, " +
                 $"prompt build {PromptBuildMs} ms, first content {FirstTokenMs} ms, total {TotalMs} ms";
+
+        if (PreparationMs > 0)
+            s += $", preparation {PreparationMs} ms";
 
         if (NonContentStreamMs > 0)
             s += $", non-content stream {NonContentStreamMs} ms";

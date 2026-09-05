@@ -380,10 +380,30 @@
 
                                     <Border IsVisible="{Binding TuneSummary, Converter={x:Static views:NotEmptyConverter.Instance}}"
                                             CornerRadius="4" Padding="6,3"
+                                            HorizontalAlignment="Stretch"
                                             Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                                             ToolTip.Tip="The shared auto-tune profile currently recorded for this model. It is not applied to a running service until the corresponding Services configuration is saved and started.">
-                                        <TextBlock Text="{Binding TuneSummary, StringFormat='Tuned: {0}'}"
-                                                   FontSize="11" TextWrapping="Wrap" />
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Tuned runtime profile"
+                                                       FontSize="10" FontWeight="SemiBold" Opacity="0.7" />
+                                            <StackPanel Spacing="3">
+                                                <Border CornerRadius="3" Padding="5,2"
+                                                        Background="{DynamicResource SubtleFillColorTertiaryBrush}">
+                                                    <TextBlock Text="{Binding TunedGpuLayersDisplay}"
+                                                               FontSize="11" TextWrapping="Wrap" />
+                                                </Border>
+                                                <Border CornerRadius="3" Padding="5,2"
+                                                        Background="{DynamicResource SubtleFillColorTertiaryBrush}">
+                                                    <TextBlock Text="{Binding TunedThreads, StringFormat='{}{0} threads'}"
+                                                               FontSize="11" TextWrapping="Wrap" />
+                                                </Border>
+                                                <Border CornerRadius="3" Padding="5,2"
+                                                        Background="{DynamicResource SubtleFillColorTertiaryBrush}">
+                                                    <TextBlock Text="{Binding TunedContextSize, StringFormat='Context {0:N0}'}"
+                                                               FontSize="11" TextWrapping="Wrap" />
+                                                </Border>
+                                            </StackPanel>
+                                        </StackPanel>
                                     </Border>
 
                                     <!-- Footer row -->
@@ -393,9 +413,8 @@
                                                    FontSize="11" Classes="faint"
                                                    VerticalAlignment="Center"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <!-- TuneSummary lives on this tooltip: it does not fit
-                                             the tile without crowding it, and no information
-                                             should be lost in the move to cards. -->
+                                        <!-- TuneSummary remains on the tooltip for full detail;
+                                             the visible fields above stay independently wrappable. -->
                                         <Button Grid.Column="1"
                                                 Content="{Binding IsTuning, Converter={x:Static views:BoolToTextConverter.Instance}, ConverterParameter='Tuning...|Auto tune'}"
                                                 Command="{Binding DataContext.AutoTuneModelCommand, ElementName=Root}"

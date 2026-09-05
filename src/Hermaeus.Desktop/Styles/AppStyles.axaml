@@ -33,7 +33,7 @@
          default arrow - usually without the tooltip ever painting. It is
          upstream AvaloniaUI/Avalonia#19218, which remains open. Its public
          report targets Avalonia 11.3.2 on macOS, and this migration does not
-         assume that 12.1.1 fixes the same feedback loop on Hermaeus's
+         assume that 12.1.2 fixes the same feedback loop on Hermaeus's
          supported platforms.
 
          ServiceEnabled false stops that service. ToolTip.Tip is still the

@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
 namespace Hermaeus.Agent.Models;
 
 /// <summary>
@@ -105,7 +109,112 @@ public sealed record AgentScenarioRunResult(
     int Steps,
     long DurationMs,
     string FinalStatus,
-    string? RunError);
+    string? RunError,
+    AgentScenarioEvidence? Evidence = null);
+
+public enum AgentScenarioEvidenceStatus
+{
+    Unknown,
+    Pass,
+    Fail,
+    Stale
+}
+
+public sealed record AgentScenarioEvidence(
+    string ModelId,
+    string ModelContentHash,
+    string ScenarioDefinitionHash,
+    string EvaluatorContractVersion,
+    string RuntimeIdentity,
+    DateTime ObservedAtUtc);
+
+/// <summary>
+/// The identity contract for persisted Scenario Eval results. A result is only
+/// applicable when the model identity, model content, scenario definition and
+/// evaluator contract still match. Runtime identity is retained as provenance,
+/// but does not invalidate a result by itself.
+/// </summary>
+public static class AgentScenarioEvidenceContract
+{
+    public const string EvaluatorContractVersion = "r32-agent-scenario-evaluator-v1";
+    public const string ModelIdKey = "model_id";
+    public const string ModelContentHashKey = "model_content_hash";
+    public const string ScenarioDefinitionHashKey = "scenario_definition_hash";
+    public const string EvaluatorContractVersionKey = "evaluator_contract_version";
+    public const string RuntimeIdentityKey = "runtime_identity";
+    public const string ObservedAtUtcKey = "observed_at_utc";
+    public const string ResultJsonKey = "result_json";
+
+    private static readonly JsonSerializerOptions HashJsonOptions = new()
+    {
+        WriteIndented = false,
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true
+    };
+
+    public static string ComputeScenarioDefinitionHash(AgentScenario scenario) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(scenario.Manifest, HashJsonOptions)))).ToLowerInvariant();
+
+    public static async Task<string> ComputeModelContentHashAsync(string modelId, CancellationToken ct = default)
+    {
+        if (!File.Exists(modelId))
+            return string.Empty;
+
+        await using var stream = new FileStream(
+            modelId,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            128 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
+    }
+
+    public static AgentScenarioEvidence Create(
+        AgentScenario scenario,
+        string modelId,
+        string modelContentHash,
+        string runtimeIdentity,
+        DateTime observedAtUtc) => new(
+        modelId,
+        modelContentHash,
+        ComputeScenarioDefinitionHash(scenario),
+        EvaluatorContractVersion,
+        string.IsNullOrWhiteSpace(runtimeIdentity) ? "Unknown" : runtimeIdentity,
+        observedAtUtc.ToUniversalTime());
+
+    public static AgentScenarioEvidenceStatus Assess(
+        AgentScenarioRunResult result,
+        AgentScenario scenario,
+        string currentModelId,
+        string currentModelContentHash)
+    {
+        var evidence = result.Evidence;
+        if (evidence is null)
+            return AgentScenarioEvidenceStatus.Unknown;
+
+        if (!string.Equals(result.ScenarioId, scenario.Manifest.Id, StringComparison.Ordinal))
+            return AgentScenarioEvidenceStatus.Stale;
+
+        if (!string.Equals(evidence.ModelId, currentModelId, StringComparison.OrdinalIgnoreCase))
+            return AgentScenarioEvidenceStatus.Stale;
+
+        var currentScenarioHash = ComputeScenarioDefinitionHash(scenario);
+        if (string.IsNullOrWhiteSpace(evidence.ModelContentHash)
+            || string.IsNullOrWhiteSpace(currentModelContentHash)
+            || string.IsNullOrWhiteSpace(evidence.ScenarioDefinitionHash)
+            || string.IsNullOrWhiteSpace(evidence.EvaluatorContractVersion))
+            return AgentScenarioEvidenceStatus.Unknown;
+
+        if (!string.Equals(evidence.ModelContentHash, currentModelContentHash, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(evidence.ScenarioDefinitionHash, currentScenarioHash, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(evidence.EvaluatorContractVersion, EvaluatorContractVersion, StringComparison.Ordinal))
+            return AgentScenarioEvidenceStatus.Stale;
+
+        return result.Passed ? AgentScenarioEvidenceStatus.Pass : AgentScenarioEvidenceStatus.Fail;
+    }
+}
 
 public sealed class AgentScenarioSuiteResult
 {

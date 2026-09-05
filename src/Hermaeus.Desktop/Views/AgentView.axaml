@@ -1394,7 +1394,8 @@
                                                             <TextBlock Text="{Binding SourceLabel}" FontSize="10" Opacity="0.7" />
                                                         </Border>
                                                         <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
-                                                                Background="{Binding Passed, Converter={StaticResource AgentScenarioStatusColor}}">
+                                                                Background="{Binding EvidenceStatus, Converter={StaticResource AgentScenarioStatusColor}}"
+                                                                ToolTip.Tip="{Binding EvidenceTooltip}">
                                                             <TextBlock Text="{Binding StatusLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
                                                         </Border>
                                                     </Grid>
@@ -1408,7 +1409,7 @@
                                                         <TextBlock Text="{Binding DurationDisplay}" FontSize="11" Opacity="0.5" />
                                                     </StackPanel>
                                                     <Button Content="Run"
-                                                            Command="{Binding DataContext.ScenarioSuite.RunScenarioCommand, ElementName=Root}"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.ScenarioSuite.RunScenarioCommand}"
                                                             CommandParameter="{Binding}"
                                                             Padding="10,4" CornerRadius="6" HorizontalAlignment="Left"
                                                             x:CompileBindings="False" />

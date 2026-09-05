@@ -2717,6 +2717,9 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private int _tunedContextSize;
 
     public bool HasTuneProfile => _tuneProfile is not null;
+    public string TunedGpuLayersDisplay => _tuneProfile?.TotalLayers is int total
+        ? $"{TunedGpuLayers}/{total} GPU layers"
+        : $"{TunedGpuLayers} GPU layers";
     public string TuneProfileContextWatermark => _tuneProfile is null
         ? "No saved tune"
         : "Saved context";
@@ -2728,6 +2731,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         TunedThreads = profile?.Threads ?? 0;
         TunedContextSize = profile?.ContextSize ?? 0;
         OnPropertyChanged(nameof(HasTuneProfile));
+        OnPropertyChanged(nameof(TunedGpuLayersDisplay));
         OnPropertyChanged(nameof(TuneProfileContextWatermark));
     }
 

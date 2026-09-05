@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Hermaeus.Agent.Models;
 using Hermaeus.Agent.Services;
+using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.ViewModels;
 using Xunit;
@@ -74,7 +76,7 @@ public sealed class AgentScenarioSuiteViewModelTests
         Assert.Equal("tag-a, tag-b", row.Tags);
         Assert.Equal("built-in", row.SourceLabel);
         Assert.Null(row.Passed);
-        Assert.Equal("Not run", row.StatusLabel);
+        Assert.Equal("Unknown", row.StatusLabel);
         Assert.Equal(string.Empty, vm.RunningHeadline);
     }
 
@@ -104,6 +106,21 @@ public sealed class AgentScenarioSuiteViewModelTests
 
         vm.ModelId = "some-model";
         Assert.True(vm.RunSuiteCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task RunScenarioCommand_tracks_the_same_execution_gate_as_the_suite()
+    {
+        var scenario = BuildScenario("s1", "One", [], isBuiltIn: true);
+        var vm = new AgentScenarioSuiteViewModel(
+            new FakeAgentScenarioStore([scenario]), new FakeAgentScenarioRunner(), new FakeToasts());
+
+        await vm.LoadScenariosAsync();
+        var row = Assert.Single(vm.Scenarios);
+        Assert.False(vm.RunScenarioCommand.CanExecute(row));
+
+        vm.ModelId = "some-model";
+        Assert.True(vm.RunScenarioCommand.CanExecute(row));
     }
 
     [Fact]
@@ -165,14 +182,12 @@ public sealed class AgentScenarioSuiteViewModelTests
             BuildScenario("s1", "One", [], isBuiltIn: true),
             BuildScenario("s2", "Two", [], isBuiltIn: true)
         };
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new FakeAgentScenarioRunner
         {
             OnRunSuiteWithProgress = async (_, _, progress, ct) =>
             {
                 progress!.Report("1/2: s1");
                 progress.Report("s1 step 3: WaitingForUser");
-                entered.SetResult();
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
                 throw new InvalidOperationException("cancellation should have ended the wait");
             }
@@ -180,8 +195,23 @@ public sealed class AgentScenarioSuiteViewModelTests
         var vm = new AgentScenarioSuiteViewModel(new FakeAgentScenarioStore(scenarios), runner, new FakeToasts()) { ModelId = "m1" };
         await vm.LoadScenariosAsync();
 
-        var run = vm.RunSuiteCommand.ExecuteAsync(null);
-        await entered.Task;
+        // Progress<T> captures the current context. The xUnit context can
+        // leave posted callbacks behind while this fake runner waits, so use
+        // the repository's inline context to observe the actual Report calls
+        // deterministically without changing production scheduling.
+        var progressContext = new CountingSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        Task run;
+        SynchronizationContext.SetSynchronizationContext(progressContext);
+        try
+        {
+            run = vm.RunSuiteCommand.ExecuteAsync(null);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
         await WaitForAsync(() => vm.CurrentStepLabel.Contains("WaitingForUser", StringComparison.Ordinal), "visible scenario step");
 
         Assert.True(vm.IsRunning);
@@ -236,5 +266,73 @@ public sealed class AgentScenarioSuiteViewModelTests
 
         Assert.True(row1.Passed);
         Assert.Null(row2.Passed);
+    }
+
+    [Fact]
+    public async Task LoadScenariosAsync_restores_failed_evidence_and_marks_it_stale_after_model_change()
+    {
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        await File.WriteAllTextAsync(modelPath, "model version one");
+        var scenario = BuildScenario("s1", "One", [], isBuiltIn: true);
+        var failed = new AgentScenarioRunResult(
+            "s1",
+            "One",
+            false,
+            [new AgentScenarioCheckResult("check-x", false, "failed evidence")],
+            3,
+            20,
+            "Blocked",
+            null,
+            AgentScenarioEvidenceContract.Create(
+                scenario,
+                modelPath,
+                await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelPath),
+                "Fake",
+                DateTime.UtcNow));
+        var evalStore = new FakeEvalStore();
+        await evalStore.SaveRunAsync(new EvalRun(
+            "suite-1",
+            EvalMode.AgentScenario,
+            new EvalTarget(modelPath, Label: "agent-scenarios"),
+            [new CaseResult(
+                "s1",
+                "check-x",
+                20,
+                Error: null,
+                Metadata: new Dictionary<string, string>
+                {
+                    [AgentScenarioEvidenceContract.ResultJsonKey] = JsonSerializer.Serialize(
+                        failed,
+                        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
+                })],
+            DateTime.UtcNow,
+            DateTime.UtcNow,
+            "suite-1"));
+
+        var vm = new AgentScenarioSuiteViewModel(
+            new FakeAgentScenarioStore([scenario]),
+            new FakeAgentScenarioRunner(),
+            new FakeToasts(),
+            evalStore)
+        {
+            ModelId = modelPath
+        };
+
+        await vm.LoadScenariosAsync();
+
+        var row = Assert.Single(vm.Scenarios);
+        Assert.Equal(AgentScenarioEvidenceStatus.Fail, row.EvidenceStatus);
+        Assert.False(row.Passed);
+        Assert.Contains("failed evidence", row.FailedCheckSummary);
+
+        await File.WriteAllTextAsync(modelPath, "model version two");
+        await vm.LoadScenariosAsync();
+
+        row = Assert.Single(vm.Scenarios);
+        Assert.Equal(AgentScenarioEvidenceStatus.Stale, row.EvidenceStatus);
+        Assert.Equal("STALE", row.StatusLabel);
+        Assert.False(row.Passed);
+        Assert.Contains("failed evidence", row.FailedCheckSummary);
     }
 }

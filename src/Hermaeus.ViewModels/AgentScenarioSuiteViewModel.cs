@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Hermaeus.Agent.Models;
 using Hermaeus.Agent.Services;
+using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -8,8 +10,8 @@ namespace Hermaeus.ViewModels;
 
 /// <summary>
 /// One scenario's row in the Agent workbench's Scenario Evals panel. Result
-/// fields start unset (never run this session) and are populated in place
-/// after a run so the list does not lose scroll position/selection mid-suite.
+/// fields start as Unknown and are populated from applicable persisted evidence
+/// or a live run so the list does not lose scroll position/selection mid-suite.
 /// </summary>
 public sealed partial class AgentScenarioRowViewModel : ObservableObject
 {
@@ -30,18 +32,40 @@ public sealed partial class AgentScenarioRowViewModel : ObservableObject
     [ObservableProperty] private string _failedCheckSummary = string.Empty;
     [ObservableProperty] private int _steps;
     [ObservableProperty] private string _durationDisplay = string.Empty;
+    [ObservableProperty] private AgentScenarioEvidenceStatus _evidenceStatus;
 
     public bool HasFailure => Passed == false;
-    public string StatusLabel => Passed switch
+    public string StatusLabel => EvidenceStatus switch
     {
-        true => "PASS",
-        false => "FAIL",
-        null => "Not run"
+        AgentScenarioEvidenceStatus.Pass => "PASS",
+        AgentScenarioEvidenceStatus.Fail => "FAIL",
+        AgentScenarioEvidenceStatus.Stale => "STALE",
+        _ => "Unknown"
+    };
+
+    public string EvidenceTooltip => EvidenceStatus switch
+    {
+        AgentScenarioEvidenceStatus.Pass => "Applicable persisted evidence passed against the current model content, scenario definition, and evaluator contract.",
+        AgentScenarioEvidenceStatus.Fail => "Applicable persisted evidence failed against the current model content, scenario definition, and evaluator contract.",
+        AgentScenarioEvidenceStatus.Stale => "Historical evidence exists, but its model content, scenario definition, or evaluator contract no longer matches the current run.",
+        _ => "No applicable persisted evidence is available for the current model and evaluator contract."
     };
 
     public void ApplyResult(AgentScenarioRunResult result)
     {
         Passed = result.Passed;
+        EvidenceStatus = result.Passed ? AgentScenarioEvidenceStatus.Pass : AgentScenarioEvidenceStatus.Fail;
+        Steps = result.Steps;
+        DurationDisplay = $"{result.DurationMs} ms";
+        FailedCheckSummary = result.Passed
+            ? string.Empty
+            : string.Join("; ", result.Checks.Where(c => !c.Passed).Select(c => $"{c.CheckId}: {c.Detail}"));
+    }
+
+    public void ApplyPersistedResult(AgentScenarioRunResult result, AgentScenarioEvidenceStatus status)
+    {
+        Passed = result.Passed;
+        EvidenceStatus = status;
         Steps = result.Steps;
         DurationDisplay = $"{result.DurationMs} ms";
         FailedCheckSummary = result.Passed
@@ -52,6 +76,7 @@ public sealed partial class AgentScenarioRowViewModel : ObservableObject
     public void ResetResult()
     {
         Passed = null;
+        EvidenceStatus = AgentScenarioEvidenceStatus.Unknown;
         FailedCheckSummary = string.Empty;
         Steps = 0;
         DurationDisplay = string.Empty;
@@ -61,6 +86,12 @@ public sealed partial class AgentScenarioRowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasFailure));
         OnPropertyChanged(nameof(StatusLabel));
+    }
+
+    partial void OnEvidenceStatusChanged(AgentScenarioEvidenceStatus value)
+    {
+        OnPropertyChanged(nameof(StatusLabel));
+        OnPropertyChanged(nameof(EvidenceTooltip));
     }
 }
 
@@ -78,6 +109,12 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     private readonly IToastService _toasts;
     private IReadOnlyList<AgentScenario> _loadedScenarios = [];
     private CancellationTokenSource? _cts;
+    private readonly SemaphoreSlim _restoreGate = new(1, 1);
+    private static readonly JsonSerializerOptions EvalResultJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true
+    };
 
     public UiBoundCollection<AgentScenarioRowViewModel> Scenarios { get; } = [];
 
@@ -99,17 +136,20 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
 
     public int ScenarioCount => Scenarios.Count;
 
-    public AgentScenarioSuiteViewModel(IAgentScenarioStore store, IAgentScenarioRunner runner, IToastService toasts)
+    public AgentScenarioSuiteViewModel(IAgentScenarioStore store, IAgentScenarioRunner runner, IToastService toasts, IEvalStore? evalStore = null)
     {
         _store = store;
         _runner = runner;
         _toasts = toasts;
+        _evalStore = evalStore;
         Scenarios.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(ScenarioCount));
             RunSuiteCommand.NotifyCanExecuteChanged();
         };
     }
+
+    private readonly IEvalStore? _evalStore;
 
     [RelayCommand]
     public async Task LoadScenariosAsync()
@@ -121,7 +161,11 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
             _loadedScenarios = await _store.LoadAllAsync(warnings);
             Scenarios.Clear();
             foreach (var scenario in _loadedScenarios)
-                Scenarios.Add(new AgentScenarioRowViewModel(scenario));
+            Scenarios.Add(new AgentScenarioRowViewModel(scenario));
+
+            RunScenarioCommand.NotifyCanExecuteChanged();
+
+            await RestorePersistedResultsAsync();
 
             StatusMessage = $"{Scenarios.Count} scenario(s) loaded.";
             if (warnings.Count > 0)
@@ -177,7 +221,7 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRunScenario))]
     private async Task RunScenarioAsync(AgentScenarioRowViewModel? row)
     {
         if (row is null || IsRunning || IsLoading || string.IsNullOrWhiteSpace(ModelId)) return;
@@ -216,6 +260,8 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     private void CancelSuite() => _cts?.Cancel();
 
     private bool CanRun() => !IsRunning && !IsLoading && !string.IsNullOrWhiteSpace(ModelId) && Scenarios.Count > 0;
+
+    private bool CanRunScenario(AgentScenarioRowViewModel? row) => row is not null && CanRun();
 
     private void ResetRunningProgress(int total, string headline)
     {
@@ -306,7 +352,76 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
         return row is null ? $"Current scenario: {scenarioId}" : $"Current scenario: {row.Title} ({row.Id})";
     }
 
-    partial void OnIsRunningChanged(bool value) => RunSuiteCommand.NotifyCanExecuteChanged();
-    partial void OnIsLoadingChanged(bool value) => RunSuiteCommand.NotifyCanExecuteChanged();
-    partial void OnModelIdChanged(string value) => RunSuiteCommand.NotifyCanExecuteChanged();
+    partial void OnIsRunningChanged(bool value)
+    {
+        RunSuiteCommand.NotifyCanExecuteChanged();
+        RunScenarioCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsLoadingChanged(bool value)
+    {
+        RunSuiteCommand.NotifyCanExecuteChanged();
+        RunScenarioCommand.NotifyCanExecuteChanged();
+    }
+    private async Task RestorePersistedResultsAsync()
+    {
+        if (_evalStore is null || _loadedScenarios.Count == 0 || string.IsNullOrWhiteSpace(ModelId))
+            return;
+
+        var modelId = ModelId;
+        await _restoreGate.WaitAsync();
+        try
+        {
+            var modelHash = await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelId);
+            var runs = await _evalStore.GetRunsAsync(EvalMode.AgentScenario);
+            if (!string.Equals(ModelId, modelId, StringComparison.OrdinalIgnoreCase))
+                return;
+            var latestByScenario = runs
+                .OrderByDescending(run => run.StartedAt)
+                .SelectMany(run => run.CaseResults.Select(caseResult => (run, caseResult)))
+                .Where(item => item.caseResult.Metadata?.ContainsKey(AgentScenarioEvidenceContract.ResultJsonKey) == true)
+                .GroupBy(item => item.caseResult.CaseId, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().caseResult, StringComparer.Ordinal);
+
+            foreach (var scenario in _loadedScenarios)
+            {
+                if (!latestByScenario.TryGetValue(scenario.Manifest.Id, out var caseResult)
+                    || caseResult.Metadata is null
+                    || !caseResult.Metadata.TryGetValue(AgentScenarioEvidenceContract.ResultJsonKey, out var resultJson))
+                    continue;
+
+                AgentScenarioRunResult? result;
+                try
+                {
+                    result = JsonSerializer.Deserialize<AgentScenarioRunResult>(resultJson, EvalResultJsonOptions);
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (result is null)
+                    continue;
+
+                var status = AgentScenarioEvidenceContract.Assess(result, scenario, modelId, modelHash);
+                Scenarios.FirstOrDefault(row => string.Equals(row.Id, scenario.Manifest.Id, StringComparison.Ordinal))
+                    ?.ApplyPersistedResult(result, status);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _toasts.Show("Scenario history unavailable", ex.Message, ToastKind.Warning);
+        }
+        finally
+        {
+            _restoreGate.Release();
+        }
+    }
+
+    partial void OnModelIdChanged(string value)
+    {
+        RunSuiteCommand.NotifyCanExecuteChanged();
+        RunScenarioCommand.NotifyCanExecuteChanged();
+        _ = RestorePersistedResultsAsync();
+    }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Hermaeus.Core.Services;
 using Hermaeus.Core.Models;
@@ -409,6 +410,7 @@ public sealed class RecallIndexStore
     public async Task<(List<RecallEntry> Results, bool KeywordOnly)> SearchAsync(
         string kind, string query, string projectScope, CancellationToken ct = default, bool includeArchived = false)
     {
+        var searchClock = Stopwatch.StartNew();
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
@@ -451,6 +453,7 @@ public sealed class RecallIndexStore
         if (_embeddings is null)
         {
             AssignLexicalRelevance(ftsResults);
+            LogSearch(kind, ftsResults.Count, ftsResults.Count, 0, ftsResults.Count, keywordOnly: true, searchClock.ElapsedMilliseconds);
             return (ftsResults, true);
         }
 
@@ -468,6 +471,7 @@ public sealed class RecallIndexStore
         catch (Exception)
         {
             AssignLexicalRelevance(ftsResults);
+            LogSearch(kind, ftsResults.Count, ftsResults.Count, 0, ftsResults.Count, keywordOnly: true, searchClock.ElapsedMilliseconds);
             return (ftsResults, true);
         }
 
@@ -550,7 +554,17 @@ public sealed class RecallIndexStore
             .OrderByDescending(e => e.RelevanceScore)
             .Take(100)
             .ToList();
+        LogSearch(kind, ftsResults.Count, candidates.Count, nonFtsScores.Count, results.Count, keywordOnly: false, searchClock.ElapsedMilliseconds);
         return (results, false);
+    }
+
+    private void LogSearch(string kind, int ftsCandidates, int candidates, int denseOnlyCandidates, int returned, bool keywordOnly, long totalMs)
+    {
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Debug,
+            RuntimeLogCategory.Rag,
+            $"Recall index search completed; kind={kind}, fts_candidates={ftsCandidates}, candidates={candidates}, dense_only_candidates={denseOnlyCandidates}, relevance_survivors={returned}, keyword_only={keywordOnly}, total_ms={totalMs}."));
     }
 
     /// <summary>
@@ -627,7 +641,9 @@ public sealed class RecallIndexStore
 
                 try
                 {
-                    var vector = await _embeddings.EmbedAsync(text, ct);
+                    var vector = _embeddings is IBackgroundEmbeddingService backgroundEmbeddings
+                        ? await backgroundEmbeddings.EmbedBackgroundAsync(text, ct)
+                        : await _embeddings.EmbedAsync(text, ct);
                     await using var update = c.CreateCommand();
                     update.CommandText = "UPDATE recall_entries SET embedding = $emb, embedding_dim = $dim, embedding_attempts = 0, embedding_next_attempt_at = NULL, embedding_last_error = NULL WHERE id = $id";
                     update.Parameters.AddWithValue("$emb", ToBlob(vector));

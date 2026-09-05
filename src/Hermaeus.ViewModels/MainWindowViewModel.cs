@@ -436,7 +436,11 @@ public partial class MainWindowViewModel : ViewModelBase
         _startupPhases.Add(new StartupPhase("local API state", step.ElapsedMilliseconds));
 
         step.Restart();
-        await RunBackgroundTaskCoreAsync("load chat models", () => Chat.LoadModelsAsync());
+        await RunBackgroundTaskCoreAsync("load chat and agent models", async () =>
+        {
+            await Chat.LoadModelsAsync();
+            await Agent.LoadAsync();
+        });
         _startupPhases.Add(new StartupPhase("chat models", step.ElapsedMilliseconds));
         // Fire and forget: the same isolation and the same log line, without the
         // await. A model load behind a five-minute health deadline is no longer
@@ -1231,7 +1235,7 @@ public partial class MainWindowViewModel : ViewModelBase
                         return Task.CompletedTask;
                 }
 
-                return Chat.LoadModelsAsync(force: true);
+                return RefreshChatAndAgentModelsAsync();
             });
         }
         catch (Exception ex)
@@ -1240,6 +1244,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 $"Model refresh failed: {ex.Message}"));
             _toasts.Show("Model refresh failed", ex.Message, ToastKind.Warning, 7000);
         }
+    }
+
+    private async Task RefreshChatAndAgentModelsAsync()
+    {
+        await Chat.LoadModelsAsync(force: true);
+        await Agent.LoadAsync();
     }
 
     /// <summary>

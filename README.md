@@ -430,7 +430,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.39.0-beta**
+**0.40.0-beta**
 
 Major systems currently implemented include:
 

@@ -32,21 +32,21 @@ own `.nuspec`.
 
 | Package | Version | Licence | Copyright |
 | --- | --- | --- | --- |
-| Avalonia | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | Avalonia.Angle.Windows.Natives | 2.1.27548.20260419 | BSD-3-Clause (ANGLE) | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | Avalonia.AvaloniaEdit | 12.0.0 | MIT | Copyright 2017-2026 (c) The AvaloniaUI Project |
 | Avalonia.BuildServices | 11.3.2 | MIT | Copyright 2023-2025 (c) The AvaloniaUI Project |
-| Avalonia.Desktop | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Fonts.Inter | 12.1.1 | MIT (package); the Inter font itself is SIL OFL 1.1, see section 3 | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.FreeDesktop | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.FreeDesktop.AtSpi | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.HarfBuzz | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Native | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Remote.Protocol | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Skia | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Themes.Fluent | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Win32 | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.X11 | 12.1.1 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Desktop | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Fonts.Inter | 12.1.2 | MIT (package); the Inter font itself is SIL OFL 1.1, see section 3 | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.FreeDesktop | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.FreeDesktop.AtSpi | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.HarfBuzz | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Native | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Remote.Protocol | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Skia | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Themes.Fluent | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Win32 | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.X11 | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | CommunityToolkit.Mvvm | 8.3.2 | MIT | (c) .NET Foundation and Contributors |
 | Google.Protobuf | 3.30.2 | BSD-3-Clause | Copyright 2015, Google Inc. |
 | HarfBuzzSharp | 8.3.1.3 | MIT | (c) Microsoft Corporation |

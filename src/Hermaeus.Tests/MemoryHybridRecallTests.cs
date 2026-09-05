@@ -42,6 +42,36 @@ public sealed class MemoryHybridRecallTests
         return new MemoryStore(s, new TopicEmbeddingService());
     }
 
+    private sealed class BlockingCountingEmbeddingService : IEmbeddingService
+    {
+        private int _calls;
+
+        public int Dimensions => 3;
+
+        public TaskCompletionSource<object?> FirstCallStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<object?> ReleaseFirstCall { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+        {
+            var call = Interlocked.Increment(ref _calls);
+            if (call == 1)
+            {
+                FirstCallStarted.TrySetResult(null);
+                await ReleaseFirstCall.Task.WaitAsync(ct);
+            }
+
+            return [1f, 0f, 0f];
+        }
+
+        public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+            Task.FromResult(texts.Select(_ => new[] { 1f, 0f, 0f }).ToList());
+    }
+
     [Fact]
     public async Task Hybrid_search_surfaces_a_semantic_match_with_no_lexical_overlap()
     {
@@ -63,6 +93,64 @@ public sealed class MemoryHybridRecallTests
         var top = results.OrderByDescending(m => m.RelevanceScore).First();
         Assert.Equal("m1", top.Id);
         Assert.True(top.RelevanceScore > 0, "the top hybrid result should carry a positive relevance score");
+    }
+
+    [Fact]
+    public async Task Concurrent_identical_searches_share_the_database_retrieval()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var seedStore = new MemoryStore(settings);
+        await seedStore.InitializeAsync();
+        await seedStore.SaveAsync(new Memory { Id = "m1", Content = "needle in a stored memory" });
+
+        var embeddings = new BlockingCountingEmbeddingService();
+        var store = new MemoryStore(settings, embeddings);
+        var first = store.SearchAsync("needle");
+        await embeddings.FirstCallStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // SearchAsync enters the shared wait before returning its task, so the
+        // second caller is attached while the first query is still blocked.
+        var second = store.SearchAsync("needle");
+        embeddings.ReleaseFirstCall.TrySetResult(null);
+
+        await Task.WhenAll(first, second);
+        var firstResults = await first;
+        var secondResults = await second;
+
+        Assert.Equal(1, embeddings.Calls);
+        Assert.Equal("m1", Assert.Single(firstResults).Id);
+        Assert.Equal("m1", Assert.Single(secondResults).Id);
+    }
+
+    [Fact]
+    public async Task Canceling_one_identical_search_waiter_keeps_the_other_search_alive()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var seedStore = new MemoryStore(settings);
+        await seedStore.InitializeAsync();
+        await seedStore.SaveAsync(new Memory { Id = "m1", Content = "needle in a stored memory" });
+
+        var embeddings = new BlockingCountingEmbeddingService();
+        var store = new MemoryStore(settings, embeddings);
+        using var canceled = new CancellationTokenSource();
+        var first = store.SearchAsync("needle", canceled.Token);
+        await embeddings.FirstCallStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = store.SearchAsync("needle");
+
+        canceled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+
+        embeddings.ReleaseFirstCall.TrySetResult(null);
+        var results = await second;
+
+        Assert.Equal(1, embeddings.Calls);
+        Assert.Equal("m1", Assert.Single(results).Id);
     }
 
     /// <summary>r11 3.3: FTS candidates used to be ordered by is_pinned/importance_score/updated_at, so the "FTS rank" half of hybrid scoring measured importance, not how well the text matched. A short, term-dense match must now outrank a long, low-relevance one even though it has far lower importance.</summary>

@@ -310,6 +310,29 @@ public sealed class AgentScenarioRunnerTests
         var saved = Assert.Single(savedRuns);
         Assert.Equal(suite.Id, saved.Id);
         Assert.Equal(2, saved.CaseResults.Count);
+        Assert.All(suite.Results, result => Assert.NotNull(result.Evidence));
+        Assert.All(saved.CaseResults, result => Assert.Contains(AgentScenarioEvidenceContract.ResultJsonKey, result.Metadata!.Keys));
+    }
+
+    [Fact]
+    public async Task Individual_scenario_runs_are_persisted_for_restart_restore()
+    {
+        using var temp = new TempDir();
+        var settings = NewIsolatedSettings(temp);
+        var workspaceDir = temp.PathFor("scenario-src/workspace");
+        Directory.CreateDirectory(workspaceDir);
+        File.WriteAllText(Path.Combine(workspaceDir, "README.md"), "one");
+        var scenario = NewScenario(workspaceDir);
+        var evalStore = new FakeEvalStore();
+
+        var runner = new AgentScenarioRunner(new FakeSequencedAgentLlm([]), settings, evalStore);
+        var result = await runner.RunScenarioAsync(scenario, "test-model");
+
+        var saved = Assert.Single(await evalStore.GetRunsAsync(EvalMode.AgentScenario));
+        Assert.Equal("test-model", saved.Target.ModelId);
+        Assert.Equal(scenario.Manifest.Id, saved.CaseResults[0].CaseId);
+        Assert.Contains(AgentScenarioEvidenceContract.ResultJsonKey, saved.CaseResults[0].Metadata!.Keys);
+        Assert.NotNull(result.Evidence);
     }
 
     [Fact]

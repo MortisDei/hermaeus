@@ -536,14 +536,7 @@ public sealed class LocalModelCapabilityService
         {
             var entries = new List<CapabilityCacheEntry>();
             if (File.Exists(cachePath))
-            {
-                try
-                {
-                    await using var stream = OpenSharedRead(cachePath);
-                    entries = await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
-                }
-                catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { entries = []; }
-            }
+                entries = await ReadCacheEntriesAsync(cachePath, ct);
 
             var identity = Identity(modelPath, executablePath);
             var runtimeIdentity = knownRuntimeIdentity
@@ -576,6 +569,19 @@ public sealed class LocalModelCapabilityService
         FileShare.ReadWrite | FileShare.Delete,
         bufferSize: 4096,
         useAsync: true);
+
+    private static async Task<List<CapabilityCacheEntry>> ReadCacheEntriesAsync(string cachePath, CancellationToken ct)
+    {
+        try
+        {
+            await using var stream = OpenSharedRead(cachePath);
+            return await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
 
     private static (string ModelPath, long ModelSize, DateTime ModelMtime, string ExecutablePath, long ExecutableSize, DateTime ExecutableMtime) Identity(string modelPath, string executablePath)
     {

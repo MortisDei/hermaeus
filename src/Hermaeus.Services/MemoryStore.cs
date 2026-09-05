@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
@@ -40,6 +42,7 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly SemaphoreSlim _backfillGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, Lazy<SharedMemorySearch>> _inFlightSearches = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (DateTime NextAttemptUtc, int Attempts)> _backfillState = new(StringComparer.Ordinal);
     private bool _queryEmbedFallbackLogged;
 
@@ -1551,6 +1554,36 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
 
     public async Task<List<Memory>> SearchAsync(string q, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
+        // Chat memory injection and the generic recall source can ask for the
+        // same query concurrently. Share the complete FTS, dense-score, and
+        // relationship search, not only the embedding request inside it.
+        var lazySearch = _inFlightSearches.GetOrAdd(
+            q,
+            _ => new Lazy<SharedMemorySearch>(
+                () => new SharedMemorySearch(token => SearchCoreAsync(q, token)),
+                LazyThreadSafetyMode.ExecutionAndPublication));
+        var search = lazySearch.Value;
+
+        try
+        {
+            var results = await search.WaitAsync(ct);
+            return [.. results];
+        }
+        finally
+        {
+            if (search.Completion.IsCompleted
+                && _inFlightSearches.TryRemove(new KeyValuePair<string, Lazy<SharedMemorySearch>>(q, lazySearch)))
+            {
+                search.Dispose();
+            }
+        }
+    }
+
+    private async Task<List<Memory>> SearchCoreAsync(string q, CancellationToken ct)
+    {
+        var searchClock = Stopwatch.StartNew();
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
@@ -1611,11 +1644,26 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
             // injection selection always has a real score to weigh, whether
             // or not hybrid recall is available.
             AssignLexicalRelevance(ftsResults);
-            return await ExpandOneHopRelationshipsAsync(c, ApplyRelevanceFloor(ftsResults), ct);
+            var lexicalPrimary = ApplyRelevanceFloor(ftsResults);
+            var lexicalFinal = await ExpandOneHopRelationshipsAsync(c, lexicalPrimary, ct);
+            LogMemorySearch(ftsResults.Count, lexicalPrimary.Count, lexicalFinal.Count, embedding: false, searchClock.ElapsedMilliseconds);
+            return lexicalFinal;
         }
 
         var hybridResults = await HybridRerankAsync(c, q, ftsResults, ct);
-        return await ExpandOneHopRelationshipsAsync(c, ApplyRelevanceFloor(hybridResults), ct);
+        var hybridPrimary = ApplyRelevanceFloor(hybridResults);
+        var hybridFinal = await ExpandOneHopRelationshipsAsync(c, hybridPrimary, ct);
+        LogMemorySearch(ftsResults.Count, hybridPrimary.Count, hybridFinal.Count, embedding: true, searchClock.ElapsedMilliseconds);
+        return hybridFinal;
+    }
+
+    private void LogMemorySearch(int candidates, int relevant, int returned, bool embedding, long totalMs)
+    {
+        _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Debug,
+            RuntimeLogCategory.Rag,
+            $"Memory search completed; embedding={embedding}, candidates={candidates}, relevance_survivors={relevant}, relationship_returned={returned}, total_ms={totalMs}."));
     }
 
     private static List<Memory> ApplyRelevanceFloor(IEnumerable<Memory> candidates) =>
@@ -1883,7 +1931,9 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
 
                 try
                 {
-                    var vector = await _embeddings.EmbedAsync(content, ct);
+                    var vector = _embeddings is IBackgroundEmbeddingService backgroundEmbeddings
+                        ? await backgroundEmbeddings.EmbedBackgroundAsync(content, ct)
+                        : await _embeddings.EmbedAsync(content, ct);
                     var update = c.CreateCommand();
                     update.CommandText = "UPDATE memories SET embedding = $embedding, embedding_dim = $dim WHERE id = $id";
                     update.Parameters.AddWithValue("$embedding", ToBlob(vector));
@@ -2567,5 +2617,61 @@ public sealed class MemoryStore : IMemoryStore, IKnowledgeRevisionStore
                 LastRecalledAt = LastRecalledAt
             };
         }
+    }
+
+    private sealed class SharedMemorySearch : IDisposable
+    {
+        private readonly object _gate = new();
+        private readonly CancellationTokenSource _requestCts = new();
+        private int _waiters;
+        private bool _completed;
+        private bool _cancelled;
+
+        public SharedMemorySearch(Func<CancellationToken, Task<List<Memory>>> factory) =>
+            Completion = RunAsync(factory);
+
+        public Task<List<Memory>> Completion { get; }
+
+        public async Task<List<Memory>> WaitAsync(CancellationToken ct)
+        {
+            lock (_gate)
+                _waiters++;
+
+            try
+            {
+                return await Completion.WaitAsync(ct);
+            }
+            finally
+            {
+                var cancel = false;
+                lock (_gate)
+                {
+                    _waiters--;
+                    if (_waiters == 0 && !_completed && !_cancelled)
+                    {
+                        _cancelled = true;
+                        cancel = true;
+                    }
+                }
+
+                if (cancel)
+                    _requestCts.Cancel();
+            }
+        }
+
+        private async Task<List<Memory>> RunAsync(Func<CancellationToken, Task<List<Memory>>> factory)
+        {
+            try
+            {
+                return await factory(_requestCts.Token);
+            }
+            finally
+            {
+                lock (_gate)
+                    _completed = true;
+            }
+        }
+
+        public void Dispose() => _requestCts.Dispose();
     }
 }

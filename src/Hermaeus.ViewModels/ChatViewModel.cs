@@ -1311,12 +1311,13 @@ public partial class ChatViewModel : ViewModelBase
         var chunker = streamingSpeech ? new SentenceChunker() : null;
         try
         {
-            // r27 02-retrieval-that-scales.md 2.6: the three injections are
+            // r27 02-retrieval-that-scales.md 2.6: the four injections are
             // independent, and r21 1.3's reason for keeping them sequential (a
             // legible trace breakdown) survives concurrency untouched, because
             // each already carries its own stopwatch and each timer still
             // measures only its own task. The pre-stream wait becomes the
-            // slowest of the three rather than their sum.
+            // slowest of the four rather than their sum.
+            var preparationClock = Stopwatch.StartNew();
             var memoryTask = BuildMemoryInjectionAsync(text, _cts.Token);
             var ragTask = BuildRagInjectionAsync(text, _cts.Token, operationId);
             var recallTask = BuildRecallInjectionAsync(text, _cts.Token);
@@ -1382,6 +1383,7 @@ public partial class ChatViewModel : ViewModelBase
                 phaseCts.Token);
 
             var sendOptions = BuildChatOptions(memoryContext, ragAndRecallContext);
+            var preparationMs = preparationClock.ElapsedMilliseconds;
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
                 sendOptions,
@@ -1419,7 +1421,7 @@ public partial class ChatViewModel : ViewModelBase
             var providerTag = SelectedModel.ProviderTag;
             var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs,
                 result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs,
-                result.ReasoningEventCount, result.ReasoningCharacterCount, providerTag, operationId);
+                result.ReasoningEventCount, result.ReasoningCharacterCount, providerTag, operationId, preparationMs);
             _runtimeLogs.Add(new RuntimeLogEntry(
                 DateTime.UtcNow,
                 RuntimeLogLevel.Info,
@@ -2186,6 +2188,9 @@ public partial class ChatViewModel : ViewModelBase
                     injectedIds.AddRange(selected.Select(m => m.Id));
                     await _memoryStore.MarkRecalledAsync(injectedIds, ct);
                 }
+
+                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Debug, RuntimeLogCategory.Rag,
+                    $"Memory injection completed; candidates={candidates.Count}, selected={selected.Count}, recall_ms={recallMs}, select_ms={selectMs}."));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -2352,6 +2357,9 @@ public partial class ChatViewModel : ViewModelBase
             var note = result.OmittedSources.Count > 0
                 ? $"omitted: {string.Join(", ", result.OmittedSources)}"
                 : result.KeywordOnly ? "keyword-only (no embedding model)" : string.Empty;
+
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Debug, RuntimeLogCategory.Rag,
+                $"Recall injection completed; source_hits={result.Hits.Count}, selected={selected.Count}, budget_tokens={budget}, used_tokens={used}, total_ms={sw.ElapsedMilliseconds}, note={note}."));
 
             return (contextText, sources, sw.ElapsedMilliseconds, selected.Count, note);
         }

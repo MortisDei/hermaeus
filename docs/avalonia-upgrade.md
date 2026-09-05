@@ -9,18 +9,18 @@ for the containment rationale.
 
 The Avalonia framework packages (`Avalonia`, `Avalonia.Desktop`,
 `Avalonia.Themes.Fluent`, and `Avalonia.Fonts.Inter`) are pinned to the same
-exact `12.1.1` version in `src/Hermaeus.Desktop/Hermaeus.Desktop.csproj`.
+exact `12.1.2` version in `src/Hermaeus.Desktop/Hermaeus.Desktop.csproj`.
 `Avalonia.AvaloniaEdit` is pinned to its latest stable `12.0.0` release because
-no `12.1.1` package exists. Its package dependency targets Avalonia 12.0.0 or
-newer, so restore resolves it against the 12.1.1 framework. This is the only
+it remains on a separate package line. Its package dependency targets Avalonia
+12.0.0 or newer, so restore resolves it against the 12.1.2 framework. This is the only
 intentional package-family version difference and must be checked whenever the
 framework moves.
 
 ## R32 migration record
 
-The R32 closeout moved the four framework packages to 12.1.1, AvaloniaEdit to
-12.0.0, and the direct `Tmds.DBus.Protocol` reference to 0.94.1, the minimum
-required by Avalonia 12.1.1's Linux dependency chain. Avalonia 12 enables
+The R32 closeout moves the four framework packages to 12.1.2, keeps
+AvaloniaEdit at 12.0.0, and retains the direct `Tmds.DBus.Protocol` reference
+at 0.94.1. Avalonia 12 enables
 compiled bindings by default, so the Desktop project explicitly retains the
 existing reflection-binding default until views are migrated to explicit data
 types. The migration also replaced the obsolete clipboard and drag/drop APIs
@@ -28,7 +28,7 @@ with Avalonia 12's typed transfer APIs, and replaced the obsolete `Watermark`
 property with `PlaceholderText` without changing the displayed prompts.
 
 The built-in tooltip service remains disabled. Upstream issue #19218 is still
-open, and this migration records no assumption that Avalonia 12.1.1 fixes that
+open, and this migration records no assumption that Avalonia 12.1.2 fixes that
 feedback loop. Owner validation of tooltips, theme switching, window behavior,
 tray integration, and Windows runtime behavior remains required.
 

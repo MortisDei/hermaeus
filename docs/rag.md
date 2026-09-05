@@ -243,6 +243,12 @@ outcome without holding anything open for the life of the process.
   raw exception, both from the RAG panel and from a chat send with a
   Knowledge dataset attached. The fallback is not cached - the next query
   probes the embedding server again and is fully semantic once it is back.
+- Recall's Documents source uses the dataset scan index and FTS candidate ids,
+  then hydrates only the combined semantic and lexical candidates. Its logs
+  separate scan, FTS, hydration, scoring, and total time, including candidate
+  and returned-hit counts. RRF remains an ordering mechanism; source relevance
+  is calibrated from the underlying semantic or lexical evidence before Chat
+  Recall applies its relevance floor.
 
 ### Using a dataset in Chat
 

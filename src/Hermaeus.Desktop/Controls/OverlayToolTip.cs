@@ -20,7 +20,7 @@ namespace Hermaeus.Desktop.Controls;
 /// symptom is the mouse cursor flickering between the control's cursor and the
 /// default arrow, usually without the tooltip ever painting. It is upstream
 /// AvaloniaUI/Avalonia#19218, which remains open. Its public report targets
-/// Avalonia 11.3.2 on macOS, and this migration does not assume that 12.1.1
+/// Avalonia 11.3.2 on macOS, and this migration does not assume that 12.1.2
 /// fixes the same feedback loop on Hermaeus's supported platforms. Placement
 /// and offset workarounds only help when
 /// they happen to move the popup clear of the pointer's path, which is why four

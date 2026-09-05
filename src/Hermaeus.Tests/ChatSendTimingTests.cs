@@ -80,6 +80,22 @@ public sealed class ChatSendTimingTests
     }
 
     [Fact]
+    public void PreFirstToken_uses_preparation_wall_time_when_branches_overlap()
+    {
+        var timing = new ChatSendTiming(
+            RecallMs: 3000,
+            SelectMs: 100,
+            LessonMs: 50,
+            PromptBuildMs: 5,
+            FirstTokenMs: 500,
+            TotalMs: 900,
+            PreparationMs: 305);
+
+        Assert.Equal(805, timing.PreFirstTokenMs);
+        Assert.Contains("preparation 305 ms", timing.Format());
+    }
+
+    [Fact]
     public void IsSlow_boundary_is_exclusive_at_the_threshold()
     {
         var atThreshold = new ChatSendTiming(0, 0, 0, 0, FirstTokenMs: ChatSendTiming.SlowSendThresholdMs, TotalMs: ChatSendTiming.SlowSendThresholdMs);

@@ -36,7 +36,8 @@ for Knowledge behavior in Chat.
   and hardware-fit information. Its bounded Services-owned inventory rechecks
   file identity and reuses GGUF metadata until an explicit invalidation or a
   file change. A saved auto-tune profile is shown directly on
-  the model card with its GPU layers, threads, and context. Opening the model
+  the model card with independently wrappable GPU layer, thread, and context
+  fields. Opening the model
   configuration also hydrates the editable saved tune values from that shared
   profile; saving them remains separate from the runtime Save Config action on
   Services.
@@ -220,8 +221,12 @@ injection is off by default. Chat traces label keyword-only Recall as degraded
 retrieval even when lexical hits are usable. Incremental indexing immediately
 starts a bounded embedding backfill off the send path; failures retain a
 durable retry count and reason, retry after a delay while attempts remain, and
-surface exhausted rows as an explicit degraded state. See the [Recall
-reference](recall.md).
+surface exhausted rows as an explicit degraded state. Interactive embedding
+queries yield priority to queued optional backfill only after foreground work
+has been served. Document Recall scans the bounded storage embedding index and
+FTS candidate ids, hydrates only the combined candidate set, and returns
+calibrated source relevance rather than its tiny RRF ordering score. See the
+[Recall reference](recall.md).
 
 ## Agent Workbench
 
@@ -237,6 +242,10 @@ reference](recall.md).
   continue with an instruction, Finish run, and Stop are distinct persisted
   lifecycle transitions. A run ledger supports per-file Rewind with staleness
   checks.
+- Scenario Evals supports both suite execution and an individual row Run
+  action. Those actions are disabled when no model or scenario set is ready,
+  and the row action resolves through the ItemsControl's owning workbench
+  context so a visible click reaches the runner.
 - Recent terminal top-level runs can be permanently deleted after confirmation,
   including their persisted sub-task records and evidence files. Running runs
   and direct child deletion are refused.

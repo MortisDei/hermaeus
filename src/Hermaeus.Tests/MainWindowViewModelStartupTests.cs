@@ -312,6 +312,8 @@ public sealed class MainWindowViewModelStartupTests
 
         Assert.Equal("chat", harness.Main.ActivePanel);
         Assert.Single(harness.Main.Chat.AvailableModels);
+        Assert.Single(harness.Main.Agent.AvailableModels);
+        Assert.Equal("a", harness.Main.Agent.SelectedModel?.Id);
         Assert.True(harness.Llm.GetModelsCallCount > 0, "chat models must load once the wizard finishes on a first run, not stay empty until a restart");
     }
 
@@ -336,6 +338,21 @@ public sealed class MainWindowViewModelStartupTests
 
         Assert.DoesNotContain(harness.Logs.GetEntries(), entry =>
             entry.Message.Contains("Model refresh failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Server_triggered_model_refresh_also_selects_an_agent_model_for_scenario_evals()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        var server = harness.Main.Services.Servers.First(s => !s.EmbeddingsMode);
+
+        server.Port += 100;
+        await server.SaveConfigCommand.ExecuteAsync(null);
+
+        await WaitForAsync(() => harness.Main.Agent.AvailableModels.Count > 0, "agent models loading after server availability change");
+
+        Assert.Equal("a", harness.Main.Agent.SelectedModel?.Id);
     }
 
     /// <summary>r16 03-workbench-and-desktop.md 3.3: every other destructive action of this weight is confirm-gated; a raw context-menu click was the one exception.</summary>

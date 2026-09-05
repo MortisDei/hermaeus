@@ -134,6 +134,20 @@ public sealed class AgentWorkbenchLayoutTests
         Assert.Contains("IsVisible=\"{Binding IsRunning}\"", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Scenario_row_run_button_uses_the_items_control_data_context()
+    {
+        var doc = XDocument.Load(AgentViewPath());
+        var button = doc.Descendants().Single(element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute("Content") == "Run"
+            && (string?)element.Attribute("CommandParameter") == "{Binding}");
+
+        Assert.Equal(
+            "{Binding $parent[ItemsControl].DataContext.ScenarioSuite.RunScenarioCommand}",
+            (string?)button.Attribute("Command"));
+        Assert.DoesNotContain("ElementName=Root", (string?)button.Attribute("Command"), StringComparison.Ordinal);
+    }
+
     private static AgentTaskState Task(AgentTaskStatus status) =>
         new() { TaskId = "t", Goal = "goal", Status = status };
 

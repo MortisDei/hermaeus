@@ -64,7 +64,8 @@ and trusted manifest provenance. A Hugging Face source badge means Hermaeus
 retained download provenance. Open a
 model card to edit its display name and per-model defaults or to inspect its
 source. When auto-tune has a current profile for a local GGUF, the card shows
-the effective tuned GPU layers, threads, and context directly. Open the card's
+the effective tuned GPU layers, threads, and context directly as separate
+wrappable metadata fields. Open the card's
 configuration to inspect and intentionally edit those same saved tune values;
 the editor stays within the available window area and scrolls when its bounded
 form does not fit. **Save model profile** persists them with the picker defaults
@@ -383,7 +384,10 @@ visual notification.
 When Recall injection is enabled, the Chat trace identifies keyword-only
 fallback retrieval separately from embedding-backed retrieval. Lexical hits
 remain usable, but their presence does not claim that semantic retrieval is
-healthy.
+healthy. Runtime logs identify source hit counts, relevance survivors,
+context-budget selection, and the number actually injected. Optional embedding
+backfill yields to interactive query embedding; missing server timing headers
+remain explicitly unavailable rather than being inferred.
 
 ## Lab experiments and evidence
 
