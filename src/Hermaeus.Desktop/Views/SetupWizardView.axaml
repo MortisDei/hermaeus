@@ -39,12 +39,12 @@
                         <TextBlock Text="Choose your data root and AI assets folder." FontSize="12" Opacity="0.6" />
                         <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
                             <TextBlock Grid.Column="0" Text="Data root" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding DataRootDirectory}" Watermark="Default app data folder" />
+                            <TextBox Grid.Column="1" Text="{Binding DataRootDirectory}" PlaceholderText="Default app data folder" />
                             <Button Grid.Column="2" Command="{Binding BrowseDataRootCommand}" Content="Browse" />
                         </Grid>
                         <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
                             <TextBlock Grid.Column="0" Text="AI assets" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding LocalAiAssetsRoot}" Watermark="Local AI assets folder" />
+                            <TextBox Grid.Column="1" Text="{Binding LocalAiAssetsRoot}" PlaceholderText="Local AI assets folder" />
                             <Button Grid.Column="2" Command="{Binding BrowseLocalAiAssetsRootCommand}" Content="Browse" />
                         </Grid>
                     </StackPanel>
@@ -86,7 +86,7 @@
 
                         <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8" IsVisible="{Binding !UseStarterModelDownload}">
                             <TextBlock Grid.Column="0" Text="Model path" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Text="{Binding ModelFolder}" Watermark="Path to a GGUF model"
+                            <TextBox Grid.Column="1" Text="{Binding ModelFolder}" PlaceholderText="Path to a GGUF model"
                                      ToolTip.Tip="Full path to a .gguf chat model file for llama.cpp to load." />
                             <Button Grid.Column="2" Command="{Binding BrowseModelFolderCommand}" Content="Browse"
                                     ToolTip.Tip="Pick a .gguf file from disk." />

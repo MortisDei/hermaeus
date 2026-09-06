@@ -1,8 +1,11 @@
 using System;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
+using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Microsoft.Data.Sqlite;
 using static Hermaeus.Tests.Helpers;
@@ -331,6 +334,170 @@ namespace Hermaeus.Tests
             False(File.Exists(Path.Combine(next, "hermaeus.lock")), "the process lock is not user data and must not move");
         }
 
+        public static async Task PendingDataRootMigrationCompletesBeforeAStoreCanUseTheRoot()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            var settingsPath = temp.PathFor("settings/settings.json");
+            Directory.CreateDirectory(previous);
+            await File.WriteAllTextAsync(Path.Combine(previous, "conversations.db"), "data");
+
+            var writer = new SettingsService(settingsPath);
+            writer.Settings.DataManagement.DataRootDirectory = previous;
+            writer.Settings.DataManagement.PendingDataRootDirectory = next;
+            await writer.SaveAsync();
+
+            var restarted = new SettingsService(settingsPath);
+            await restarted.LoadAsync();
+
+            Equal(Path.GetFullPath(next), Path.GetFullPath(restarted.Settings.DataManagement.DataRootDirectory),
+                "bootstrap must publish the destination as the configured root after migration");
+            Equal(string.Empty, restarted.Settings.DataManagement.PendingDataRootDirectory,
+                "a successful bootstrap migration must clear the pending destination");
+            True(File.Exists(Path.Combine(next, "conversations.db")),
+                "the destination must be complete before settings load returns");
+            False(Directory.Exists(previous), "the old root should be cleaned after a successful bootstrap migration");
+
+            var reloaded = new SettingsService(settingsPath);
+            await reloaded.LoadAsync();
+            Equal(Path.GetFullPath(next), Path.GetFullPath(reloaded.Settings.DataManagement.DataRootDirectory),
+                "the persisted configured root must survive a second restart");
+        }
+
+        public static async Task PendingDataRootMigrationReceiptPreservesPreviewAndRestartAccounting()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            var settingsPath = temp.PathFor("settings/settings.json");
+            Directory.CreateDirectory(previous);
+            await File.WriteAllTextAsync(Path.Combine(previous, "first.db"), "first");
+            await File.WriteAllTextAsync(Path.Combine(previous, "second.db"), "second");
+            await File.WriteAllTextAsync(Path.Combine(previous, "third.db"), "third");
+
+            var writer = new SettingsService(settingsPath);
+            writer.Settings.DataManagement.DataRootDirectory = previous;
+            await writer.SaveAsync();
+
+            var preview = writer.PreviewDataRootMigration(previous, next);
+            Equal(3, preview.FilesToMove, "preview should count all three data files");
+            True(preview.InitiallyDiscoveredFiles is not null, "preview should persist its initial inventory");
+
+            writer.Settings.DataManagement.PendingDataRootDirectory = next;
+            writer.Settings.DataManagement.PendingDataRootMigrationPlan = JsonSerializer.Serialize(preview);
+            await writer.SaveAsync();
+            File.Delete(Path.Combine(previous, "third.db"));
+
+            var restarted = new SettingsService(settingsPath);
+            await restarted.LoadAsync();
+            var receipt = restarted.Settings.DataManagement.DataRootMigrationReceipt;
+
+            True(receipt.Contains("initially discovered 3", StringComparison.Ordinal), "receipt should preserve preview inventory");
+            True(receipt.Contains("discovered at restart 2", StringComparison.Ordinal), "receipt should report restart inventory");
+            True(receipt.Contains("copied/moved 2", StringComparison.Ordinal), "receipt should report actual moves");
+            True(receipt.Contains("verified 2", StringComparison.Ordinal), "receipt should report verified moves");
+            True(receipt.Contains("removed from source 2", StringComparison.Ordinal), "receipt should report source removals");
+            True(receipt.Contains("retained 1 (third.db)", StringComparison.Ordinal), "receipt should identify the preview file no longer present");
+            True(receipt.Contains("failures 0", StringComparison.Ordinal), "receipt should distinguish success from failure");
+            True(receipt.Contains("skipped 0", StringComparison.Ordinal), "receipt should report skipped work separately");
+        }
+
+        public static async Task FailedPendingDataRootMigrationRetainsTheOldRootAndReceipt()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            var settingsPath = temp.PathFor("settings/settings.json");
+            Directory.CreateDirectory(previous);
+            await File.WriteAllTextAsync(Path.Combine(previous, "conversations.db"), "data");
+            await File.WriteAllTextAsync(Path.Combine(previous, "memories.db"), "memories");
+
+            var writer = new SettingsService(settingsPath);
+            writer.Settings.DataManagement.DataRootDirectory = previous;
+            writer.Settings.DataManagement.PendingDataRootDirectory = next;
+            await writer.SaveAsync();
+
+            var moves = 0;
+            var failed = new SettingsService(settingsPath, (source, destination) =>
+            {
+                if (++moves == 2)
+                    throw new IOException("injected startup migration failure");
+                File.Move(source, destination);
+            });
+            await failed.LoadAsync();
+
+            Equal(Path.GetFullPath(previous), Path.GetFullPath(failed.Settings.DataManagement.DataRootDirectory),
+                "failed startup migration must keep the old root authoritative");
+            Equal(Path.GetFullPath(next), Path.GetFullPath(failed.Settings.DataManagement.PendingDataRootDirectory),
+                "failed startup migration must remain retryable");
+            True(failed.Settings.DataManagement.DataRootMigrationReceipt.Contains("failed", StringComparison.OrdinalIgnoreCase),
+                "the failure receipt must be user-visible");
+            True(File.Exists(Path.Combine(previous, "conversations.db")), "rollback must restore the first file");
+            True(File.Exists(Path.Combine(previous, "memories.db")), "the failed file must remain authoritative");
+            False(File.Exists(Path.Combine(next, "conversations.db")), "rollback must not leave split state");
+
+            var retry = new SettingsService(settingsPath);
+            await retry.LoadAsync();
+            Equal(string.Empty, retry.Settings.DataManagement.PendingDataRootDirectory,
+                "a later restart must be able to retry the retained pending migration");
+            True(File.Exists(Path.Combine(next, "memories.db")), "the retry must complete the migration");
+        }
+
+        public static async Task PendingDataRootMigrationRejectsAnInvalidDestinationWithoutMovingData()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var invalidDestination = temp.PathFor("destination-file");
+            var settingsPath = temp.PathFor("settings/settings.json");
+            Directory.CreateDirectory(previous);
+            await File.WriteAllTextAsync(Path.Combine(previous, "conversations.db"), "data");
+            await File.WriteAllTextAsync(invalidDestination, "not a directory");
+
+            var writer = new SettingsService(settingsPath);
+            writer.Settings.DataManagement.DataRootDirectory = previous;
+            writer.Settings.DataManagement.PendingDataRootDirectory = invalidDestination;
+            await writer.SaveAsync();
+
+            var restarted = new SettingsService(settingsPath);
+            await restarted.LoadAsync();
+
+            Equal(Path.GetFullPath(previous), Path.GetFullPath(restarted.Settings.DataManagement.DataRootDirectory),
+                "an invalid destination must not change the effective root");
+            Equal(Path.GetFullPath(invalidDestination), Path.GetFullPath(restarted.Settings.DataManagement.PendingDataRootDirectory),
+                "the invalid destination must remain visible for correction");
+            True(restarted.Settings.DataManagement.DataRootMigrationReceipt.Contains("failed", StringComparison.OrdinalIgnoreCase),
+                "an invalid destination must produce a failure receipt");
+            True(File.Exists(Path.Combine(previous, "conversations.db")), "source data must remain in place");
+        }
+
+        public static async Task PendingDataRootMigrationRepointsAnAlreadyPopulatedDestination()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            var settingsPath = temp.PathFor("settings/settings.json");
+            Directory.CreateDirectory(previous);
+            Directory.CreateDirectory(next);
+            await File.WriteAllTextAsync(Path.Combine(previous, "conversations.db"), "stray");
+            await File.WriteAllTextAsync(Path.Combine(next, "conversations.db"), "authoritative");
+
+            var writer = new SettingsService(settingsPath);
+            writer.Settings.DataManagement.DataRootDirectory = previous;
+            writer.Settings.DataManagement.PendingDataRootDirectory = next;
+            await writer.SaveAsync();
+
+            var restarted = new SettingsService(settingsPath);
+            await restarted.LoadAsync();
+
+            Equal(Path.GetFullPath(next), Path.GetFullPath(restarted.Settings.DataManagement.DataRootDirectory),
+                "an already populated destination should be activated at bootstrap");
+            Equal("authoritative", await File.ReadAllTextAsync(Path.Combine(next, "conversations.db")),
+                "repointing must not overwrite the destination copy");
+            Equal("stray", await File.ReadAllTextAsync(Path.Combine(previous, "conversations.db")),
+                "repointing must not delete the old copy");
+        }
+
         public static async Task BackupExcludesSecretsAndRefusesOverwrite()
         {
             using var temp = new TempDir();
@@ -466,6 +633,142 @@ namespace Hermaeus.Tests
 
             await ThrowsAsync<InvalidOperationException>(() => backups.RestoreAsync(backup));
             False(File.Exists(Path.Combine(unsafePeer, "escape.txt")), "restore should not treat case-variant siblings as the data root");
+        }
+
+        public static async Task BackupRestoreAllowsNestedLegitimateEntries()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("restore-root");
+            var backup = temp.PathFor("legitimate.zip");
+            Directory.CreateDirectory(root);
+
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("nested/deeper/legitimate.txt");
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write("safe content");
+            }
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = root;
+            await new BackupService(service).RestoreAsync(backup);
+
+            Equal("safe content", await File.ReadAllTextAsync(Path.Combine(root, "nested", "deeper", "legitimate.txt")),
+                "nested legitimate archive entries should restore beneath the data root");
+        }
+
+        public static async Task BackupRestoreRejectsAdversarialArchiveEntryPaths()
+        {
+            using var temp = new TempDir();
+            var cases = new[]
+            {
+                (Name: "parent", Entry: "../outside/escape.txt"),
+                (Name: "repeated-parent", Entry: "nested/../../outside/escape.txt"),
+                (Name: "prefix", Entry: "../restore-root-evil/escape.txt"),
+                (Name: "absolute", Entry: "/absolute-escape.txt"),
+                (Name: "drive", Entry: "C:/drive-qualified.txt"),
+                (Name: "unc", Entry: "\\\\server\\share\\unc-escape.txt"),
+                (Name: "mixed-separators", Entry: "nested\\..\\mixed-escape.txt")
+            };
+
+            for (var i = 0; i < cases.Length; i++)
+            {
+                var testCase = cases[i];
+                var caseRoot = temp.PathFor($"{testCase.Name}/restore-root");
+                var outside = temp.PathFor($"{testCase.Name}/outside");
+                var backup = temp.PathFor($"{testCase.Name}.zip");
+                Directory.CreateDirectory(caseRoot);
+                Directory.CreateDirectory(outside);
+
+                using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+                    archive.CreateEntry(testCase.Entry);
+
+                var service = NewSettings(temp);
+                service.Settings.DataManagement.DataRootDirectory = caseRoot;
+                await ThrowsAsync<InvalidOperationException>(() => new BackupService(service).RestoreAsync(backup));
+
+                False(Directory.EnumerateFiles(caseRoot, "*", SearchOption.AllDirectories).Any(),
+                    $"malicious {testCase.Name} entry must not create a file under the root");
+                False(Directory.EnumerateFiles(outside, "*", SearchOption.AllDirectories).Any(),
+                    $"malicious {testCase.Name} entry must not create a file outside the root");
+            }
+        }
+
+        public static async Task BackupRestorePreflightsAllEntriesBeforeWriting()
+        {
+            using var temp = new TempDir();
+            var caseRoot = temp.PathFor("preflight/restore-root");
+            var outside = temp.PathFor("preflight/outside");
+            var backup = temp.PathFor("preflight.zip");
+            Directory.CreateDirectory(caseRoot);
+            Directory.CreateDirectory(outside);
+
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+            {
+                var safe = archive.CreateEntry("safe/should-not-exist.txt");
+                using (var writer = new StreamWriter(safe.Open()))
+                    writer.Write("must not be partially restored");
+                archive.CreateEntry("../outside/escape.txt");
+            }
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = caseRoot;
+            await ThrowsAsync<InvalidOperationException>(() => new BackupService(service).RestoreAsync(backup));
+
+            False(File.Exists(Path.Combine(caseRoot, "safe", "should-not-exist.txt")),
+                "an unsafe later entry must prevent earlier legitimate entries from being written");
+            False(File.Exists(Path.Combine(outside, "escape.txt")),
+                "the unsafe entry must not write outside the root");
+        }
+
+        public static async Task BackupRestoreRejectsReparsePointDirectoryEscapes()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor(Path.Combine("reparse", "restore-root"));
+            var outside = temp.PathFor(Path.Combine("reparse", "outside"));
+            var linked = Path.Combine(root, "linked");
+            var backup = temp.PathFor("reparse.zip");
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(outside);
+            CreateDirectoryReparsePoint(linked, outside);
+
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+                archive.CreateEntry("linked/escape.txt");
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = root;
+            await ThrowsAsync<InvalidOperationException>(() => new BackupService(service).RestoreAsync(backup));
+
+            False(File.Exists(Path.Combine(outside, "escape.txt")),
+                "a reparse-point directory must not redirect restore output outside the root");
+        }
+
+        private static void CreateDirectoryReparsePoint(string link, string target)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                Directory.CreateSymbolicLink(link, target);
+                return;
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add($"mklink /J {link} {target}");
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not create the reparse-point test fixture.");
+            process.WaitForExit();
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            Equal(0, process.ExitCode, $"the reparse-point test fixture should be created: {output} {error}");
         }
     }
 }

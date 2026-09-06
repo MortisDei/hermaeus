@@ -587,4 +587,10 @@ The System Overview displays:
 - Cache footprints
 - Model and asset directory sizes
 
+Where both the used and total values are trustworthy, RAM, storage, and GPU
+cards also show a small observed-use bar. A bar is omitted when the source is
+unknown; device-wide memory is never presented as process-owned memory. On
+Windows, process GPU memory uses PID-scoped NVML first and a PID-scoped
+`nvidia-smi` query as fallback, otherwise it remains `Unknown`.
+
 This helps monitor storage usage and plan data cleanup or archival.

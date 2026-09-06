@@ -39,7 +39,16 @@ you change Data Root later, use the in-app migration flow rather than moving
 live database files by hand. After entering or choosing a different root,
 review the current and destination paths and choose **Move data...**. Hermaeus
 asks for confirmation before moving an existing workspace; ordinary Settings
-autosave never performs that migration implicitly.
+autosave never performs that migration implicitly. The Data Storage page shows
+both the configured root and the root currently effective for composed stores.
+Restart Hermaeus after a successful change so every store and cached view is
+composed against the selected root. Startup migration verifies each copied file
+before committing the destination; a failed attempt keeps the old root active,
+leaves the pending destination available for retry, and records the outcome in
+Data Storage. After scheduling a move, a second dialog offers **Restart now**
+or **Restart later**. Restart later leaves the current effective root active;
+Restart now performs the controlled application restart required for bootstrap
+migration. No active files move before that bootstrap step.
 
 Choose a chat backend next. For managed llama.cpp, use **Install managed
 llama.cpp** before reaching Doctor. You can then choose an existing GGUF or
@@ -48,18 +57,34 @@ native Kokoro can be installed during onboarding or later through Doctor.
 
 ## Models and Services
 
-**Models** lists GGUF files and models reported by configured providers. A
-Hugging Face source badge means Hermaeus retained download provenance. Open a
+**Models** groups the catalog by purpose: **Chat & Generation**, **Embeddings**,
+and **Rerankers**. GGUF files and models reported by configured providers are
+classified using provider configuration, dedicated asset layout, GGUF metadata,
+and trusted manifest provenance. A Hugging Face source badge means Hermaeus
+retained download provenance. Open a
 model card to edit its display name and per-model defaults or to inspect its
 source. When auto-tune has a current profile for a local GGUF, the card shows
-the effective tuned GPU layers, threads, and context directly. Open the card's
+the effective tuned GPU layers, threads, and context directly as separate
+wrappable metadata fields. Open the card's
 configuration to inspect and intentionally edit those same saved tune values;
 the editor stays within the available window area and scrolls when its bounded
 form does not fit. **Save model profile** persists them with the picker defaults
-and metadata.
+and metadata. Local cards use a detailed GPU-fit prediction when GGUF shape
+metadata is available. Provider and download cards show a clearly labelled
+pre-download estimate until the file is available locally. These are
+projections, not proof of the placement a runtime will eventually select.
 Extra arguments and live process overrides remain on Services, where their
 trust checks and process state are visible. Runtime process settings still use
 **Save Config** on Services.
+
+Factual capability badges such as **MoE**, **MTP**, **Draft**, and
+**Vision / Projector** describe model metadata only. They do not mean that a
+feature is configured, available, or active. A primary generation card owns
+its proven projector, draft, MTP, EAGLE, tokenizer, or sidecar companions;
+expand **Companions** to inspect Present, Missing, Stale, or Unknown state.
+Companion files are not promoted to independent cards just because they look
+like model files. The filter also searches role, capability, tag, and
+companion state.
 
 **Services** owns processes and files on disk. A managed llama.cpp server needs
 the resolved `llama-server` executable, a GGUF model, a localhost port, and
@@ -72,7 +97,8 @@ installation is required, prefers the hardware's primary accelerated backend,
 and may select another compatible accelerated asset when upstream does not
 publish that preferred package. The selected backend is recorded separately as
 the last installed backend; Auto itself remains Auto. If no compatible GPU
-asset is available or the selected build fails its launch probe, Hermaeus
+asset is available or the selected build fails executable or build-identity
+validation, Hermaeus
 refuses the update with an explanation rather than silently replacing it with a
 CPU build. CPU is still available when selected explicitly. Fresh managed
 archives are stored under one Hermaeus build directory; older nested archive
@@ -82,7 +108,17 @@ The Data Storage panel shows the configured request and the last installed
 backend separately. The latter is installation history, not a replacement for
 Auto and not proof of which executable a currently running process uses. The
 active process identity remains tied to the Services executable and Chat
-runtime telemetry.
+runtime telemetry. Persisted capability cache and sibling state resolve beneath
+the effective Data Root. A root change is write-probed before settings are
+published, and a capability-cache write failure is shown as a failure with its
+path rather than as successful persistence.
+
+For a GPU update, Hermaeus runs the downloaded executable with `--version` and
+captures both output streams. Current llama.cpp Windows builds write their
+version/build identity to stderr. The verified upstream release tag and
+SHA256-checked archive remain the stable identity evidence when a runtime's
+version text cannot be parsed. `--help`, a help-shaped output, or exit code 0
+alone is never accepted as identity proof.
 
 Capability status is evidence-scoped. `Available` means the selected runtime,
 and the selected model where relevant, advertised or demonstrated the feature.
@@ -131,6 +167,27 @@ the current repository revision and hash-verified compatible candidates, but it
 never changes a server's configured projector or draft path. Selecting a
 replacement in Services remains an explicit user action.
 
+The model card's companion list also has a **Clear** action for a stale or unwanted
+mapping. After confirmation it removes only that companion file under the Local AI
+assets root, when the file is present, and removes only that mapping from the
+primary model's manifest. It does not delete the primary model or unrelated
+companions.
+
+When the model card declares a Hugging Face thumbnail, the selected repository
+and its download cards may show it as optional repository artwork. Hermaeus
+reads only the bounded `cardData.thumbnail` value, requires an exact immutable
+repository revision, blocks arbitrary external hosts, and checks MIME, magic,
+dimensions, and decoded size before loading it. If the repository does not
+declare artwork, Hermaeus may use the publisher or organization avatar from
+the exact Hugging Face avatar host as a clearly labelled fallback. It is not
+treated as repository-declared artwork. Missing, invalid, unavailable, or
+unsafe artwork falls back to the generic mark. Artwork does not affect model
+identity, fit, trust, ranking, or download selection.
+The cache is rebuildable and excluded from Data Root backups. Settings >
+Data Storage shows its size and provides a confirmed Clear action that does
+not remove models or manifests. A custom model avatar remains separate and
+takes precedence over cached repository artwork.
+
 When a repository is selected, known GGUF variants appear immediately while
 fit and companion checks complete independently per row. A row remains
 download-disabled while its compatibility check is still running.
@@ -141,6 +198,29 @@ overhead, companions, and headroom separately. `Unknown` means a material input
 or trustworthy measurement is missing; it is not treated as zero. Runtime
 observations remain separate and are comparable only under the exact v2
 runtime/model/hardware/configuration fingerprint.
+
+**System Overview** also shows a whole-workload resource snapshot. It lists
+registered consumers and their active allocations, whole-device memory totals,
+and evidence states that prevent false precision. Active values identify
+observed or planned bytes; a component attribution gap, a non-resident
+consumer, and a lazy consumer are shown separately. Each managed server's
+Services card shows the admission receipt used for its start. Reservations are
+short-lived concurrency guards only. They do not stop or unload another
+consumer, change settings, or attribute a whole-device total to one process.
+
+Managed server cards also expose an **Adaptive launch** envelope. It is **Fixed**
+by default. **Advise** computes and displays bounded alternatives without
+starting one, while **AdaptAtLaunch** may retry a resource-exhausted start with
+only the explicitly enabled compromise fields. GPU-layer reductions preserve
+an accelerated backend, context reductions stay above the configured minimum,
+and KV or CPU-MoE changes require selected-runtime and quality evidence.
+Every attempt obtains a fresh whole-workload reservation. If effective context
+or placement cannot be audited through structured runtime output, the attempt
+stops visibly rather than guessing or falling back to CPU. The transient launch
+candidate is never saved over the configured server values. A recent compatible
+successful launch may be preferred only when the exact runtime, model, complete
+hardware, base configuration, workload identity, and evidence age match. The
+current resource snapshot and admission checks still apply.
 
 If onboarding is already complete and Chat reports that no chat model is set
 up, go to **Services** to configure or start the current model server. A stopped
@@ -157,7 +237,8 @@ provider into a local one merely because the desktop app itself is local.
 RAG, and voice readiness. A failed check does not silently change the machine.
 Where Hermaeus can remediate a problem, inspect the plan and explicitly approve
 the download or write. Details remain available in Doctor, Activity, and
-Runtime Logs.
+Runtime Logs. Ready informational checks do not expose a repair or navigation
+action; non-ready checks expose only the action relevant to that check.
 
 If managed llama.cpp is missing, use onboarding's install action or Doctor's
 download action. Hermaeus selects the newest compatible b-numbered upstream
@@ -171,7 +252,12 @@ whose executable is nested below the b-numbered directory.
 Choose a model at the top of **Chat**, type a message, and send. Stop cancels an
 active generation. Regenerate creates a branch rather than destroying the
 previous answer. Deleting the active conversation returns Chat to a fresh,
-focused input.
+focused input. Delete from a conversation's details flyout shows its nearby
+confirmation; the context-menu path keeps a full confirmation dialog.
+
+The compact **Quick Chat** surface sends with Enter or Ctrl+Enter; use
+Shift+Enter for a newline. It shows a Processing indicator while the request is
+active.
 
 While a response streams, scrolling upward pauses bottom-following. Scroll back
 to the bottom to intentionally re-pin. The telemetry flyout can start bounded
@@ -180,12 +266,12 @@ Nested panes keep wheel input when the pointer is over their content and pass it
 to the page only at an edge. Horizontal overflow remains available in panes
 that provide it.
 
-Attach text, code, PDF, DOCX, or supported image files from the attachment
-control, drag and drop, or clipboard. Images are sent only when the selected
-route actually accepts them. The **Context Inspector** shows the environment
-context, prompt, draft, history estimate, attachments, and attached Knowledge
-context. Normal Chat does not expose web access, a shell, tool calls, or Agent
-workspace actions.
+Attach text, code, logs, CSV/TSV, markup, configuration, PDF, DOCX, or supported
+image files from the attachment control, drag and drop, or clipboard. Images
+are sent only when the selected route actually accepts them. The **Context
+Inspector** shows the environment context, prompt, draft, history estimate,
+attachments, and attached Knowledge context. Normal Chat does not expose web
+access, a shell, tool calls, or Agent workspace actions.
 
 ## Projects and Project State
 
@@ -208,17 +294,52 @@ Knowledge/RAG, conversations, and Agent task history.
 
 ## Knowledge, Memory, and Recall
 
-**Knowledge** ingests files into a local RAG dataset. Attach a dataset to a Chat
-conversation from the Knowledge picker. Retrieval is bounded and cited; weak
+**Knowledge** ingests files into local RAG datasets. In the RAG panel, select
+one or more datasets for each question from **Datasets included in this
+question**. The first time the panel is used, none is selected and asking
+prompts for an explicit choice. The last choice is retained for later
+questions. If no dataset exists, **Create Hermaeus Help dataset** offers to
+ingest the version-local help documents shipped with this build through the
+normal pipeline, with ordinary citations and provenance. The normal folder
+ingest path remains available. Attach one dataset to a Chat conversation from the Knowledge
+picker. Retrieval is bounded and cited; weak
 matches are omitted instead of forced into every answer. Reindex after changing
-the embedding model.
+the embedding model. Dataset Manager shows the published generation history,
+while ordinary retrieval uses only the current complete generation. A cancelled
+or failed ingest leaves the prior generation in place. Removing missing sources
+requires separate confirmation and publishes a replacement generation rather
+than deleting live rows mid-ingest.
+
+The RAG workspace separates **Ask**, **Manage**, **Sources**, and
+**Diagnostics**. Use **Manage** for persistent dataset administration,
+ingestion, watched folders, reindexing, and deletion. The dataset scope in
+**Ask** remains question-specific and does not change the selected dataset used
+by management actions.
 
 **Memories** are durable, reviewable facts stored under Data Root. Settings
 control whether memory and Recall context may be injected into Chat. The Chat
 environment description reports only enabled context sources. The command
 palette can search the local Recall index even when Recall injection into Chat
-is disabled. A pinned memory remains visibly marked in its row and exposes
-**Unpin** directly, so the state does not depend on a toast.
+is disabled. The Memories view puts pinned memories in a clearly labelled
+section at the top, where **Unpin** is available directly. Agent workspace
+notes and generated workspace profiles are shown in Agent, not mixed into
+ordinary Memories. Weak semantic memory candidates are left out of ordinary
+recall. Pinning affects prominence only after relevance, so a pinned but
+unrelated memory is not injected. The RAG ingest plan is analysis context and
+is not saved as a normal memory.
+
+Open **History** on a memory to inspect its immutable revisions. Recorded time
+and established effective time are shown separately, alongside adjacent
+content diffs, sources, decisions, and status. **Revise fact** and **Correct
+fact** create successors; pinning, tags, archive, and scope changes remain
+presentation edits. **Restore as new revision** copies selected historical
+content only after an explicit review. A contradiction proposal records two
+exact revisions for review and can be rejected without changing either one.
+Normal Chat uses only the accepted current projection and names its exact
+revision in the context receipt. **Export history** writes bounded, redacted,
+versioned JSON containing the visible memories' revision, source, effective-time,
+and decision structure. The older CSV action remains a current-projection-only
+export, and files exported before deletion remain user-owned copies.
 
 ## Agent workspaces
 
@@ -250,7 +371,9 @@ restrained and deduplicated; high GPU use by itself is normal and produces no
 warning.
 Request timing labels use first content, meaning the first non-empty content
 delta received from the runtime, rather than a provider reasoning or tool
-event.
+event. The same trace line identifies the selected provider tag and reports
+reasoning-event/character counts when the provider emits a reasoning stream,
+so reasoning time is not mistaken for answer content latency.
 
 Settings > Voice contains supplementary audio feedback controls for the
 explicit task/runtime/recording event list. Volume is retained when muted,
@@ -261,7 +384,10 @@ visual notification.
 When Recall injection is enabled, the Chat trace identifies keyword-only
 fallback retrieval separately from embedding-backed retrieval. Lexical hits
 remain usable, but their presence does not claim that semantic retrieval is
-healthy.
+healthy. Runtime logs identify source hit counts, relevance survivors,
+context-budget selection, and the number actually injected. Optional embedding
+backfill yields to interactive query embedding; missing server timing headers
+remain explicitly unavailable rather than being inferred.
 
 ## Lab experiments and evidence
 
@@ -303,6 +429,25 @@ review.
 the Hermaeus window, rechecks the selected server plus runtime/model identity,
 and saves through the normal Settings path. Review is separate from running an
 experiment, and experiment evidence is retained.
+
+Services shows the same review card when an auditable adaptive launch or Lab
+result produces a managed-server recommendation. The card separates current
+and proposed values, evidence, trade-offs, and freshness. **Apply** saves the
+reviewed settings only. It does not restart a running server. **Undo** restores
+the bounded pre-Apply fields only when the target has not changed since Apply;
+otherwise the service refuses without overwriting the later edit.
+
+Benchmark **Insights** may show a model-guidance card when usage and comparable
+benchmark evidence disagree. It is review-only: **Dismiss** suppresses that
+identical proposal, and **Open Models** takes you to the model page. It never
+changes the selected model.
+
+Managed server GPU placement is edited as CPU, Auto, All, or Exact. The setting
+is a request, not a claim about effective runtime placement. Auto is available
+only when the selected runtime proves both automatic placement and fit support;
+unsupported or unobservable behavior stays unavailable or Unknown. Matching
+Auto-tune profiles are evidence and are not silently applied when a server
+starts or a model is selected.
 
 Choose **Inspect runtime recipes** to see GPU placement, context, KV, Flash
 Attention, CPU-MoE, external draft, EAGLE-3, and speculative parameter plans
@@ -373,14 +518,20 @@ retained records in the detail pane.
 Native Kokoro runs locally after its verified assets are installed. Other voice
 providers may require Python packages, local services, or an API key. Configure
 the provider in Services or Settings, use Doctor for readiness, and check
-Runtime Logs if synthesis fails. Remote voice providers receive the text sent
-for speech. **Settings > Voice** lists the active provider's discovered names
-for per-channel voice routing, while **Services > Voice** keeps the explicit
-Save Config action for provider, device, speed, and process settings.
+Runtime Logs if synthesis fails. A missing, integrity, or load failure from
+native Kokoro exposes **Open Doctor** directly in its Services status row
+because Doctor owns the verified asset diagnosis and repair action. Remote
+voice providers receive the text sent for speech. **Settings > Voice** lists the
+active provider's discovered names in editable, unfiltered per-channel
+selectors. Reopening a selector does not reuse the previous voice as a filter,
+and a provider without a catalogue still permits a manually entered voice id.
+**Services > Voice** keeps the explicit Save Config action for provider, device,
+speed, and process settings.
 
 ## Activity, logs, and troubleshooting
 
-**Activity** records completed outcomes such as downloads, ingests, backups,
+Background **Activity** is available as a collapsed section inside **Memories**
+and records completed outcomes such as downloads, ingests, backups,
 and managed-server events. **Runtime Logs** contain live operational detail,
 apply redaction before display or persistence, and retain useful aggregate
 timing while filtering repetitive low-level slot scheduler chatter. Diagnostic notifications that

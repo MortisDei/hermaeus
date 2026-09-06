@@ -91,6 +91,10 @@ public sealed class OpenAiService : IDisposable
                 .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "OpenAI", ProviderTag = ProviderTagValue, SupportsOutputConstraints = ConstraintSupport != LlmConstraintSupport.None })
                 .ToList();
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch { return []; }
     }
 
@@ -159,6 +163,10 @@ public sealed class OpenAiService : IDisposable
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
             return (true, resp, string.Empty);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

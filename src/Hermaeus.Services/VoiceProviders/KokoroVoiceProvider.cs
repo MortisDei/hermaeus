@@ -53,10 +53,10 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
     public (int Major, int Minor)? RequiredPythonVersion => (3, 12);
 
-    public KokoroVoiceProvider(ISettingsService settings, KokoroProcessManager? processManager = null)
+    public KokoroVoiceProvider(ISettingsService settings, KokoroProcessManager processManager)
     {
         _settings = settings;
-        _processManager = processManager ?? new KokoroProcessManager();
+        _processManager = processManager;
     }
 
     public bool IsInstalled => VoiceProviderProcessRunner.IsExecutableAvailable(VoiceProviderProcessRunner.ResolvePythonPath(_settings));

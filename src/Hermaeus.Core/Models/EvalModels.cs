@@ -40,7 +40,8 @@ public sealed record CaseResult(
     int? PromptTokens = null,
     int? CompletionTokens = null,
     IReadOnlyDictionary<string, double>? Scores = null,
-    string? Error = null);
+    string? Error = null,
+    IReadOnlyDictionary<string, string>? Metadata = null);
 
 /// <summary>One execution of a set of cases against a target, saved or transient.</summary>
 public sealed record EvalRun(

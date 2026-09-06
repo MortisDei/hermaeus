@@ -28,6 +28,15 @@ Supported providers:
 Kokoro (Python), F5-TTS, and XTTS v2 are grouped under **Advanced** in
 **Services -> Voice**; Kokoro (native) is **Recommended**.
 
+The settings file persists the stable provider ids `Kokoro` and
+`KokoroNative`; the displayed names are labels only. Older display-name values
+are accepted when loading and are rewritten to the stable id on the next save.
+Provider-specific configuration entries use those same ids as separate keys.
+The Python backend uses the configured `Tts.PythonPath` and `Tts.ServiceUrl`,
+while native Kokoro resolves assets under
+`{LocalAiAssetsRoot}/Models/voice/kokoro-native` (or Hermaeus' local application
+data root when no AI assets root is configured).
+
 ## Local Environment and Hardware Setup
 
 The first-run Setup Wizard and Local AI setup can detect available hardware
@@ -59,6 +68,16 @@ notes before you continue. When the assets are already present, onboarding
 reports Voice as ready and removes the install action. A successful install
 rechecks provider state immediately, and the same state is read again when the
 step is revisited or the app restarts.
+
+Native admission is separate from file presence. Before the provider reports
+healthy, Hermaeus constructs the ONNX session and checks the required
+`input_ids`, `style`, and `speed` inputs plus the presence of an output. A
+failed admission keeps a bounded reason such as a missing model, SHA mismatch,
+missing ONNX contract input, or session exception in provider health and
+runtime diagnostics. It does not claim that a present model file is installed
+and ready. Doctor labels a present-but-unadmitted native asset set as a health
+retry, not as a missing installation. Kokoro (Python) is not involved in that
+probe or repair path.
 
 The Kokoro (Python) fallback, along with F5-TTS and XTTS v2, run as managed
 Python subprocesses. For those, Hermaeus can detect available hardware backends
@@ -156,9 +175,9 @@ Audio feedback is a separate bounded semantic cue service. It covers only the
 reviewed task, runtime, long-operation, and recording events, with per-event
 defaults, volume, mute, visual equivalents, and suppression while TTS speaks.
 It never cues ordinary token arrival, clicks, navigation, or high GPU use.
-Windows playback keeps the WAV path as an argument to a fixed PowerShell
-script rather than interpolating it into command text; temporary cue files are
-deleted after playback.
+Windows playback uses the native winmm `PlaySound` API directly, so a preview
+does not open a media player or depend on the WAV file association. Temporary
+cue files are deleted after playback.
 
 ## Audio Data and Privacy Lifecycle
 

@@ -32,6 +32,10 @@ public sealed partial class DoctorService
                 $"Datasets: {datasets.Count}",
                 "RAG");
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return BuildCheck(
@@ -78,6 +82,10 @@ public sealed partial class DoctorService
                 true,
                 ok ? $"Dimensions: {embedding.Length}" : "No embedding returned.",
                 "RAG");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -157,13 +165,33 @@ public sealed partial class DoctorService
 
         if (LooksLikeNomicEmbeddingName(configured) || LooksLikeNomicEmbeddingName(Path.GetFileName(search.Path)))
         {
+            var defaultSearch = FindInstalledEmbeddingModel(_embeddingDownload.ModelName);
+            if (defaultSearch.Found)
+            {
+                var defaultHashOk = await _downloads.VerifyHashAsync(defaultSearch.Path, _embeddingDownload.Sha256, null, ct);
+                return BuildCheck(
+                    "embedding-model-update",
+                    "Qwen3 embedding model upgrade",
+                    defaultHashOk ? DoctorCheckStatus.Info : DoctorCheckStatus.Warning,
+                    defaultHashOk
+                        ? "Qwen3 embedding model is installed but Nomic remains selected"
+                        : "A Qwen3 embedding model file needs verification",
+                    defaultHashOk
+                        ? $"Verified Qwen3 is ready at {defaultSearch.Path}. Switch the dedicated embedding server to Qwen3 now; RAG datasets and mismatched memories should then be re-embedded."
+                        : $"A Qwen3 candidate was found at {defaultSearch.Path}, but it does not match the pinned build. Download the verified model before switching from Nomic.",
+                    defaultHashOk ? "Use installed Qwen3" : "Download verified Qwen3",
+                    true,
+                    defaultSearch.Path,
+                    "RAG");
+            }
+
             return BuildCheck(
                 "embedding-model-update",
                 "Qwen3 embedding model upgrade",
                 DoctorCheckStatus.Info,
                 "Nomic embedding model remains selected",
                 "Nomic remains configured and usable. Download the verified Qwen3-Embedding-0.6B default to switch this dedicated server; reindex RAG datasets and re-embed mismatched memories after it starts.",
-                "Download embedding model",
+                "Download verified Qwen3",
                 true,
                 search.Path,
                 "RAG");

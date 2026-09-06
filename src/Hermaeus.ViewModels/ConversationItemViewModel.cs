@@ -11,6 +11,7 @@ public partial class ConversationItemViewModel : ObservableObject
     [ObservableProperty] private string   _tagsText = string.Empty;
     [ObservableProperty] private bool     _isPinned;
     [ObservableProperty] private bool     _isArchived;
+    [ObservableProperty] private bool     _isDeleteConfirmationVisible;
 
     /// <summary>r24 doc 02 2.0: "Exclude from Recall", alongside pin and archive.</summary>
     [ObservableProperty] private bool     _isRecallExcluded;

@@ -20,8 +20,20 @@ public sealed record LocalAiAssetLayout(
             : $"Found {FoundCount} asset location(s) under {Root}.";
 }
 
+public sealed record BoundedGgufModelScan(
+    IReadOnlyList<string> Paths,
+    bool IsTruncated);
+
 public static class LocalAiAssetLocator
 {
+    private static EnumerationOptions GgufEnumerationOptions => new()
+    {
+        RecurseSubdirectories = true,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+        IgnoreInaccessible = true,
+        ReturnSpecialDirectories = false
+    };
+
     public static IReadOnlyList<string> FindGgufModels(string root)
     {
         var layout = Detect(root);
@@ -30,7 +42,7 @@ public static class LocalAiAssetLocator
 
         try
         {
-            return Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", SearchOption.AllDirectories)
+            return Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", GgufEnumerationOptions)
                 .Where(path => !IsUnderSpecialModelDirectory(path, layout.ModelsDirectory))
                 .Where(path => !IsCompanionGguf(path))
                 .Order(StringComparer.OrdinalIgnoreCase)
@@ -41,6 +53,125 @@ public static class LocalAiAssetLocator
             return [];
         }
     }
+
+    /// <summary>
+    /// Retains at most <paramref name="maxResults" /> model paths while keeping
+    /// one overflow sentinel, so callers can report a bounded inventory without
+    /// retaining an unbounded list. This deliberately resolves only the model directory and
+    /// does not run the broader asset discovery performed by <see cref="Detect"/>.
+    /// </summary>
+    public static BoundedGgufModelScan FindGgufModelsBounded(string root, int maxResults)
+    {
+        if (maxResults <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxResults));
+
+        root = root.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            return new BoundedGgufModelScan([], false);
+
+        try
+        {
+            root = Path.GetFullPath(root);
+            if (!Directory.Exists(root))
+                return new BoundedGgufModelScan([], false);
+
+            var modelsDirectory = FindModelsDirectory(root, maxResults + 1);
+            if (string.IsNullOrWhiteSpace(modelsDirectory) || !Directory.Exists(modelsDirectory))
+                return new BoundedGgufModelScan([], false);
+            if ((File.GetAttributes(modelsDirectory) & FileAttributes.ReparsePoint) != 0)
+                return new BoundedGgufModelScan([], false);
+
+            var paths = new SortedSet<string>(ModelPathSafety.LocalPathComparer);
+            var sawMore = false;
+            foreach (var path in Directory.EnumerateFiles(modelsDirectory, "*.gguf", GgufEnumerationOptions))
+            {
+                if (IsUnderSpecialModelDirectory(path, modelsDirectory)
+                    || IsCompanionGguf(path)
+                    || !ModelPathSafety.TryResolveFileUnderRoot(root, path, out _, out _))
+                    continue;
+
+                paths.Add(path);
+                if (paths.Count > maxResults)
+                {
+                    sawMore = true;
+                    paths.Remove(paths.Max!);
+                }
+            }
+
+            return new BoundedGgufModelScan(paths.ToList(), sawMore);
+        }
+        catch
+        {
+            return new BoundedGgufModelScan([], false);
+        }
+    }
+
+    /// <summary>
+    /// Returns every GGUF in the detected models tree, including files in
+    /// embedding folders and companion-looking files. The model catalog uses
+    /// this inventory so role classification can use GGUF metadata and trusted
+    /// manifest ownership instead of treating a filename as proof. Existing
+    /// chat-model selectors continue to use <see cref="FindGgufModelsBounded"/>,
+    /// which intentionally omits non-chat asset folders.
+    /// </summary>
+    public static BoundedGgufModelScan FindGgufInventoryFilesBounded(string root, int maxResults)
+    {
+        if (maxResults <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxResults));
+
+        root = root.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            return new BoundedGgufModelScan([], false);
+
+        try
+        {
+            root = Path.GetFullPath(root);
+            if (!Directory.Exists(root))
+                return new BoundedGgufModelScan([], false);
+
+            var modelsDirectory = FindModelsDirectory(root, maxResults + 1);
+            if (string.IsNullOrWhiteSpace(modelsDirectory) || !Directory.Exists(modelsDirectory))
+                return new BoundedGgufModelScan([], false);
+            if ((File.GetAttributes(modelsDirectory) & FileAttributes.ReparsePoint) != 0)
+                return new BoundedGgufModelScan([], false);
+
+            var paths = new SortedSet<string>(ModelPathSafety.LocalPathComparer);
+            var sawMore = false;
+            foreach (var path in Directory.EnumerateFiles(modelsDirectory, "*.gguf", GgufEnumerationOptions))
+            {
+                if (!ModelPathSafety.TryResolveFileUnderRoot(root, path, out _, out _))
+                    continue;
+
+                paths.Add(path);
+                if (paths.Count > maxResults)
+                {
+                    sawMore = true;
+                    paths.Remove(paths.Max!);
+                }
+            }
+
+            return new BoundedGgufModelScan(paths.ToList(), sawMore);
+        }
+        catch
+        {
+            return new BoundedGgufModelScan([], false);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether a file is below the dedicated embedding model folder
+    /// in the detected Models tree. The directory role is existing asset
+    /// layout evidence, not a filename classification rule.
+    /// </summary>
+    public static bool IsUnderEmbeddingDirectory(string root, string filePath) =>
+        IsUnderDedicatedModelDirectory(root, filePath, "embed", "embedding", "embeddings");
+
+    /// <summary>
+    /// Returns whether a file is below the dedicated reranker model folder in
+    /// the detected Models tree. This is structural discovery evidence only.
+    /// </summary>
+    public static bool IsUnderRerankerDirectory(string root, string filePath) =>
+        IsUnderDedicatedModelDirectory(root, filePath, "rerank", "reranker");
 
     /// <summary>
     /// r18 03-model-catalog-and-memory-ui.md 3.2: the reported "small model files &lt; ~500 MB
@@ -225,7 +356,7 @@ public static class LocalAiAssetLocator
     private static string FirstExistingDirectory(params string[] candidates) =>
         candidates.FirstOrDefault(Directory.Exists) ?? string.Empty;
 
-    private static string FindModelsDirectory(string root)
+    private static string FindModelsDirectory(string root, int countLimit = 10_000)
     {
         // Actual on-disk directories go first so case-insensitive dedup keeps
         // the real casing instead of a guessed "Models"/"models" variant.
@@ -257,7 +388,7 @@ public static class LocalAiAssetLocator
 
         var withGguf = candidates
             .Where(Directory.Exists)
-            .Select(path => new { Path = path, Count = CountGgufFiles(path) })
+            .Select(path => new { Path = path, Count = CountGgufFiles(path, countLimit) })
             .Where(x => x.Count > 0)
             .OrderByDescending(x => x.Count)
             .ThenBy(x => string.Equals(Path.GetFileName(x.Path), "Models", StringComparison.Ordinal) ? 0 : 1)
@@ -269,11 +400,11 @@ public static class LocalAiAssetLocator
         return candidates.FirstOrDefault(Directory.Exists) ?? string.Empty;
     }
 
-    private static int CountGgufFiles(string path)
+    private static int CountGgufFiles(string path, int countLimit = 10_000)
     {
         try
         {
-            return Directory.EnumerateFiles(path, "*.gguf", SearchOption.AllDirectories).Count();
+            return Directory.EnumerateFiles(path, "*.gguf", GgufEnumerationOptions).Take(countLimit).Count();
         }
         catch
         {
@@ -399,5 +530,31 @@ public static class LocalAiAssetLocator
                 || firstSegment.Equals("embeddings", StringComparison.OrdinalIgnoreCase)
                 || firstSegment.Equals("rerank", StringComparison.OrdinalIgnoreCase)
                 || firstSegment.Equals("reranker", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsUnderDedicatedModelDirectory(string root, string filePath, params string[] directoryNames)
+    {
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(filePath))
+            return false;
+
+        try
+        {
+            root = Path.GetFullPath(root.Trim());
+            var modelsDirectory = FindModelsDirectory(root);
+            if (string.IsNullOrWhiteSpace(modelsDirectory) || !Directory.Exists(modelsDirectory))
+                return false;
+            if (!ModelPathSafety.TryResolveFileUnderRoot(root, filePath, out var normalized, out _))
+                return false;
+
+            var relative = Path.GetRelativePath(modelsDirectory, normalized);
+            var firstSegment = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .FirstOrDefault();
+            return firstSegment is not null
+                && directoryNames.Any(name => string.Equals(firstSegment, name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
     }
 }

@@ -41,6 +41,18 @@ public sealed class ChatSendTimingTests
     }
 
     [Fact]
+    public void Format_labels_provider_and_reasoning_evidence()
+    {
+        var timing = new ChatSendTiming(0, 0, 0, 0, 500, 900,
+            ReasoningEventCount: 2, ReasoningCharacterCount: 16, ProviderTag: "llama.cpp");
+
+        var formatted = timing.Format();
+
+        Assert.Contains("provider llama.cpp", formatted);
+        Assert.Contains("reasoning 2 events / 16 chars", formatted);
+    }
+
+    [Fact]
     public void Format_omits_server_timings_when_provider_does_not_report_them()
     {
         var timing = new ChatSendTiming(0, 0, 0, 0, FirstTokenMs: 500, TotalMs: 900);
@@ -65,6 +77,22 @@ public sealed class ChatSendTimingTests
         var timing = new ChatSendTiming(RecallMs: 240, SelectMs: 3, LessonMs: 1, PromptBuildMs: 2, FirstTokenMs: 950, TotalMs: 1400);
 
         Assert.False(timing.IsSlow, "A sub-second send must not be flagged slow.");
+    }
+
+    [Fact]
+    public void PreFirstToken_uses_preparation_wall_time_when_branches_overlap()
+    {
+        var timing = new ChatSendTiming(
+            RecallMs: 3000,
+            SelectMs: 100,
+            LessonMs: 50,
+            PromptBuildMs: 5,
+            FirstTokenMs: 500,
+            TotalMs: 900,
+            PreparationMs: 305);
+
+        Assert.Equal(805, timing.PreFirstTokenMs);
+        Assert.Contains("preparation 305 ms", timing.Format());
     }
 
     [Fact]

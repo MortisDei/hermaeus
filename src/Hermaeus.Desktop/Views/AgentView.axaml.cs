@@ -50,5 +50,15 @@ public partial class AgentView : UserControl
                 Console.Error.WriteLine($"Failed to open '{path}': {ex.Message}");
             }
         };
+        vm.RequestDeleteTaskConfirmation = async item =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+
+            var dialog = new ConfirmActionDialog(
+                "Delete agent run",
+                $"Permanently delete the historical run '{item.Goal}' and its persisted sub-tasks? This removes its transcript, trace, log, and report.");
+            return await dialog.ShowDialog<bool>(owner);
+        };
     }
 }

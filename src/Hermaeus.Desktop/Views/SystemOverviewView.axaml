@@ -1,10 +1,11 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:views="using:Hermaeus.Desktop.Views"
              x:Class="Hermaeus.Desktop.Views.SystemOverviewView"
              x:DataType="vm:SystemOverviewViewModel">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="24" Spacing="16">
+        <StackPanel Margin="24" Spacing="16" MaxWidth="1100" HorizontalAlignment="Center">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <StackPanel Grid.Column="0" Spacing="2">
                     <TextBlock Text="System Overview" FontSize="22" FontWeight="SemiBold" />
@@ -18,6 +19,32 @@
                         ToolTip.Tip="Re-reads CPU, memory, GPU, and component status now." />
             </Grid>
 
+            <Border Classes="settings-card" Padding="14">
+                <Grid ColumnDefinitions="1.1*,1.1*,1.5*,1.2*" ColumnSpacing="16">
+                    <StackPanel Grid.Column="0" Spacing="3">
+                        <TextBlock Text="System health" FontSize="11" Opacity="0.55" />
+                        <TextBlock Text="{Binding HealthSummary}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="Evidence from the current component snapshot." FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="3">
+                        <TextBlock Text="Workstation" FontSize="11" Opacity="0.55" />
+                        <TextBlock Text="Local-first runtime" FontSize="14" FontWeight="SemiBold" />
+                        <TextBlock Text="Observed from the current machine snapshot." FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="3">
+                        <TextBlock Text="Platform" FontSize="11" Opacity="0.55" />
+                        <TextBlock Text="{Binding Snapshot.OSDescription}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Snapshot.Architecture}" FontSize="11" Opacity="0.6" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" Spacing="3">
+                        <TextBlock Text="Data root" FontSize="11" Opacity="0.55" />
+                        <TextBlock Text="{Binding Snapshot.DataRoot}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="Configured storage location" FontSize="11" Opacity="0.6" ToolTip.Tip="{Binding Snapshot.DataRoot}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <TextBlock Text="At a glance" FontSize="16" FontWeight="SemiBold" />
             <ItemsControl ItemsSource="{Binding Metrics}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -26,11 +53,12 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:SystemMetricViewModel">
-                        <Border Width="270"
+                        <Border Width="250"
                                 MinHeight="86"
                                 Margin="0,0,10,10"
                                 Padding="14"
                                 CornerRadius="8"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                 BorderThickness="1">
                             <StackPanel Spacing="6">
@@ -39,18 +67,39 @@
                                            TextWrapping="Wrap"
                                            FontWeight="SemiBold"
                                            FontSize="13" />
+                                <ProgressBar IsVisible="{Binding HasRatio}"
+                                             Value="{Binding ProgressValue}"
+                                             Minimum="0" Maximum="100"
+                                             Height="6"
+                                             ToolTip.Tip="Observed proportion currently in use. It is omitted when the source did not provide both values." />
                             </StackPanel>
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <Border Classes="settings-card" Padding="10">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Details" VerticalAlignment="Center" FontSize="11" Opacity="0.55" Margin="0,0,6,0" />
+                    <Button Content="Dashboard" Command="{Binding ShowOverviewDetailCommand}" Padding="9,4" CornerRadius="6"
+                            IsVisible="{Binding !IsOverviewDetailVisible}"
+                            ToolTip.Tip="Keep the at-a-glance hardware and workload view in focus." />
+                    <Button Content="Startup" Command="{Binding ShowStartupDetailCommand}" Padding="9,4" CornerRadius="6"
+                            IsEnabled="{Binding HasStartupBreakdown}"
+                            ToolTip.Tip="Inspect the last measured startup breakdown." />
+                    <Button Content="Privacy" Command="{Binding ShowPrivacyDetailCommand}" Padding="9,4" CornerRadius="6"
+                            ToolTip.Tip="Inspect configured outbound destinations and privacy posture." />
+                </StackPanel>
+            </Border>
+
+            <StackPanel IsVisible="{Binding IsOverviewDetailVisible}" Spacing="16">
             <!-- r19 6.2: hardware (GPU/VRAM, Components) reads before the privacy
                  audit, not buried under it. -->
             <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
                 <Border Grid.Column="0"
                         Padding="14"
                         CornerRadius="8"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                         BorderThickness="1">
                     <StackPanel Spacing="10">
@@ -64,6 +113,11 @@
                                         <StackPanel Spacing="2">
                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
                                             <TextBlock Text="{Binding Memory}" FontSize="12" Opacity="0.65" />
+                                            <ProgressBar IsVisible="{Binding HasMemoryRatio}"
+                                                         Value="{Binding MemoryProgressValue}"
+                                                         Minimum="0" Maximum="100"
+                                                         Height="6"
+                                                         ToolTip.Tip="Observed VRAM use for this GPU. It is omitted when process or device memory is unknown." />
                                             <TextBlock Text="{Binding Provider}" FontSize="11" Opacity="0.4" />
                                             <TextBlock Text="{Binding Status}" FontSize="11" Opacity="0.4" />
                                         </StackPanel>
@@ -77,6 +131,7 @@
                 <Border Grid.Column="1"
                         Padding="14"
                         CornerRadius="8"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                         BorderThickness="1">
                     <StackPanel Spacing="10">
@@ -95,11 +150,16 @@
                                                            FontSize="11"
                                                            Opacity="0.45" />
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding Status}"
-                                                       FontSize="12"
-                                                       FontWeight="SemiBold"
-                                                       VerticalAlignment="Top" />
+                                            <Border Grid.Column="1"
+                                                    Background="{Binding Status, Converter={x:Static views:SystemOverviewStatusColorConverter.Instance}}"
+                                                    CornerRadius="5"
+                                                    Padding="7,3"
+                                                    VerticalAlignment="Top">
+                                                <TextBlock Text="{Binding Status}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="White" />
+                                            </Border>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
@@ -109,11 +169,88 @@
                 </Border>
             </Grid>
 
+            <Border Classes="settings-card" Padding="14">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Whole-workload resources" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ResourceStatus}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="Observed / planned / evidence gaps" FontSize="10" Opacity="0.5" VerticalAlignment="Center" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding ResourceConsumers}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ResourceConsumerReceiptViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="0,0,0,1" Padding="0,8">
+                                    <StackPanel Spacing="2">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{Binding ConsumerId}" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="{Binding State}" FontSize="12" Opacity="0.65" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding Kind}" FontSize="11" Opacity="0.5" />
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <TextBlock Text="GPU" FontSize="12" />
+                                            <TextBlock Text="{Binding DeviceMemory}" FontSize="12" />
+                                            <TextBlock Text="RAM" FontSize="12" Margin="6,0,0,0" />
+                                            <TextBlock Text="{Binding SystemMemory}" FontSize="12" />
+                                            <TextBlock Text="{Binding Unknown}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="Device totals are whole-device observations, not process attribution."
+                               FontSize="11" Opacity="0.5" />
+                    <ItemsControl ItemsSource="{Binding ResourceDevices}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ResourceDeviceReceiptViewModel">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{Binding DeviceId}" FontSize="12" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding Used}" FontSize="12" />
+                                        <TextBlock Text="/" FontSize="12" />
+                                        <TextBlock Text="{Binding Capacity}" FontSize="12" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Spacing="4" IsVisible="{Binding HasResourceReleaseReceipts}">
+                        <TextBlock Text="Recent release receipts" FontSize="12" FontWeight="SemiBold" Opacity="0.75" Margin="0,6,0,0" />
+                        <ItemsControl ItemsSource="{Binding ResourceReleaseReceipts}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:ResourceReleaseReceiptViewModel">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                        <TextBlock Grid.Column="0" Text="{Binding ConsumerId}" FontSize="11" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Reason}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Column="2" Text="{Binding ReleasedAt}" FontSize="10" Opacity="0.5" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding ResourceUnknowns}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ResourceUnknownViewModel">
+                                <TextBlock Text="{Binding Detail}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+            </StackPanel>
+
             <!-- r27 01 1.5: the startup breakdown was already measured and already
                  formatted into one Info line in the runtime log, which nobody
                  reads. It is the only evidence a round changed startup at all. -->
-            <Expander Header="Last startup" IsExpanded="False" IsVisible="{Binding HasStartupBreakdown}">
+            <Border Classes="settings-card" Padding="14" IsVisible="{Binding IsStartupDetailVisible}">
                 <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Text="Last startup" FontSize="16" FontWeight="SemiBold" />
+                        <Button Grid.Column="1" Content="Back to dashboard" Command="{Binding ShowOverviewDetailCommand}" Padding="9,4" CornerRadius="6" />
+                    </Grid>
                     <TextBlock Text="{Binding StartupTotal}" FontWeight="SemiBold" />
                     <ItemsControl ItemsSource="{Binding StartupPhases}">
                         <ItemsControl.ItemTemplate>
@@ -147,22 +284,23 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
-            </Expander>
+            </Border>
 
-            <Expander Header="Privacy audit - what can leave this machine" IsExpanded="True">
+            <Border Classes="settings-card" Padding="14" IsVisible="{Binding IsPrivacyDetailVisible}">
                 <StackPanel Spacing="10">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                         <TextBlock Grid.Column="0"
-                                   Text="Local-first posture, remote data paths, secret storage, and exposed services"
-                                   FontSize="12"
-                                   Opacity="0.62"
-                                   TextWrapping="Wrap" />
+                                   Text="Privacy audit"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
                         <Button Grid.Column="1"
-                                Content="Refresh"
-                                Command="{Binding RefreshPrivacyAuditCommand}"
-                                IsEnabled="{Binding !IsRefreshing}"
-                                ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
+                                Content="Back to dashboard"
+                                Command="{Binding ShowOverviewDetailCommand}" Padding="9,4" CornerRadius="6" />
                     </Grid>
+                    <TextBlock Text="Local-first posture, remote data paths, secret storage, and exposed services" FontSize="12" Opacity="0.62" TextWrapping="Wrap" />
+                    <Button Content="Refresh privacy audit" Command="{Binding RefreshPrivacyAuditCommand}"
+                            IsEnabled="{Binding !IsRefreshing}" HorizontalAlignment="Left"
+                            ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
                     <TextBlock Text="{Binding PrivacyAuditSummary}" FontSize="13" FontWeight="SemiBold" />
                     <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">
                         <ItemsControl.ItemTemplate>
@@ -189,7 +327,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
-            </Expander>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

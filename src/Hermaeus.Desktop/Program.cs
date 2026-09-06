@@ -85,11 +85,8 @@ class Program
         // A second instance would write to the same SQLite data root with no
         // cross-process coordination; refuse to start rather than risk it.
         var ownsInstance = SingleInstanceGuard.TryAcquire();
-        if (!ownsInstance && PackageIntegrationLaunch is null)
+        if (!ShouldContinueStartup(ownsInstance))
             return;
-
-        if (PackageIntegrationLaunch is not null)
-            PackageIntegrationLaunch = PackageIntegrationLaunch with { CanRun = ownsInstance };
 
         try
         {
@@ -114,8 +111,17 @@ class Program
         }
     }
 
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
+    /// <summary>
+    /// Every executable entry point, including package integration helpers,
+    /// requires ownership of the application lock before Avalonia startup.
+    /// </summary>
+    internal static bool ShouldContinueStartup(bool ownsInstance) => ownsInstance;
+
+    public static AppBuilder BuildAvaloniaApp() => BuildAvaloniaApp<App>();
+
+    internal static AppBuilder BuildAvaloniaApp<TApplication>()
+        where TApplication : Application, new() =>
+        AppBuilder.Configure<TApplication>()
             .UsePlatformDetect()
             .With(new X11PlatformOptions { WmClass = "hermaeus" })
             .WithInterFont()

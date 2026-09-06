@@ -18,6 +18,7 @@ public enum RagGroundingMode
 public sealed class RagQueryTrace
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string OperationId { get; set; } = string.Empty;
     public string DatasetId { get; set; } = string.Empty;
     public string Question { get; set; } = string.Empty;
     public string ExpandedQuestion { get; set; } = string.Empty;
@@ -44,6 +45,10 @@ public sealed class RagTraceChunk
     public string Title { get; set; } = string.Empty;
     public string File { get; set; } = string.Empty;
     public string Path { get; set; } = string.Empty;
+    public string SourceId { get; set; } = string.Empty;
+    public string SourceRevisionId { get; set; } = string.Empty;
+    public string ContentHash { get; set; } = string.Empty;
+    public string GenerationId { get; set; } = string.Empty;
     public float Score { get; set; }
     public string Content { get; set; } = string.Empty;
 

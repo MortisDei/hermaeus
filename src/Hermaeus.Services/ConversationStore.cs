@@ -9,6 +9,7 @@ public sealed class ConversationStore : IConversationStore
 {
     private const int SchemaVersion = 6;
     private readonly ISettingsService _settings;
+    private readonly IRuntimeLogService? _logs;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private string DbPath
@@ -22,9 +23,10 @@ public sealed class ConversationStore : IConversationStore
     }
     private string Cs => $"Data Source={DbPath}";
 
-    public ConversationStore(ISettingsService settings)
+    public ConversationStore(ISettingsService settings, IRuntimeLogService? logs = null)
     {
         _settings = settings;
+        _logs = logs;
     }
 
     public async Task InitializeAsync() => await EnsureInitializedAsync();
@@ -35,6 +37,7 @@ public sealed class ConversationStore : IConversationStore
         if (_initializedPath == dbPath && File.Exists(dbPath)) return;
 
         await _initGate.WaitAsync(ct);
+        var operationId = OperationCorrelation.NewId();
         try
         {
             if (_initializedPath == dbPath && File.Exists(dbPath)) return;
@@ -91,12 +94,35 @@ public sealed class ConversationStore : IConversationStore
             ], ct);
             if (!ftsExisted || schemaChanged)
                 await RebuildFtsAsync(c, ct);
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Conversation database opened with mode=read-write, pooling=provider-default, journal={await ReadJournalModeAsync(c, ct)}, schema_target={SchemaVersion}.",
+                operationId));
             _initializedPath = dbPath;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                $"Conversation database initialization failed: exception={ex.GetType().Name}.",
+                operationId));
+            throw;
         }
         finally
         {
             _initGate.Release();
         }
+    }
+
+    private static async Task<string> ReadJournalModeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode";
+        return Convert.ToString(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture) ?? "Unknown";
     }
 
     private static async Task<bool> TableExistsAsync(SqliteConnection c, string table, CancellationToken ct)

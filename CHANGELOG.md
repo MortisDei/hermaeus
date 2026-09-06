@@ -9,6 +9,213 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.40.0-beta] - 2026-09-05
+
+### Changed
+
+- Windows desktop identity now uses the canonical Moss `hermaeus.ico` for the
+  application executable and Avalonia main window, covering taskbar and
+  Alt-Tab icon paths. The existing tray PNG path is unchanged.
+- Model cards now keep the primary role, capability, size, fit, and update
+  metadata inside a wrapping row, preserving whole badges when the card is
+  narrow. Saved tune metadata remains a separate card section. Scenario Eval
+  suite and row Run actions now use truthful command availability and the row
+  binding resolves through the ItemsControl data context. Foreground embedding
+  queries are prioritized over
+  queued optional backfill, while physical gate, request, parse, coalescing,
+  payload, and logical timings are recorded without query text. Recall document
+  search scans the storage embedding index and FTS candidates before bounded
+  content hydration, and returns calibrated source relevance so useful document
+  hits are not discarded as tiny RRF ordering scores.
+- R32 chat diagnostics now report preparation as wall-clock time across the
+  concurrent memory, RAG, recall, and project-state branches instead of adding
+  overlapping spans. Identical foreground query-embedding requests share one
+  cancellable request, while lexical fallback and caller cancellation remain
+  intact. Identical memory searches share the complete retrieval work while
+  returning independent result lists. Scenario Eval results from both suite and
+  individual runs now persist model-content, scenario-definition,
+  evaluator-contract, runtime, timestamp,
+  counts, and check-detail evidence, and mismatched evidence is shown as stale.
+  Capability-cache replacement now closes the existing read handle before the
+  atomic write. The observed background embedding admission denial remains an
+  explicit bounded deferral when whole-workload headroom is insufficient.
+- Scenario Eval history restoration is now independent of run availability:
+  definitions become runnable before persisted evidence is restored, a new
+  live run takes precedence over late history, and unchanged local model files
+  reuse a bounded in-session content-hash cache. Restored evidence remains
+  isolated by model id and retains Pass, Fail, Stale, and Unknown semantics.
+- The four Avalonia framework packages are now pinned coherently to 12.1.2.
+  AvaloniaEdit remains on its separate 12.0.0 package line; no new framework
+  controls or backend-selection changes are included.
+
+- R32 corrective work now completes pending Data Root moves at startup with
+  per-file length and SHA256 verification, preserving the old active root and a
+  retryable receipt when a move fails. The RAG surface separates Ask, Manage,
+  Sources, and Diagnostics; Hugging Face acquisition has a dedicated workspace;
+  and model cards support confirmed bulk cleanup of stale or unknown companions
+  without deleting present assets.
+- System Overview now summarizes component health and recent resource release
+  receipts, Doctor exposes only contextual repair actions, and each Settings
+  voice channel owns its discovered voice catalogue so selector state cannot
+  leak between rows. Scenario Evals now exposes bounded current/total,
+  scenario, step, pass/fail, and cancellation state while a run is active.
+  Resource receipts distinguish observed and planned bytes, not-resident and
+  lazy consumers, and incomplete component attribution without assigning
+  whole-device totals to a process. Recall preserves caller cancellation
+  through embedding backfill and keeps dense candidates that have no lexical
+  overlap.
+- Startup recovery now marks persisted Agent runs with no execution owner as
+  `Interrupted`, including active child-plan entries, with an explicit reason;
+  active `Running` tasks remain protected from deletion. Recall incremental
+  indexing now performs bounded embedding backfill immediately, persists
+  retry/exhaustion state, and retries transient failures without requiring a
+  restart. Normal missing Hugging Face artwork is recorded as partial rather
+  than failed, and duplicate same-revision artwork reports are suppressed.
+- RAG questions can now include an explicit combination of datasets, while
+  ingest, reindex, and evaluation retain their single-dataset controls.
+- RAG question scope now starts empty on first use, persists explicit later
+  selections, and prompts before a question can run without a selected dataset.
+  An empty RAG install can create a version-local Hermaeus Help dataset through
+  the normal ingestion and citation pipeline, with Sources and Diagnostics
+  initially collapsed.
+- Hugging Face artwork checks now continue after a missing repository thumbnail
+  by using a separately labelled, exact-host publisher/avatar fallback. The
+  fallback retains immutable repository/revision provenance, shares only
+  verified content-addressed image bytes across metadata records, and remains
+  subject to the existing redirect, MIME, magic, size, decode, and atomic-cache
+  guards. Quick Chat now sends with Enter or Ctrl+Enter and shows processing
+  state while a request is active.
+- Windows voice preview now uses native `winmm` playback instead of opening a
+  media player through the WAV file association. Data-root selection opens its
+  safe migration confirmation immediately, and the Services editor exposes
+  the exact GPU offload count beside the effective offload state.
+- Windows packaging now validates `-SkipRestore` runtime targets and removes
+  incomplete package output after failures.
+- Managed llama.cpp GPU updates now capture `--version` from stdout and stderr,
+  use the verified upstream release tag and SHA256-checked archive as stable
+  identity evidence, and refuse help-only or otherwise unverified identities.
+- Data-root persistence now write-probes the selected effective root before
+  publishing settings. Capability-cache writes report their actual path and
+  failure state, while sibling persisted stores continue to resolve beneath
+  the current root after startup and root changes.
+- Workspace-generated profile memories are deduplicated per workspace and
+  excluded from ordinary Memories. Benchmark detail refresh keeps the current
+  run bound to its replacement row, and Lab evidence detail can be copied
+  with its persisted records and provenance.
+- Agent workspace reads now preserve complete default file content through the
+  executor, report search and glob caps explicitly, and allow confirmed
+  deletion of stopped historical top-level runs with their persisted sub-tasks.
+- Activity is folded into the Memories surface as a collapsed section, and
+  model tiles and system overview sections regain bounded visual grouping.
+- Memory recall now drops weak semantic candidates before injection while
+  treating pinning as prominence rather than a relevance bypass; observed
+  background embedding failures are recorded instead of becoming unobserved
+  task exceptions. Model-generated absence conclusions are not promoted to
+  durable memories.
+- RAG Enter-to-send follows the shared Chat setting, including multiline input
+  when the configured modifier is not pressed.
+- Native Kokoro resource admission now reuses the provider's registered
+  consumer identity, so present verified assets are not rejected before ONNX
+  session creation by a false owner conflict. Doctor distinguishes install
+  from retry-health actions for present but unadmitted assets.
+- RAG, Agent workspace reads, and Chat attachments now share one bounded common
+  text/source extension policy, including log files, while retaining separate
+  binary, size, path, and document-extraction guards. RAG streaming no longer
+  pulls the view back to the bottom after the user scrolls up.
+- Confirmation dialogs now use the framework's owner placement consistently;
+  the manual pixel repositioning that could place a prompt outside the app
+  window was removed. Model cards and their configuration flyouts now resize
+  and wrap within narrower app windows, and section headers are more prominent.
+- Verified manifest companion paths and GGUF metadata now hide projector and
+  draft companions from the top-level model catalog without filename guessing.
+  A successful update check also records the immutable revision needed for
+  revision-pinned artwork, and the check awaits optional artwork backfill.
+- Native Kokoro installation failures now retain their actionable exception in
+  the runtime log and progress channel instead of collapsing to a generic
+  failure-only diagnostic.
+- Native Kokoro admission now validates the required ONNX input contract and
+  records a bounded rejection reason. Capability-cache reads and atomic writer
+  updates share Windows-compatible file access and serialization so a runtime
+  update cannot leave a transient Access Denied result.
+- Voice provider settings now persist canonical provider ids. Legacy Kokoro
+  display labels remain readable, while Kokoro (Python) and Kokoro (native)
+  retain separate setup parsing, install-state reporting, and provider config
+  keys.
+- Chat send traces now label the selected provider and count reasoning deltas
+  separately from first-content latency when the runtime emits them.
+- Agent Run now separates typed continue, planned continuation, Finish run,
+  and Stop transitions, preserving stopped-run evidence. The shell keeps only a
+  compact pending-action indicator, while the Agent response is selectable and
+  copyable. Lab displays execution and source-restore outcomes separately.
+- Hugging Face artwork accepts the documented thumbnail metadata shape when it
+  is returned at either supported API level; missing optional declarations
+  remain an honest `NoDeclaredArtwork` state.
+
+- Corrective hardening now recognizes Linux GPU shared libraries in Doctor,
+  keeps typed Auto placement out of CPU-only advisories, separates installed
+  llama.cpp identity from an Unknown latest-release comparison. A second
+  normal launch remains a strict lock rejection and does not contact the
+  existing instance.
+- Corrective model-management hardening backfills Hugging Face artwork after an
+  update check only when the verified manifest, card, and immutable tree agree;
+  artwork remains optional and cannot fail the update result.
+- The Models catalog now groups Chat & Generation, Embeddings, and Rerankers;
+  proven companions stay on their primary card, with factual capability badges
+  kept separate from configured and ready state.
+- New installs show toolbar labels by default while preserving an explicitly
+  saved choice to keep them hidden. Chat's compact settings flyout projects
+  the same managed GPU-placement owner shown on Services.
+- Native Kokoro health failures in Services now link directly to Doctor, which
+  owns the verified asset diagnosis and repair action.
+- R32 development is prepared as `0.40.0-beta`; no release or tag is created
+  by this work.
+- R32 dependency closeout migrates the Avalonia framework packages to 12.1.2,
+  AvaloniaEdit to its latest compatible stable 12.0.0 release, and the
+  required Tmds.DBus.Protocol floor to 0.94.1. Clipboard and drag/drop paths
+  use Avalonia 12 typed transfer APIs while preserving their existing user
+  outcomes. Both CI workflows now pin actions/cache 6.1.0; cache paths, keys,
+  and permissions are unchanged.
+- R32 Batch 4 adds whole-workload resource admission receipts in Services and
+  System Overview, with expiring reservations and explicit Unknown resource
+  state across managed runtimes, Lab, voice, ONNX, and embedding backfill.
+- R32 Batch 5 adds an opt-in adaptive launch envelope with deterministic,
+  bounded candidates, runtime-gated fit target/minimum-context controls,
+  conservative structured effective-launch observations, fresh admission for
+  retries, compatible recent-success preference, and transient overlays that
+  never overwrite saved settings.
+- R32 Batch 6 scopes reranker load failures to the selected asset identity and
+  adds a bounded diagnostic for dynamic ONNX batch equivalence without changing
+  sequential query ranking. Host-cache, checkpoint, per-slot, and multi-device
+  controls remain unshipped without their required measured evidence.
+- R32 Batch 7 adds the Services-owned, normalized recommendation persistence
+  foundation with deterministic eligibility, fixed rule identities,
+  deduplication, and durable pending decision and rollback records. It does not
+  add automatic application or model/workload routing.
+- R32 Batch 8 adds shared recommendation review cards, stale-guarded managed
+  server Apply and Undo, startup reconciliation by observed settings identity,
+  auditable adaptive-result proposals, and review-only benchmark model
+  guidance. Applying a recommendation never restarts a running server or
+  changes model selection automatically.
+- Fixed a transient Settings autosave race by publishing direct-save settings
+  only after their atomic file replacement completes, preserving the existing
+  autosave and direct-save lifecycle behavior.
+- R32 Batch 9 adds lazy legacy memory lineage, immutable revision/update/
+  correction/dispute/restore commands with stale guards, current/as-of/history
+  retrieval, exact revision context identities, timeline diffs, review-only
+  contradiction proposals, transactional hard deletion, and bounded redacted
+  versioned memory history export. Existing CSV export remains
+  current-projection-only.
+- R32 Batch 10 adds stable watched-root and source lineage, staged source
+  revisions and dataset generations, exact embedding cardinality/dimension/
+  finite-value validation, immediate source revalidation, atomic RAG
+  publication, generation-aware query caches, exact-revision citations, and
+  Dataset Manager generation history. Missing-source removal now publishes a
+  replacement generation and cancellation cannot expose a partial ingest.
+- R32 Batch 11 adds bounded, revision-pinned Hugging Face repository artwork
+  with strict host and redirect validation, independent PNG/JPEG/WebP
+  preflight, atomic bounded LRU cache storage, installed-card cache reuse only
+  for verified manifests, and a confirmed Data Management clear action.
+
 ## [0.38.0-beta] - 2026-08-30
 
 ### Changed

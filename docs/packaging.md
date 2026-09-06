@@ -129,6 +129,13 @@ dotnet restore Hermaeus.sln -r win-x64
 pwsh ./build.ps1 -SkipRestore -Runtime win-x64
 ```
 
+`-SkipRestore` validates both publish projects before changing `dist/`. If the
+requested RID is not present in the restore assets, the script stops with a
+command-specific message instead of reaching `NETSDK1047`. Publish scratch
+directories are removed on success and failure, and an incomplete package is
+removed when packaging fails. A package is ready only after the executable,
+layout, archive, and checksum validations complete.
+
 Framework-dependent packages require the .NET 10 runtime on the target machine.
 Self-contained packages include the runtime and are larger.
 
@@ -156,6 +163,12 @@ network, update, installation, elevation, registry, discovery, or persistence
 behavior. The launcher exists only to keep the portable archive tidy and give
 users a normal double-click entry point. The old `Launch-Hermaeus.cmd` is not
 packaged.
+
+The bundled Windows apphost declares `src/Hermaeus.Desktop/Assets/hermaeus.ico`
+as its application icon, and the Avalonia main window uses that same multi-size
+ICO for the Windows window, taskbar, and Alt-Tab identity. The system tray keeps
+its separate `hermaeus-tray.png` path because tray integration consumes the
+existing raster asset.
 
 The build requires a native compiler only for this small launcher. Windows
 builds use the Visual Studio C++ tools already present on GitHub's

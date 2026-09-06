@@ -117,7 +117,7 @@ public sealed class LocalAiSetupService
             items.Add(new LocalAiReadinessItem(
                 "voice-native",
                 $"{voiceProviderLabel} assets",
-                LocalAiReadinessStatus.Found,
+                LocalAiReadinessStatus.Optional,
                 $"{voiceProviderLabel} needs no Python venv; use the Doctor page to install its model assets.",
                 "Handled by Doctor, not the local AI setup scan.",
                 false));
@@ -401,15 +401,10 @@ public sealed class LocalAiSetupService
             required));
     }
 
-    private static VoiceProvider NormalizeVoiceProvider(string value) => value switch
-    {
-        "Kokoro" => VoiceProvider.Kokoro,
-        "F5Tts" or "F5-TTS" => VoiceProvider.F5Tts,
-        "XttsV2" or "XTTS" or "XTTS v2" => VoiceProvider.XttsV2,
-        "OpenAi" or "OpenAI" => VoiceProvider.OpenAi,
-        "KokoroNative" => VoiceProvider.KokoroNative,
-        _ => VoiceProvider.KokoroNative
-    };
+    private static VoiceProvider NormalizeVoiceProvider(string value) =>
+        VoiceProviderIdentity.TryParse(value, out var provider)
+            ? provider
+            : VoiceProvider.KokoroNative;
 
     private static string VoiceProviderLabel(VoiceProvider provider) => provider switch
     {

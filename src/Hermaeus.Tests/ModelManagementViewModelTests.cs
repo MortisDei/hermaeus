@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using Hermaeus.Core.Models;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
@@ -10,6 +11,123 @@ namespace Hermaeus.Tests;
 // r13 02-model-library.md 2.1: filter box narrows the already-loaded list without a refetch.
 public sealed class ModelManagementViewModelTests
 {
+    [Fact]
+    public async Task Refresh_groups_generation_embedding_and_reranker_roles_without_mixing_cards()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var models = Path.Combine(assets, "Models");
+        Directory.CreateDirectory(models);
+        var embeddingPath = Path.Combine(models, "embedding.gguf");
+        File.WriteAllText(embeddingPath, "embedding");
+        var reranker = Path.Combine(models, "reranker");
+        Directory.CreateDirectory(reranker);
+        File.WriteAllText(Path.Combine(reranker, "model_O4.onnx"), "onnx");
+        File.WriteAllText(Path.Combine(reranker, "vocab.txt"), "vocab");
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        settings.Settings.ManagedServers[1].ModelPath = embeddingPath;
+        settings.Settings.ManagedServers[1].EmbeddingsMode = true;
+        settings.Settings.Rag.RerankerModelPath = reranker;
+
+        var llm = new ScriptedModelsLlm(() =>
+        [
+            new LlmModel { Id = "chat", Name = "Chat model", Provider = "llama.cpp", ProviderTag = "llama.cpp" }
+        ]);
+        var vm = new ModelManagementViewModel(llm, new ModelProfileService(settings), new FakeToasts(), settings,
+            new FakeSystemInfo(), NewServicesViewModel(settings), new ModelManifestStore(settings), new HuggingFaceClient(), new ModelDownloadService());
+
+        await vm.RefreshAsync();
+
+        Assert.Equal(3, vm.Models.Count);
+        Assert.Equal("Chat & Generation", Assert.Single(vm.ModelSections, section => section.Title == "Chat & Generation").Title);
+        Assert.Single(vm.ModelSections.Single(section => section.Title == "Chat & Generation").Models);
+        Assert.Single(vm.ModelSections.Single(section => section.Title == "Embeddings").Models);
+        Assert.Single(vm.ModelSections.Single(section => section.Title == "Rerankers").Models);
+        Assert.Equal(ModelCatalogRole.Embedding, vm.Models.Single(model => model.ModelId == embeddingPath).CatalogRole);
+        Assert.Equal(ModelCatalogRole.Reranker, vm.Models.Single(model => model.ModelId == reranker).CatalogRole);
+    }
+
+    [Fact]
+    public async Task Refresh_hides_manifest_mapped_companions_without_filename_guessing()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var models = Path.Combine(assets, "Models");
+        Directory.CreateDirectory(models);
+        var primaryPath = Path.Combine(models, "primary.gguf");
+        var companionPath = Path.Combine(models, "supporting.gguf");
+        File.WriteAllText(primaryPath, "primary");
+        File.WriteAllText(companionPath, "companion");
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = primaryPath,
+            Companions = [new ModelCompanionManifestEntry
+            {
+                LocalFilePath = companionPath,
+                Role = "projector",
+                SizeBytes = new FileInfo(companionPath).Length
+            }]
+        });
+
+        var vm = new ModelManagementViewModel(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            NewServicesViewModel(settings),
+            manifest,
+            new HuggingFaceClient(),
+            new ModelDownloadService());
+
+        await vm.RefreshAsync();
+
+        Assert.Contains(vm.Models, item => item.ModelId == primaryPath);
+        Assert.DoesNotContain(vm.Models, item => item.ModelId == companionPath);
+    }
+
+    [Fact]
+    public void Catalog_classification_keeps_capability_facts_separate_from_readiness()
+    {
+        using var temp = new TempDir();
+        var projectorPath = temp.PathFor("projector.gguf");
+        var draftPath = temp.PathFor("draft.gguf");
+        File.WriteAllBytes(projectorPath, [1, 2]);
+        var primary = new ModelProfileItemViewModel(
+            new LlmModel { Id = temp.PathFor("primary.gguf"), Name = "MoE model", Provider = "local GGUF" },
+            new ModelProfile { ModelId = temp.PathFor("primary.gguf") });
+        var manifest = new ModelManifestEntry
+        {
+            FilePath = primary.ModelId,
+            Companions =
+            [
+                new ModelCompanionManifestEntry { LocalFilePath = projectorPath, Role = "projector", SizeBytes = 2 },
+                new ModelCompanionManifestEntry { LocalFilePath = draftPath, Role = "draft_head", SizeBytes = 2 }
+            ]
+        };
+
+        primary.ApplyCatalogClassification(
+            ModelCatalogRole.ChatGeneration,
+            new GgufModelInfo("mixtral", "Q4_K_M", 32, 8192, 4096, 32, 8, 128, 128,
+                NextnPredictLayers: 4, ExpertCount: 8, ExpertUsedCount: 2),
+            manifest);
+
+        Assert.Equal("Chat & Generation", primary.RoleLabel);
+        Assert.Contains("MoE", primary.CapabilityBadges);
+        Assert.Contains("MTP", primary.CapabilityBadges);
+        Assert.Contains("Draft", primary.CapabilityBadges);
+        Assert.Contains("Vision / Projector", primary.CapabilityBadges);
+        Assert.Equal(2, primary.Companions.Count);
+        Assert.Equal("Present", primary.Companions[0].StateLabel);
+        Assert.Equal("Missing", primary.Companions[1].StateLabel);
+        Assert.Contains("missing", primary.CompanionSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task Refresh_does_not_duplicate_a_local_model_reported_with_a_normalized_path()
     {
@@ -272,6 +390,62 @@ public sealed class ModelManagementViewModelTests
         }
     }
 
+    private sealed class UpdateArtworkHandler(string revision, string modelHash, int modelSize, byte[] image) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var url = request.RequestUri!.ToString();
+            if (url.Contains("/tree/", StringComparison.Ordinal))
+            {
+                var tree = "[{\"path\":\"model.gguf\",\"size\":" + modelSize + ",\"lfs\":{\"oid\":\"" + modelHash + "\"}},{\"path\":\"art.png\",\"size\":" + image.Length + "}]";
+                return Task.FromResult(Response(tree));
+            }
+            if (url.Contains("/api/models/", StringComparison.Ordinal))
+                return Task.FromResult(Response("{\"sha\":\"" + revision + "\",\"cardData\":{\"thumbnail\":\"art.png\"}}"));
+
+            var artwork = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(image)
+            };
+            artwork.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            artwork.Content.Headers.ContentLength = image.Length;
+            return Task.FromResult(artwork);
+        }
+    }
+
+    private sealed class PublisherAvatarArtworkHandler(string revision, string modelHash, int modelSize, byte[] image) : HttpMessageHandler
+    {
+        public List<string> RequestedUrls { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var url = request.RequestUri!.ToString();
+            RequestedUrls.Add(url);
+            if (url.Contains("/tree/", StringComparison.Ordinal))
+            {
+                var tree = "[{\"path\":\"model.gguf\",\"size\":" + modelSize + ",\"lfs\":{\"oid\":\"" + modelHash + "\"}}]";
+                return Task.FromResult(Response(tree));
+            }
+            if (url.Contains("/api/models/", StringComparison.Ordinal))
+                return Task.FromResult(Response("{\"sha\":\"" + revision + "\",\"author\":\"org\",\"cardData\":{}}"));
+            if (url.Contains("/api/organizations/org/overview", StringComparison.Ordinal))
+                return Task.FromResult(Response("{\"avatarUrl\":\"https://cdn-avatars.huggingface.co/v1/production/uploads/org/avatar.png\"}"));
+
+            var artwork = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(image)
+            };
+            artwork.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            artwork.Content.Headers.ContentLength = image.Length;
+            return Task.FromResult(artwork);
+        }
+    }
+
+    private static HttpResponseMessage Response(string json) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(json, Encoding.UTF8, "application/json")
+    };
+
     private static (string Metadata, string MetadataHash, string ModelHash, string CompanionHash) CompanionFixture(
         byte[] modelBytes, byte[] companionBytes)
     {
@@ -349,6 +523,124 @@ public sealed class ModelManagementViewModelTests
 
         var entry = await manifest.FindAsync(modelPath);
         Assert.Equal("new-oid", entry!.PendingSha256);
+    }
+
+    [Fact]
+    public async Task CheckForUpdates_backfills_revision_pinned_artwork_without_changing_update_state()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor(Path.Combine("assets", "Models"));
+        Directory.CreateDirectory(assets);
+        var modelPath = Path.Combine(assets, "model.gguf");
+        var modelBytes = Encoding.UTF8.GetBytes("fake model");
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("assets");
+
+        const string revision = "0123456789abcdef0123456789abcdef01234567";
+        var modelHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(modelBytes));
+        var image = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = "org/repo",
+            RepoFile = "model.gguf",
+            Sha256 = modelHash,
+            SizeBytes = modelBytes.Length,
+            Source = "hf-browser"
+        });
+
+        using var http = new HttpClient(new UpdateArtworkHandler(revision, modelHash, modelBytes.Length, image));
+        var vm = new ModelManagementViewModel(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            NewServicesViewModel(settings),
+            manifest,
+            new HuggingFaceClient(http),
+            new ModelDownloadService(),
+            artwork: new HuggingFaceArtworkService(http));
+
+        await vm.RefreshAsync();
+        await vm.CheckForUpdatesCommand.ExecuteAsync(null);
+
+        var item = Assert.Single(vm.Models);
+        Assert.Equal(ModelUpdateStatus.UpToDate, item.UpdateStatus);
+        await WaitForAsync(() => item.ArtworkState == HfArtworkState.Available, "revision-pinned artwork backfill");
+        Assert.NotNull(item.ArtworkPath);
+        Assert.Contains(revision, item.ArtworkTooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckForUpdates_backfills_the_publisher_avatar_when_the_repo_has_no_declared_artwork()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor(Path.Combine("assets", "Models"));
+        Directory.CreateDirectory(assets);
+        var modelPath = Path.Combine(assets, "model.gguf");
+        var modelBytes = Encoding.UTF8.GetBytes("fake model");
+        await File.WriteAllBytesAsync(modelPath, modelBytes);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("assets");
+        const string revision = "0123456789abcdef0123456789abcdef01234567";
+        var modelHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(modelBytes));
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = "org/repo",
+            RepoFile = "model.gguf",
+            Sha256 = modelHash,
+            SizeBytes = modelBytes.Length,
+            Source = "hf-browser"
+        });
+
+        var image = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        var handler = new PublisherAvatarArtworkHandler(revision, modelHash, modelBytes.Length, image);
+        using var http = new HttpClient(handler);
+        var logs = new RuntimeLogService(settings);
+        var vm = new ModelManagementViewModel(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            NewServicesViewModel(settings),
+            manifest,
+            new HuggingFaceClient(http),
+            new ModelDownloadService(),
+            artwork: new HuggingFaceArtworkService(http),
+            runtimeLogs: logs);
+
+        await vm.RefreshAsync();
+        await vm.CheckForUpdatesCommand.ExecuteAsync(null);
+
+        var item = Assert.Single(vm.Models);
+        await WaitForAsync(() => item.ArtworkState == HfArtworkState.Available, "publisher avatar fallback");
+        Assert.Equal(ModelUpdateStatus.UpToDate, item.UpdateStatus);
+        Assert.Equal(HfArtworkSourceKind.HuggingFaceAuthorAvatar, item.ArtworkSource);
+        Assert.Contains("Publisher avatar fallback", item.ArtworkTooltip, StringComparison.Ordinal);
+        Assert.NotNull(item.ArtworkPath);
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("update check started", StringComparison.Ordinal));
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("repository and revision resolution completed", StringComparison.Ordinal));
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("artwork declaration gate evaluated", StringComparison.Ordinal));
+        Assert.Contains(logs.GetEntries(), entry => entry.Message.Contains("model-card binding completed", StringComparison.Ordinal));
+        Assert.Collection(handler.RequestedUrls,
+            cardUrl => Assert.Contains("/api/models/org/repo", cardUrl, StringComparison.Ordinal),
+            treeUrl =>
+            {
+                Assert.Contains($"/tree/{revision}", treeUrl, StringComparison.Ordinal);
+                Assert.DoesNotContain("/resolve/", treeUrl, StringComparison.Ordinal);
+            },
+            avatarMetadataUrl => Assert.Contains("/api/organizations/org/overview", avatarMetadataUrl, StringComparison.Ordinal),
+            avatarImageUrl =>
+            {
+                Assert.Equal("cdn-avatars.huggingface.co", new Uri(avatarImageUrl).Host);
+                Assert.DoesNotContain("/resolve/", avatarImageUrl, StringComparison.Ordinal);
+            });
     }
 
     [Fact]
@@ -855,5 +1147,62 @@ public sealed class ModelManagementViewModelTests
         Assert.False(File.Exists(companionPath));
         Assert.Null(await manifest.FindAsync(companionPath));
         Assert.True(File.Exists(modelPath));
+    }
+
+    [Fact]
+    public async Task Bulk_companion_cleanup_removes_only_reviewable_files_and_preserves_present_assets()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        var stalePath = Path.Combine(modelDir, "mmproj-stale.gguf");
+        var presentPath = Path.Combine(modelDir, "mmproj-present.gguf");
+        var unknownPath = Path.Combine(modelDir, "mmproj-unknown.gguf");
+        File.WriteAllText(modelPath, "model");
+        File.WriteAllText(stalePath, "stale");
+        File.WriteAllText(presentPath, "present");
+
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            Companions =
+            [
+                new ModelCompanionManifestEntry { LocalFilePath = stalePath, Role = "projector", SizeBytes = 99 },
+                new ModelCompanionManifestEntry { LocalFilePath = presentPath, Role = "projector", SizeBytes = 7 },
+                new ModelCompanionManifestEntry { LocalFilePath = unknownPath, Role = "draft_head", RequiresUserConfirmation = true }
+            ]
+        });
+
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), new ModelProfileService(settings), new FakeToasts(), settings,
+            new FakeSystemInfo(), NewServicesViewModel(settings), manifest, new HuggingFaceClient(), new ModelDownloadService());
+        var item = new ModelProfileItemViewModel(
+            new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" },
+            new ModelProfile { ModelId = modelPath });
+        var primary = await manifest.FindAsync(modelPath);
+        item.ApplyCatalogClassification(ModelCatalogRole.ChatGeneration, null, primary);
+        ModelDeletionPlan? confirmedPlan = null;
+        vm.RequestCompanionRemovalConfirmation = plan =>
+        {
+            confirmedPlan = plan;
+            return Task.FromResult(true);
+        };
+
+        await vm.ClearReviewableCompanionsCommand.ExecuteAsync(item);
+
+        Assert.NotNull(confirmedPlan);
+        Assert.Single(confirmedPlan!.Files);
+        Assert.Contains("Present companions remain unchanged", confirmedPlan.Description, StringComparison.Ordinal);
+        Assert.False(File.Exists(stalePath));
+        Assert.True(File.Exists(presentPath));
+        var remaining = await manifest.FindAsync(modelPath);
+        Assert.NotNull(remaining);
+        Assert.Single(remaining!.Companions);
+        Assert.Equal(presentPath, remaining.Companions[0].LocalFilePath);
     }
 }

@@ -487,7 +487,7 @@ namespace Hermaeus.Tests
         public FakeVoiceProviderRegistry(ISettingsService settings)
         {
             _settings = settings;
-            _kokoroProvider = new KokoroVoiceProvider(settings);
+            _kokoroProvider = new KokoroVoiceProvider(settings, new KokoroProcessManager());
         }
 
         public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>
@@ -561,7 +561,7 @@ namespace Hermaeus.Tests
         public FakeVoiceProviderRegistryKokoroInstall(ISettingsService settings)
         {
             _settings = settings;
-            _kokoro = new KokoroVoiceProvider(settings);
+            _kokoro = new KokoroVoiceProvider(settings, new KokoroProcessManager());
         }
 
         public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>

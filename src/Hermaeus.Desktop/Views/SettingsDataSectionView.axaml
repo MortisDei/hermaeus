@@ -11,17 +11,15 @@
             <Grid ColumnDefinitions="110,*,Auto,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="Data folder" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                 <TextBox Grid.Column="1" Text="{Binding DataRootDirectory, UpdateSourceTrigger=PropertyChanged}"
-                         Watermark="Default OS app data folder" FontSize="13" CornerRadius="6" Padding="10,6" />
-                <Button Grid.Column="2" Classes="icon-btn" Command="{Binding OpenDataRootCommand}" ToolTip.Tip="Open data folder">
-                    <PathIcon Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-                              Width="15" Height="15" />
-                </Button>
-                <Button Grid.Column="3" Classes="icon-btn" Command="{Binding BrowseDataRootCommand}" ToolTip.Tip="Choose data folder">
-                    <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
-                              Width="15" Height="15" />
-                </Button>
+                         PlaceholderText="Default OS app data folder" FontSize="13" CornerRadius="6" Padding="10,6" />
+                <Button Grid.Column="2" Content="Open" Command="{Binding OpenDataRootCommand}"
+                        ToolTip.Tip="Open the currently active data folder" FontSize="12" Padding="10,5" />
+                <Button Grid.Column="3" Content="Choose" Command="{Binding BrowseDataRootCommand}"
+                        ToolTip.Tip="Choose a data folder, review the migration summary, and confirm the move" FontSize="12" Padding="10,5" />
             </Grid>
+            <TextBlock Text="{Binding DataRootStateSummary}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
             <TextBlock Text="{Binding DataMigrationPreview}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding DataRootMigrationReceipt}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
             <Button Command="{Binding ConfirmDataRootMigrationCommand}"
                     Content="Move data..."
                     IsVisible="{Binding DataRootMigrationPending}"
@@ -32,16 +30,12 @@
             <Grid ColumnDefinitions="110,*,Auto,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="AI assets" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                 <TextBox Grid.Column="1" Text="{Binding LocalAiAssetsRoot, UpdateSourceTrigger=PropertyChanged}"
-                         Watermark="Folder containing local models, XTTS, venvs, encoders"
+                         PlaceholderText="Folder containing local models, XTTS, venvs, encoders"
                          FontSize="13" CornerRadius="6" Padding="10,6" />
-                <Button Grid.Column="2" Classes="icon-btn" Command="{Binding OpenLocalAiAssetsRootCommand}" ToolTip.Tip="Open AI assets folder">
-                    <PathIcon Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-                              Width="15" Height="15" />
-                </Button>
-                <Button Grid.Column="3" Classes="icon-btn" Command="{Binding BrowseLocalAiAssetsRootCommand}" ToolTip.Tip="Choose local AI assets folder">
-                    <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
-                              Width="15" Height="15" />
-                </Button>
+                <Button Grid.Column="2" Content="Open" Command="{Binding OpenLocalAiAssetsRootCommand}"
+                        ToolTip.Tip="Open the local AI assets folder" FontSize="12" Padding="10,5" />
+                <Button Grid.Column="3" Content="Change" Command="{Binding BrowseLocalAiAssetsRootCommand}"
+                        ToolTip.Tip="Choose the local AI assets folder" FontSize="12" Padding="10,5" />
             </Grid>
             <TextBlock Text="{Binding LocalAiAssetsStatus}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="110,*" ColumnSpacing="8">
@@ -54,8 +48,16 @@
             </Grid>
             <TextBlock Text="{Binding LlamaRuntimeVariantStatus}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="Artwork cache" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <TextBlock Grid.Column="1" Text="{Binding ArtworkCacheStatus}" VerticalAlignment="Center"
+                           FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                <Button Grid.Column="2" Command="{Binding ClearArtworkCacheCommand}"
+                        Content="Clear" FontSize="12" Padding="10,4" CornerRadius="6"
+                        ToolTip.Tip="Removes cached Hugging Face artwork only. Downloaded models and manifests are not touched." />
+            </Grid>
+            <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="Backup to" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Column="1" Text="{Binding BackupDirectory}" Watermark="Backup folder"
+                <TextBox Grid.Column="1" Text="{Binding BackupDirectory}" PlaceholderText="Backup folder"
                          FontSize="13" CornerRadius="6" Padding="10,6" />
                 <Button Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseBackupDirectoryCommand}" ToolTip.Tip="Choose backup folder">
                     <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
@@ -64,7 +66,7 @@
             </Grid>
             <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="Restore" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Column="1" Text="{Binding RestoreBackupPath}" Watermark="hermaeus-backup.zip"
+                <TextBox Grid.Column="1" Text="{Binding RestoreBackupPath}" PlaceholderText="hermaeus-backup.zip"
                          FontSize="13" CornerRadius="6" Padding="10,6" />
                 <Button Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseRestoreBackupCommand}" ToolTip.Tip="Choose backup zip">
                     <PathIcon Data="M16 6v8h3l-4 4-4-4h3V6h2zM5 20h14v-2H5v2z" Width="15" Height="15" />

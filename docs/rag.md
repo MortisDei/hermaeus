@@ -9,11 +9,15 @@ traces, versioned SQLite schema migrations, and native eval support.
 ## Getting Started
 
 1. Start an embeddings runtime in **Services** (Doctor can auto-download if missing).
-2. Open **RAG** and ingest a folder of `.txt` / `.md` / digital `.pdf` files.
+2. Open **RAG** and ingest a folder of supported text/source files such as
+   `.txt`, `.md`, `.log`, `.csv`, code, configuration, and digital `.pdf` files.
 3. Use **Dry run** to preview the ingest report before writing to SQLite, or
    choose a duplicate policy to skip unchanged sources, replace them, or just
    report what would happen. Use **Stop** during ingest to cancel long runs.
-4. Ask questions against the dataset. The box empties on send and the question
+4. In **Datasets included in this question**, select one or more datasets, then
+   ask your question. On first use no dataset is selected, so the question
+   box prompts you to choose one rather than silently querying the first
+   dataset. The box empties on send and the question
    is shown above the answer it produced; a question that failed goes back in
    the box so it can be edited and retried. Answers are written by the model
    Chat has selected, falling back to Settings > LLM's default.
@@ -69,12 +73,16 @@ traces, versioned SQLite schema migrations, and native eval support.
 - Optional explicit web URLs (off by default).
 - Reindex diffing and corpus health warnings.
 - In-progress cancellation support.
-- Directory ingest processes local files in bounded file batches, embedding and
-  flushing each batch to SQLite before loading the next one. Large folders can
-  resume with **Skip unchanged** after an interrupted run instead of rebuilding
-  the whole corpus in memory.
-- The ingest pipeline uses cancellable, batched embedding and storage steps to
-  reduce DB lock contention and make long ingests abortable from the UI.
+- Directory ingest processes local files in bounded file batches, but publishes
+  only one complete dataset generation after all requested source chunks have
+  been embedded and validated. Cancellation or failure before publication
+  leaves the prior generation query-visible. Large folders can resume with
+  **Skip unchanged** after an interrupted run without exposing a partial
+  generation.
+- The ingest pipeline uses cancellable, batched embedding and one atomic
+  publication step. Source content and watched-root identity are revalidated
+  immediately before publication, so a file changed during embedding cannot be
+  published under stale evidence.
 - Large ingests report separate overall progress and current-stage progress.
   Embedding progress identifies both the file batch and embedding batch, and
   oversized embedding inputs are retried with smaller clamps before failing the
@@ -98,6 +106,13 @@ derive honestly.
 
 ### Dataset Manager
 
+The RAG workspace separates **Ask**, **Manage**, **Sources**, and
+**Diagnostics**. **Ask** owns the question and per-question dataset scope.
+**Manage** owns persistent dataset health, ingestion, watched folders, and
+reindexing. **Sources** and **Diagnostics** are evidence views for the last
+query. The parent-child retrieval checkbox has a tooltip explaining that it
+retrieves child matches together with their indexed parent context.
+
 Each dataset card in the manager shows chunk/source counts, missing and stale
 file counts, and duplicate-source counts, with these actions:
 
@@ -109,9 +124,15 @@ file counts, and duplicate-source counts, with these actions:
   cache. Progress reports through the same ingest progress UI.
 - **Remove missing** - shown only when one or more source files no longer
   exist on disk. Lists the missing paths and, after explicit confirmation,
-  deletes their chunks, rebuilds BM25 stats, and refreshes health. Never runs
+  publishes a replacement generation without those sources, rebuilds BM25
+  stats as part of that publication, and refreshes health. Never runs
   automatically: a temporarily unmounted drive must not silently shred a
-  dataset.
+  dataset. The prior generation remains query-visible until the replacement
+  commits.
+- Each published generation records its embedding identity, dimensions, chunk
+  count, predecessor, and current or superseded state. Source revisions record
+  the exact content hash and source evidence. The Dataset Manager shows this
+  history for inspection and ordinary retrieval uses only the current pointer.
 - **Delete** - deletes the dataset and all of its chunks and BM25 stats
   (explicit deletes, not a database cascade), after confirmation.
 
@@ -136,7 +157,10 @@ those folders taken once at ingest time.
   against the dataset's stored source rows - new, changed, missing, or
   unchanged - without changing anything. Change detection prefers a stored
   content hash; it falls back to modification time (with a one-second
-  tolerance) only when no hash was recorded. The scan is cancellable.
+  tolerance) only when no hash was recorded. It verifies stable root identity,
+  containment, and symlink/reparse ancestors. A missing, replaced, or
+  identity-Unknown root reports an error and produces no missing-source removal
+  plan. The scan is cancellable.
 - **Refresh now** runs the scan, shows the plan, and applies it after
   confirmation. New and changed files are ingested through the normal
   pipeline (`IngestDuplicatePolicy.Replace`) - the same chunking, embedding,
@@ -180,7 +204,14 @@ outcome without holding anything open for the life of the process.
 
 ### Querying
 
+- The RAG question panel has a separate multi-select dataset scope. It defaults
+  to the selected dataset, but each question can include any combination of
+  loaded datasets. The Dataset Manager dropdown remains single-select because
+  ingest, reindex, and evaluation operate on one dataset at a time.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
+  Each citation also carries the dataset generation, stable source id, source
+  revision id, and content hash that supplied the indexed chunk. A path remains
+  display evidence only and is not the citation identity.
 - RAG query traces now include query variants, planner notes, packing summaries,
   and refusal reasons.
 - Malformed source or trace metadata markers are logged as warnings instead of
@@ -212,6 +243,12 @@ outcome without holding anything open for the life of the process.
   raw exception, both from the RAG panel and from a chat send with a
   Knowledge dataset attached. The fallback is not cached - the next query
   probes the embedding server again and is fully semantic once it is back.
+- Recall's Documents source uses the dataset scan index and FTS candidate ids,
+  then hydrates only the combined semantic and lexical candidates. Its logs
+  separate scan, FTS, hydration, scoring, and total time, including candidate
+  and returned-hit counts. RRF remains an ordering mechanism; source relevance
+  is calibrated from the underlying semantic or lexical evidence before Chat
+  Recall applies its relevance floor.
 
 ### Using a dataset in Chat
 
@@ -243,6 +280,23 @@ outcome without holding anything open for the life of the process.
 - **Open in chat** on a Dataset Manager card starts a new conversation with
   that dataset pre-attached.
 
+### First-use help and question scope
+
+When no dataset exists, the RAG panel offers **Create Hermaeus Help dataset**
+when the build includes its version-local help documents. This uses the same
+local-folder ingestion, embedding, generation publication, citation, and
+provenance path as a user-selected folder. It does not create a special
+retrieval route. The normal ingest controls remain available for creating a
+user dataset.
+
+The question scope is an explicit multi-select. Its selection is independent
+of the single dataset controls used for ingest, reindex, and evaluation. The
+selection is saved for the next RAG question; a missing dataset is ignored
+when the list is rebuilt. Sources and Diagnostics are explicit secondary views
+in the workspace navigation bar, each with a Back path, so the answer remains
+the first-use focus. Asking with no selected dataset produces
+an actionable prompt and does not clear the question.
+
 ### Reranker
 
 - Reranker install: The ONNX cross-encoder reranker assets are not downloaded
@@ -256,10 +310,23 @@ outcome without holding anything open for the life of the process.
   SHA256 before the ONNX session or tokenizer loads.
 - This prevents heavy network activity during queries and makes reranker
   installation an explicit, observable action.
+- The loaded session is keyed to the selected model and vocabulary asset set.
+  Changing that set releases the old session and resource allocation, and a
+  failed asset set does not poison a different selected set for the rest of the
+  process.
+- Reranking remains sequential by default. An explicit bounded diagnostic can
+  compare sequential and dynamic-graph batches, proving score/order
+  equivalence, cancellation boundaries, and its tensor working-set cap. A
+  dynamic ONNX dimension alone does not enable production batching.
 - The in-memory query cache is bounded by dataset count and an approximate
   byte ceiling. A single dataset that exceeds the byte ceiling is queried but
   not retained in cache, so very large embedding sets cannot grow memory use
   without limit.
+- The reranker is lazy. **Registered, lazy until a RAG query needs reranking**
+  means its consumer is known to whole-workload accounting but no verified
+  ONNX session is resident yet. A query that cannot load verified assets falls
+  back to the fused retrieval order; inspect the query trace for reranker
+  scores rather than treating residency as the only usage signal.
 
 ## Scale and the memory budget
 

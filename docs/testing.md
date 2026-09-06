@@ -137,7 +137,11 @@ The coverage scripts assume the solution has already been restored and built,
 then run tests with `--no-restore`. Reports are written beneath the operating
 system temporary directory so coverage artifacts never enter the checkout.
 CI keeps the required restore and zero-warning build steps before its test
-workflow.
+workflow. The Ubuntu CI leg runs that same test command under the runner's
+Xvfb virtual display because the suite includes an Avalonia bitmap
+render-boundary assertion; this exercises the Linux Avalonia path without
+requiring a physical desktop session. The product still uses its normal
+platform-detected renderer.
 
 Floor: **60%** line coverage, set in `scripts/coverage.sh`,
 `scripts/coverage.ps1` and stated in `AGENTS.md`. All four must agree.

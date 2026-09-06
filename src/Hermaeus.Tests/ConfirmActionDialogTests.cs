@@ -1,5 +1,3 @@
-using Avalonia;
-using Avalonia.Controls;
 using Hermaeus.Desktop.Views;
 using Xunit;
 
@@ -8,12 +6,17 @@ namespace Hermaeus.Tests;
 public sealed class ConfirmActionDialogTests
 {
     [Fact]
-    public void Confirmation_dialog_position_is_centered_inside_its_owner_bounds()
+    public void Confirmation_dialog_uses_the_framework_owner_placement()
     {
-        var position = ConfirmActionDialog.CenterOnOwner(
-            new PixelPoint(2400, 180), new Size(1800, 1200), new Size(460, 200));
+        var path = Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/Hermaeus.Desktop/Views/ConfirmActionDialog.axaml");
+        var markup = File.ReadAllText(path);
+        Assert.Contains("WindowStartupLocation=\"CenterOwner\"", markup, StringComparison.Ordinal);
 
-        Assert.Equal(new PixelPoint(3070, 680), position);
+        var code = File.ReadAllText(Path.ChangeExtension(path, ".axaml.cs"));
+        Assert.DoesNotContain("WindowStartupLocation.Manual", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Position =", code, StringComparison.Ordinal);
     }
 
     [Fact]

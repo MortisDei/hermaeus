@@ -26,6 +26,7 @@ public partial class ProjectViewModel : ViewModelBase
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
     private readonly IMemoryStore _memories;
+    private readonly IKnowledgeRevisionStore _knowledge;
     private readonly IConversationStore _conversations;
     private readonly IAgentTaskStateStore _agentTasks;
     private readonly SqliteRagStore? _rag;
@@ -92,12 +93,15 @@ public partial class ProjectViewModel : ViewModelBase
         IConversationStore conversations,
         IAgentTaskStateStore agentTasks,
         SqliteRagStore? rag = null,
-        IProjectStateStore? stateStore = null)
+        IProjectStateStore? stateStore = null,
+        IKnowledgeRevisionStore? knowledge = null)
     {
         _store = store;
         _settings = settings;
         _toasts = toasts;
         _memories = memories;
+        _knowledge = knowledge ?? memories as IKnowledgeRevisionStore
+            ?? throw new ArgumentException("The memory store must expose knowledge revision writes.", nameof(memories));
         _conversations = conversations;
         _agentTasks = agentTasks;
         _rag = rag;
@@ -456,7 +460,10 @@ public partial class ProjectViewModel : ViewModelBase
         {
             note.Scope = MemoryScope.Project;
             note.ScopeId = projectId;
-            await _memories.SaveAsync(note);
+            var revision = await _knowledge.GetCurrentRevisionAsync(note.Id)
+                ?? throw new InvalidOperationException($"Memory '{note.Id}' has no current revision.");
+            await _knowledge.MutatePresentationAsync(note.Id, revision.RevisionId,
+                KnowledgePresentationMutation.FromMemory(note));
         }
 
         return notes.Count;
@@ -507,7 +514,10 @@ public partial class ProjectViewModel : ViewModelBase
         {
             memory.Scope = MemoryScope.Global;
             memory.ScopeId = string.Empty;
-            await _memories.SaveAsync(memory);
+            var revision = await _knowledge.GetCurrentRevisionAsync(memory.Id)
+                ?? throw new InvalidOperationException($"Memory '{memory.Id}' has no current revision.");
+            await _knowledge.MutatePresentationAsync(memory.Id, revision.RevisionId,
+                KnowledgePresentationMutation.FromMemory(memory));
         }
 
         // Agent tasks: task_state.json is the source of truth and is

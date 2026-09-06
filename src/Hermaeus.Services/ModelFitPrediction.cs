@@ -71,6 +71,36 @@ public sealed record ModelFitPrediction(
 public static class ModelFitPredictor
 {
     private const double WeightAllocationMultiplier = 1.05;
+    private const double PreDownloadWeightsMultiplier = 1.2;
+    private const long PreDownloadRamHeadroomBytes = 2_147_483_648;
+
+    /// <summary>
+    /// The deliberately rough projection used before a model is downloaded and
+    /// its GGUF shape is available. It remains part of the versioned predictor
+    /// so card and download surfaces do not carry a second fit implementation.
+    /// Callers must label this result as a pre-download estimate.
+    /// </summary>
+    public static ModelFitResult EstimatePreDownload(long fileSizeBytes, HardwareProfile hardware)
+    {
+        if (fileSizeBytes <= 0)
+            return new ModelFitResult(ModelFitTier.Unknown, "Model file size is unavailable; fit cannot be estimated.");
+
+        if (hardware.TotalRamBytes <= 0 && hardware.MaxGpuVramBytes <= 0)
+            return new ModelFitResult(ModelFitTier.Unknown, string.Empty);
+
+        var weighted = (long)(fileSizeBytes * PreDownloadWeightsMultiplier);
+        if (hardware.MaxGpuVramBytes > 0 && weighted + KvCacheMath.GpuHeadroomBytes <= hardware.MaxGpuVramBytes)
+            return new ModelFitResult(ModelFitTier.FitsGpu, $"~{FormatGb(fileSizeBytes)} model fits fully in {FormatGb(hardware.MaxGpuVramBytes)} VRAM.");
+
+        if (hardware.TotalRamBytes > 0 && weighted + PreDownloadRamHeadroomBytes <= hardware.TotalRamBytes)
+        {
+            return hardware.MaxGpuVramBytes > 0
+                ? new ModelFitResult(ModelFitTier.FitsPartial, $"~{FormatGb(fileSizeBytes)} model vs {FormatGb(hardware.MaxGpuVramBytes)} VRAM: needs partial CPU offload.")
+                : new ModelFitResult(ModelFitTier.FitsPartial, $"~{FormatGb(fileSizeBytes)} model runs on CPU/RAM only: no GPU detected.");
+        }
+
+        return new ModelFitResult(ModelFitTier.TooLarge, $"~{FormatGb(fileSizeBytes)} model exceeds available VRAM and RAM headroom.");
+    }
 
     public static ModelFitPrediction Predict(ModelFitPredictionRequest request, GgufModelInfo? info)
     {
@@ -263,6 +293,8 @@ public static class ModelFitPredictor
         + $"{FormatBytes(hardware.MaxGpuVramBytes)} GPU and {FormatBytes(hardware.TotalRamBytes)} system RAM; tier {tier}.";
 
     private static string FormatBytes(long bytes) => $"{bytes / 1024d / 1024 / 1024:0.00} GiB";
+
+    private static string FormatGb(long bytes) => $"{bytes / 1024d / 1024 / 1024:0.0} GB";
 
     private static string DefaultIfEmpty(this string value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value;
 }

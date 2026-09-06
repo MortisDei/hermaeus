@@ -43,6 +43,33 @@ $launcherSourceDir = Join-Path $root "src/Hermaeus.Launcher"
 $launcherBuildDir = Join-Path $dist ".launcher-$Runtime"
 $launcherPath = Join-Path $packageDir "Hermaeus.exe"
 
+function Remove-BuildTemporaryOutput {
+    foreach ($path in @($publishDir, $localApiPublishDir, $launcherBuildDir)) {
+        if (Test-Path $path) {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Assert-RuntimeRestoreTarget([string]$ProjectPath, [string]$TargetRuntime) {
+    $assetsPath = Join-Path (Split-Path -Parent $ProjectPath) "obj/project.assets.json"
+    $targetName = "net10.0/$TargetRuntime"
+    if (-not (Test-Path $assetsPath -PathType Leaf)) {
+        throw "-SkipRestore was requested, but restore assets are missing for '$ProjectPath'. Run this script without -SkipRestore first."
+    }
+
+    try {
+        $assets = Get-Content -Raw $assetsPath | ConvertFrom-Json
+    } catch {
+        throw "-SkipRestore was requested, but restore assets could not be read for '$ProjectPath'. Run this script without -SkipRestore first."
+    }
+
+    $hasTarget = $assets.targets.PSObject.Properties.Name -contains $targetName
+    if (-not $hasTarget) {
+        throw "-SkipRestore was requested, but '$ProjectPath' is not restored for '$TargetRuntime'. Run 'pwsh ./build.ps1 -Runtime $TargetRuntime' first."
+    }
+}
+
 function Import-MsvcEnvironment([string]$TargetRuntime) {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
     if (-not (Test-Path $vswhere -PathType Leaf)) {
@@ -152,15 +179,22 @@ function Assert-WindowsPackageLayout([string]$PackagePath) {
     }
 }
 
+Remove-BuildTemporaryOutput
+
 if (-not $SkipRestore) {
     Write-Host "Restoring..."
     dotnet restore $project -r $Runtime
     dotnet restore $localApiProject -r $Runtime
+} else {
+    Assert-RuntimeRestoreTarget $project $Runtime
+    Assert-RuntimeRestoreTarget $localApiProject $Runtime
 }
 
-Write-Host "Publishing $Runtime ($Configuration, self-contained=$selfContainedValue)..."
-Remove-Item -Recurse -Force $packageDir, $publishDir, $localApiPublishDir, $launcherBuildDir, $archive, $checksum -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $packageDir, $publishDir, $localApiPublishDir, $docDir, $appDir, $iconDir, $localApiDir | Out-Null
+$buildSucceeded = $false
+try {
+    Write-Host "Publishing $Runtime ($Configuration, self-contained=$selfContainedValue)..."
+    Remove-Item -LiteralPath $packageDir, $archive, $checksum -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force $packageDir, $publishDir, $localApiPublishDir, $docDir, $appDir, $iconDir, $localApiDir | Out-Null
 
 $publishArgs = @(
     $project,
@@ -212,14 +246,22 @@ Get-ChildItem $packageDir -Filter "*.pdb" -File -Recurse -ErrorAction SilentlyCo
 Assert-WindowsPackageLayout $packageDir
 Remove-Item -Recurse -Force $publishDir, $localApiPublishDir, $launcherBuildDir
 
-Write-Host "Creating $archive..."
-Compress-Archive -Path $packageDir -DestinationPath $archive -Force
+    Write-Host "Creating $archive..."
+    Compress-Archive -Path $packageDir -DestinationPath $archive -Force
 
-$hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-$archiveName = Split-Path -Leaf $archive
-"$hash  $archiveName" | Set-Content -NoNewline -Encoding ASCII $checksum
+    $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+    $archiveName = Split-Path -Leaf $archive
+    "$hash  $archiveName" | Set-Content -NoNewline -Encoding ASCII $checksum
 
-Write-Host "Package ready:"
-Write-Host "  $packageDir"
-Write-Host "  $archive"
-Write-Host "  $checksum"
+    $buildSucceeded = $true
+    Write-Host "Package ready:"
+    Write-Host "  $packageDir"
+    Write-Host "  $archive"
+    Write-Host "  $checksum"
+} finally {
+    Remove-BuildTemporaryOutput
+    if (-not $buildSucceeded) {
+        Remove-Item -LiteralPath $packageDir, $archive, $checksum -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Warning "Packaging failed; incomplete Windows package output was removed."
+    }
+}

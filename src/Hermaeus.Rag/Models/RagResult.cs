@@ -14,6 +14,10 @@ public class RagSourceRef
 {
     public string Title  { get; init; } = string.Empty;
     public string File   { get; init; } = string.Empty;
+    public string SourceId { get; init; } = string.Empty;
+    public string SourceRevisionId { get; init; } = string.Empty;
+    public string ContentHash { get; init; } = string.Empty;
+    public string GenerationId { get; init; } = string.Empty;
     public float  Score  { get; init; }
     public int    Rank   { get; init; }
 }

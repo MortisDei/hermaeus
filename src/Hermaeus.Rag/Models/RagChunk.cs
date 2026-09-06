@@ -20,6 +20,9 @@ public class RagChunk
     public string   SourceFile   { get; set; } = string.Empty;
     public string   SourcePath   { get; set; } = string.Empty;
     public string   SourceHash   { get; set; } = string.Empty;
+    public string   SourceId     { get; set; } = string.Empty;
+    public string   SourceRevisionId { get; set; } = string.Empty;
+    public string   GenerationId { get; set; } = string.Empty;
     public DateTime? SourceModifiedUtc { get; set; }
     public string   SourceTitle  { get; set; } = string.Empty;
     public string   Content      { get; set; } = string.Empty;

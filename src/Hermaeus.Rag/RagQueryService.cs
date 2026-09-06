@@ -190,6 +190,10 @@ public sealed class RagQueryService
     public async Task<RagDataset?> GetDatasetAsync(string datasetId, CancellationToken ct = default)
         => (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
 
+    public async Task<List<RagDatasetGeneration>> GetGenerationHistoryAsync(
+        string datasetId, CancellationToken ct = default)
+        => await _store.GetGenerationHistoryAsync(datasetId, ct);
+
     public async Task<List<RagChunk>> GetChunksForDatasetAsync(string datasetId, bool includeEmbeddings = false, CancellationToken ct = default)
         => await _store.GetChunksAsync(datasetId, includeEmbeddings, ct);
 
@@ -221,34 +225,27 @@ public sealed class RagQueryService
         if (sourcePaths.Count == 0)
             return 0;
 
-        await _store.DeleteChunksForSourcesAsync(datasetId, sourcePaths, ct);
-
-        var remaining = await _store.GetChunksAsync(datasetId, includeEmbeddings: false, ct);
-        var stats = Bm25Scorer.BuildStats(remaining);
-        await _store.SaveBm25StatsAsync(datasetId, stats, ct);
-
-        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
-        if (ds is not null)
-        {
-            ds.ChunkCount = remaining.Count;
-            await _store.SaveDatasetAsync(ds, ct);
-        }
+        var remainingCount = await _store.RemoveSourcesByPublishingGenerationAsync(datasetId, sourcePaths, ct);
 
         ClearCache(datasetId);
         _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-            $"RAG removed {sourcePaths.Count} missing source(s) from dataset {datasetId}; {remaining.Count} chunk(s) remain."));
+            $"RAG removed {sourcePaths.Count} missing source(s) from dataset {datasetId}; {remainingCount} chunk(s) remain."));
 
-        return remaining.Count;
+        return remainingCount;
     }
 
     public async Task<RagRetrievalResult> RetrieveAsync(
         string datasetId,
         string question,
         RagQueryOptions? opts = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? operationId = null)
     {
         opts ??= new RagQueryOptions();
+        operationId ??= OperationCorrelation.NewId();
         var sw = Stopwatch.StartNew();
+        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
+        var currentGenerationId = ds?.CurrentGenerationId ?? string.Empty;
 
         // r27 2.1: "absent from the cache" and "cached and genuinely empty" are
         // different states. Only the first one needs a load, and a dataset that
@@ -258,7 +255,17 @@ public sealed class RagQueryService
         bool cacheHit;
         lock (_cacheSync)
         {
-            cacheHit = _cache.TryGetValue(datasetId, out scanIndex!);
+            cacheHit = _cache.TryGetValue(datasetId, out scanIndex!)
+                && string.Equals(scanIndex.GenerationId, currentGenerationId, StringComparison.Ordinal);
+            if (!cacheHit)
+            {
+                _cache.Remove(datasetId);
+                if (_cacheSizes.Remove(datasetId, out var staleSize))
+                    _cacheBytes -= staleSize;
+                var staleNode = _cacheOrder.Find(datasetId);
+                if (staleNode is not null)
+                    _cacheOrder.Remove(staleNode);
+            }
             if (cacheHit)
                 TouchCacheUnsafe(datasetId);
         }
@@ -274,8 +281,6 @@ public sealed class RagQueryService
         var plan = await BuildQueryPlanAsync(datasetId, question, ct);
 
         // read dataset config to obtain hybrid retriever weights and check the embedding model
-        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
-
         // r10 01-rag-correctness.md 1.4: a dataset embedded with one model
         // queried under a different current model produces either a raw
         // exception (mismatched dimensions) or silent garbage rankings
@@ -323,7 +328,7 @@ public sealed class RagQueryService
                 var note = $"semantic search unavailable: {oneLine}; used keyword search only";
                 plannerNotes = AppendNote(plannerNotes, note);
                 _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                    $"RAG semantic search failed for dataset {datasetId}: {ex.Message}"));
+                    $"RAG semantic search failed for dataset {datasetId}: {ex.GetType().Name}; keyword fallback selected.", operationId));
             }
         }
 
@@ -358,38 +363,131 @@ public sealed class RagQueryService
             ds?.Config.HybridSemanticWeight ?? 0.7f,
             ds?.Config.HybridBm25Weight ?? 0.3f,
             ds?.Config.HybridRrfK ?? 60f);
+        var preRerankCount = fused.Count;
         fused = await _reranker.RerankAsync(plan.PrimaryQuery, fused, opts.TopK, ct);
         if (opts.UseParentChild)
             fused = await UpgradeToParentsAsync(fused, ct);
 
         sw.Stop();
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Rag,
+            $"RAG retrieval completed; dataset={datasetId}, semantic={semantic.Count}, keyword={bm25.Count}, pre_rerank={preRerankCount}, selected={fused.Count}, cache_hit={cacheHit}, latency_ms={sw.ElapsedMilliseconds}.",
+            operationId));
         return new RagRetrievalResult(question, plan.PrimaryQuery, plan.QueryVariants, plannerNotes, semantic, bm25, fused, sw.ElapsedMilliseconds, ds?.Config);
     }
 
-    public async IAsyncEnumerable<RagStreamEvent> StreamQueryAsync(
+    public IAsyncEnumerable<RagStreamEvent> StreamQueryAsync(
         string datasetId,
+        string question,
+        RagQueryOptions? opts = null,
+        CancellationToken ct = default) =>
+        StreamQueryCoreAsync([datasetId], question, opts, ct);
+
+    /// <summary>
+    /// Queries several explicitly selected datasets as one grounded context.
+    /// Retrieval remains isolated per dataset, then the bounded results are
+    /// merged using their retrieval ranking. This preserves each dataset's
+    /// embedding/configuration checks and avoids silently querying datasets
+    /// the user did not select.
+    /// </summary>
+    public IAsyncEnumerable<RagStreamEvent> StreamQueryAsync(
+        IReadOnlyList<string> datasetIds,
+        string question,
+        RagQueryOptions? opts = null,
+        CancellationToken ct = default) =>
+        StreamQueryCoreAsync(datasetIds, question, opts, ct);
+
+    private async Task<RagRetrievalResult> RetrieveManyAsync(
+        IReadOnlyList<string> datasetIds,
+        string question,
+        RagQueryOptions opts,
+        CancellationToken ct,
+        string operationId)
+    {
+        var ids = datasetIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (ids.Length == 0)
+            throw new InvalidOperationException("At least one RAG dataset must be selected.");
+        if (ids.Length == 1)
+            return await RetrieveAsync(ids[0], question, opts, ct, operationId);
+
+        var retrievals = new List<RagRetrievalResult>(ids.Length);
+        foreach (var id in ids)
+            retrievals.Add(await RetrieveAsync(id, question, opts, ct, operationId));
+
+        var semantic = retrievals.SelectMany(result => result.SemanticCandidates)
+            .GroupBy(scored => ChunkKey(scored.Chunk), StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(scored => scored.Score).First())
+            .OrderByDescending(scored => scored.Score)
+            .Take(Math.Max(opts.TopK * 10, 50))
+            .ToList();
+        var bm25 = retrievals.SelectMany(result => result.Bm25Candidates)
+            .GroupBy(scored => ChunkKey(scored.Chunk), StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(scored => scored.Score).First())
+            .OrderByDescending(scored => scored.Score)
+            .Take(Math.Max(opts.TopK * 10, 50))
+            .ToList();
+        var selected = retrievals.SelectMany(result => result.Selected)
+            .GroupBy(scored => ChunkKey(scored.Chunk), StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(scored => scored.Score).First())
+            .OrderByDescending(scored => scored.Score)
+            .Take(opts.TopK)
+            .ToList();
+
+        return new RagRetrievalResult(
+            question,
+            retrievals[0].ExpandedQuery,
+            retrievals.SelectMany(result => result.QueryVariants).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            string.Join("; ", retrievals.Where(result => !string.IsNullOrWhiteSpace(result.PlannerNotes)).Select(result => result.PlannerNotes)),
+            semantic,
+            bm25,
+            selected,
+            retrievals.Sum(result => result.LatencyMs),
+            DatasetConfig: null);
+    }
+
+    private async IAsyncEnumerable<RagStreamEvent> StreamQueryCoreAsync(
+        IReadOnlyList<string> datasetIds,
         string question,
         RagQueryOptions? opts = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         opts ??= new RagQueryOptions();
+        var operationId = OperationCorrelation.NewId();
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Rag,
+            $"RAG query started; datasets={string.Join(',', datasetIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))}, configured_model={(string.IsNullOrWhiteSpace(opts.ModelId) ? _settings.Settings.Llm.DefaultModel : opts.ModelId)}.",
+            operationId));
         var totalSw = Stopwatch.StartNew();
         var retrievalSw = Stopwatch.StartNew();
 
-        var retrieval = await RetrieveAsync(datasetId, question, opts, ct);
+        var retrieval = await RetrieveManyAsync(datasetIds, question, opts, ct, operationId);
+        var traceDatasetId = string.Join(",", datasetIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal));
         var semantic = retrieval.SemanticCandidates;
         var bm25 = retrieval.Bm25Candidates;
         var fused = retrieval.Selected;
         var expandedQuery = retrieval.ExpandedQuery;
         retrievalSw.Stop();
 
-        var semanticById = semantic.GroupBy(s => s.Chunk.Id).ToDictionary(g => g.Key, g => g.First());
-        var bm25ById = bm25.GroupBy(s => s.Chunk.Id).ToDictionary(g => g.Key, g => g.First());
+        var semanticById = semantic.GroupBy(s => ChunkKey(s.Chunk)).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var bm25ById = bm25.GroupBy(s => ChunkKey(s.Chunk)).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         var queryTerms = Bm25Scorer.Tokenize(retrieval.ExpandedQuery);
 
         // ── 8. Build context + prompt ────────────────────────────────────
         var contextPack = BuildContext(fused, opts);
         var context = contextPack.Text;
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Rag,
+            $"RAG context prepared; datasets={datasetIds.Count}, semantic={semantic.Count}, keyword={bm25.Count}, merged={fused.Count}, packed={contextPack.PackedChunks.Count}, dropped={Math.Max(0, fused.Count - contextPack.PackedChunks.Count)}, retrieval_ms={retrievalSw.ElapsedMilliseconds}.",
+            operationId));
         var prompt  = BuildPrompt(question, context, retrieval.DatasetConfig);
         var modelId = string.IsNullOrEmpty(opts.ModelId)
             ? _settings.Settings.Llm.DefaultModel
@@ -420,7 +518,8 @@ public sealed class RagQueryService
             totalSw.Stop();
             var refusalTrace = new RagQueryTrace
             {
-                DatasetId = datasetId,
+                OperationId = operationId,
+                DatasetId = traceDatasetId,
                 Question = question,
                 ExpandedQuestion = expandedQuery,
                 QueryVariants = retrieval.QueryVariants,
@@ -438,6 +537,8 @@ public sealed class RagQueryService
                 SelectedContext = sourceChunks
             };
             await PersistTraceAsync(refusalTrace, ct);
+            _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                "RAG query completed with a grounded-context refusal.", operationId));
             yield return RagStreamEvent.ForTrace(new RagTraceSummary(
                 refusalTrace.Id,
                 refusalTrace.RetrievalLatencyMs,
@@ -449,7 +550,8 @@ public sealed class RagQueryService
                 PlannerNotes: refusalTrace.PlannerNotes,
                 ContextPackingSummary: refusalTrace.ContextPackingSummary,
                 Refused: refusalTrace.Refused,
-                RefusalReason: refusalTrace.RefusalReason));
+                RefusalReason: refusalTrace.RefusalReason,
+                DatasetId: refusalTrace.DatasetId));
             yield break;
         }
 
@@ -493,7 +595,8 @@ public sealed class RagQueryService
         var answerText = answer.ToString();
         var trace = new RagQueryTrace
         {
-            DatasetId = datasetId,
+            OperationId = operationId,
+            DatasetId = traceDatasetId,
             Question = question,
             ExpandedQuestion = expandedQuery,
             QueryVariants = retrieval.QueryVariants,
@@ -511,6 +614,8 @@ public sealed class RagQueryService
             SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1, fused.Count, semanticById, bm25ById, queryTerms)).ToList()
         };
         await PersistTraceAsync(trace, ct);
+        _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+            $"RAG query completed; refused=false, total_ms={totalSw.ElapsedMilliseconds}, citations={trace.SelectedContext.Count}.", operationId));
         yield return RagStreamEvent.ForTrace(new RagTraceSummary(
             trace.Id,
             trace.RetrievalLatencyMs,
@@ -520,7 +625,8 @@ public sealed class RagQueryService
             ExpandedQuery: trace.ExpandedQuestion,
             QueryVariants: string.Join("\n", trace.QueryVariants),
             PlannerNotes: trace.PlannerNotes,
-            ContextPackingSummary: trace.ContextPackingSummary));
+            ContextPackingSummary: trace.ContextPackingSummary,
+            DatasetId: trace.DatasetId));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -597,7 +703,7 @@ public sealed class RagQueryService
                 CreatedAt = trace.CreatedAt,
                 SourceId = trace.DatasetId,
                 ModelId = trace.ModelId,
-                Operation = trace.Refused ? "rag-refusal" : "rag-query",
+                Operation = $"{(trace.Refused ? "rag-refusal" : "rag-query")}:{trace.OperationId}",
                 TotalLatencyMs = trace.TotalLatencyMs,
                 Error = trace.RefusalReason,
                 DetailJson = JsonSerializer.Serialize(trace)
@@ -606,7 +712,7 @@ public sealed class RagQueryService
         catch (Exception ex)
         {
             _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                $"RAG trace persistence failed: {ex.Message}"));
+                $"RAG trace persistence failed: {ex.Message}", trace.OperationId));
         }
     }
 
@@ -885,6 +991,7 @@ public sealed class RagQueryService
         IReadOnlyCollection<string> queryTerms)
     {
         var id = scored.Chunk.Id;
+        var key = ChunkKey(scored.Chunk);
         var (matchedTerm, matchedCount) = FindDominantMatchedTerm(scored.Chunk.Content, queryTerms);
 
         return new RagTraceChunk
@@ -895,15 +1002,22 @@ public sealed class RagQueryService
             Title = scored.Chunk.SourceTitle,
             File = scored.Chunk.SourceFile,
             Path = scored.Chunk.SourcePath,
+            SourceId = scored.Chunk.SourceId,
+            SourceRevisionId = scored.Chunk.SourceRevisionId,
+            ContentHash = scored.Chunk.SourceHash,
+            GenerationId = scored.Chunk.GenerationId,
             Score = scored.Score,
             Content = scored.Chunk.Content,
-            VectorScore = semanticById.TryGetValue(id, out var sem) ? sem.Score : null,
-            KeywordScore = bm25ById.TryGetValue(id, out var kw) ? kw.Score : null,
+            VectorScore = semanticById.TryGetValue(key, out var sem) ? sem.Score : null,
+            KeywordScore = bm25ById.TryGetValue(key, out var kw) ? kw.Score : null,
             RerankScore = scored.Source == ScoreSource.Reranker ? scored.Score : null,
             MatchedTerm = matchedTerm,
             MatchedTermCount = matchedCount
         };
     }
+
+    private static string ChunkKey(RagChunk chunk) =>
+        $"{chunk.DatasetId}\u001f{chunk.Id}";
 
     /// <summary>The query term that appears most often in the chunk, for the "term 'x' matched N times" summary phrase.</summary>
     private static (string Term, int Count) FindDominantMatchedTerm(string content, IReadOnlyCollection<string> queryTerms)

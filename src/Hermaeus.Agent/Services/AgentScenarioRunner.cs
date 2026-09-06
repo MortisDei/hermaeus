@@ -37,19 +37,37 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
         _evalStore = evalStore;
     }
 
-    public Task<AgentScenarioRunResult> RunScenarioAsync(AgentScenario scenario, string modelId, IProgress<string>? progress = null, CancellationToken ct = default) =>
-        RunScenarioCoreAsync(scenario, modelId, Guid.NewGuid().ToString("N"), progress, ct);
+    public async Task<AgentScenarioRunResult> RunScenarioAsync(AgentScenario scenario, string modelId, IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        var startedAt = DateTime.UtcNow;
+        var runId = Guid.NewGuid().ToString("N");
+        progress?.Report($"1/1: {scenario.Manifest.Id}");
+        var modelContentHash = await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelId, ct);
+        var result = await RunScenarioCoreAsync(scenario, modelId, modelContentHash, runId, progress, ct);
+        await ExportSuiteAsync(new AgentScenarioSuiteResult
+        {
+            Id = runId,
+            ModelId = modelId,
+            Results = [result],
+            StartedAt = startedAt,
+            FinishedAt = DateTime.UtcNow
+        }, ct);
+        progress?.Report($"completed 1/1: {scenario.Manifest.Id} - {(result.Passed ? "PASS" : "FAIL")}");
+        return result;
+    }
 
     public async Task<AgentScenarioSuiteResult> RunSuiteAsync(IReadOnlyList<AgentScenario> scenarios, string modelId, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         var suite = new AgentScenarioSuiteResult { ModelId = modelId, StartedAt = DateTime.UtcNow };
+        var modelContentHash = await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelId, ct);
         for (var i = 0; i < scenarios.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
             var scenario = scenarios[i];
             progress?.Report($"{i + 1}/{scenarios.Count}: {scenario.Manifest.Id}");
-            var result = await RunScenarioCoreAsync(scenario, modelId, suite.Id, progress, ct);
+            var result = await RunScenarioCoreAsync(scenario, modelId, modelContentHash, suite.Id, progress, ct);
             suite.Results.Add(result);
+            progress?.Report($"completed {suite.Results.Count}/{scenarios.Count}: {scenario.Manifest.Id} - {(result.Passed ? "PASS" : "FAIL")}");
         }
 
         suite.FinishedAt = DateTime.UtcNow;
@@ -60,6 +78,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
     private async Task<AgentScenarioRunResult> RunScenarioCoreAsync(
         AgentScenario scenario,
         string modelId,
+        string modelContentHash,
         string runId,
         IProgress<string>? progress,
         CancellationToken ct)
@@ -202,7 +221,13 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
             Steps: finalState?.StepCount ?? 0,
             DurationMs: sw.ElapsedMilliseconds,
             FinalStatus: finalState?.Status.ToString() ?? "error",
-            RunError: runError);
+            RunError: runError,
+            Evidence: AgentScenarioEvidenceContract.Create(
+                scenario,
+                modelId,
+                modelContentHash,
+                _llm.ProviderName,
+                DateTime.UtcNow));
     }
 
     private static void CopyWorkspace(string sourceWorkspaceDir, string destWorkspaceDir)
@@ -363,9 +388,14 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
                 ["checks_total"] = r.Checks.Count,
                 ["steps"] = r.Steps
             },
-            Error: r.RunError)).ToList(),
+            Error: r.RunError,
+            Metadata: new Dictionary<string, string>
+            {
+                [AgentScenarioEvidenceContract.ResultJsonKey] = JsonSerializer.Serialize(r, AgentJson.CompactOptions)
+            })).ToList(),
         StartedAt: suite.StartedAt,
-        FinishedAt: suite.FinishedAt);
+        FinishedAt: suite.FinishedAt,
+        SuiteId: suite.Id);
 
     private sealed class ScenarioSettings : ISettingsService
     {

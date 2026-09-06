@@ -94,7 +94,7 @@ public sealed class AgentContinueTaskTests
     }
 
     [Fact]
-    public async Task ContinueTaskAsync_uses_a_default_instruction_when_none_is_given()
+    public async Task ContinueTaskAsync_requires_explicit_instruction()
     {
         using var temp = new TempDir();
         var llm = new FakeSequencedAgentLlmForContinue([FinalResponse]);
@@ -103,11 +103,78 @@ public sealed class AgentContinueTaskTests
         var created = await agent.CreateTaskAsync("Investigate the bug", options);
         await agent.RunAsync(created.TaskId, options);
 
-        var reopened = await agent.ContinueTaskAsync(created.TaskId, string.Empty, options);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => agent.ContinueTaskAsync(created.TaskId, string.Empty, options));
 
-        var transcript = await store.LoadTranscriptAsync(created.TaskId);
-        Assert.Contains(transcript, e => e.Content.Contains("remaining pending steps", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Continue planned work", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(await store.LoadTranscriptAsync(created.TaskId),
+            e => e.Content.StartsWith("continue:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ContinuePlannedTaskAsync_records_a_typed_transition()
+    {
+        using var temp = new TempDir();
+        var llm = new FakeSequencedAgentLlmForContinue([FinalResponse]);
+        var (agent, store, _, options) = await BuildAsync(temp, llm);
+
+        var created = await agent.CreateTaskAsync("Investigate the bug", options);
+        await agent.RunAsync(created.TaskId, options);
+        var state = await store.LoadAsync(created.TaskId);
+        state!.PendingSteps.Add("Run the regression test");
+        await store.SaveAsync(state);
+
+        var reopened = await agent.ContinuePlannedTaskAsync(created.TaskId, options);
+
         Assert.Equal(AgentTaskStatus.Running, reopened.Status);
+        Assert.Equal(AgentTaskTransitionKind.ContinuePlannedWork, Assert.Single(reopened.UserTransitions).Kind);
+        Assert.Contains(await store.LoadTranscriptAsync(created.TaskId),
+            e => e.Content.Contains("remaining planned work", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task FinishTaskAsync_ends_a_paused_run_without_erasing_history()
+    {
+        using var temp = new TempDir();
+        var llm = new FakeSequencedAgentLlmForContinue([FinalResponse]);
+        var (agent, store, _, options) = await BuildAsync(temp, llm);
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        var paused = await store.LoadAsync(created.TaskId);
+        paused!.Status = AgentTaskStatus.WaitingForUser;
+        paused.LastUserMessage = "Please confirm the next step.";
+        paused.Summary = "The run is waiting for a reply.";
+        await store.SaveAsync(paused);
+        var before = await store.LoadTranscriptAsync(created.TaskId);
+
+        var finished = await agent.FinishTaskAsync(created.TaskId);
+
+        Assert.Equal(AgentTaskStatus.Complete, finished.Status);
+        Assert.Equal(AgentTaskTransitionKind.FinishRun, Assert.Single(finished.UserTransitions).Kind);
+        Assert.Null(finished.PendingToolAction);
+        Assert.True((await store.LoadTranscriptAsync(created.TaskId)).Count > before.Count);
+    }
+
+    [Fact]
+    public async Task StopTaskAsync_records_a_resumable_stop_without_erasing_history()
+    {
+        using var temp = new TempDir();
+        var llm = new FakeSequencedAgentLlmForContinue([GatedToolResponse]);
+        var (agent, store, _, options) = await BuildAsync(temp, llm);
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        var state = await store.LoadAsync(created.TaskId);
+        state!.Status = AgentTaskStatus.Running;
+        state.Summary = "A completed read remains recorded.";
+        await store.SaveAsync(state);
+
+        var stopped = await agent.StopTaskAsync(created.TaskId);
+
+        Assert.Equal(AgentTaskStatus.Blocked, stopped.Status);
+        Assert.Equal(AgentTaskTransitionKind.StopRun, Assert.Single(stopped.UserTransitions).Kind);
+        Assert.Contains("Completed work remains", stopped.Summary, StringComparison.Ordinal);
+        Assert.Contains("A completed read remains recorded.", stopped.Summary, StringComparison.Ordinal);
+        Assert.Contains(await store.LoadTranscriptAsync(created.TaskId),
+            e => e.Content.Contains("active work cancelled", StringComparison.Ordinal));
     }
 
     [Fact]

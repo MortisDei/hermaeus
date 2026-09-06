@@ -42,6 +42,36 @@ public sealed class MemoryHybridRecallTests
         return new MemoryStore(s, new TopicEmbeddingService());
     }
 
+    private sealed class BlockingCountingEmbeddingService : IEmbeddingService
+    {
+        private int _calls;
+
+        public int Dimensions => 3;
+
+        public TaskCompletionSource<object?> FirstCallStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<object?> ReleaseFirstCall { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+        {
+            var call = Interlocked.Increment(ref _calls);
+            if (call == 1)
+            {
+                FirstCallStarted.TrySetResult(null);
+                await ReleaseFirstCall.Task.WaitAsync(ct);
+            }
+
+            return [1f, 0f, 0f];
+        }
+
+        public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+            Task.FromResult(texts.Select(_ => new[] { 1f, 0f, 0f }).ToList());
+    }
+
     [Fact]
     public async Task Hybrid_search_surfaces_a_semantic_match_with_no_lexical_overlap()
     {
@@ -58,9 +88,69 @@ public sealed class MemoryHybridRecallTests
         var results = await store.SearchAsync("local model runtime");
 
         Assert.Contains(results, m => m.Id == "m1");
+        Assert.DoesNotContain(results, m => m.Id == "m2");
+        Assert.DoesNotContain(results, m => m.Id == "m3");
         var top = results.OrderByDescending(m => m.RelevanceScore).First();
         Assert.Equal("m1", top.Id);
         Assert.True(top.RelevanceScore > 0, "the top hybrid result should carry a positive relevance score");
+    }
+
+    [Fact]
+    public async Task Concurrent_identical_searches_share_the_database_retrieval()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var seedStore = new MemoryStore(settings);
+        await seedStore.InitializeAsync();
+        await seedStore.SaveAsync(new Memory { Id = "m1", Content = "needle in a stored memory" });
+
+        var embeddings = new BlockingCountingEmbeddingService();
+        var store = new MemoryStore(settings, embeddings);
+        var first = store.SearchAsync("needle");
+        await embeddings.FirstCallStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // SearchAsync enters the shared wait before returning its task, so the
+        // second caller is attached while the first query is still blocked.
+        var second = store.SearchAsync("needle");
+        embeddings.ReleaseFirstCall.TrySetResult(null);
+
+        await Task.WhenAll(first, second);
+        var firstResults = await first;
+        var secondResults = await second;
+
+        Assert.Equal(1, embeddings.Calls);
+        Assert.Equal("m1", Assert.Single(firstResults).Id);
+        Assert.Equal("m1", Assert.Single(secondResults).Id);
+    }
+
+    [Fact]
+    public async Task Canceling_one_identical_search_waiter_keeps_the_other_search_alive()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var seedStore = new MemoryStore(settings);
+        await seedStore.InitializeAsync();
+        await seedStore.SaveAsync(new Memory { Id = "m1", Content = "needle in a stored memory" });
+
+        var embeddings = new BlockingCountingEmbeddingService();
+        var store = new MemoryStore(settings, embeddings);
+        using var canceled = new CancellationTokenSource();
+        var first = store.SearchAsync("needle", canceled.Token);
+        await embeddings.FirstCallStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = store.SearchAsync("needle");
+
+        canceled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+
+        embeddings.ReleaseFirstCall.TrySetResult(null);
+        var results = await second;
+
+        Assert.Equal(1, embeddings.Calls);
+        Assert.Equal("m1", Assert.Single(results).Id);
     }
 
     /// <summary>r11 3.3: FTS candidates used to be ordered by is_pinned/importance_score/updated_at, so the "FTS rank" half of hybrid scoring measured importance, not how well the text matched. A short, term-dense match must now outrank a long, low-relevance one even though it has far lower importance.</summary>
@@ -111,6 +201,92 @@ public sealed class MemoryHybridRecallTests
         Assert.Single(results);
         Assert.NotNull(results[0].RelevanceScore);
         Assert.True(results[0].RelevanceScore > 0);
+    }
+
+    [Fact]
+    public async Task Keyword_fallback_keeps_more_than_two_genuine_lexical_matches()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var store = new MemoryStore(settings);
+        await store.InitializeAsync();
+
+        await store.SaveAsync(new Memory { Id = "pizza", Content = "Pizza pairs well with a medium-bodied red wine." });
+        await store.SaveAsync(new Memory { Id = "pasta", Content = "Pasta can pair with red wine." });
+        await store.SaveAsync(new Memory { Id = "cheese", Content = "Cheese also pairs with red wine." });
+
+        var results = await store.SearchAsync("wine");
+
+        Assert.Equal(3, results.Count);
+        Assert.All(results, result => Assert.True(result.RelevanceScore >= 0.4));
+    }
+
+    [Fact]
+    public async Task Unembedded_rows_keep_more_than_two_genuine_lexical_matches_with_a_configured_embedder()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var plainStore = new MemoryStore(settings);
+        await plainStore.InitializeAsync();
+        await plainStore.SaveAsync(new Memory { Id = "pizza", Content = "Pizza pairs well with a medium-bodied red wine." });
+        await plainStore.SaveAsync(new Memory { Id = "pasta", Content = "Pasta can pair with red wine." });
+        await plainStore.SaveAsync(new Memory { Id = "cheese", Content = "Cheese also pairs with red wine." });
+
+        var hybridStore = new MemoryStore(settings, new TopicEmbeddingService());
+        var results = await hybridStore.SearchAsync("wine");
+
+        Assert.Equal(3, results.Count);
+        Assert.All(results, result => Assert.True(result.RelevanceScore >= 0.4));
+    }
+
+    [Fact]
+    public async Task Weak_ordinary_and_unrelated_pinned_memories_are_not_injected_by_recall()
+    {
+        using var temp = new TempDir();
+        var store = NewHybridStore(temp, out _);
+        await store.InitializeAsync();
+
+        await store.SaveAsync(new Memory { Id = "relevant", Content = "User runs llama.cpp for local inference." });
+        await store.SaveAsync(new Memory { Id = "pinned-relevant", Content = "Pinned note: user runs llama.cpp for local inference.", IsPinned = true });
+        await store.SaveAsync(new Memory { Id = "ordinary-unrelated", Content = "User's unrelated lunch plans and grocery list." });
+        await store.SaveAsync(new Memory { Id = "pinned-unrelated", Content = "Pinned context retained by deliberate user choice.", IsPinned = true });
+
+        var results = await store.SearchAsync("local model runtime");
+
+        Assert.Contains(results, memory => memory.Id == "relevant");
+        Assert.Contains(results, memory => memory.Id == "pinned-relevant");
+        Assert.DoesNotContain(results, memory => memory.Id == "ordinary-unrelated");
+        Assert.DoesNotContain(results, memory => memory.Id == "pinned-unrelated");
+    }
+
+    [Fact]
+    public async Task A_model_generated_absence_conclusion_cannot_hide_later_positive_evidence()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var store = new MemoryStore(settings);
+        await store.InitializeAsync();
+
+        await store.SaveAsync(new Memory
+        {
+            Id = "old-negative",
+            Content = "No prior discussion about food paired with wine was found.",
+            IsPinned = true
+        });
+        await store.SaveAsync(new Memory
+        {
+            Id = "later-positive",
+            Content = "Recommended wine pairing for meat lovers pizza."
+        });
+
+        var results = await store.SearchAsync("wine pizza");
+
+        Assert.Contains(results, memory => memory.Id == "later-positive");
+        Assert.DoesNotContain(results, memory => memory.Id == "old-negative");
     }
 
     [Fact]

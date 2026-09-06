@@ -25,6 +25,25 @@ Hermaeus is a native, local-first AI workstation: Avalonia UI + .NET 10, Windows
 Dependency direction: Desktop → ViewModels → (Services, Agent, Rag) → Core.
 Never add a reference against that flow.
 
+## Repository skills
+
+`AGENTS.md` is authoritative for repository-wide rules. Task-specific
+procedures live in `.agents/skills/` and supplement these instructions; they do
+not override them. Read and apply the relevant skill before work in that area.
+If a skill conflicts with `AGENTS.md`, current authoritative documentation, or
+source behaviour, treat the skill as drift and correct it.
+
+- `add-a-feature`: bounded feature workflow across architecture, DI, settings,
+  UI, documentation, security, and tests.
+- `build-and-verify`: approved-host-aware build, sequential test, coverage,
+  packaging, process audit, and owner GUI verification.
+- `review-round`: numbered review-pack sequencing, evidence, closure, and
+  publication ownership.
+- `security-posture`: process, secret, download, path, network, and Agent gate
+  invariants.
+- `storage-and-data-root`: SQLite, backup, atomic writes, and staged Data Root
+  migration lifecycle.
+
 ## Build, test, run
 
 ```bash
@@ -34,6 +53,10 @@ dotnet run --project src/Hermaeus.Desktop                  # launch the app; see
 ./build.sh --skip-restore    # or: pwsh ./build.ps1 -SkipRestore   # packaging
 ./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 60%)
 ```
+
+Run coverage once as the final automated verification immediately before
+creating a commit, after the solution build and test suite pass. Keep coverage
+results outside the repository.
 
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.
 

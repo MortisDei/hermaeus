@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Hermaeus.ViewModels;
@@ -53,7 +54,10 @@ public partial class SettingsView : UserControl
         {
             var folders = await PickFolderAsync("Choose Hermaeus data folder");
             if (folders.Count > 0)
+            {
                 vm.Data.DataRootDirectory = folders[0].Path.LocalPath;
+                await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+            }
         };
 
         vm.Data.RequestDataRootMigrationConfirmation = async plan =>
@@ -67,6 +71,19 @@ public partial class SettingsView : UserControl
             var dialog = new ConfirmActionDialog(
                 "Confirm data folder change",
                 $"Current data folder:\n{plan.PreviousDataRoot}\n\nDestination:\n{plan.CurrentDataRoot}\n\n{moveDescription}. Existing workspace state will be handled by Hermaeus' safe migration path.");
+            return await dialog.ShowDialog<bool>(owner);
+        };
+
+        vm.Data.RequestDataRootMigrationRestartDecision = async () =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+
+            var dialog = new ConfirmActionDialog(
+                "Data migration scheduled",
+                "Hermaeus must restart before the data folder can be moved safely.",
+                "Restart later",
+                "Restart now");
             return await dialog.ShowDialog<bool>(owner);
         };
 
@@ -102,6 +119,17 @@ public partial class SettingsView : UserControl
                 return false;
 
             var dialog = new RestoreBackupConfirmationDialog();
+            return await dialog.ShowDialog<bool>(owner);
+        };
+
+        vm.Data.RequestArtworkCacheClearConfirmation = async () =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+
+            var dialog = new ConfirmActionDialog(
+                "Clear artwork cache",
+                "Remove cached Hugging Face artwork only? Downloaded models and model manifests will not be changed.");
             return await dialog.ShowDialog<bool>(owner);
         };
 

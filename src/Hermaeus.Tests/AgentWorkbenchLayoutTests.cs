@@ -76,6 +76,18 @@ public sealed class AgentWorkbenchLayoutTests
     }
 
     [Fact]
+    public void Secondary_workbench_areas_are_tabs_and_run_can_open_changes()
+    {
+        var source = System.IO.File.ReadAllText(AgentViewPath());
+
+        Assert.Contains("<TextBlock Text=\"Changes\"", source, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Workspace\"", source, StringComparison.Ordinal);
+        Assert.Contains("Header=\"History\"", source, StringComparison.Ordinal);
+        Assert.Contains("ShowChangesTabCommand", source, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding NewTaskCommand}\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_run_tab_explains_the_approval_gated_workflow_and_current_next_action()
     {
         var source = System.IO.File.ReadAllText(AgentViewPath());
@@ -83,6 +95,10 @@ public sealed class AgentWorkbenchLayoutTests
         Assert.Contains("How Agent work proceeds", source, StringComparison.Ordinal);
         Assert.Contains("review the plan and each requested approval", source, StringComparison.Ordinal);
         Assert.Contains("{Binding NextUserActionLabel}", source, StringComparison.Ordinal);
+        Assert.Contains("controls:MarkdownViewer", source, StringComparison.Ordinal);
+        Assert.Contains("CopyResponseCommand", source, StringComparison.Ordinal);
+        Assert.Contains("ContinuePlannedTaskCommand", source, StringComparison.Ordinal);
+        Assert.Contains("FinishTaskCommand", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -95,7 +111,7 @@ public sealed class AgentWorkbenchLayoutTests
             Status = AgentTaskStatus.WaitingForUser,
             PendingToolAction = new AgentPendingToolAction()
         }));
-        Assert.Equal("Agent needs your answer. Reply in the panel above.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.WaitingForUser)));
+        Assert.Equal("Agent needs your answer. Reply below its response in the Run tab.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.WaitingForUser)));
         Assert.Equal("Review the outcome below, then inspect Changes or start a follow-up task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Complete)));
         Assert.Equal("Review the failure and transcript, then provide a new instruction or start again.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Failed)));
         Assert.Equal("This task was stopped. Review its outcome or start a new task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Cancelled)));
@@ -103,6 +119,10 @@ public sealed class AgentWorkbenchLayoutTests
         var budget = Task(AgentTaskStatus.Blocked);
         budget.StepBudgetExhausted = true;
         Assert.Equal("Step budget exhausted. Add steps or continue the remaining plan, or stop the task.", AgentViewModel.DescribeNextUserAction(budget));
+
+        var stopped = Task(AgentTaskStatus.Blocked);
+        stopped.UserTransitions.Add(new AgentTaskTransition(AgentTaskTransitionKind.StopRun, DateTime.UtcNow));
+        Assert.Equal("The run was stopped. Review its outcome, continue planned work, add an instruction, or finish it.", AgentViewModel.DescribeNextUserAction(stopped));
     }
 
     [Fact]
@@ -112,6 +132,20 @@ public sealed class AgentWorkbenchLayoutTests
 
         Assert.Contains("IsVisible=\"{Binding ShowRunStep}\"", source, StringComparison.Ordinal);
         Assert.Contains("IsVisible=\"{Binding IsRunning}\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Scenario_row_run_button_uses_the_items_control_data_context()
+    {
+        var doc = XDocument.Load(AgentViewPath());
+        var button = doc.Descendants().Single(element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute("Content") == "Run"
+            && (string?)element.Attribute("CommandParameter") == "{Binding}");
+
+        Assert.Equal(
+            "{Binding $parent[ItemsControl].DataContext.ScenarioSuite.RunScenarioCommand}",
+            (string?)button.Attribute("Command"));
+        Assert.DoesNotContain("ElementName=Root", (string?)button.Attribute("Command"), StringComparison.Ordinal);
     }
 
     private static AgentTaskState Task(AgentTaskStatus status) =>

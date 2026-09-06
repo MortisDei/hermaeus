@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Hermaeus.Core.Models;
@@ -23,6 +25,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         Opened += OnOpened;
         AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
+        AddHandler(KeyDownEvent, OnQuickChatKeyDown, RoutingStrategies.Tunnel);
     }
 
     private static void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e) =>
@@ -33,6 +36,20 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm)
         {
             vm.Agent.RequestDraftPatchPreview = ShowDraftPatchPreviewAsync;
+            vm.Agent.RequestCopyToClipboard = async text =>
+            {
+                if (Clipboard is not { } clipboard)
+                    return false;
+                try { await clipboard.SetTextAsync(text); return true; }
+                catch { return false; }
+            };
+            vm.Lab.RequestCopyToClipboard = async text =>
+            {
+                if (Clipboard is not { } clipboard)
+                    return false;
+                try { await clipboard.SetTextAsync(text); return true; }
+                catch { return false; }
+            };
             vm.Agent.RequestRewindConfirmation = async plan =>
             {
                 var dialog = new TaskRewindConfirmationDialog();
@@ -83,6 +100,7 @@ public partial class MainWindow : Window
                     "kept exactly as it is - nothing is deleted.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.Settings.Data.RequestApplicationRestart = RestartApplicationAsync;
             vm.Palette.PropertyChanged += OnPaletteViewModelPropertyChanged;
 
             if (vm.Settings.StartMinimized)
@@ -116,6 +134,20 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnQuickChatKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (!ReferenceEquals(e.Source, QuickChatInput))
+            return;
+        if (e.Key is not (Key.Return or Key.Enter)
+            || e.KeyModifiers is not (KeyModifiers.None or KeyModifiers.Control)
+            || DataContext is not MainWindowViewModel vm)
+            return;
+
+        e.Handled = true;
+        if (vm.Chat.SendCommand.CanExecute(null))
+            vm.Chat.SendCommand.Execute(null);
+    }
+
     private async Task<bool> ShowDraftPatchPreviewAsync(DraftPatchPreviewRequest request)
     {
         if (PatchDiffService is null)
@@ -128,6 +160,33 @@ public partial class MainWindow : Window
             DataContext = viewModel
         };
         return await modal.ShowDialog<bool>(this);
+    }
+
+    private async Task RestartApplicationAsync()
+    {
+        if (_closeAfterShutdown || DataContext is not MainWindowViewModel vm)
+            return;
+
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+            throw new InvalidOperationException("The current application path is unavailable, so Hermaeus cannot restart itself.");
+
+        await vm.ShutdownAsync();
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = processPath,
+            UseShellExecute = false,
+            WorkingDirectory = Environment.CurrentDirectory
+        };
+        foreach (var argument in Environment.GetCommandLineArgs().Skip(1))
+            startInfo.ArgumentList.Add(argument);
+
+        if (Process.Start(startInfo) is null)
+            throw new InvalidOperationException("Hermaeus could not start the replacement process.");
+
+        _closeAfterShutdown = true;
+        Close();
     }
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)

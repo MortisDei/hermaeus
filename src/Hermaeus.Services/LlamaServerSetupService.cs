@@ -34,6 +34,24 @@ public enum GpuVendor { Unknown, Nvidia, Amd, Intel }
 /// </summary>
 public sealed class LlamaServerSetupService
 {
+    private static readonly TimeSpan SharedReleaseMetadataTtl = TimeSpan.FromHours(1);
+    private static readonly object SharedReleaseMetadataLock = new();
+    private static (LlamaServerLatestDownload Download, DateTimeOffset CachedAt)? _lastSuccessfulRelease;
+
+    internal static (LlamaServerLatestDownload Download, DateTimeOffset CachedAt)? LastSuccessfulRelease
+    {
+        get
+        {
+            lock (SharedReleaseMetadataLock)
+            {
+                var cached = _lastSuccessfulRelease;
+                return cached is { } value && DateTimeOffset.UtcNow - value.CachedAt < SharedReleaseMetadataTtl
+                    ? value
+                    : null;
+            }
+        }
+    }
+
     /// <summary>
     /// llama.cpp release tag this pinned install downloads. Verified against
     /// the live GitHub releases API on 2026-07-16: tag b10034, published
@@ -285,7 +303,12 @@ public sealed class LlamaServerSetupService
             var result = await DownloadExtractAndLocateAsync(
                 versionedInstallPath, release.Url, release.AssetName, release.Sha256,
                 $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
-            return result with { SelectedVariant = release.Variant };
+            return result with
+            {
+                SelectedVariant = release.Variant,
+                VerifiedReleaseTag = result.Success ? release.TagName : null,
+                VerifiedArtifactSha256 = result.Success ? release.Sha256 : null
+            };
         }
         catch (OperationCanceledException)
         {
@@ -575,7 +598,7 @@ public sealed class LlamaServerSetupService
             ? CurrentPlatformDisplayName()
             : DisplayNameFor(platform.Value, effectiveVariant);
 
-        return new LlamaServerLatestDownload(
+        var download = new LlamaServerLatestDownload(
             release.TagName,
             asset.Name,
             asset.BrowserDownloadUrl,
@@ -586,6 +609,9 @@ public sealed class LlamaServerSetupService
             release.PublishedAt,
             companionSha256,
             effectiveVariant);
+        lock (SharedReleaseMetadataLock)
+            _lastSuccessfulRelease = (download, DateTimeOffset.UtcNow);
+        return download;
     }
 
     internal static string RequireSha256Digest(GitHubReleaseAsset asset)

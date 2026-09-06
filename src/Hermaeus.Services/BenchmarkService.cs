@@ -16,16 +16,18 @@ public sealed class BenchmarkService
     private readonly ILlmService _llm;
     private readonly ISystemInfoService _system;
     private readonly IEvalStore _evalStore;
+    private readonly IRuntimeLogService? _logs;
     private string _initializedPath = string.Empty;
     private string _starterSuitesSeededPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
 
-    public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system, IEvalStore evalStore)
+    public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system, IEvalStore evalStore, IRuntimeLogService? logs = null)
     {
         _settings = settings;
         _llm = llm;
         _system = system;
         _evalStore = evalStore;
+        _logs = logs;
     }
 
     private string DbPath
@@ -511,6 +513,7 @@ public sealed class BenchmarkService
         // could race the starter-suite seed (EnsureStarterSuitesAsync reads
         // `existing` then inserts) into a double-insert or a PK violation.
         await _initGate.WaitAsync(ct);
+        var operationId = OperationCorrelation.NewId();
         try
         {
             if (_initializedPath == dbPath && File.Exists(dbPath)) return;
@@ -543,16 +546,40 @@ public sealed class BenchmarkService
             await cmd.ExecuteNonQueryAsync(ct);
             _initializedPath = dbPath;
 
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Benchmark database opened with mode=read-write, pooling=provider-default, journal={await ReadJournalModeAsync(c, ct)}, schema_target=1.",
+                operationId));
+
             if (_starterSuitesSeededPath != dbPath)
             {
                 await EnsureStarterSuitesAsync(ct);
                 _starterSuitesSeededPath = dbPath;
             }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                $"Benchmark database initialization failed: exception={ex.GetType().Name}.",
+                operationId));
+            throw;
+        }
         finally
         {
             _initGate.Release();
         }
+    }
+
+    private static async Task<string> ReadJournalModeAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode";
+        return Convert.ToString(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture) ?? "Unknown";
     }
 
     /// <summary>
@@ -1006,26 +1033,40 @@ public sealed class BenchmarkService
         if (!string.IsNullOrWhiteSpace(managedServer?.Speculative?.DraftModelPath))
             companionIdentity = RuntimeIdentityFactory.CreateModelIdentity(managedServer.Speculative.DraftModelPath, null).StableId;
 
-        var configuration = new ConfigurationIdentityV2(
-            metadata.ContextSize,
-            metadata.GpuLayers,
-            metadata.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", > 0 => "gpu-partial", _ => string.Empty },
-            metadata.Threads,
-            metadata.PromptThreads,
-            managedServer?.Slots,
-            metadata.BatchSize,
-            null,
-            metadata.KvCacheTypeK,
-            metadata.KvCacheTypeV,
-            metadata.FlashAttention,
-            metadata.SpeculativeTypes,
-            companionIdentity,
-            $"nmax={metadata.SpeculativeNMax?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty};nmin={metadata.SpeculativeNMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty};pmin={metadata.SpeculativePMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}",
-            managedServer?.CpuMoeLayers,
-            new Dictionary<string, string>(StringComparer.Ordinal),
-            managedServer is not null && string.IsNullOrWhiteSpace(managedServer.ExtraArgs)
+        var identitySource = managedServer ?? new ServerConfig
+        {
+            ContextSize = metadata.ContextSize ?? 4096,
+            GpuLayers = metadata.GpuLayers ?? 0,
+            GpuPlacement = GpuPlacementIntent.TryFromLegacy(metadata.GpuLayers ?? 0, out var placement, out _)
+                ? placement
+                : null,
+            Threads = metadata.Threads ?? 0,
+            PromptThreads = metadata.PromptThreads ?? 0,
+            KvCacheTypeK = metadata.KvCacheTypeK,
+            KvCacheTypeV = metadata.KvCacheTypeV,
+            FlashAttention = metadata.FlashAttention,
+            Speculative = new SpeculativeDecodingConfig
+            {
+                Types = (metadata.SpeculativeTypes ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+                NMax = metadata.SpeculativeNMax,
+                NMin = metadata.SpeculativeNMin,
+                PMin = metadata.SpeculativePMin
+            }
+        };
+        var configuration = ConfigurationIdentityFactory.Create(identitySource, companionIdentity) with
+        {
+            ContextSize = metadata.ContextSize,
+            GpuLayers = metadata.GpuLayers,
+            Threads = metadata.Threads,
+            PromptThreads = metadata.PromptThreads,
+            Slots = managedServer?.Slots,
+            BatchSize = metadata.BatchSize,
+            SpeculativeMechanism = metadata.SpeculativeTypes ?? string.Empty,
+            FlashAttention = metadata.FlashAttention ?? string.Empty,
+            Completeness = managedServer is not null && string.IsNullOrWhiteSpace(managedServer.ExtraArgs)
                 ? IdentityCompleteness.Complete
-                : IdentityCompleteness.Incomplete);
+                : IdentityCompleteness.Incomplete
+        };
 
         return new EmpiricalProfileFingerprintV2(runtime, modelIdentity, hardware, configuration);
     }

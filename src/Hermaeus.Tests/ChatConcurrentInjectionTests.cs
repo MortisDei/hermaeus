@@ -99,7 +99,7 @@ public sealed class ChatConcurrentInjectionTests
         var rag = new RagQueryService(store, embed, new FakeLlm(), settings, new NoOpReranker());
 
         var hit = new RecallHit(RecallKind.Message, "Earlier conversation", "we settled on flash attention off",
-            DateTime.UtcNow, "", 0.02, new RecallTarget(ConversationId: "c-old", MessageIndex: 3));
+            DateTime.UtcNow, "", 1.0, new RecallTarget(ConversationId: "c-old", MessageIndex: 3));
         var recall = new RecallService([new FakeRecallSource([hit])], new FakeEmbeddingService());
 
         var llm = new CapturingLlm();
@@ -161,7 +161,7 @@ public sealed class ChatConcurrentInjectionTests
         var (store, dataset) = await IngestAsync(temp, settings, embed);
         var rag = new RagQueryService(store, embed, new FakeLlm(), settings, new NoOpReranker());
         var hit = new RecallHit(RecallKind.Message, "Earlier conversation", "we settled on flash attention off",
-            DateTime.UtcNow, "", 0.02, new RecallTarget(ConversationId: "c-old", MessageIndex: 3));
+            DateTime.UtcNow, "", 1.0, new RecallTarget(ConversationId: "c-old", MessageIndex: 3));
 
         // The same fixed inputs twice: the receipt is what the user reads back
         // as "what went into this answer", and it must not vary run to run.

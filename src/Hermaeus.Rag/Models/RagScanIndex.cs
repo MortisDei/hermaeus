@@ -26,6 +26,9 @@ public sealed class RagScanIndex
     /// <summary>The embedding model the dataset was built with, for the mismatch check.</summary>
     public string EmbeddingModel { get; }
 
+    /// <summary>The published dataset generation this index was loaded from.</summary>
+    public string GenerationId { get; }
+
     public int Count => ChunkIds.Length;
 
     /// <summary>
@@ -45,12 +48,13 @@ public sealed class RagScanIndex
     /// <summary>A chunk id string plus its slot in the array and the dictionary that finds it.</summary>
     private const int IdOverheadBytes = 128;
 
-    public RagScanIndex(string[] chunkIds, float[] block, int dimension, string embeddingModel)
+    public RagScanIndex(string[] chunkIds, float[] block, int dimension, string embeddingModel, string generationId = "")
     {
         ChunkIds = chunkIds;
         Block = block;
         Dimension = dimension;
         EmbeddingModel = embeddingModel;
+        GenerationId = generationId;
     }
 
     public ReadOnlySpan<float> RowAt(int index) => Block.AsSpan(index * Dimension, Dimension);

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
@@ -135,6 +136,7 @@ public sealed class SettingsService : ISettingsService
             UpgradeSpeculativeDecoding(server);
             NormalizeKvCache(server, warning);
             server.PromptThreads = Math.Max(0, server.PromptThreads);
+            NormalizeGpuPlacement(server, warning);
 
             if (!seenIds.Add(server.Id))
             {
@@ -154,6 +156,36 @@ public sealed class SettingsService : ISettingsService
             servers.Insert(0, CreateDefaultServer(false));
         if (!servers.Any(server => server.EmbeddingsMode))
             servers.Add(CreateDefaultServer(true));
+    }
+
+    private static void NormalizeGpuPlacement(ServerConfig server, Action<string>? warning)
+    {
+        if (server.GpuPlacement is null)
+        {
+            if (GpuPlacementIntent.TryFromLegacy(server.GpuLayers, out var legacy, out var legacyError))
+            {
+                server.GpuPlacement = legacy;
+                server.GpuPlacementValidationError = string.Empty;
+            }
+            else
+            {
+                server.GpuPlacementValidationError = legacyError ?? "GPU placement is invalid.";
+                warning?.Invoke($"Managed server '{server.Name}' has invalid GPU placement: {server.GpuPlacementValidationError} Repair it before launching.");
+            }
+
+            return;
+        }
+
+        if (!server.GpuPlacement.TryValidate(out var error))
+        {
+            server.GpuPlacementValidationError = error ?? "GPU placement is invalid.";
+            warning?.Invoke($"Managed server '{server.Name}' has invalid GPU placement: {server.GpuPlacementValidationError} Repair it before launching.");
+            return;
+        }
+
+        server.GpuPlacementValidationError = string.Empty;
+        if (server.GpuPlacement.LegacyGpuLayers is int legacyLayers)
+            server.GpuLayers = legacyLayers;
     }
 
     private static void NormalizeKvCache(ServerConfig server, Action<string>? warning)
@@ -206,8 +238,13 @@ public sealed class SettingsService : ISettingsService
             if (!File.Exists(_path)) return;
             var json = await File.ReadAllTextAsync(_path);
             Settings = JsonSerializer.Deserialize<AppSettings>(json, Opts) ?? new();
+            // Materialize the typed placement in memory, but do not persist it
+            // merely because the application started. The next owner-initiated
+            // settings save writes the new shape.
+            NormalizeSettings(Settings);
             needsPersist = MigrateLegacyLocalEndpoints(Settings);
             needsPersist |= MigrateLegacyLocalApiToken(Settings);
+            needsPersist |= await ApplyPendingDataRootMigrationAtBootstrapAsync();
             notify = true;
         }
         catch
@@ -232,23 +269,41 @@ public sealed class SettingsService : ISettingsService
     }
 
     public async Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
+        => await SaveCandidateAsync(Settings, previousDataRootDirectory, replaceLiveSettings: false);
+
+    public async Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
+        => await SaveCandidateAsync(settings, previousDataRootDirectory, replaceLiveSettings: true);
+
+    /// <summary>
+    /// Writes and validates a candidate before publishing it as the live
+    /// settings object. Publishing earlier let observers see new in-memory
+    /// values while a reload could still read the previous file from disk.
+    /// </summary>
+    private async Task<SettingsSaveResult> SaveCandidateAsync(
+        AppSettings candidate,
+        string? previousDataRootDirectory,
+        bool replaceLiveSettings)
     {
+        ArgumentNullException.ThrowIfNull(candidate);
         DataRootMigration? migration = null;
         var currentDataRoot = string.Empty;
         await _gate.WaitAsync();
         try
         {
-            NormalizeSettings(Settings);
-            currentDataRoot = ResolveDataRoot(Settings);
+            NormalizeSettings(candidate);
+            currentDataRoot = ResolveDataRoot(candidate);
             ValidateDataRoot(currentDataRoot);
+            await EnsureDataRootWritableAsync(currentDataRoot);
 
             migration = previousDataRootDirectory is null
                 ? null
-                : MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
+                : MigrateDataRoot(previousDataRootDirectory, candidate.DataManagement.DataRootDirectory, null);
 
             Directory.CreateDirectory(currentDataRoot);
-            await WriteTextAtomicAsync(_path, JsonSerializer.Serialize(Settings, Opts));
+            await WriteTextAtomicAsync(_path, JsonSerializer.Serialize(candidate, Opts));
             migration?.Commit();
+            if (replaceLiveSettings)
+                Settings = candidate;
         }
         catch (Exception ex)
         {
@@ -266,7 +321,7 @@ public sealed class SettingsService : ISettingsService
             }
 
             if (previousDataRootDirectory is not null)
-                Settings.DataManagement.DataRootDirectory = previousDataRootDirectory;
+                candidate.DataManagement.DataRootDirectory = previousDataRootDirectory;
             throw;
         }
         finally
@@ -276,21 +331,6 @@ public sealed class SettingsService : ISettingsService
 
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         return migration?.Result ?? new SettingsSaveResult(false, null, currentDataRoot, null, 0);
-    }
-
-    public async Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
-    {
-        var previous = Settings;
-        Settings = settings;
-        try
-        {
-            return await SaveAsync(previousDataRootDirectory);
-        }
-        catch
-        {
-            Settings = previous;
-            throw;
-        }
     }
 
     public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory)
@@ -303,7 +343,8 @@ public sealed class SettingsService : ISettingsService
         if (!Directory.Exists(previous))
             return new DataMigrationPlan(false, previous, next, 0, []);
 
-        var files = EnumerateMigrationFiles(previous).ToList();
+        var inventory = InspectMigrationFiles(previous);
+        var files = inventory.Files;
         var conflicts = files
             .Select(f => Path.Combine(next, f.RelativePath))
             .Where(File.Exists)
@@ -314,26 +355,32 @@ public sealed class SettingsService : ISettingsService
         // anything (see MigrateDataRoot), not block. Only a partial
         // conflict is genuinely ambiguous and stays blocked.
         if (files.Count > 0 && conflicts.Count == files.Count)
-            return new DataMigrationPlan(false, previous, next, 0, []);
+            return new DataMigrationPlan(false, previous, next, 0, [],
+                files.Select(file => file.RelativePath).ToList(), inventory.Exclusions);
 
-        return new DataMigrationPlan(files.Count > 0 && conflicts.Count == 0, previous, next, files.Count, conflicts);
+        return new DataMigrationPlan(files.Count > 0 && conflicts.Count == 0, previous, next, files.Count, conflicts,
+            files.Select(file => file.RelativePath).ToList(), inventory.Exclusions);
     }
 
-    private DataRootMigration MigrateDataRoot(string? previousDataRootDirectory, string? nextDataRootDirectory)
+    private DataRootMigration MigrateDataRoot(
+        string? previousDataRootDirectory,
+        string? nextDataRootDirectory,
+        DataMigrationPlan? plannedPlan)
     {
         var previous = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = previousDataRootDirectory ?? string.Empty } });
         var next = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = nextDataRootDirectory ?? string.Empty } });
         ValidateDataRoot(next);
         if (ModelPathSafety.AreSameLocalPath(previous, next))
-            return NoMigration(previous, next);
+            return NoMigration(previous, next, plannedPlan, skipped: 0);
 
         Directory.CreateDirectory(next);
         if (!Directory.Exists(previous))
-            return NoMigration(previous, next);
+            return NoMigration(previous, next, plannedPlan, skipped: 0);
 
-        var files = EnumerateMigrationFiles(previous).ToList();
+        var inventory = InspectMigrationFiles(previous);
+        var files = inventory.Files;
         if (files.Count == 0)
-            return NoMigration(previous, next);
+            return NoMigration(previous, next, plannedPlan, skipped: 0, inventory: inventory);
 
         var conflicts = files.Where(file => File.Exists(Path.Combine(next, file.RelativePath))).ToList();
         if (conflicts.Count == files.Count)
@@ -345,7 +392,7 @@ public sealed class SettingsService : ISettingsService
             // Treating that as a hard conflict used to throw here, which
             // left the settings save failed and the data root reverted to
             // blank with no way to just repoint without an unwanted move.
-            return NoMigration(previous, next);
+            return NoMigration(previous, next, plannedPlan, skipped: files.Count, inventory: inventory);
         }
 
         if (conflicts.Count > 0)
@@ -362,6 +409,7 @@ public sealed class SettingsService : ISettingsService
             var backupTarget = Path.Combine(backupDir, file.RelativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(backupTarget)!);
             File.Copy(file.SourcePath, backupTarget);
+            VerifyMigrationFile(file.SourcePath, backupTarget);
         }
 
         var moved = new List<(string SourcePath, string TargetPath)>();
@@ -377,6 +425,12 @@ public sealed class SettingsService : ISettingsService
                 moved.Add((file.SourcePath, target));
                 if (IsSecretsFile(target))
                     TryRestrictSecretsPermissions(target);
+            }
+
+            foreach (var (sourcePath, targetPath) in moved)
+            {
+                var relativePath = Path.GetRelativePath(previous, sourcePath);
+                VerifyMigrationFile(Path.Combine(backupDir, relativePath), targetPath);
             }
         }
         catch (Exception ex)
@@ -394,12 +448,83 @@ public sealed class SettingsService : ISettingsService
             throw;
         }
 
+        var evidence = BuildMigrationEvidence(
+            plannedPlan,
+            inventory,
+            previous,
+            files,
+            moved,
+            verified: moved.Count,
+            failures: [],
+            skipped: 0);
         return new DataRootMigration(previous, moved, createdDirectories.ToArray(),
-            new SettingsSaveResult(true, previous, next, backupDir, files.Count));
+            new SettingsSaveResult(true, previous, next, backupDir, files.Count, evidence));
     }
 
-    private static DataRootMigration NoMigration(string previous, string next) =>
-        new(previous, [], [], new SettingsSaveResult(false, previous, next, null, 0));
+    private static DataRootMigration NoMigration(
+        string previous,
+        string next,
+        DataMigrationPlan? plannedPlan,
+        int skipped,
+        (List<MigrationFile> Files, List<DataMigrationExclusion> Exclusions)? inventory = null)
+    {
+        var inspected = inventory ?? (new List<MigrationFile>(), new List<DataMigrationExclusion>());
+        var evidence = BuildMigrationEvidence(
+            plannedPlan,
+            inspected,
+            previous,
+            inspected.Files,
+            [],
+            verified: 0,
+            failures: [],
+            skipped);
+        return new DataRootMigration(previous, [], [], new SettingsSaveResult(false, previous, next, null, 0, evidence));
+    }
+
+    private static (List<MigrationFile> Files, List<DataMigrationExclusion> Exclusions) InspectMigrationFiles(string root)
+    {
+        var inventory = DataRootManifest.Inspect(root);
+        return (inventory.Included.Select(file => new MigrationFile(file.SourcePath, file.RelativePath)).ToList(),
+            inventory.Excluded.ToList());
+    }
+
+    private static DataMigrationEvidence BuildMigrationEvidence(
+        DataMigrationPlan? plannedPlan,
+        (List<MigrationFile> Files, List<DataMigrationExclusion> Exclusions) inventory,
+        string previousRoot,
+        IReadOnlyList<MigrationFile> discovered,
+        IReadOnlyList<(string SourcePath, string TargetPath)> moved,
+        int verified,
+        IReadOnlyList<string> failures,
+        int skipped)
+    {
+        var initiallyDiscovered = plannedPlan?.InitiallyDiscoveredFiles?.ToList()
+            ?? discovered.Select(file => file.RelativePath).ToList();
+        var exclusions = plannedPlan?.Exclusions?.ToList() ?? inventory.Exclusions;
+        var movedRelativePaths = moved
+            .Select(item => Path.GetRelativePath(previousRoot, item.SourcePath))
+            .ToHashSet(ModelPathSafety.LocalPathComparer);
+        var currentPaths = discovered.Select(file => file.RelativePath).ToHashSet(ModelPathSafety.LocalPathComparer);
+        var retainedPaths = initiallyDiscovered
+            .Where(path => !currentPaths.Contains(path))
+            .Concat(discovered.Select(file => file.RelativePath).Where(path => !movedRelativePaths.Contains(path)))
+            .Distinct(ModelPathSafety.LocalPathComparer)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new DataMigrationEvidence(
+            initiallyDiscovered.Count,
+            exclusions.Count,
+            discovered.Count,
+            moved.Count,
+            verified,
+            moved.Count,
+            retainedPaths.Count,
+            failures.Count,
+            skipped,
+            exclusions,
+            retainedPaths,
+            failures);
+    }
 
     private static void CreateMigrationDirectory(string directory, ISet<string> createdDirectories)
     {
@@ -428,6 +553,7 @@ public sealed class SettingsService : ISettingsService
     private void NormalizeSettings(AppSettings settings)
     {
         NormalizeManagedServers(settings.ManagedServers, message => NormalizationWarning?.Invoke(message));
+        NormalizeTuneProfiles(settings.LlamaTuneProfiles);
 
         if (settings.Memory.EnabledPerConversation.Count == 0)
             return;
@@ -448,6 +574,23 @@ public sealed class SettingsService : ISettingsService
             .Take(MaxPerConversationMemoryOverrides)
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         settings.Memory.EnabledPerConversation = keep;
+    }
+
+    private static void NormalizeTuneProfiles(List<LlamaTuneProfile> profiles)
+    {
+        foreach (var profile in profiles)
+        {
+            if (profile.GpuPlacement is null)
+            {
+                if (GpuPlacementIntent.TryFromLegacy(profile.GpuLayers, out var legacy, out _))
+                    profile.GpuPlacement = legacy;
+                continue;
+            }
+
+            if (profile.GpuPlacement.TryValidate(out _)
+                && profile.GpuPlacement.LegacyGpuLayers is int legacyLayers)
+                profile.GpuLayers = legacyLayers;
+        }
     }
 
     private static bool MigrateLegacyLocalEndpoints(AppSettings settings)
@@ -512,6 +655,7 @@ public sealed class SettingsService : ISettingsService
         Port = embeddingsMode ? 39202 : 39201,
         ContextSize = embeddingsMode ? 2048 : 4096,
         GpuLayers = 0,
+        GpuPlacement = GpuPlacementIntent.Cpu(),
         Threads = 4,
         EmbeddingsMode = embeddingsMode,
         AutoStart = false
@@ -539,6 +683,21 @@ public sealed class SettingsService : ISettingsService
         string.Equals(Path.GetFileName(path), "secrets.local.json", StringComparison.OrdinalIgnoreCase)
         || string.Equals(Path.GetFileName(path), "secrets.local.key", StringComparison.OrdinalIgnoreCase);
 
+    private static void VerifyMigrationFile(string expectedPath, string actualPath)
+    {
+        var expectedInfo = new FileInfo(expectedPath);
+        var actualInfo = new FileInfo(actualPath);
+        if (!expectedInfo.Exists || !actualInfo.Exists || expectedInfo.Length != actualInfo.Length)
+            throw new IOException($"Data-root migration verification failed for '{actualPath}'.");
+
+        using var expected = File.OpenRead(expectedPath);
+        using var actual = File.OpenRead(actualPath);
+        var expectedHash = SHA256.HashData(expected);
+        var actualHash = SHA256.HashData(actual);
+        if (!CryptographicOperations.FixedTimeEquals(expectedHash, actualHash))
+            throw new IOException($"Data-root migration verification failed for '{actualPath}'.");
+    }
+
     /// <summary>Mirrors SecretStore's own TryRestrictPermissions so a moved secrets file keeps the same owner-only mode it had before the move (r11 3.1 security-review note).</summary>
     private static void TryRestrictSecretsPermissions(string path)
     {
@@ -561,6 +720,74 @@ public sealed class SettingsService : ISettingsService
         var full = Path.GetFullPath(path);
         if (string.Equals(full, root, ModelPathSafety.LocalPathComparison))
             throw new IOException("Hermaeus data root cannot be the filesystem root.");
+    }
+
+    /// <summary>
+    /// Runs before Desktop resolves any store or service whose constructor
+    /// binds to the data root. Live migration cannot safely move SQLite/WAL
+    /// and log files held by this process; a confirmed change is therefore
+    /// staged in settings and completed only at this bootstrap boundary.
+    /// </summary>
+    private async Task<bool> ApplyPendingDataRootMigrationAtBootstrapAsync()
+    {
+        var pending = Settings.DataManagement.PendingDataRootDirectory?.Trim();
+        if (string.IsNullOrWhiteSpace(pending))
+            return false;
+
+        var previous = Settings.DataManagement.DataRootDirectory;
+        DataMigrationPlan? plannedPlan = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(Settings.DataManagement.PendingDataRootMigrationPlan))
+            {
+                plannedPlan = JsonSerializer.Deserialize<DataMigrationPlan>(
+                    Settings.DataManagement.PendingDataRootMigrationPlan, Opts);
+            }
+        }
+        catch (JsonException)
+        {
+            // The plan is evidence only. A damaged preview must not prevent a
+            // safe migration from using the current on-disk inventory.
+        }
+
+        try
+        {
+            var resolvedPending = ResolveDataRoot(new AppSettings
+            {
+                DataManagement = { DataRootDirectory = pending }
+            });
+            ValidateDataRoot(resolvedPending);
+            await EnsureDataRootWritableAsync(resolvedPending);
+            var migration = MigrateDataRoot(previous, pending, plannedPlan);
+            migration.Commit();
+            Settings.DataManagement.DataRootDirectory = pending;
+            Settings.DataManagement.PendingDataRootDirectory = string.Empty;
+            Settings.DataManagement.PendingDataRootMigrationPlan = string.Empty;
+            Settings.DataManagement.DataRootMigrationReceipt = migration.Result.MigrationEvidence?.ToReceipt(
+                migration.Result.CurrentDataRoot ?? pending,
+                migration.Result.BackupDirectory)
+                ?? $"Data folder changed at startup to {migration.Result.CurrentDataRoot}; no workspace files required moving.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // The migration owns rollback for partial moves. Keep the old root
+            // authoritative and retain the queued destination for a safe retry
+            // on the next start; never let a failed bootstrap masquerade as a
+            // configured/effective root change.
+            Settings.DataManagement.PendingDataRootDirectory = pending;
+            Settings.DataManagement.DataRootMigrationReceipt =
+                $"Migration failed before startup completed: {ex.Message} failures 1 ({ex.Message}); the current data folder remains active.";
+            return true;
+        }
+    }
+
+    private static async Task EnsureDataRootWritableAsync(string path)
+    {
+        Directory.CreateDirectory(path);
+        var probePath = Path.Combine(path, $".hermaeus-write-probe-{Guid.NewGuid():N}.tmp");
+        await AtomicFile.WriteAllTextAsync(probePath, "write probe");
+        File.Delete(probePath);
     }
 
     private static async Task WriteTextAtomicAsync(string path, string content)

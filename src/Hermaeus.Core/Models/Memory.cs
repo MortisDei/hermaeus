@@ -28,6 +28,12 @@ public class Memory
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
     /// <summary>
+    /// Query-only identity of the current immutable assertion revision. It is
+    /// absent on in-memory drafts and legacy rows before projection mapping.
+    /// </summary>
+    public string? RevisionId { get; set; }
+
+    /// <summary>
     /// Scope this memory applies to. Defaults to Global (visible everywhere).
     /// </summary>
     public MemoryScope Scope { get; set; } = MemoryScope.Global;
@@ -144,15 +150,17 @@ public class Memory
             Snippet: Content,
             Timestamp: UpdatedAt);
 
+        var revisionLocator = RevisionId is null ? source.Locator : $"memory:{Id}/revision:{RevisionId}";
+
         if (RetrievedViaRelationship is null)
-            return source;
+            return source with { Locator = revisionLocator };
 
         var relationship = RetrievedViaRelationship;
         var targetTitle = string.IsNullOrWhiteSpace(Title) ? source.Title : Title;
         return new SourceReference(
             ProvenanceKind.Memory,
             $"{targetTitle} (via {KnowledgeRelationshipSemantics.DisplayName(relationship.Kind)} relationship from {relationship.SourceMemoryTitle})",
-            Locator: Id,
+            Locator: revisionLocator,
             Snippet: relationship.Evidence?.Snippet ?? source.Snippet,
             Score: source.Score,
             Timestamp: source.Timestamp,

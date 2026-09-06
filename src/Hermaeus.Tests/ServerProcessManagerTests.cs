@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
+using Hermaeus.Services;
 using Hermaeus.Services.ProcessManagement;
 using Xunit;
 
@@ -60,7 +62,7 @@ public sealed class ServerProcessManagerTests
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        var mgr = new ServerProcessManager();
+        var mgr = new ServerProcessManager(runtimeProbe: TestRuntimeProbe);
         var config = NewConfig(ImmediateExitExecutable, modelPath, port);
 
         await mgr.StartAsync(config);
@@ -78,7 +80,7 @@ public sealed class ServerProcessManagerTests
         File.WriteAllText(modelPath, "fake");
 
         var jobObject = new FakeProcessJobObject(succeeds: false);
-        var mgr = new ServerProcessManager(jobObject: jobObject);
+        var mgr = new ServerProcessManager(jobObject: jobObject, runtimeProbe: TestRuntimeProbe);
         var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
 
         await mgr.StartAsync(config);
@@ -98,7 +100,7 @@ public sealed class ServerProcessManagerTests
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
 
-        var mgr = new ServerProcessManager();
+        var mgr = new ServerProcessManager(runtimeProbe: TestRuntimeProbe);
         var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
 
         await mgr.StartAsync(config);
@@ -129,7 +131,7 @@ public sealed class ServerProcessManagerTests
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
 
-        var mgr = new ServerProcessManager();
+        var mgr = new ServerProcessManager(runtimeProbe: TestRuntimeProbe);
         var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
 
         var started = System.Diagnostics.Stopwatch.StartNew();
@@ -149,7 +151,7 @@ public sealed class ServerProcessManagerTests
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
 
-        var mgr = new ServerProcessManager();
+        var mgr = new ServerProcessManager(runtimeProbe: TestRuntimeProbe);
         var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
 
         // Pre-cancelled token: the health-wait loop's first ThrowIfCancellationRequested
@@ -171,7 +173,7 @@ public sealed class ServerProcessManagerTests
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
 
-        var mgr = new ServerProcessManager();
+        var mgr = new ServerProcessManager(runtimeProbe: TestRuntimeProbe);
         var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
 
         // where.exe exits before /health ever responds, but StartAsync still
@@ -197,7 +199,7 @@ public sealed class ServerProcessManagerTests
         var modelPath = Path.Combine(modelDir, "model.gguf");
         File.WriteAllText(modelPath, "fake");
 
-        var mgr = new ServerProcessManager();
+        var mgr = new ServerProcessManager(runtimeProbe: TestRuntimeProbe);
         // A directory for ExecutablePath and ModelPath so NormalizeConfig
         // must resolve both to concrete files internally.
         var executableDir = temp.PathFor("bin");
@@ -233,6 +235,32 @@ public sealed class ServerProcessManagerTests
         (CancellationTokenSource?)typeof(ServerProcessManager)
             .GetField("_monitorCts", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(mgr);
+
+    private static Task<LlamaRuntimeCapabilityFacts> TestRuntimeProbe(string _, CancellationToken __) =>
+        Task.FromResult(new LlamaRuntimeCapabilityFacts(
+            HelpProbeSucceeded: true,
+            SupportsDraftMtp: false,
+            SupportsReasoningFormat: false,
+            SupportsReasoningFlag: false,
+            SupportsReasoningPreserve: false,
+            PropsProbeSucceeded: false,
+            SupportsPreserveReasoningTemplate: null,
+            Modalities: [],
+            SpeculativeTypes: [],
+            SupportsPromptThreads: false,
+            SupportsBackendSampling: false,
+            SupportsPerformanceInstrumentation: false,
+            LaunchCapabilities: new Dictionary<string, CapabilityEvidence>
+            {
+                ["runtime.gpu-placement.cpu"] = AvailableCapability(),
+                ["runtime.gpu-placement.auto"] = AvailableCapability(),
+                ["runtime.gpu-placement.all"] = AvailableCapability(),
+                ["runtime.gpu-placement.exact"] = AvailableCapability(),
+                ["runtime.fit"] = AvailableCapability()
+            }));
+
+    private static CapabilityEvidence AvailableCapability() =>
+        new(CapabilityState.Available, "test-runtime", "test runtime capability");
 
     // r17 01-gguf-context-and-tuning.md 1.5: pure context-suggestion ladder.
     private static Hermaeus.Services.GgufModelInfo Shape() => new("llama", "Q4_K_M", 32, 131072, 4096, 32, 8, 128, 128);

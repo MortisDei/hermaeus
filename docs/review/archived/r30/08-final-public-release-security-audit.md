@@ -286,7 +286,7 @@ Deleted reachable paths were review documents, prior product-name sources,
 fonts/assets, and ordinary code, not deleted secret stores or user databases.
 
 All four README screenshots were visually inspected. They contain generic
-model/runtime examples and paths such as `/mnt/Gaming/AI/Models`, not private
+model/runtime examples and paths such as `/path/to/ai-assets/Models`, not private
 user content. PNG `file`/`strings` inspection found no embedded personal path,
 author, comment, or software/date metadata. ImageMagick metadata tooling was
 not installed, which is recorded under limitations.

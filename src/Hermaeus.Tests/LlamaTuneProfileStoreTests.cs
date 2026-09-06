@@ -24,6 +24,7 @@ public sealed class LlamaTuneProfileStoreTests
         Assert.NotNull(profile);
         Assert.Single(settings.LlamaTuneProfiles);
         Assert.Equal(20, profile!.GpuLayers);
+        Assert.Equal(GpuPlacementKind.Exact, profile.GpuPlacement?.Kind);
         Assert.Equal(8, profile.Threads);
         Assert.Equal(4096, profile.ContextSize);
     }

@@ -23,6 +23,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [ObservableProperty] private string _localAiAssetsStatus = "Choose a local AI assets folder first.";
     [ObservableProperty] private LlamaRuntimeVariant _llamaRuntimeVariant = LlamaRuntimeVariant.Auto;
     [ObservableProperty] private string _llamaRuntimeVariantStatus = "No managed llama.cpp build has been installed yet.";
+    [ObservableProperty] private string _artworkCacheStatus = "Artwork cache: 0 B";
 
     /// <summary>Selectable llama.cpp build variants for the Services/data settings (r14 1.1).</summary>
     public IReadOnlyList<LlamaRuntimeVariant> LlamaRuntimeVariantOptions { get; } =
@@ -32,16 +33,43 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [ObservableProperty] private string _settingsError = string.Empty;
     [ObservableProperty] private bool _dataRootMigrationPending;
 
+    private string _effectiveDataRootAtComposition = string.Empty;
+
+    public string EffectiveDataRootDirectory => _effectiveDataRootAtComposition;
+    public string DataRootStateSummary
+    {
+        get
+        {
+            var pending = _settings.Settings.DataManagement.PendingDataRootDirectory?.Trim();
+            var configured = string.IsNullOrWhiteSpace(pending)
+                ? SettingsService.ResolveDataRoot(_settings.Settings)
+                : SettingsService.ResolveDataRoot(new AppSettings
+                {
+                    DataManagement = { DataRootDirectory = pending }
+                });
+            if (string.IsNullOrWhiteSpace(_effectiveDataRootAtComposition)
+                || ModelPathSafety.AreSameLocalPath(configured, _effectiveDataRootAtComposition))
+                return $"Configured and effective: {configured}";
+
+            return $"Configured: {configured}. Currently effective: {_effectiveDataRootAtComposition}. Restart Hermaeus to reload all stores and cached views.";
+        }
+    }
+
+    public string DataRootMigrationReceipt => _settings.Settings.DataManagement.DataRootMigrationReceipt;
+
     private readonly SemaphoreSlim _dataRootMigrationGate = new(1, 1);
     private int _dataRootEditVersion;
 
-    public Action? RequestDataRootPicker { get; set; }
+    public Func<Task>? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
     public Action? RequestRestoreBackupPicker { get; set; }
     public Func<Task<bool>>? RequestRestoreBackupConfirmation { get; set; }
+    public Func<Task<bool>>? RequestArtworkCacheClearConfirmation { get; set; }
     public Func<DataMigrationPlan, Task<bool>>? RequestDataRootMigrationConfirmation { get; set; }
-    public Func<Task>? CommitDataRootMigration { get; set; }
+    public Func<DataMigrationPlan, Task>? CommitDataRootMigration { get; set; }
+    public Func<Task<bool>>? RequestDataRootMigrationRestartDecision { get; set; }
+    public Func<Task>? RequestApplicationRestart { get; set; }
     public event Action? LocalAiAssetsRootChanged;
 
     public DataManagementSettingsViewModel(
@@ -61,12 +89,22 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     public void ReloadFrom(AppSettings settings)
     {
         _dataRootEditVersion++;
+        // This VM is composed against the stores that were already opened at
+        // application startup. Reload/reset refreshes editable settings, not
+        // those store instances, so it must not rewrite effective-root truth
+        // after a migration has committed and is waiting for restart.
+        if (string.IsNullOrWhiteSpace(_effectiveDataRootAtComposition))
+            _effectiveDataRootAtComposition = SettingsService.ResolveDataRoot(settings);
         DataRootDirectory = settings.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = settings.DataManagement.LocalAiAssetsRoot;
         LlamaRuntimeVariant = settings.DataManagement.LlamaRuntimeVariant;
         UpdateLlamaRuntimeVariantStatus(settings);
         UpdateMigrationPreview();
+        OnPropertyChanged(nameof(EffectiveDataRootDirectory));
+        OnPropertyChanged(nameof(DataRootStateSummary));
+        OnPropertyChanged(nameof(DataRootMigrationReceipt));
         UpdateLocalAiAssetsStatus();
+        _ = RefreshArtworkCacheStatusAsync();
     }
 
     /// <summary>
@@ -92,7 +130,12 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         settings.DataManagement.LlamaRuntimeVariant = LlamaRuntimeVariant;
     }
 
-    [RelayCommand] private void BrowseDataRoot() => RequestDataRootPicker?.Invoke();
+    [RelayCommand]
+    private async Task BrowseDataRootAsync()
+    {
+        if (RequestDataRootPicker is not null)
+            await RequestDataRootPicker();
+    }
     [RelayCommand] private void BrowseLocalAiAssetsRoot() => RequestLocalAiAssetsRootPicker?.Invoke();
     [RelayCommand] private void BrowseBackupDirectory() => RequestBackupDirectoryPicker?.Invoke();
     [RelayCommand] private void BrowseRestoreBackup() => RequestRestoreBackupPicker?.Invoke();
@@ -103,10 +146,46 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     /// stored" (r6 01-first-five-minutes.md 1.2) has a one-click answer.
     /// </summary>
     [RelayCommand]
-    private void OpenDataRoot() => OpenFolder(_resolveDataRoot());
+    private void OpenDataRoot() => OpenFolder(EffectiveDataRootDirectory);
 
     [RelayCommand]
     private void OpenLocalAiAssetsRoot() => OpenFolder(LocalAiAssetsRoot);
+
+    [RelayCommand]
+    private async Task ClearArtworkCacheAsync()
+    {
+        if (RequestArtworkCacheClearConfirmation is not null
+            && !await RequestArtworkCacheClearConfirmation())
+            return;
+
+        try
+        {
+            var root = HuggingFaceArtworkCache.ResolveRoot(_resolveDataRoot());
+            await HuggingFaceArtworkCache.ClearAsync(root);
+            ArtworkCacheStatus = "Artwork cache cleared. Downloaded models and manifests were not changed.";
+            _toasts.Show("Artwork cache cleared", "Downloaded models and manifests were not changed.", ToastKind.Success);
+        }
+        catch (Exception ex)
+        {
+            ArtworkCacheStatus = $"Artwork cache could not be cleared: {ex.Message}";
+            _toasts.Show("Artwork cache clear failed", ex.Message, ToastKind.Warning);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefreshArtworkCacheStatusAsync()
+    {
+        try
+        {
+            var info = await HuggingFaceArtworkCache.GetInfoAsync(
+                HuggingFaceArtworkCache.ResolveRoot(_resolveDataRoot()));
+            ArtworkCacheStatus = $"Artwork cache: {SystemInfoService.FormatBytes(info.ByteCount)} in {info.EntryCount} entr{(info.EntryCount == 1 ? "y" : "ies")}.";
+        }
+        catch
+        {
+            ArtworkCacheStatus = "Artwork cache: unavailable.";
+        }
+    }
 
     private void OpenFolder(string path)
     {
@@ -174,6 +253,13 @@ public partial class DataManagementSettingsViewModel : ObservableObject
 
     public void UpdateMigrationPreview()
     {
+        var queued = _settings.Settings.DataManagement.PendingDataRootDirectory?.Trim();
+        if (!string.IsNullOrWhiteSpace(queued))
+        {
+            DataRootMigrationPending = false;
+            DataMigrationPreview = $"Migration to {Path.GetFullPath(queued)} is scheduled. Restart Hermaeus to move and verify data before services open.";
+            return;
+        }
         var plan = _settings.PreviewDataRootMigration(_settings.Settings.DataManagement.DataRootDirectory, DataRootDirectory);
         var rootsDiffer = !ModelPathSafety.AreSameLocalPath(plan.PreviousDataRoot, plan.CurrentDataRoot);
         DataRootMigrationPending = rootsDiffer && plan.Conflicts.Count == 0;
@@ -213,12 +299,22 @@ public partial class DataManagementSettingsViewModel : ObservableObject
                 return;
             }
 
-            await CommitDataRootMigration();
-            var committedRoot = SettingsService.ResolveDataRoot(_settings.Settings);
-            if (!ModelPathSafety.AreSameLocalPath(committedRoot, plan.CurrentDataRoot))
+            await CommitDataRootMigration(plan);
+            OnPropertyChanged(nameof(DataRootStateSummary));
+            OnPropertyChanged(nameof(DataRootMigrationReceipt));
+            var queuedRoot = _settings.Settings.DataManagement.PendingDataRootDirectory;
+            if (!ModelPathSafety.AreSameLocalPath(queuedRoot, plan.CurrentDataRoot))
                 RevertDataRootEdit();
             else
+            {
                 UpdateMigrationPreview();
+                if (RequestDataRootMigrationRestartDecision is not null
+                    && await RequestDataRootMigrationRestartDecision()
+                    && RequestApplicationRestart is not null)
+                {
+                    await RequestApplicationRestart();
+                }
+            }
         }
         finally
         {
@@ -243,6 +339,8 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     {
         _dataRootEditVersion++;
         UpdateMigrationPreview();
+        OnPropertyChanged(nameof(DataRootStateSummary));
+        _ = RefreshArtworkCacheStatusAsync();
     }
     partial void OnLocalAiAssetsRootChanged(string value) => UpdateLocalAiAssetsStatus();
 }

@@ -38,6 +38,13 @@ only that owned session. Startup recovery kills an abandoned process only
 after PID, start time, and executable content all match; otherwise cleanup
 remains `Unknown` and the process is not touched.
 
+The Experiment card reports the execution outcome separately from source
+restore. A run can be `Succeeded`, `PartiallySucceeded`, `Cancelled`, or
+`Failed` while source restoration is still `Pending`, `Restored`,
+`Blocked`, or `Failed`. A failed or blocked restore is surfaced as an
+attention state and leaves the source stopped for owner review; it does not
+rewrite the execution result or silently restart a changed configuration.
+
 Observations keep value and missing reason separate, so an absent counter never
 becomes zero. Every observation names unit, source, evidence origin, trust,
 timestamp, repetition/case, and all four v2 fingerprint components.

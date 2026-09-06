@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# r29 doc 04 4.6 / 5.2: measured line coverage is 61.6%. The old 47 (and
-# AGENTS.md's 45) could not fail on any regression short of deleting a quarter
-# of the suite. 60 is just under the real number.
+# r29 doc 04 4.6 / 5.2: measured line coverage is 61.6%. The prior lower
+# ratchets could not fail on any regression short of deleting a quarter of the
+# suite. 60 is just under the real number.
 THRESHOLD="${1:-60}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT_DIR/src/Hermaeus.Tests/Hermaeus.Tests.csproj"

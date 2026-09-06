@@ -1,0 +1,97 @@
+name: Branch CI
+
+on:
+  push:
+    branches: ['r*/round']
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: branch-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  find_open_pr:
+    name: find-open-pr
+    runs-on: ubuntu-latest
+    outputs:
+      has_open_pr: ${{ steps.lookup.outputs.has_open_pr }}
+    steps:
+      - name: Check for the matching open pull request
+        id: lookup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          count="$(gh api \
+            --method GET \
+            "repos/${REPOSITORY}/pulls" \
+            -f state=open \
+            -f base=main \
+            -f "head=${REPOSITORY_OWNER}:${BRANCH_NAME}" \
+            --jq 'length')"
+          if [[ "$count" == "0" ]]; then
+            echo "has_open_pr=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_open_pr=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  branch_build_and_test:
+    name: branch-build-and-test (${{ matrix.os }})
+    needs: find_open_pr
+    if: needs.find_open_pr.outputs.has_open_pr == 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Hermaeus.sln
+
+      - name: Build (zero warnings enforced)
+        run: dotnet build Hermaeus.sln --no-restore -c Release
+
+      - name: Exclude test working set from Defender (windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
+
+      - name: Test (Ubuntu virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
+
+      - name: Test
+        if: runner.os == 'Windows'
+        run: dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: branch-test-results-${{ matrix.os }}
+          path: '**/test-results.trx'
+          if-no-files-found: warn

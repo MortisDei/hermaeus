@@ -42,9 +42,25 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<PrivacyAuditService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IRuntimeTelemetrySource, ProcessRuntimeTelemetrySource>();
+        s.AddSingleton<IResourceSnapshotStore, SqliteResourceSnapshotStore>();
+        s.AddSingleton<IResourceConsumerAdapter>(sp => ResourceConsumerAdapters.Reranker(
+            () => (sp.GetRequiredService<IReranker>() as OnnxCrossEncoderReranker)?.IsLoaded == true));
+        s.AddSingleton<IResourceConsumerAdapter>(sp => ResourceConsumerAdapters.Whisper(
+            () => sp.GetRequiredService<NativeSpeechRecognitionProvider>().IsLoaded));
+        s.AddSingleton<IResourceConsumerAdapter>(sp => ResourceConsumerAdapters.Kokoro(
+            () => sp.GetRequiredService<NativeKokoroVoiceProvider>().IsLoaded));
+        s.AddSingleton<IResourceConsumerRegistry, ResourceConsumerRegistry>();
+        s.AddSingleton<IResourceSnapshotSource, SystemResourceSnapshotSource>();
+        s.AddSingleton<IResourceCoordinator, ResourceCoordinator>();
+        s.AddSingleton<IManagedRuntimeProcessFactory, ManagedRuntimeProcessFactory>();
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
+        s.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
+        s.AddSingleton<RecommendationRuleRegistry>();
+        s.AddSingleton<RecommendationDerivationService>();
+        s.AddSingleton<RecommendationApplicationService>();
         s.AddSingleton<GpuFitExperienceService>();
+        s.AddSingleton<AdaptiveInferenceExperienceService>();
         s.AddSingleton<ILabRuntimeHost, IsolatedLabRuntimeHost>();
         s.AddSingleton<ILabExperimentService, LabExperimentService>();
         s.AddSingleton<ILabWorkloadExecutor, LlamaServerLabWorkloadExecutor>();
@@ -64,7 +80,9 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IProjectStateStore>(provider => provider.GetRequiredService<ProjectStore>());
         s.AddSingleton<ConversationExportService>();
         s.AddSingleton<ChatArtifactService>();
-        s.AddSingleton<IMemoryStore, MemoryStore>();
+        s.AddSingleton<MemoryStore>();
+        s.AddSingleton<IMemoryStore>(provider => provider.GetRequiredService<MemoryStore>());
+        s.AddSingleton<IKnowledgeRevisionStore>(provider => provider.GetRequiredService<MemoryStore>());
         s.AddSingleton<MemoryExtractionService>();
         s.AddSingleton<MemoryInjectionService>();
                 s.AddSingleton<IConversationMemoryService, ConversationMemoryService>();
@@ -76,6 +94,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<ModelProfileService>();
         s.AddSingleton<ModelManifestStore>();
         s.AddSingleton<HuggingFaceClient>();
+        s.AddSingleton<HuggingFaceArtworkService>();
         s.AddSingleton<ModelDownloadService>();
         s.AddSingleton<XttsV2VoiceProvider>();
         s.AddSingleton<KokoroVoiceProvider>();

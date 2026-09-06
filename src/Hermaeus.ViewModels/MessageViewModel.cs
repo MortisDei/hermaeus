@@ -17,7 +17,7 @@ public partial class MessageViewModel : ObservableObject, IConversationNode
 
     public bool HasReasoning => !string.IsNullOrWhiteSpace(ReasoningContent);
     public string NoFinalAnswerNotice => IsAssistant && !IsStreaming && HasReasoning && string.IsNullOrWhiteSpace(Content)
-        ? "No final answer was returned."
+        ? "The model returned reasoning but no final answer."
         : string.Empty;
     partial void OnReasoningContentChanged(string value)
     {

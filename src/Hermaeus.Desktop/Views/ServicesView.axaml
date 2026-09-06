@@ -22,12 +22,48 @@
                            Text="Manage llama-server processes. Paths and config are saved per card with Save Config. Auto-start launches on Hermaeus startup if model path is set." />
             </StackPanel>
 
+            <Border Classes="settings-card" Padding="16" IsVisible="{Binding HasRecommendations}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="Recommendations" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="Review evidence-backed settings changes. Applying one saves settings only and never restarts a running server." FontSize="12" Opacity="0.55" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Recommendations}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:RecommendationReviewViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+                                    <StackPanel Spacing="7">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <TextBlock Text="{Binding Kind}" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Eligibility}" FontSize="12" Opacity="0.6" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding WhyNow}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding CurrentSummary}" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ProposedSummary}" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding EvidenceSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding TradeoffSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding FreshnessSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Apply" Command="{Binding ApplyCommand}" IsVisible="{Binding CanApply}" Padding="12,5" />
+                                            <Button Content="Undo" Command="{Binding UndoCommand}" IsVisible="{Binding CanUndo}" Padding="12,5" />
+                                            <Button Content="Dismiss" Command="{Binding DismissCommand}" IsVisible="{Binding CanDismiss}" Padding="12,5" />
+                                            <Button Content="Open details" Command="{Binding InspectTargetCommand}" Padding="12,5" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
             <Border Classes="settings-card" Padding="16">
                 <StackPanel Spacing="12">
                     <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Grid.Column="0" Spacing="2">
                             <TextBlock Text="Runtime Profiles" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="Connect local llama.cpp, Ollama, and OpenAI-compatible runtimes. Local llama.cpp processes still use the managed server cards below."
+                            <TextBlock Text="Add a profile, choose its runtime kind, enter its base URL, then use Health and Save. Ollama uses /api, while OpenAI-compatible endpoints use /v1. Local llama.cpp processes still use the managed server cards below."
                                        FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
                         </StackPanel>
                         <Button Grid.Column="1"
@@ -51,17 +87,18 @@
                                           RowSpacing="8">
                                         <TextBox Grid.Row="0" Grid.Column="0"
                                                  Text="{Binding Name}"
-                                                 Watermark="Profile name"
+                                                 PlaceholderText="Profile name"
                                                  CornerRadius="6"
                                                  Padding="10,6" />
                                         <ComboBox Grid.Row="0" Grid.Column="1"
                                                   ItemsSource="{Binding $parent[UserControl].DataContext.RuntimeKinds}"
                                                   SelectedItem="{Binding Kind}"
                                                   CornerRadius="6"
-                                                  Padding="8,4" />
+                                                  Padding="8,4"
+                                                  ToolTip.Tip="Choose Ollama for an Ollama /api endpoint, or OpenAiCompatible for an OpenAI-compatible /v1 endpoint." />
                                         <TextBox Grid.Row="0" Grid.Column="2"
                                                  Text="{Binding BaseUrl}"
-                                                 Watermark="http://127.0.0.1:8080"
+                                                 PlaceholderText="http://127.0.0.1:8080"
                                                  CornerRadius="6"
                                                  Padding="10,6" />
                                         <StackPanel Grid.Row="0" Grid.Column="3"
@@ -79,7 +116,7 @@
                                         <TextBox Grid.Row="1" Grid.Column="0"
                                                  Text="{Binding ApiKey}"
                                                  PasswordChar="*"
-                                                 Watermark="API key"
+                                                 PlaceholderText="API key"
                                                  CornerRadius="6"
                                                  Padding="10,6" />
                                         <CheckBox Grid.Row="1" Grid.Column="1"
@@ -231,7 +268,7 @@
                                                Opacity="0.6" FontSize="13" />
                                         <TextBox Grid.Row="0" Grid.Column="1"
                                                  Text="{Binding ExecutablePath}"
-                                                 Watermark="llama-server  or  /full/path/llama-server"
+                                                 PlaceholderText="llama-server  or  /full/path/llama-server"
                                                  FontSize="13" CornerRadius="6" Padding="10,6"
                                                  IsEnabled="{Binding CanEdit}"
                                                  ToolTip.Tip="Full path or PATH command for llama-server. Trust scan can hash local files and warn outside the AI root." />
@@ -350,14 +387,14 @@
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Context size (tokens)" />
-                                        <NumericUpDown Grid.Column="2"
-                                                       Value="{Binding GpuLayers}"
-                                                       Minimum="-1" Maximum="999"
-                                                       Increment="1"
-                                                       Width="124" HorizontalAlignment="Left"
-                                                       FontSize="13"
-                                                       IsEnabled="{Binding CanEdit}"
-                                                       ToolTip.Tip="GPU offload layers. -1 offloads all layers (rendered as --n-gpu-layers 999); 0 keeps inference on the CPU; a positive N offloads exactly N layers." />
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                                            <ComboBox ItemsSource="{Binding GpuPlacementOptions}"
+                                                      SelectedItem="{Binding GpuPlacementSelection}"
+                                                      Width="96"
+                                                      FontSize="12"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="GPU placement intent: CPU, runtime Auto, all layers, or an exact layer count." />
+                                        </StackPanel>
                                     </Grid>
 
                                     <!-- Threads -->
@@ -365,52 +402,51 @@
                                                Text="Threads" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
                                     <Grid Grid.Row="4" Grid.Column="1"
-                                          ColumnDefinitions="140,Auto,120,Auto,*"
-                                          ColumnSpacing="16">
-                                        <NumericUpDown Value="{Binding Threads}"
+                                          RowDefinitions="Auto,Auto"
+                                          ColumnDefinitions="140,*,140,120,*"
+                                          RowSpacing="6" ColumnSpacing="10">
+                                        <NumericUpDown Grid.Row="0" Grid.Column="0"
+                                                       Value="{Binding Threads}"
                                                        Minimum="1" Maximum="128"
                                                        Increment="1"
                                                        HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="CPU thread count" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <StackPanel Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="4"
+                                                    Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBlock Text="Offload:" Opacity="0.6" FontSize="13" />
-                                            <TextBlock Text="{Binding EffectiveOffloadLabel}" FontSize="13" />
+                                            <NumericUpDown Value="{Binding GpuLayers}"
+                                                           Minimum="1" Maximum="999"
+                                                           Increment="1"
+                                                           Width="96"
+                                                           IsVisible="{Binding IsExactGpuPlacement}"
+                                                           IsEnabled="{Binding CanEdit}"
+                                                           ToolTip.Tip="Exact number of model layers placed on the GPU. Active only when GPU placement is Exact." />
                                         </StackPanel>
-                                        <NumericUpDown Grid.Column="2"
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Parallel slots:" Opacity="0.6" FontSize="13" VerticalAlignment="Center" />
+                                        <NumericUpDown Grid.Row="1" Grid.Column="1"
                                                        Value="{Binding Slots}"
                                                        Minimum="1" Maximum="32"
                                                        Increment="1"
                                                        HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
-                                                       ToolTip.Tip="Advanced: parallel request slots (--parallel N). Keep at 1 for a single-user chat app so the whole context belongs to one conversation and every send reuses the KV cache." />
-                                        <CheckBox Grid.Column="3"
+                                                       ToolTip.Tip="Parallel request slots (--parallel N). Each slot can own an in-flight request and its context. Use 1 for one-user chat when you want the full context and KV cache reserved for that conversation." />
+                                        <CheckBox Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="3"
                                                   IsChecked="{Binding AutoStart}"
                                                   Content="Auto-start"
                                                   FontSize="13"
                                                   VerticalAlignment="Center" />
                                     </Grid>
 
-                                    <!-- Extra args -->
-                                    <TextBlock Grid.Row="5" Grid.Column="0"
-                                               Text="Extra args" VerticalAlignment="Center"
-                                               Opacity="0.6" FontSize="13" />
-                                    <TextBox Grid.Row="5" Grid.Column="1"
-                                             Text="{Binding ExtraArgs}"
-                                             Watermark="--flash-attn --mlock  etc."
-                                             FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding CanEdit}"
-                                             ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning. Quote a value containing spaces, e.g. --mmproj &quot;C:\models\a b\proj.gguf&quot;; a backslash is only an escape before a quote or another backslash, so plain Windows paths like C:\models\proj.gguf do not need to be escaped." />
-
                                     <!-- r18 04-llama-server-engine-options.md 4.1: first-class
                                          engine options. Defaults (f16/auto/off) are byte-identical
                                          to pre-r18 launches; nothing here is ever forced. -->
-                                    <TextBlock Grid.Row="6" Grid.Column="0"
+                                    <TextBlock Grid.Row="5" Grid.Column="0"
                                                Text="KV cache / engine" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
-                                    <StackPanel Grid.Row="6" Grid.Column="1" Spacing="6">
+                                    <StackPanel Grid.Row="5" Grid.Column="1" Spacing="6">
                                         <Grid ColumnDefinitions="Auto,110,Auto,140" ColumnSpacing="8">
                                             <TextBlock Text="KV cache:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                                             <ComboBox Grid.Column="1"
@@ -445,6 +481,64 @@
                                                    FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
                                     </StackPanel>
 
+                                    <!-- R32 adaptive inference envelope. Defaults are Fixed
+                                         and conservative; relaxed fields remain explicit. -->
+                                    <TextBlock Grid.Row="6" Grid.Column="0"
+                                               Text="Adaptive launch" VerticalAlignment="Top"
+                                               Opacity="0.6" FontSize="13" />
+                                    <StackPanel Grid.Row="6" Grid.Column="1" Spacing="6">
+                                        <Grid ColumnDefinitions="Auto,150,Auto,140" ColumnSpacing="8">
+                                            <TextBlock Text="Mode:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding AdaptiveModeOptions}"
+                                                      SelectedItem="{Binding AdaptiveMode}"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      FontSize="12"
+                                                      ToolTip.Tip="Fixed preserves configured values. Advise plans without launching. AdaptAtLaunch may try only enabled envelope fields." />
+                                            <TextBlock Grid.Column="2" Text="Min context:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <NumericUpDown Grid.Column="3"
+                                                           Value="{Binding AdaptiveMinimumContext}"
+                                                           Minimum="0" Maximum="131072" Increment="512"
+                                                           IsEnabled="{Binding CanEdit}" FontSize="12"
+                                                           ToolTip.Tip="Minimum context for adaptive reduction. 0 means the configured context is the floor." />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="Auto,140,Auto,Auto,140" ColumnSpacing="8">
+                                            <TextBlock Text="GPU headroom:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <NumericUpDown Grid.Column="1"
+                                                           Value="{Binding AdaptiveMinimumGpuHeadroomMiB}"
+                                                           Minimum="0" Maximum="8796093022208" Increment="64" FormatString="N0"
+                                                           IsEnabled="{Binding CanEdit}" FontSize="12"
+                                                           ToolTip.Tip="Minimum device headroom reserved for the rest of the workload, in MiB. The saved setting remains an exact byte value." />
+                                            <TextBlock Grid.Column="2" Text="MiB" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <TextBlock Grid.Column="3" Text="Evidence days:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <NumericUpDown Grid.Column="4"
+                                                           Value="{Binding AdaptivePreferredEvidenceAgeDays}"
+                                                           Minimum="1" Maximum="30" Increment="1"
+                                                           IsEnabled="{Binding CanEdit}" FontSize="12"
+                                                           ToolTip.Tip="Maximum age of compatible adaptive evidence. A fresh resource snapshot is still required every launch." />
+                                        </Grid>
+                                        <WrapPanel ItemSpacing="12" LineSpacing="4">
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowGpuLayerReduction}" Content="Reduce GPU layers"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Allow bounded exact GPU-layer reductions while preserving an accelerated backend." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowContextReduction}" Content="Reduce context"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Allow context reduction on the named ladder, never below the minimum." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowKvPrecisionChange}" Content="Change KV precision"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Only runtime-advertised KV types with compatible quality evidence can be considered." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowCpuMoePlacement}" Content="CPU MoE experts"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Allow CPU placement for known MoE experts when the selected runtime proves both controls." />
+                                            <CheckBox IsChecked="{Binding AdaptiveAllowMultiDevicePlacement}" Content="Multi-device"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Request multi-device planning only. Execution remains unavailable until device and split behavior are proven." />
+                                            <CheckBox IsChecked="{Binding AdaptivePreserveAcceleratedBackend}" Content="Preserve accelerated backend"
+                                                      FontSize="12" IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Keep enabled to prevent CPU fallback. Managed Auto never silently falls back to CPU." />
+                                        </WrapPanel>
+                                    </StackPanel>
+
                                 </Grid>
 
                                 <!-- Diagnostics intentionally live below the configuration grid.
@@ -464,11 +558,24 @@
                                                TextWrapping="Wrap"
                                                Opacity="0.62" FontSize="11"
                                                ToolTip.Tip="Analytical GPU Fit breakdown. Prediction only; runtime observations remain separate." />
+                                    <TextBlock Text="{Binding AdmissionReceipt}"
+                                               IsVisible="{Binding HasAdmissionReceipt}"
+                                               TextWrapping="Wrap"
+                                               Opacity="0.62" FontSize="11"
+                                               ToolTip.Tip="Whole-workload admission receipt. Unknown components are not treated as zero." />
                                 </StackPanel>
 
                                 <!-- ── Advanced engine options ───────────── -->
                                 <Expander Header="Advanced engine options" IsExpanded="False">
                                     <StackPanel Spacing="8" Margin="0,8,0,0">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Extra args" FontSize="12" FontWeight="SemiBold" />
+                                            <TextBox Text="{Binding ExtraArgs}"
+                                                     PlaceholderText="--flash-attn --mlock  etc."
+                                                     FontSize="13" CornerRadius="6" Padding="10,6"
+                                                     IsEnabled="{Binding CanEdit}"
+                                                     ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning. Quote a value containing spaces, e.g. --mmproj &quot;C:\models\a b\proj.gguf&quot;; a backslash is only an escape before a quote or another backslash, so plain Windows paths like C:\models\proj.gguf do not need to be escaped." />
+                                        </StackPanel>
                                         <StackPanel Orientation="Horizontal" Spacing="16">
                                             <CheckBox IsChecked="{Binding MemoryLock}"
                                                       Content="--mlock (keep model pinned in RAM)"
@@ -491,7 +598,7 @@
                                                        VerticalAlignment="Center" FontSize="12" Opacity="0.75" />
                                             <TextBox Grid.Column="1"
                                                      Text="{Binding CpuMoeLayersText}"
-                                                     Watermark="off"
+                                                     PlaceholderText="off"
                                                      FontSize="12"
                                                      CornerRadius="6"
                                                      IsEnabled="{Binding CanEdit}"
@@ -547,25 +654,25 @@
                                             <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
                                                 <TextBox Grid.Column="0"
                                                          Text="{Binding SpeculativeNMaxText}"
-                                                         Watermark="n-max"
+                                                         PlaceholderText="n-max"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="--spec-draft-n-max: tokens to draft per step. Blank uses the server default of 3." />
                                                 <TextBox Grid.Column="1"
                                                          Text="{Binding SpeculativeNMinText}"
-                                                         Watermark="n-min"
+                                                         PlaceholderText="n-min"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="--spec-draft-n-min: minimum drafted tokens. Blank uses the server default of 0." />
                                                 <TextBox Grid.Column="2"
                                                          Text="{Binding SpeculativePMinText}"
-                                                         Watermark="p-min"
+                                                         PlaceholderText="p-min"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="--spec-draft-p-min: minimum draft probability. Blank uses the server default of 0.00." />
                                                 <TextBox Grid.Column="3"
                                                          Text="{Binding DraftGpuLayersText}"
-                                                         Watermark="draft ngl"
+                                                         PlaceholderText="draft ngl"
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="-ngld: draft-model layers to keep in VRAM. Blank leaves the server's own default alone." />

@@ -99,4 +99,38 @@ public sealed class ModelManifestStoreTests
 
         Assert.Contains(swept, entry => Path.GetFileName(entry.SourcePath) == "model-manifest.json");
     }
+
+    [Fact]
+    public async Task RemoveCompanion_preserves_the_primary_and_other_companion_mappings()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var modelPath = temp.PathFor("model.gguf");
+        var projectorPath = temp.PathFor("mmproj.gguf");
+        var draftPath = temp.PathFor("mtp.gguf");
+        File.WriteAllText(modelPath, "model");
+        File.WriteAllText(projectorPath, "projector");
+        File.WriteAllText(draftPath, "draft");
+        var store = new ModelManifestStore(settings);
+
+        await store.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = "org/repo",
+            Source = "hf-browser",
+            Companions =
+            [
+                new ModelCompanionManifestEntry { LocalFilePath = projectorPath, Role = "projector" },
+                new ModelCompanionManifestEntry { LocalFilePath = draftPath, Role = "draft_head" }
+            ]
+        });
+
+        await store.RemoveCompanionAsync(modelPath, projectorPath);
+
+        var found = await store.FindAsync(modelPath);
+        Assert.NotNull(found);
+        var companion = Assert.Single(found!.Companions);
+        Assert.Equal(draftPath, companion.LocalFilePath);
+    }
 }

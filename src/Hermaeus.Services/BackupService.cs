@@ -29,7 +29,8 @@ public sealed class BackupService
             {
                 var name = Path.GetFileName(f.SourcePath);
                 return !name.Equals("secrets.local.json", StringComparison.OrdinalIgnoreCase)
-                    && !name.Equals("secrets.local.key", StringComparison.OrdinalIgnoreCase);
+                    && !name.Equals("secrets.local.key", StringComparison.OrdinalIgnoreCase)
+                    && !IsRebuildableArtwork(f.RelativePath);
             })
             // WAL/rollback-journal sidecars describe a database file that is
             // about to be replaced by a consistent snapshot (below); zipping
@@ -75,6 +76,12 @@ public sealed class BackupService
     private static bool IsSqliteDatabaseFile(string path) =>
         path.EndsWith(".db", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsRebuildableArtwork(string relativePath)
+    {
+        var normalized = relativePath.Replace('\\', '/').TrimStart('/');
+        return normalized.StartsWith("cache/huggingface-artwork/", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsSqliteSidecarFile(string path) =>
         path.EndsWith("-wal", StringComparison.OrdinalIgnoreCase)
         || path.EndsWith("-shm", StringComparison.OrdinalIgnoreCase)
@@ -100,11 +107,10 @@ public sealed class BackupService
         if (!File.Exists(backupPath))
             throw new FileNotFoundException("Backup file was not found.", backupPath);
 
-        var root = SettingsService.ResolveDataRoot(_settings.Settings);
+        var root = Path.GetFullPath(SettingsService.ResolveDataRoot(_settings.Settings));
         Directory.CreateDirectory(root);
-        var rootWithSeparator = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        EnsureNoReparsePoints(root);
+
         using var zip = ZipFile.OpenRead(backupPath);
         foreach (var entry in zip.Entries)
         {
@@ -112,21 +118,110 @@ public sealed class BackupService
             if (string.IsNullOrWhiteSpace(entry.Name))
                 continue;
 
-            var target = Path.GetFullPath(Path.Combine(root, entry.FullName));
-            if (!target.StartsWith(rootWithSeparator, comparison)
-                && !string.Equals(target, root, comparison))
-                throw new InvalidOperationException("Backup contains an unsafe path.");
+            var target = ResolveRestoreTarget(root, entry.FullName);
             if (File.Exists(target) && !allowOverwrite)
                 throw new IOException($"Restore refused because '{target}' already exists.");
 
             var targetDirectory = Path.GetDirectoryName(target);
             if (string.IsNullOrWhiteSpace(targetDirectory))
                 throw new InvalidOperationException("Backup entry target directory could not be resolved.");
+        }
+
+        var fullRootPath = Path.GetFullPath(root + Path.DirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var entry in zip.Entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(entry.Name))
+                continue;
+
+            var normalizedEntryName = entry.FullName.Replace('\\', '/');
+            var target = Path.GetFullPath(Path.Combine(root, normalizedEntryName));
+            if (!target.StartsWith(fullRootPath))
+                throw new InvalidOperationException("Backup contains an unsafe path.");
+            if (!target.StartsWith(fullRootPath, comparison))
+                throw new InvalidOperationException("Backup contains an unsafe path.");
+
+            var targetDirectory = Path.GetDirectoryName(target);
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+                throw new InvalidOperationException("Backup entry target directory could not be resolved.");
 
             Directory.CreateDirectory(targetDirectory);
+            EnsureNoReparsePoints(target);
+            if (File.Exists(target) && !allowOverwrite)
+                throw new IOException($"Restore refused because '{target}' already exists.");
+
             entry.ExtractToFile(target, allowOverwrite);
         }
 
         return Task.CompletedTask;
+    }
+
+    private static string ResolveRestoreTarget(string root, string entryName)
+    {
+        var normalized = entryName.Replace('\\', '/');
+        if (normalized.Length == 0
+            || normalized.IndexOf('\0') >= 0
+            || normalized.StartsWith("/", StringComparison.Ordinal)
+            || Path.IsPathFullyQualified(normalized)
+            || IsDriveQualified(normalized))
+            throw new InvalidOperationException("Backup contains an unsafe path.");
+
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Where(segment => segment != ".")
+            .ToArray();
+        if (segments.Length == 0 || segments.Any(segment => segment == ".."))
+            throw new InvalidOperationException("Backup contains an unsafe path.");
+
+        if (OperatingSystem.IsWindows() && segments.Any(segment => segment.Contains(':')))
+            throw new InvalidOperationException("Backup contains an unsafe path.");
+
+        var safeRelativePath = string.Join(Path.DirectorySeparatorChar, segments);
+        var target = Path.GetFullPath(Path.Combine(root, safeRelativePath));
+        var relativeTarget = Path.GetRelativePath(root, target);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (Path.IsPathFullyQualified(relativeTarget)
+            || relativeTarget.Equals("..", comparison)
+            || relativeTarget.StartsWith(".." + Path.DirectorySeparatorChar, comparison)
+            || relativeTarget.StartsWith(".." + Path.AltDirectorySeparatorChar, comparison))
+            throw new InvalidOperationException("Backup contains an unsafe path.");
+
+        EnsureNoReparsePoints(target);
+        return target;
+    }
+
+    private static bool IsDriveQualified(string path) =>
+        path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':';
+
+    private static void EnsureNoReparsePoints(string path)
+    {
+        var current = new DirectoryInfo(path);
+        while (current is not null)
+        {
+            if (TryGetAttributes(current.FullName, out var attributes)
+                && (attributes & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("Backup restore refuses reparse-point paths.");
+
+            current = current.Parent;
+        }
+    }
+
+    private static bool TryGetAttributes(string path, out FileAttributes attributes)
+    {
+        try
+        {
+            attributes = File.GetAttributes(path);
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            attributes = default;
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            attributes = default;
+            return false;
+        }
     }
 }

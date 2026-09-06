@@ -13,6 +13,8 @@ namespace Hermaeus.Services;
 
 public sealed partial class DoctorService
 {
+    private const int MaxProbeOutputCharacters = 8_000;
+
     private async Task<DoctorCheck> CheckLlamaServerBinaryAsync(CancellationToken ct)
     {
         var configuredPath = (_settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
@@ -62,17 +64,17 @@ public sealed partial class DoctorService
                 "Runtime");
         }
 
-        if (probe.ExitCode != 0)
+        if (probe.FailureKind is LlamaProbeFailureKind.NonZeroExit or LlamaProbeFailureKind.TimedOut)
         {
             return BuildCheck(
                 "llama-server",
                 "llama-server usable",
                 DoctorCheckStatus.Error,
-                $"llama-server failed its launch probe (exit {probe.ExitCode?.ToString() ?? "unknown"})",
-                "The executable exists, but it cannot run successfully. Reinstall the managed llama.cpp package or correct its companion libraries.",
+                DescribeLlamaProbeFailure(probe),
+                "The executable started but did not complete a valid probe. Reinstall the managed llama.cpp package or correct its companion libraries.",
                 "Download llama.cpp",
                 true,
-                $"Executable: {resolved}\n{probe.Raw}\n{probe.Error}".Trim(),
+                FormatProbeEvidence(resolved, "--version", probe),
                 "Runtime");
         }
 
@@ -81,11 +83,11 @@ public sealed partial class DoctorService
             "llama-server",
             "llama-server usable",
             healthy ? DoctorCheckStatus.Ready : DoctorCheckStatus.Warning,
-            healthy ? $"llama-server executed successfully ({probe.Label})" : "llama-server executes, but health is unknown",
+            healthy ? $"llama-server executed successfully ({probe.Label})" : DescribeLlamaProbeFailure(probe),
             healthy ? resolved : "The executable ran successfully but did not report a recognizable llama.cpp build identifier.",
             "Open Services",
             true,
-            $"Executable: {resolved}\nVersion output: {probe.Raw}",
+            FormatProbeEvidence(resolved, "--version", probe),
             "Runtime");
     }
 
@@ -131,10 +133,10 @@ public sealed partial class DoctorService
                 "llama.cpp update check",
                 DoctorCheckStatus.Info,
                 $"Installed {local.Label}",
-                "Could not reach GitHub releases, so Doctor could not compare against the latest llama.cpp build.",
+                "Installed identity is known. Latest release: Unknown because GitHub release metadata was unavailable. Comparison: Unknown; no update or current-state claim is made.",
                 "Open Services",
                 true,
-                $"Executable: {resolved}\nVersion output: {local.Raw}",
+                $"Executable: {resolved}\nVersion output: {local.Raw}\nInstalled: {local.Label}\nLatest: Unknown\nComparison: Unknown",
                 "Runtime");
         }
 
@@ -144,9 +146,12 @@ public sealed partial class DoctorService
             : comparison == LlamaVersionComparison.Incomparable
                 ? DoctorCheckStatus.Info
                 : DoctorCheckStatus.Ready;
+        var latestLabel = latest.FromSharedCache
+            ? $"{latest.TagName} (cached {latest.MetadataObservedAt:u})"
+            : latest.TagName;
         var summary = comparison == LlamaVersionComparison.Incomparable
-            ? $"Installed {local.Label}; latest {latest.TagName} (not comparable)"
-            : $"Installed {local.Label}; latest {latest.TagName}";
+            ? $"Installed {local.Label}; latest {latestLabel} (not comparable)"
+            : $"Installed {local.Label}; latest {latestLabel}";
         var detail = comparison switch
         {
             LlamaVersionComparison.Outdated => "Download a newer llama.cpp release or rerun Local AI setup.",
@@ -162,7 +167,7 @@ public sealed partial class DoctorService
             detail,
             "Open Services",
             true,
-            $"Executable: {resolved}\nVersion output: {local.Raw}\nLatest: {latest.TagName} ({latest.PublishedAt:O})",
+            $"Executable: {resolved}\nVersion output: {local.Raw}\nLatest: {latest.TagName} ({latest.PublishedAt:O})\nMetadata source: {(latest.FromSharedCache ? $"shared cache at {latest.MetadataObservedAt:O}" : "live release lookup")}",
             "Runtime");
     }
 
@@ -200,7 +205,16 @@ public sealed partial class DoctorService
     /// <summary>
     /// Fires when a real GPU is present but inference is still configured for
     /// the CPU (r14 1.4): either the installed build has no GPU backend, or the
-    /// chat server's effective offload is 0. Pure decision for tests.
+    /// chat server is explicitly configured for CPU placement. Typed Auto is
+    /// not treated as CPU merely because its legacy integer is zero. Pure
+    /// decision for tests.
+    /// </summary>
+    public static bool ShouldAdviseGpuInference(bool hasRealGpu, bool installedBuildIsCpu, GpuPlacementIntent? placement)
+        => hasRealGpu && (installedBuildIsCpu || placement?.Kind == GpuPlacementKind.Cpu);
+
+    /// <summary>
+    /// Compatibility overload for callers that still have only the legacy
+    /// integer form. New runtime decisions must use the typed overload above.
     /// </summary>
     public static bool ShouldAdviseGpuInference(bool hasRealGpu, bool installedBuildIsCpu, int chatGpuLayers)
         => hasRealGpu && (installedBuildIsCpu || chatGpuLayers == 0);
@@ -263,6 +277,10 @@ public sealed partial class DoctorService
             await http.GetAsync($"{baseUrl.TrimEnd('/')}/health", timeout.Token);
             return true;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             return false;
@@ -287,35 +305,37 @@ public sealed partial class DoctorService
         if (!await IsServerRespondingAsync(chat.Port, ct))
             return null;
 
-        var chatGpuLayers = chat.GpuLayers;
+        if (!chat.TryGetGpuPlacement(out var placement, out _))
+            return null;
+
         var resolvedExe = ResolveExecutable(chat.ExecutablePath ?? string.Empty);
         var installedBuildIsCpu = IsCpuOnlyBuild(resolvedExe);
 
-        if (!ShouldAdviseGpuInference(hasRealGpu, installedBuildIsCpu, chatGpuLayers))
+        if (!ShouldAdviseGpuInference(hasRealGpu, installedBuildIsCpu, placement))
             return null;
 
         var reason = installedBuildIsCpu
             ? "the installed llama-server is a CPU-only build"
-            : "the chat server is set to 0 GPU layers";
+            : "the chat server is explicitly set to CPU placement";
         return BuildCheck(
             "gpu-inference",
             "GPU inference",
             DoctorCheckStatus.Warning,
             $"GPU present but {reason}",
-            $"{profile.GpuName ?? "A GPU"} was detected, but {reason}, so your prompts are read and generated at CPU speed. Install a GPU build in Services and set the chat server to offload all layers.",
+            $"{profile.GpuName ?? "A GPU"} was detected, but {reason}. Install a GPU build in Services and choose Auto, All, or an exact layer count if you want accelerated inference. Effective placement remains Unknown until the running runtime reports it.",
             "Open Services",
             true,
-            $"GPU: {profile.GpuName}\nInstalled build CPU-only: {installedBuildIsCpu}\nChat gpu-layers: {chatGpuLayers}",
+            $"GPU: {profile.GpuName}\nInstalled build CPU-only: {installedBuildIsCpu}\nConfigured placement: {placement?.CanonicalValue ?? "Unknown"}\nEffective placement: Unknown until /props evidence is available",
             "Runtime");
     }
 
     /// <summary>
     /// True when no GPU backend runtime sits next to the executable (r14 1.4):
-    /// CPU builds ship only ggml-cpu/ggml-base DLLs, GPU builds add
+    /// CPU builds ship only ggml-cpu/ggml-base shared libraries, GPU builds add
     /// ggml-cuda/ggml-vulkan (and cudart for CUDA). An empty/unresolved path is
     /// treated as CPU so the advisory nudges toward a real GPU install.
     /// </summary>
-    private static bool IsCpuOnlyBuild(string executablePath)
+    internal static bool IsCpuOnlyBuild(string executablePath)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
             return true;
@@ -324,10 +344,14 @@ public sealed partial class DoctorService
             return true;
         try
         {
-            foreach (var file in Directory.EnumerateFiles(dir, "*.dll", SearchOption.TopDirectoryOnly))
+            foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly))
             {
-                var name = Path.GetFileName(file).ToLowerInvariant();
-                if (name.Contains("cuda") || name.Contains("vulkan") || name.Contains("cudart") || name.Contains("hip") || name.Contains("sycl"))
+                var name = Path.GetFileName(file);
+                if (!IsSharedLibrary(name))
+                    continue;
+
+                var lower = name.ToLowerInvariant();
+                if (lower.Contains("cuda") || lower.Contains("vulkan") || lower.Contains("cudart") || lower.Contains("hip") || lower.Contains("sycl"))
                     return false;
             }
             return true;
@@ -336,6 +360,11 @@ public sealed partial class DoctorService
         {
             return true;
         }
+
+        static bool IsSharedLibrary(string name) =>
+            name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".dylib", StringComparison.OrdinalIgnoreCase)
+            || name.Contains(".so", StringComparison.OrdinalIgnoreCase);
     }
 
     private DoctorCheck CheckUntunedGgufModels()
@@ -624,19 +653,28 @@ public sealed partial class DoctorService
             // changing the selected backend. Leave the new path unconfigured
             // and require an explicit backend choice instead.
             var probe = await ReadLlamaServerVersionAsync(result.UpdatedPath, ct);
-            if (ShouldRejectGpuRuntime(installedVariant, probe.BuildNumber is not null))
+            var expectedBuild = TryParseLlamaBuild(result.VerifiedReleaseTag);
+            var identityVerified = IsLlamaUpdateIdentityVerified(
+                probe.BuildNumber,
+                expectedBuild,
+                IsVerifiedLlamaArtifact(result, expectedBuild));
+            if (ShouldRejectGpuRuntime(installedVariant, probe.Started, probe.ExitCode, identityVerified))
             {
-                result = new LocalAiSetupResult(
-                    false,
-                    $"llama.cpp {LlamaServerSetupService.VariantLabel(installedVariant)} build was downloaded but failed its launch probe. "
+                var probeEvidence = FormatProbeEvidence(result.UpdatedPath, "--version", probe);
+                result = result with
+                {
+                    Success = false,
+                    Log = $"llama.cpp {LlamaServerSetupService.VariantLabel(installedVariant)} build was downloaded, but {DescribeLlamaProbeFailure(probe)}. "
                     + "The update was refused so a working GPU backend cannot be silently replaced with CPU. "
-                    + "Check the backend's driver/runtime requirements or explicitly choose CPU.");
+                    + "Check the backend's driver/runtime requirements or explicitly choose CPU."
+                    + Environment.NewLine + "Probe diagnostics:" + Environment.NewLine + probeEvidence
+                };
             }
         }
 
         if (!result.Success || string.IsNullOrWhiteSpace(result.UpdatedPath))
         {
-            progress?.Report(result.Log);
+            progress?.Report(SummarizeProgress(result.Log));
             _runtimeLogs?.Add(new RuntimeLogEntry(
                 DateTime.UtcNow,
                 RuntimeLogLevel.Error,
@@ -662,12 +700,41 @@ public sealed partial class DoctorService
     }
 
     /// <summary>
-    /// A non-CPU variant whose installed binary did not report a version failed
-    /// its launch probe. The update must be refused rather than silently
-    /// changing to CPU. Pure decision for tests.
+    /// A non-CPU variant is refused unless its executable starts and exits
+    /// zero, then identity is established either by recognizable version text
+    /// or by the separately verified release-tag and SHA256 artifact evidence.
+    /// A successful process launch with neither evidence remains unsafe to
+    /// install over a working GPU backend.
     /// </summary>
     public static bool ShouldRejectGpuRuntime(LlamaRuntimeVariant installedVariant, bool versionProbeSucceeded)
-        => installedVariant != LlamaRuntimeVariant.Cpu && !versionProbeSucceeded;
+        => ShouldRejectGpuRuntime(installedVariant, probeStarted: true, exitCode: 0, versionProbeSucceeded);
+
+    public static bool ShouldRejectGpuRuntime(
+        LlamaRuntimeVariant installedVariant,
+        bool probeStarted,
+        int? exitCode,
+        bool versionProbeSucceeded)
+        => installedVariant != LlamaRuntimeVariant.Cpu
+            && ClassifyLlamaProbe(probeStarted, exitCode, versionProbeSucceeded) != LlamaProbeFailureKind.None;
+
+    internal static bool IsLlamaUpdateIdentityVerified(
+        int? reportedBuild,
+        int? expectedBuild,
+        bool verifiedArtifact)
+    {
+        if (expectedBuild is not null && reportedBuild is not null && reportedBuild != expectedBuild)
+            return false;
+
+        return reportedBuild is not null || verifiedArtifact;
+    }
+
+    private static bool IsVerifiedLlamaArtifact(LocalAiSetupResult result, int? expectedBuild)
+    {
+        var sha256 = result.VerifiedArtifactSha256;
+        return expectedBuild is not null
+            && sha256 is { Length: 64 }
+            && sha256.All(Uri.IsHexDigit);
+    }
 
     public long PruneLlamaServerVersions(IReadOnlyList<string> versionDirectories)
     {
@@ -731,16 +798,19 @@ public sealed partial class DoctorService
     private static async Task<LlamaVersionInfo> ReadLlamaServerVersionAsync(string executablePath, CancellationToken ct)
     {
         var result = await RunVersionCommandAsync(executablePath, "--version", ct);
-        if (!result.Success || string.IsNullOrWhiteSpace(result.Output))
-        {
-            var help = await RunVersionCommandAsync(executablePath, "--help", ct);
-            if (help.Success || help.Output.Length > result.Output.Length)
-                result = help;
-        }
 
         var build = TryParseLlamaBuild(result.Output);
         var label = build is int value ? $"b{value}" : "unknown build";
-        return new LlamaVersionInfo(label, build, result.Output.Trim(), result.Started, result.ExitCode, result.Error);
+        return new LlamaVersionInfo(
+            label,
+            build,
+            result.Output.Trim(),
+            result.Started,
+            result.ExitCode,
+            result.Stdout,
+            result.Stderr,
+            result.Error,
+            ClassifyLlamaProbe(result.Started, result.ExitCode, build is not null));
     }
 
     private static async Task<LlamaCommandResult> RunVersionCommandAsync(string executablePath, string arg, CancellationToken ct)
@@ -761,14 +831,15 @@ public sealed partial class DoctorService
         try
         {
             if (!process.Start())
-                return new LlamaCommandResult(false, null, string.Empty, "The operating system refused to start the executable.");
+                return new LlamaCommandResult(false, null, string.Empty, string.Empty, "The operating system refused to start the executable.");
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(3));
-            var stdout = await process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var stderr = await process.StandardError.ReadToEndAsync(timeout.Token);
+            var stdoutTask = ReadBoundedAsync(process.StandardOutput, timeout.Token);
+            var stderrTask = ReadBoundedAsync(process.StandardError, timeout.Token);
+            await Task.WhenAll(stdoutTask, stderrTask);
             await process.WaitForExitAsync(timeout.Token);
-            return new LlamaCommandResult(true, process.ExitCode, $"{stdout}\n{stderr}".Trim(), string.Empty);
+            return new LlamaCommandResult(true, process.ExitCode, stdoutTask.Result, stderrTask.Result, string.Empty);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -785,7 +856,7 @@ public sealed partial class DoctorService
             {
             }
 
-            return new LlamaCommandResult(true, null, string.Empty, "The executable probe timed out after 3 seconds.");
+            return new LlamaCommandResult(true, null, string.Empty, string.Empty, "The executable probe timed out after 3 seconds.");
         }
         catch (Exception ex)
         {
@@ -798,8 +869,70 @@ public sealed partial class DoctorService
             {
             }
 
-            return new LlamaCommandResult(false, null, string.Empty, ex.Message);
+            return new LlamaCommandResult(false, null, string.Empty, string.Empty, ex.Message);
         }
+    }
+
+    private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken ct)
+    {
+        var buffer = new char[2048];
+        var output = new System.Text.StringBuilder();
+        var truncated = false;
+        int read;
+        while ((read = await reader.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            var remaining = MaxProbeOutputCharacters - output.Length;
+            if (remaining > 0)
+                output.Append(buffer, 0, Math.Min(read, remaining));
+            if (!truncated && read > remaining)
+            {
+                truncated = true;
+                output.Append(" [truncated]");
+            }
+        }
+
+        return output.ToString();
+    }
+
+    internal static LlamaProbeFailureKind ClassifyLlamaProbe(
+        bool probeStarted,
+        int? exitCode,
+        bool buildIdentityVerified)
+    {
+        if (!probeStarted)
+            return LlamaProbeFailureKind.CouldNotStart;
+        if (exitCode is null)
+            return LlamaProbeFailureKind.TimedOut;
+        if (exitCode != 0)
+            return LlamaProbeFailureKind.NonZeroExit;
+        return buildIdentityVerified ? LlamaProbeFailureKind.None : LlamaProbeFailureKind.IdentityUnverified;
+    }
+
+    private static string DescribeLlamaProbeFailure(LlamaVersionInfo probe) => probe.FailureKind switch
+    {
+        LlamaProbeFailureKind.CouldNotStart => "the executable could not be started",
+        LlamaProbeFailureKind.TimedOut => "the executable started but the probe timed out",
+        LlamaProbeFailureKind.NonZeroExit => $"the executable started but exited with code {probe.ExitCode}",
+        LlamaProbeFailureKind.IdentityUnverified => "the executable started and returned exit code 0, but no recognizable llama.cpp build identifier was found",
+        _ => "the executable probe completed successfully"
+    };
+
+    private static string FormatProbeEvidence(string executable, string arguments, LlamaVersionInfo probe) => string.Join(
+        Environment.NewLine,
+        $"Executable: {executable}",
+        $"Arguments: {arguments}",
+        $"Started: {probe.Started}",
+        $"Exit code: {probe.ExitCode?.ToString() ?? "unknown"}",
+        $"Validation: {probe.FailureKind}",
+        $"Stdout: {(string.IsNullOrWhiteSpace(probe.Stdout) ? "<empty>" : probe.Stdout)}",
+        $"Stderr: {(string.IsNullOrWhiteSpace(probe.Stderr) ? "<empty>" : probe.Stderr)}",
+        $"Error: {(string.IsNullOrWhiteSpace(probe.Error) ? "<none>" : probe.Error)}");
+
+    private static string SummarizeProgress(string log)
+    {
+        const string marker = "Probe diagnostics:";
+        var markerIndex = log.IndexOf(marker, StringComparison.Ordinal);
+        return markerIndex >= 0 ? log[..markerIndex].Trim() : log;
     }
 
     internal static LlamaVersionComparison CompareLlamaBuilds(int installedBuild, int? latestBuild) =>
@@ -809,8 +942,21 @@ public sealed partial class DoctorService
                 ? LlamaVersionComparison.Outdated
                 : LlamaVersionComparison.Current;
 
-    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct) =>
-        GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", FetchLatestLlamaReleaseAsync, ct);
+    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
+    {
+        var shared = LlamaServerSetupService.LastSuccessfulRelease;
+        if (shared is { } cached)
+        {
+            return Task.FromResult<LlamaLatestRelease?>(new(
+                cached.Download.TagName,
+                TryParseLlamaBuild(cached.Download.TagName),
+                cached.Download.PublishedAt ?? cached.CachedAt,
+                cached.CachedAt,
+                true));
+        }
+
+        return GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", FetchLatestLlamaReleaseAsync, ct);
+    }
 
     private async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
     {
@@ -820,7 +966,9 @@ public sealed partial class DoctorService
             return new LlamaLatestRelease(
                 release.TagName,
                 TryParseLlamaBuild(release.TagName),
-                release.PublishedAt ?? DateTimeOffset.MinValue);
+                release.PublishedAt ?? DateTimeOffset.MinValue,
+                DateTimeOffset.UtcNow,
+                false);
         }
         catch
         {
@@ -857,13 +1005,38 @@ public sealed partial class DoctorService
             && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
     }
 
-    private sealed record LlamaCommandResult(bool Started, int? ExitCode, string Output, string Error)
+    private sealed record LlamaCommandResult(bool Started, int? ExitCode, string Stdout, string Stderr, string Error)
     {
+        public string Output => string.Join(Environment.NewLine,
+            new[] { Stdout, Stderr }.Where(value => !string.IsNullOrWhiteSpace(value))).Trim();
         public bool Success => Started && ExitCode == 0;
     }
 
-    private sealed record LlamaVersionInfo(string Label, int? BuildNumber, string Raw, bool Started, int? ExitCode, string Error);
-    private sealed record LlamaLatestRelease(string TagName, int? BuildNumber, DateTimeOffset PublishedAt);
+    private sealed record LlamaVersionInfo(
+        string Label,
+        int? BuildNumber,
+        string Raw,
+        bool Started,
+        int? ExitCode,
+        string Stdout,
+        string Stderr,
+        string Error,
+        LlamaProbeFailureKind FailureKind);
+    private sealed record LlamaLatestRelease(
+        string TagName,
+        int? BuildNumber,
+        DateTimeOffset PublishedAt,
+        DateTimeOffset MetadataObservedAt,
+        bool FromSharedCache);
+}
+
+internal enum LlamaProbeFailureKind
+{
+    None,
+    CouldNotStart,
+    TimedOut,
+    NonZeroExit,
+    IdentityUnverified
 }
 
 internal enum LlamaVersionComparison

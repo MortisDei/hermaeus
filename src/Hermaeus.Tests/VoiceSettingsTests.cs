@@ -161,6 +161,20 @@ public sealed class VoiceSettingsTests
     }
 
     [Fact]
+    public void Empty_channel_voice_edit_does_not_clear_the_previous_selection()
+    {
+        var channel = new VoiceChannelSettingViewModel(VoiceChannel.Chat, "Chat")
+        {
+            VoiceId = "af_heart"
+        };
+
+        channel.VoiceDisplay = string.Empty;
+
+        Assert.Equal("af_heart", channel.VoiceId);
+        Assert.Equal("af_heart", channel.VoiceDisplay);
+    }
+
+    [Fact]
     public async Task RefreshTtsVoices_populates_TtsVoices_from_the_active_providers_list()
     {
         using var temp = new TempDir();
@@ -195,10 +209,10 @@ public sealed class VoiceSettingsTests
         Assert.Contains("provider-voice-2", vm.ChannelVoiceOptions);
     }
 
-    /// <summary>Avalonia's ComboBox has no free-text entry mode; the channel voice picker
-    /// uses AutoCompleteBox instead, so a hand-typed voice id still works for providers
-    /// that cannot enumerate voices (TtsVoices then holds nothing) - the channel row's
-    /// VoiceDisplay setter accepts any text regardless of ChannelVoiceOptions membership.</summary>
+    /// <summary>The channel voice picker is an editable ComboBox, so a hand-typed voice id
+    /// still works for providers that cannot enumerate voices (TtsVoices then holds nothing).
+    /// The channel row's VoiceDisplay setter accepts any text regardless of membership in the
+    /// provider catalogue.</summary>
     [Fact]
     public async Task A_provider_that_cannot_enumerate_voices_leaves_manual_entry_working()
     {
@@ -213,6 +227,26 @@ public sealed class VoiceSettingsTests
         var channel = new VoiceChannelSettingViewModel(VoiceChannel.Chat, "Chat");
         channel.VoiceDisplay = "hand-typed-voice-id";
         Assert.Equal("hand-typed-voice-id", channel.VoiceId);
+    }
+
+    [Fact]
+    public void Selected_voice_provider_id_keeps_the_two_Kokoro_display_labels_distinct()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = NewTtsVm(settings);
+        vm.VoiceProviders.Add(new VoiceProviderInfo(
+            VoiceProvider.Kokoro, "Kokoro (Python)", "Python backend.",
+            VoiceProviderCategory.Advanced, false, VoiceCapability.TextToSpeech | VoiceCapability.Local));
+        vm.VoiceProviders.Add(new VoiceProviderInfo(
+            VoiceProvider.KokoroNative, "Kokoro (native)", "Native backend.",
+            VoiceProviderCategory.Recommended, false, VoiceCapability.TextToSpeech | VoiceCapability.Local));
+
+        vm.SelectedVoiceProvider = "Kokoro (Python)";
+        Assert.Equal(VoiceProvider.Kokoro, vm.SelectedVoiceProviderId);
+
+        vm.SelectedVoiceProvider = "Kokoro (native)";
+        Assert.Equal(VoiceProvider.KokoroNative, vm.SelectedVoiceProviderId);
     }
 
     private sealed class ScriptedTts(IReadOnlyList<string> voices) : ITtsService

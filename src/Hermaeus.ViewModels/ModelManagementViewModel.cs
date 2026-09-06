@@ -20,17 +20,31 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly ServicesViewModel _services;
     private readonly ModelManifestStore _manifest;
     private readonly HuggingFaceClient _hf;
+    private readonly HuggingFaceArtworkService _artwork;
     private readonly ModelDownloadService _downloader;
+    private readonly ModelInventoryService _inventory;
     private readonly IActivityRecorder? _activity;
+    private readonly IRuntimeLogService? _runtimeLogs;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
     private readonly List<LlmModel> _modelCache = [];
     private readonly object _modelCacheLock = new();
     private readonly List<ModelProfileItemViewModel> _allModels = [];
+    private readonly HashSet<string> _reportedArtworkOutcomes = new(StringComparer.Ordinal);
+    private readonly object _artworkReportLock = new();
     private CancellationTokenSource? _hfSelectionCts;
+    private long _hfSelectionGeneration;
 
     /// <summary>The (possibly filtered) rows shown in the list. Filtering narrows this
     /// from <see cref="_allModels"/> without a refetch (r13 02-model-library.md 2.1).</summary>
     public UiBoundCollection<ModelProfileItemViewModel> Models { get; } = [];
+
+    /// <summary>
+    /// The catalog is grouped by intended use. The flat <see cref="Models"/>
+    /// collection remains for callers and tests, while the view binds to these
+    /// sections so embedding and reranker assets are not mistaken for chat
+    /// models.
+    /// </summary>
+    public UiBoundCollection<ModelCatalogSectionViewModel> ModelSections { get; } = [];
 
     [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _statusMessage = string.Empty;
@@ -41,11 +55,15 @@ public partial class ModelManagementViewModel : ObservableObject
     [ObservableProperty] private string _autoTuneAllStatus = string.Empty;
     [ObservableProperty] private bool   _isOrganizing;
     [ObservableProperty] private string _organizeStatus = string.Empty;
+    [ObservableProperty] private ModelProfileItemViewModel? _selectedProfile;
+
+    public bool HasSelectedProfile => SelectedProfile is not null;
 
     private volatile bool _isTuneInProgress;
     private CancellationTokenSource? _autoTuneAllCts;
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
+    partial void OnSelectedProfileChanged(ModelProfileItemViewModel? value) => OnPropertyChanged(nameof(HasSelectedProfile));
 
     private void ApplyFilter()
     {
@@ -55,12 +73,33 @@ public partial class ModelManagementViewModel : ObservableObject
             : _allModels.Where(m =>
                 m.EffectiveName.Contains(filter, StringComparison.OrdinalIgnoreCase)
                 || m.RawName.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                || m.TagsDisplay.Contains(filter, StringComparison.OrdinalIgnoreCase));
+                || m.TagsDisplay.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || m.RoleLabel.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || m.CapabilityBadges.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || m.CompanionSearchText.Contains(filter, StringComparison.OrdinalIgnoreCase));
 
         Models.Clear();
         foreach (var m in matches)
             Models.Add(m);
+
+        ModelSections.Clear();
+        AddSection("Chat & Generation", ModelCatalogRole.ChatGeneration, matches);
+        AddSection("Embeddings", ModelCatalogRole.Embedding, matches);
+        AddSection("Rerankers", ModelCatalogRole.Reranker, matches);
+        AddSection("Other / Unknown", ModelCatalogRole.Unknown, matches);
         OnPropertyChanged(nameof(HasNoModels));
+    }
+
+    private void AddSection(
+        string title,
+        ModelCatalogRole role,
+        IEnumerable<ModelProfileItemViewModel> matches)
+    {
+        var section = new ModelCatalogSectionViewModel(title);
+        foreach (var item in matches.Where(item => item.CatalogRole == role))
+            section.Models.Add(item);
+        if (section.Models.Count > 0)
+            ModelSections.Add(section);
     }
 
     /// <summary>
@@ -82,15 +121,157 @@ public partial class ModelManagementViewModel : ObservableObject
     public Func<int, Task<bool>>? RequestEmptyDirectoryCleanupConfirmation { get; set; }
     public Func<ModelDeletionPlan, Task<bool>>? RequestDeleteModelConfirmation { get; set; }
     public Func<ModelDeletionPlan, Task<CompanionDisableChoice>>? RequestCompanionDisableConfirmation { get; set; }
+    public Func<ModelDeletionPlan, Task<bool>>? RequestCompanionRemovalConfirmation { get; set; }
     public Action<string>? RequestNavigate { get; set; }
 
     [RelayCommand]
     private void OpenServices() => RequestNavigate?.Invoke("services");
 
+    [RelayCommand]
+    private void OpenHuggingFaceWorkspace() => IsHfBrowserExpanded = true;
+
+    [RelayCommand]
+    private void CloseHuggingFaceWorkspace()
+    {
+        CancelHfSelection();
+        IsHfBrowserExpanded = false;
+    }
+
+    [RelayCommand]
+    private void OpenProfileEditor(ModelProfileItemViewModel? item) => SelectedProfile = item;
+
+    [RelayCommand]
+    private void CloseProfileEditor() => SelectedProfile = null;
+
+    [RelayCommand]
+    private async Task ClearCompanionAsync(ModelCompanionViewModel? item)
+    {
+        if (item is null || string.IsNullOrWhiteSpace(item.ModelId)
+            || string.IsNullOrWhiteSpace(item.LocalFilePath)
+            || RequestCompanionRemovalConfirmation is null)
+            return;
+
+        var assetsRoot = _settings.Settings.DataManagement.LocalAiAssetsRoot;
+        if (!ModelPathSafety.TryResolveFileUnderRoot(assetsRoot, item.LocalFilePath, out var normalized, out var error))
+        {
+            _toasts.Show("Cannot clear companion", error, ToastKind.Warning, 7000);
+            return;
+        }
+
+        var existing = await _manifest.FindAsync(item.ModelId);
+        if (existing is null || !existing.Companions.Any(companion =>
+                ModelPathSafety.AreSameLocalPath(companion.LocalFilePath, normalized)))
+            return;
+
+        var files = File.Exists(normalized) ? new[] { normalized } : Array.Empty<string>();
+        var description = files.Length == 0
+            ? $"Clear the stale companion mapping for {normalized}? No regular file is present, so no file will be deleted."
+            : $"Delete the companion file {normalized} and clear its mapping from {Path.GetFileName(item.ModelId)}?";
+        var plan = new ModelDeletionPlan(item.ModelId, files, description, Path.GetFullPath(assetsRoot));
+        if (!await RequestCompanionRemovalConfirmation(plan))
+            return;
+
+        if (files.Length > 0)
+        {
+            var remaining = ModelDeletionService.DeleteExact(plan);
+            if (remaining.Count > 0)
+            {
+                _toasts.Show("Companion removal incomplete", string.Join(", ", remaining), ToastKind.Warning, 7000);
+                return;
+            }
+        }
+
+        await _manifest.RemoveCompanionAsync(item.ModelId, normalized);
+        InvalidateModelInventory();
+        ForceRefresh = true;
+        await RefreshAsync();
+        _toasts.Show("Companion cleared", $"Removed {Path.GetFileName(normalized)} from the model's known companion mappings.", ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private Task ClearStaleCompanionsAsync(ModelProfileItemViewModel? item) =>
+        ClearCompanionsAsync(item, CompanionClearScope.Stale);
+
+    [RelayCommand]
+    private Task ClearUnknownCompanionsAsync(ModelProfileItemViewModel? item) =>
+        ClearCompanionsAsync(item, CompanionClearScope.Unknown);
+
+    [RelayCommand]
+    private Task ClearReviewableCompanionsAsync(ModelProfileItemViewModel? item) =>
+        ClearCompanionsAsync(item, CompanionClearScope.Reviewable);
+
+    private enum CompanionClearScope
+    {
+        Stale,
+        Unknown,
+        Reviewable
+    }
+
+    private async Task ClearCompanionsAsync(ModelProfileItemViewModel? item, CompanionClearScope scope)
+    {
+        if (item is null || RequestCompanionRemovalConfirmation is null)
+            return;
+
+        var candidates = item.Companions
+            .Where(companion => scope switch
+            {
+                CompanionClearScope.Stale => companion.StateLabel == "Stale",
+                CompanionClearScope.Unknown => companion.StateLabel == "Unknown",
+                _ => companion.StateLabel is "Missing" or "Stale" or "Unknown"
+            })
+            .ToList();
+        if (candidates.Count == 0)
+            return;
+
+        var assetsRoot = _settings.Settings.DataManagement.LocalAiAssetsRoot;
+        var normalizedPaths = new List<string>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            if (!ModelPathSafety.TryResolveFileUnderRoot(assetsRoot, candidate.LocalFilePath, out var normalized, out var error))
+            {
+                _toasts.Show("Cannot clear companions", error, ToastKind.Warning, 7000);
+                return;
+            }
+
+            normalizedPaths.Add(normalized);
+        }
+
+        var files = normalizedPaths.Where(File.Exists).Distinct(ModelPathSafety.LocalPathComparer).ToArray();
+        var description = files.Length == 0
+            ? $"Clear {candidates.Count} companion mapping(s) from {Path.GetFileName(item.ModelId)}? No regular companion file will be deleted. Present companions remain unchanged."
+            : $"Delete {files.Length} reviewable companion file(s) and clear {candidates.Count} mapping(s) from {Path.GetFileName(item.ModelId)}? Present companions remain unchanged.";
+        var plan = new ModelDeletionPlan(item.ModelId, files, description, Path.GetFullPath(assetsRoot));
+        if (!await RequestCompanionRemovalConfirmation(plan))
+            return;
+
+        if (files.Length > 0)
+        {
+            var remaining = ModelDeletionService.DeleteExact(plan);
+            if (remaining.Count > 0)
+            {
+                _toasts.Show("Companion removal incomplete", string.Join(", ", remaining), ToastKind.Warning, 7000);
+                return;
+            }
+        }
+
+        foreach (var path in normalizedPaths.Distinct(ModelPathSafety.LocalPathComparer))
+            await _manifest.RemoveCompanionAsync(item.ModelId, path);
+
+        InvalidateModelInventory();
+        ForceRefresh = true;
+        await RefreshAsync();
+        var receipt = $"Cleared {candidates.Count} reviewable companion mapping(s); deleted {files.Length} file(s). Present companions were preserved.";
+        _activity.RecordSafe("models.companions.clear", item.ModelId, ActivityOutcome.Succeeded,
+            "Companion cleanup completed", receipt);
+        _toasts.Show("Companion cleanup complete", receipt, ToastKind.Info, 8000);
+    }
+
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
-        ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null)
+        ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null,
+        ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null, IRuntimeLogService? runtimeLogs = null)
     {
         _activity = activity;
+        _runtimeLogs = runtimeLogs;
         _llm = llm;
         _profiles = profiles;
         _toasts = toasts;
@@ -99,24 +280,69 @@ public partial class ModelManagementViewModel : ObservableObject
         _services = services;
         _manifest = manifest;
         _hf = hf;
+        _artwork = artwork ?? new HuggingFaceArtworkService(runtimeLogs: runtimeLogs);
         _downloader = downloader;
+        _inventory = inventory ?? new ModelInventoryService(manifest);
     }
 
-    private List<LlmModel> DiscoverLocalGgufModels(IReadOnlyList<LlmModel> existingModels)
+    private static List<LlmModel> DiscoverLocalGgufModels(
+        IReadOnlyList<LlmModel> existingModels,
+        ModelInventorySnapshot inventory)
     {
-        return LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot)
-            .Where(path => !existingModels.Any(model => SameLocalModelIdentity(model.Id, path)))
-            .Select(path => new LlmModel
+        var manifestCompanionPaths = inventory.ManifestEntries
+            .SelectMany(entry => entry.Companions)
+            .Select(companion => companion.LocalFilePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizeModelPath)
+            .ToHashSet(ModelPathSafety.LocalPathComparer);
+
+        return inventory.Entries
+            .Where(entry => !manifestCompanionPaths.Contains(NormalizeModelPath(entry.Path)))
+            .Where(entry => !IsCatalogCompanion(entry))
+            .Where(entry => !existingModels.Any(model => SameLocalModelIdentity(model.Id, entry.Path)))
+            .Select(entry => new LlmModel
             {
-                Id = path,
-                Name = Path.GetFileNameWithoutExtension(path),
+                Id = entry.Path,
+                Name = Path.GetFileNameWithoutExtension(entry.Path),
                 Provider = "local GGUF",
                 ProviderTag = "llama.cpp",
-                SizeBytes = new FileInfo(path).Length,
-                ModifiedAt = File.GetLastWriteTimeUtc(path)
+                SizeBytes = entry.SizeBytes,
+                ModifiedAt = entry.ModifiedAtUtc
             })
             .ToList();
     }
+
+    private static string NormalizeModelPath(string path)
+    {
+        try { return Path.GetFullPath(path.Trim()); }
+        catch (ArgumentException) { return string.Empty; }
+    }
+
+    /// <summary>
+    /// A catalog row is hidden as a companion only when existing trusted
+    /// provenance or unambiguous GGUF metadata proves that role. Filename
+    /// spelling is intentionally not consulted here. The primary manifest's
+    /// companion paths are handled before this predicate, so downloaded
+    /// companions remain grouped even when an older manifest did not write a
+    /// reciprocal ParentModelPath on the child entry.
+    /// </summary>
+    private static bool IsCatalogCompanion(ModelInventoryEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.Manifest?.ParentModelPath)
+        || IsMetadataProjector(entry.GgufInfo)
+        || IsMetadataDraftCompanion(entry.GgufInfo);
+
+    private static bool IsMetadataProjector(GgufModelInfo? info) =>
+        info is not null
+        && (string.Equals(info.GeneralType, "clip", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(info.GeneralType, "mmproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(info.Architecture, "clip", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsMetadataDraftCompanion(GgufModelInfo? info) =>
+        info is not null
+        && (info.NextnPredictLayers is > 0
+            && info.Architecture.Trim().ToLowerInvariant() is "eagle" or "eagle2" or "eagle3"
+            || (string.Equals(info.GeneralType, "model", StringComparison.OrdinalIgnoreCase)
+                && info.Architecture.Trim().EndsWith("-assistant", StringComparison.OrdinalIgnoreCase)));
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -136,7 +362,10 @@ public partial class ModelManagementViewModel : ObservableObject
             }
 
             if (cachedModels is null && ForceRefresh)
+            {
                 _llm.InvalidateModelCache();
+                _inventory.Invalidate(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+            }
 
             var reportedModels = cachedModels ?? await _llm.GetModelsAsync();
             if (cachedModels is null)
@@ -151,11 +380,23 @@ public partial class ModelManagementViewModel : ObservableObject
 
             var runningIds = new HashSet<string>(reportedModels.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
             var models = new List<LlmModel>(reportedModels);
-            models.AddRange(DiscoverLocalGgufModels(models));
+            var inventory = await _inventory.ScanAsync(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+            models.AddRange(DiscoverLocalGgufModels(models, inventory));
+            AddConfiguredEmbeddingModels(models);
+            AddDiscoveredRerankerModels(models);
+            AddConfiguredRerankerModel(models);
 
             _profiles.ApplyProfiles(models);
             var hardware = await _system.GetHardwareProfileAsync();
-            var manifestEntries = await _manifest.LoadAsync();
+            var manifestEntries = inventory.ManifestEntries;
+            var embeddingPaths = ConfiguredEmbeddingPaths();
+            foreach (var entry in inventory.Entries.Where(entry =>
+                         LocalAiAssetLocator.IsUnderEmbeddingDirectory(inventory.Root, entry.Path)))
+            {
+                try { embeddingPaths.Add(Path.GetFullPath(entry.Path)); }
+                catch (ArgumentException) { }
+            }
+            var rerankerPath = _settings.Settings.Rag.RerankerModelPath.Trim();
             _allModels.Clear();
             foreach (var m in models)
             {
@@ -163,23 +404,190 @@ public partial class ModelManagementViewModel : ObservableObject
                 var item = new ModelProfileItemViewModel(m, profile, runningIds.Contains(m.Id));
                 RefreshTuneSummary(item);
                 var existingTune = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
-                var ggufInfo = item.IsLocalGguf
-                    ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId))
-                    : null;
+                var inventoryEntry = inventory.Find(item.ModelId);
+                var ggufInfo = item.IsLocalGguf ? inventoryEntry?.GgufInfo : null;
+                var manifestEntry = inventoryEntry?.Manifest ?? FindManifestEntry(manifestEntries, item.ModelId);
+                item.ApplyCatalogClassification(
+                    ClassifyCatalogRole(m, ggufInfo, embeddingPaths, rerankerPath),
+                    ggufInfo,
+                    manifestEntry);
                 ApplyFit(item, m.SizeBytes, hardware, ggufInfo, ResolveProbeContextSize(item, existingTune), profile.DefaultKvCacheType);
                 ApplyManifestState(item, manifestEntries);
+                if (string.IsNullOrWhiteSpace(item.Avatar)
+                    && manifestEntry is { } verifiedManifest
+                    && IsVerifiedManifest(verifiedManifest))
+                {
+                    var cachedArtwork = await _artwork.TryGetCachedAsync(
+                        verifiedManifest.RepoId,
+                        verifiedManifest.RevisionSha,
+                        HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)));
+                    item.ApplyArtwork(cachedArtwork?.CachePath, cachedArtwork?.State ?? HfArtworkState.Unavailable,
+                        cachedArtwork?.FailureCode ?? "not_cached", verifiedManifest.RevisionSha,
+                        cachedArtwork?.EffectiveSourceKind ?? HfArtworkSourceKind.None);
+                }
                 _allModels.Add(item);
             }
             ApplyFilter();
 
+            var inventoryLimitMessage = inventory.IsTruncated
+                ? $" (local inventory capped at {_inventory.MaximumEntries:N0} models)"
+                : string.Empty;
             StatusMessage = models.Count == 0
                 ? "No models detected. Add GGUF files to your AI assets root or start a runtime."
-                : $"{models.Count} model(s) detected, {runningIds.Count} currently running{(cachedModels is not null ? " (from cache)" : "")}";
+                : $"{models.Count} model(s) detected, {runningIds.Count} currently running{(cachedModels is not null ? " (from cache)" : "")}{inventoryLimitMessage}";
             ForceRefresh = false;
         }
         catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
         finally { IsLoading = false; }
     }
+
+    private void AddConfiguredEmbeddingModels(List<LlmModel> models)
+    {
+        foreach (var server in _settings.Settings.ManagedServers.Where(server => server.EmbeddingsMode))
+        {
+            var path = server.ModelPath.Trim();
+            if (path.Length == 0 || models.Any(model => SameLocalModelIdentity(model.Id, path)))
+                continue;
+
+            try
+            {
+                var file = new FileInfo(path);
+                models.Add(new LlmModel
+                {
+                    Id = path,
+                    Name = Path.GetFileNameWithoutExtension(path),
+                    Provider = "Managed embeddings",
+                    ProviderTag = "llama.cpp",
+                    SizeBytes = file.Exists ? file.Length : 0,
+                    ModifiedAt = file.Exists ? file.LastWriteTimeUtc : null
+                });
+            }
+            catch (ArgumentException) { }
+            catch (IOException) { }
+        }
+    }
+
+    private void AddConfiguredRerankerModel(List<LlmModel> models)
+    {
+        var path = _settings.Settings.Rag.RerankerModelPath.Trim();
+        if (path.Length == 0 || models.Any(model => string.Equals(model.Id, path, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (name.Length == 0)
+            name = "Configured reranker";
+        models.Add(new LlmModel
+        {
+            Id = path,
+            Name = name,
+            Provider = "ONNX reranker",
+            ProviderTag = "reranker"
+        });
+    }
+
+    private void AddDiscoveredRerankerModels(List<LlmModel> models)
+    {
+        foreach (var path in LocalAiAssetLocator.FindRerankerDirectories(_settings.Settings.DataManagement.LocalAiAssetsRoot))
+        {
+            if (models.Any(model => ModelPathSafety.AreSameLocalPath(model.Id, path)))
+                continue;
+
+            models.Add(new LlmModel
+            {
+                Id = path,
+                Name = Path.GetFileName(path),
+                Provider = "ONNX reranker",
+                ProviderTag = "reranker",
+                SizeBytes = DirectorySize(path)
+            });
+        }
+    }
+
+    private static long DirectorySize(string path)
+    {
+        try
+        {
+            long total = 0;
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly))
+            {
+                try { total = checked(total + new FileInfo(file).Length); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            return total;
+        }
+        catch (IOException) { return 0; }
+        catch (UnauthorizedAccessException) { return 0; }
+    }
+
+    private HashSet<string> ConfiguredEmbeddingPaths()
+    {
+        var paths = new HashSet<string>(ModelPathSafety.LocalPathComparer);
+        foreach (var server in _settings.Settings.ManagedServers.Where(server =>
+                     server.EmbeddingsMode && !string.IsNullOrWhiteSpace(server.ModelPath)))
+        {
+            try { paths.Add(Path.GetFullPath(server.ModelPath.Trim())); }
+            catch (ArgumentException) { }
+            catch (NotSupportedException) { }
+        }
+        return paths;
+    }
+
+    private static ModelManifestEntry? FindManifestEntry(
+        IReadOnlyList<ModelManifestEntry> entries,
+        string modelPath)
+    {
+        try
+        {
+            var normalized = Path.GetFullPath(modelPath);
+            return entries.FirstOrDefault(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
+        }
+        catch (ArgumentException) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
+
+    private ModelCatalogRole ClassifyCatalogRole(
+        LlmModel model,
+        GgufModelInfo? info,
+        HashSet<string> embeddingPaths,
+        string rerankerPath)
+    {
+        if (string.Equals(model.ProviderTag, "reranker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(model.Id, rerankerPath, StringComparison.OrdinalIgnoreCase))
+            return ModelCatalogRole.Reranker;
+
+        if (IsConfiguredEmbeddingModel(model, embeddingPaths))
+            return ModelCatalogRole.Embedding;
+
+        if (IsKnownEmbeddingArchitecture(info?.Architecture))
+            return ModelCatalogRole.Embedding;
+
+        if (string.Equals(model.ProviderTag, "llama.cpp", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(model.ProviderTag, "ollama", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(model.ProviderTag, "openai", StringComparison.OrdinalIgnoreCase))
+            return ModelCatalogRole.ChatGeneration;
+
+        return info is null ? ModelCatalogRole.Unknown : ModelCatalogRole.ChatGeneration;
+    }
+
+    private bool IsConfiguredEmbeddingModel(LlmModel model, HashSet<string> embeddingPaths)
+    {
+        try
+        {
+            if (embeddingPaths.Contains(Path.GetFullPath(model.Id)))
+                return true;
+        }
+        catch (ArgumentException) { }
+
+        var configuredName = _settings.Settings.Rag.EmbeddingModel.Trim();
+        return configuredName.Length > 0
+            && (string.Equals(model.Id, configuredName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(model.Name, configuredName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsKnownEmbeddingArchitecture(string? architecture) =>
+        architecture?.Trim().ToLowerInvariant() is
+            "bert" or "nomic-bert" or "jina-bert-v2" or "roberta" or "xlm-roberta";
 
     [RelayCommand]
     private async Task SaveProfileAsync(ModelProfileItemViewModel? item)
@@ -226,6 +634,7 @@ public partial class ModelManagementViewModel : ObservableObject
 
                     foreach (var file in companionFiles)
                         await _manifest.RemoveAsync(file);
+                    InvalidateModelInventory();
                 }
             }
             else if (companionFiles.Count > 0 && !string.IsNullOrWhiteSpace(removalError))
@@ -273,6 +682,7 @@ public partial class ModelManagementViewModel : ObservableObject
             return;
         }
         await _manifest.RemoveAsync(item.ModelId);
+        InvalidateModelInventory();
         _settings.Settings.ModelProfiles.RemoveAll(p => ModelPathSafety.AreSameLocalPath(p.ModelId, item.ModelId));
         foreach (var server in _settings.Settings.ManagedServers.Where(s => ModelPathSafety.AreSameLocalPath(s.ModelPath, item.ModelId)))
             server.ModelPath = string.Empty;
@@ -284,9 +694,31 @@ public partial class ModelManagementViewModel : ObservableObject
 
     private static void ApplyFit(ModelProfileItemViewModel item, long sizeBytes, HardwareProfile hardware, GgufModelInfo? info, int contextSize, string? kvCacheType = null)
     {
-        var fit = ModelFitEstimator.Estimate(sizeBytes, hardware, info, contextSize, kvCacheType ?? "f16");
-        item.FitTier = fit.Tier;
-        item.FitReason = fit.Reason;
+        if (info is null)
+        {
+            var estimate = ModelFitPredictor.EstimatePreDownload(sizeBytes, hardware);
+            item.FitTier = estimate.Tier;
+            item.FitReason = $"Pre-download estimate: {estimate.Reason}";
+            return;
+        }
+
+        var cacheType = string.IsNullOrWhiteSpace(kvCacheType) ? "f16" : kvCacheType;
+        var prediction = ModelFitPredictor.Predict(new ModelFitPredictionRequest(
+            Fingerprint: null,
+            ModelFileBytes: sizeBytes,
+            ContextSize: Math.Max(1, contextSize),
+            GpuLayers: -1,
+            Slots: 1,
+            KvCacheTypeK: cacheType,
+            KvCacheTypeV: cacheType,
+            KvCacheTypeKState: CapabilityState.Available,
+            KvCacheTypeVState: CapabilityState.Available,
+            SwaFull: false,
+            CpuMoeLayers: 0,
+            Hardware: hardware,
+            Companions: []), info);
+        item.FitTier = prediction.Tier;
+        item.FitReason = $"Detailed prediction: {ModelFitPredictor.FormatBreakdown(prediction)}";
     }
 
     private static bool SameLocalModelIdentity(string reportedId, string localPath)
@@ -303,10 +735,45 @@ public partial class ModelManagementViewModel : ObservableObject
     /// <summary>Restores the update chip's last-known state from the manifest across a
     /// refresh; only models with a manifest entry carrying a RepoId participate at all -
     /// everything else shows nothing (r13 03-hugging-face.md 3.2).</summary>
+    private static bool IsVerifiedManifest(ModelManifestEntry? entry)
+    {
+        if (entry is null
+            || string.IsNullOrWhiteSpace(entry.FilePath)
+            || string.IsNullOrWhiteSpace(entry.RepoId)
+            || string.IsNullOrWhiteSpace(entry.RevisionSha)
+            || !HuggingFaceArtworkService.IsRepoId(entry.RepoId)
+            || !HuggingFaceArtworkService.IsImmutableRevision(entry.RevisionSha)
+            || string.IsNullOrWhiteSpace(entry.Sha256)
+            || entry.Sha256.Length != 64
+            || !entry.Sha256.All(Uri.IsHexDigit))
+            return false;
+        try
+        {
+            return File.Exists(entry.FilePath)
+                && new FileInfo(entry.FilePath).Length == entry.SizeBytes;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? ResolveHfPublisher(string repoId, string? author)
+    {
+        if (!string.IsNullOrWhiteSpace(author)
+            && !author.Contains('/', StringComparison.Ordinal)
+            && !author.Any(char.IsControl)
+            && !string.Equals(author, ".", StringComparison.Ordinal)
+            && !string.Equals(author, "..", StringComparison.Ordinal))
+            return author.Trim();
+
+        var owner = repoId.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return string.IsNullOrWhiteSpace(owner) ? null : owner;
+    }
+
     private static void ApplyManifestState(ModelProfileItemViewModel item, IReadOnlyList<ModelManifestEntry> manifestEntries)
     {
-        var normalized = Path.GetFullPath(item.ModelId);
-        var entry = manifestEntries.FirstOrDefault(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
+        var entry = FindManifestEntry(manifestEntries, item.ModelId);
         if (entry is null || string.IsNullOrWhiteSpace(entry.RepoId))
         {
             item.RepoId = string.Empty;
@@ -316,6 +783,7 @@ public partial class ModelManagementViewModel : ObservableObject
             item.HasVerifiedCompanionReplacement = false;
             item.CompanionStatus = string.Empty;
             item.ManualCompanionRepairLabel = string.Empty;
+            item.ApplyCompanionDetails(null);
             return;
         }
 
@@ -328,6 +796,7 @@ public partial class ModelManagementViewModel : ObservableObject
                     ? ModelUpdateStatus.UpToDate
                     : ModelUpdateStatus.NotLinked; // linked but never checked yet
 
+        item.ApplyCompanionDetails(entry);
         ApplyCompanionState(item, entry);
     }
 
@@ -368,7 +837,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 if (HasVerifiedCompanionMetadata(entry, companion))
                     repairable.Add(companion.LocalFilePath);
                 else
-                    manualRoles.Add(CompanionRoleLabel(companion.Role));
+                    manualRoles.Add(CompanionRoleLabelForDisplay(companion.Role));
             }
         }
 
@@ -398,7 +867,7 @@ public partial class ModelManagementViewModel : ObservableObject
         }
     }
 
-    private static string CompanionRoleLabel(string role) => role.Trim().ToLowerInvariant() switch
+    internal static string CompanionRoleLabelForDisplay(string role) => role.Trim().ToLowerInvariant() switch
     {
         "projector" => "projector",
         "draft_head" => "MTP draft head",
@@ -728,6 +1197,7 @@ public partial class ModelManagementViewModel : ObservableObject
             SizeBytes = new FileInfo(fullPath).Length,
             Source = "manual"
         });
+        InvalidateModelInventory();
 
         item.RepoId = repoId;
         item.UpdateStatus = ModelUpdateStatus.NotLinked; // linked but not checked yet; "Check for updates" picks it up
@@ -760,6 +1230,7 @@ public partial class ModelManagementViewModel : ObservableObject
             return;
         }
 
+        LogNetwork($"Hugging Face update check started: linked models={candidates.Count}");
         IsCheckingUpdates = true;
         try
         {
@@ -781,21 +1252,29 @@ public partial class ModelManagementViewModel : ObservableObject
                         // network call so a timeout, cancellation, or failed repo lookup
                         // cannot make the next check hash the exact same bytes again.
                         await _manifest.UpsertAsync(entry);
+                        InvalidateModelInventory();
                     }
                 }
 
                 IReadOnlyList<HfTreeEntry>? tree;
                 var revision = "main";
+                HfModelCard? card = null;
+                string? authorAvatarUrl = null;
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    var card = await _hf.GetModelCardAsync(group.Key, cts.Token);
+                    LogNetwork($"Hugging Face repository and revision resolution started: repo={group.Key}");
+                    card = await _hf.GetModelCardAsync(group.Key, cts.Token);
                     revision = !string.IsNullOrWhiteSpace(card?.Sha) ? card.Sha : "main";
                     tree = await _hf.GetTreeAsync(group.Key, revision, cts.Token);
+                    if (card is not null)
+                        authorAvatarUrl = await _hf.GetAuthorAvatarUrlAsync(ResolveHfPublisher(group.Key, card.Author), cts.Token);
+                    LogNetwork($"Hugging Face repository and revision resolution completed: repo={group.Key} revision={revision} card={(card is not null ? "available" : "unavailable")} tree={(tree is not null ? "available" : "unavailable")} avatar={(authorAvatarUrl is not null ? "available" : "unavailable")}");
                 }
-                catch
+                catch (Exception ex)
                 {
                     tree = null;
+                    LogNetwork($"Hugging Face repository and revision resolution failed: repo={group.Key} error={ex.GetType().Name}", RuntimeLogLevel.Warning);
                 }
 
                 foreach (var (item, entry) in group)
@@ -804,6 +1283,15 @@ public partial class ModelManagementViewModel : ObservableObject
                     item.UpdateStatus = result.Status;
                     entry.LastCheckedAtUtc = DateTime.UtcNow;
                     entry.NoLongerPublished = result.Status == ModelUpdateStatus.NoLongerPublished;
+                    if (result.Status == ModelUpdateStatus.UpToDate
+                        && HuggingFaceArtworkService.IsImmutableRevision(revision))
+                    {
+                        // Older manifest entries may have a verified file hash but
+                        // no immutable revision. A successful tree comparison is
+                        // the evidence that closes that provenance gap and lets the
+                        // decoration cache use the same revision safely.
+                        entry.RevisionSha = revision;
+                    }
                     if (result.Status == ModelUpdateStatus.UpdateAvailable && result.MatchedEntry is not null)
                     {
                         entry.PendingSha256 = result.MatchedEntry.LfsSha256;
@@ -818,7 +1306,34 @@ public partial class ModelManagementViewModel : ObservableObject
                     }
                     ApplyCompanionState(item, entry);
                     await _manifest.UpsertAsync(entry);
+                    InvalidateModelInventory();
                     item.IsCheckingUpdate = false;
+                }
+
+                // Update Check already has the exact repository card and tree
+                // for this group. Backfill optional artwork only when the
+                // installed file's manifest pins that same immutable revision;
+                // never use the current branch to decorate an older model.
+                if (card is not null && tree is not null)
+                {
+                    var artworkItems = group
+                        .Where(candidate => string.Equals(candidate.Entry.RevisionSha, revision, StringComparison.OrdinalIgnoreCase)
+                            && IsVerifiedManifest(candidate.Entry)
+                            && !candidate.Item.HasCustomAvatar
+                            && !candidate.Item.HasArtworkForDisplay)
+                        .Select(candidate => candidate.Item)
+                        .ToList();
+                    var revisionMatches = group.Count(candidate => string.Equals(candidate.Entry.RevisionSha, revision, StringComparison.OrdinalIgnoreCase));
+                    var verifiedManifests = group.Count(candidate => IsVerifiedManifest(candidate.Entry));
+                    var withoutCustomAvatars = group.Count(candidate => !candidate.Item.HasCustomAvatar);
+                    var withoutDisplayedArtwork = group.Count(candidate => !candidate.Item.HasArtworkForDisplay);
+                    LogNetwork($"Hugging Face artwork declaration gate evaluated: repo={group.Key} revision={revision} card=available tree=available eligible-models={artworkItems.Count} candidates={group.Count()} revision-matches={revisionMatches} verified-manifests={verifiedManifests} without-custom-avatar={withoutCustomAvatars} without-displayed-artwork={withoutDisplayedArtwork}");
+                    if (artworkItems.Count > 0)
+                        await BackfillArtworkAsync(group.Key, card, tree, revision, artworkItems, authorAvatarUrl);
+                }
+                else
+                {
+                    LogNetwork($"Hugging Face artwork declaration gate stopped: repo={group.Key} revision={revision} card={(card is null ? "unavailable" : "available")} tree={(tree is null ? "unavailable" : "available")}", RuntimeLogLevel.Warning);
                 }
             }
 
@@ -836,6 +1351,82 @@ public partial class ModelManagementViewModel : ObservableObject
         {
             IsCheckingUpdates = false;
         }
+    }
+
+    private async Task BackfillArtworkAsync(
+        string repoId,
+        HfModelCard card,
+        IReadOnlyList<HfTreeEntry> tree,
+        string revision,
+        IReadOnlyList<ModelProfileItemViewModel> items,
+        string? authorAvatarUrl)
+    {
+        try
+        {
+            LogNetwork($"Hugging Face artwork backfill started: repo={repoId} revision={revision} models={items.Count}");
+            var result = await _artwork.FetchAsync(
+                repoId,
+                card,
+                tree,
+                HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)),
+                authorAvatarUrl);
+            foreach (var item in items)
+            {
+                if (!item.HasCustomAvatar && !item.HasArtworkForDisplay)
+                    item.ApplyArtwork(result.CachePath, result.State, result.FailureCode, revision,
+                        result.EffectiveSourceKind);
+            }
+
+            RecordArtworkOutcome(repoId, revision, result);
+            LogNetwork($"Hugging Face artwork model-card binding completed: repo={repoId} revision={revision} source={result.EffectiveSourceKind} state={result.State} path={(result.CachePath is null ? "none" : "available")}");
+        }
+        catch (Exception ex)
+        {
+            // Artwork is decoration. A failed backfill must never turn a
+            // completed update check into a failed model-management action.
+            RecordArtworkFailure(repoId, revision, ex);
+            LogNetwork($"Hugging Face artwork backfill failed after acquisition attempt: repo={repoId} revision={revision} error={ex.GetType().Name}", RuntimeLogLevel.Warning);
+        }
+    }
+
+    private void LogNetwork(string message, RuntimeLogLevel level = RuntimeLogLevel.Info) =>
+        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, level, RuntimeLogCategory.Network, message));
+
+    private void RecordArtworkOutcome(string repoId, string revision, HfArtworkResult result)
+    {
+        if (result.State == HfArtworkState.Available)
+            return;
+
+        var key = $"{repoId}\n{revision}\n{result.State}\n{result.FailureCode}";
+        lock (_artworkReportLock)
+        {
+            if (!_reportedArtworkOutcomes.Add(key))
+                return;
+        }
+
+        var outcome = result.State == HfArtworkState.NoDeclaredArtwork
+            ? ActivityOutcome.Partial
+            : ActivityOutcome.Failed;
+        var title = result.EffectiveSourceKind == HfArtworkSourceKind.HuggingFaceAuthorAvatar
+            ? "Publisher avatar fallback unavailable"
+            : result.State == HfArtworkState.NoDeclaredArtwork
+                ? "No artwork available"
+                : "Repository-declared artwork unavailable";
+        _activity.RecordSafe("models.artwork", repoId, outcome, title,
+            $"source={result.EffectiveSourceKind} state={result.State}:{result.FailureCode} rev={revision}");
+    }
+
+    private void RecordArtworkFailure(string repoId, string revision, Exception exception)
+    {
+        var key = $"{repoId}\n{revision}\nexception\n{exception.GetType().Name}";
+        lock (_artworkReportLock)
+        {
+            if (!_reportedArtworkOutcomes.Add(key))
+                return;
+        }
+
+        _activity.RecordSafe("models.artwork", repoId, ActivityOutcome.Failed,
+            "Repository artwork unavailable", $"Unavailable:{exception.GetType().Name} rev={revision}");
     }
 
     private static async Task<string> ComputeSha256Async(string path)
@@ -858,6 +1449,9 @@ public partial class ModelManagementViewModel : ObservableObject
             ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
             : layout.ModelsDirectory;
     }
+
+    private void InvalidateModelInventory() =>
+        _inventory.Invalidate(_settings.Settings.DataManagement.LocalAiAssetsRoot);
 
     private static string CompanionRole(ModelFileRole role) => role switch
     {
@@ -965,6 +1559,7 @@ public partial class ModelManagementViewModel : ObservableObject
         primary.Companions = known;
         primary.RevisionSha = revision;
         await _manifest.UpsertAsync(primary, ct);
+        InvalidateModelInventory();
 
         var updated = 0;
         var missing = 0;
@@ -977,7 +1572,7 @@ public partial class ModelManagementViewModel : ObservableObject
             if (companion.RequiresUserConfirmation)
             {
                 missing++;
-                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} has no verified compatibility evidence; browse or clear the {CompanionRoleLabel(companion.Role)} in Services.");
+                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} has no verified compatibility evidence; browse or clear the {CompanionRoleLabelForDisplay(companion.Role)} in Services.");
                 continue;
             }
 
@@ -1016,6 +1611,7 @@ public partial class ModelManagementViewModel : ObservableObject
             updated++;
         }
 
+        InvalidateModelInventory();
         return (updated, missing, messages.Count == 0 ? null : string.Join("; ", messages));
     }
 
@@ -1120,6 +1716,7 @@ public partial class ModelManagementViewModel : ObservableObject
             entry.PendingSizeBytes = null;
             entry.RecordedAtUtc = DateTime.UtcNow;
             await _manifest.UpsertAsync(entry);
+            InvalidateModelInventory();
 
             (int Updated, int Missing, string? Message)? companionResult = null;
             if (item.AutoManageCompanionAssets)
@@ -1207,9 +1804,10 @@ public partial class ModelManagementViewModel : ObservableObject
         try { previousCts?.Cancel(); }
         catch (ObjectDisposedException) { }
         previousCts?.Dispose();
+        var generation = Interlocked.Increment(ref _hfSelectionGeneration);
         try
         {
-            await SelectHfRepoCoreAsync(repo, selectionCts.Token);
+            await SelectHfRepoCoreAsync(repo, selectionCts.Token, generation);
         }
         finally
         {
@@ -1220,13 +1818,15 @@ public partial class ModelManagementViewModel : ObservableObject
 
     private void CancelHfSelection()
     {
+        Interlocked.Increment(ref _hfSelectionGeneration);
         try { _hfSelectionCts?.Cancel(); }
         catch (ObjectDisposedException) { }
     }
 
-    private async Task SelectHfRepoCoreAsync(HfRepoResultViewModel repo, CancellationToken ct)
+    private async Task SelectHfRepoCoreAsync(HfRepoResultViewModel repo, CancellationToken ct, long generation)
     {
         SelectedHfRepo = repo;
+        repo.SetArtworkLoading();
         HfFiles.Clear();
         IsLoadingHfFiles = true;
         HfBrowserStatus = $"Checking {repo.RepoId} and calculating fit...";
@@ -1240,12 +1840,29 @@ public partial class ModelManagementViewModel : ObservableObject
             var tree = await _hf.GetTreeAsync(repo.RepoId, revision, ct);
             ct.ThrowIfCancellationRequested();
             repo.License = card?.License ?? "unknown";
+            var authorAvatarUrl = card is null
+                ? null
+                : await _hf.GetAuthorAvatarUrlAsync(ResolveHfPublisher(repo.RepoId, card.Author), ct);
+            ct.ThrowIfCancellationRequested();
 
             if (tree is null)
             {
                 HfBrowserStatus = $"Could not load the file list for {repo.RepoId}.";
                 return;
             }
+
+            var artworkTask = card is null
+                ? Task.FromResult(new HfArtworkResult(
+                    HfArtworkState.Invalid, null, null, null, 0, 0, 0, null,
+                    "card_unavailable", string.Empty))
+                : _artwork.FetchAsync(
+                    repo.RepoId,
+                    card,
+                    tree,
+                    HuggingFaceArtworkCache.ResolveRoot(SettingsService.ResolveDataRoot(_settings.Settings)),
+                    authorAvatarUrl,
+                    ct);
+            _ = PublishHfArtworkAsync(repo, generation, artworkTask, ct);
 
             var hardware = await _system.GetHardwareProfileAsync();
             ct.ThrowIfCancellationRequested();
@@ -1291,6 +1908,11 @@ public partial class ModelManagementViewModel : ObservableObject
                 rows[entry.Path] = row;
                 HfFiles.Add(row);
             }
+            if (repo.HasArtwork)
+            {
+                foreach (var row in HfFiles)
+                    row.ApplyArtwork(repo.ArtworkPath, repo.ArtworkState, repo.ArtworkSource);
+            }
 
             var enrichments = modelEntries.Select(async entry =>
             {
@@ -1305,7 +1927,8 @@ public partial class ModelManagementViewModel : ObservableObject
                     var setBytes = fileSet.Entries
                         .Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard)
                         .Sum(e => e.SizeBytes ?? 0);
-                    var fit = ModelFitEstimator.Estimate(setBytes, hardware);
+                    var fit = ModelFitPredictor.EstimatePreDownload(setBytes, hardware);
+                    fit = fit with { Reason = $"Pre-download estimate: {fit.Reason}" };
                     return (entry.Path, FileSet: (ModelFileSet?)fileSet, Fit: (ModelFitResult?)fit, Error: (string?)null);
                 }
                 catch (OperationCanceledException)
@@ -1360,6 +1983,40 @@ public partial class ModelManagementViewModel : ObservableObject
             IsLoadingHfFiles = false;
         }
     }
+
+    private async Task PublishHfArtworkAsync(
+        HfRepoResultViewModel repo,
+        long generation,
+        Task<HfArtworkResult> artworkTask,
+        CancellationToken ct)
+    {
+        try
+        {
+            await Task.Yield();
+            var result = await artworkTask;
+            ct.ThrowIfCancellationRequested();
+            if (!IsCurrentHfSelection(repo, generation))
+                return;
+            repo.ApplyArtwork(result);
+            foreach (var file in HfFiles)
+                file.ApplyArtwork(result);
+            RecordArtworkOutcome(repo.RepoId, repo.RevisionSha, result);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (IsCurrentHfSelection(repo, generation))
+            {
+                repo.ApplyArtwork(new HfArtworkResult(
+                    HfArtworkState.Unavailable, null, null, null, 0, 0, 0, null,
+                    "artwork_error", string.Empty));
+                RecordArtworkFailure(repo.RepoId, repo.RevisionSha, ex);
+            }
+        }
+    }
+
+    private bool IsCurrentHfSelection(HfRepoResultViewModel repo, long generation) =>
+        ReferenceEquals(SelectedHfRepo, repo) && Interlocked.Read(ref _hfSelectionGeneration) == generation;
 
     [RelayCommand]
     private async Task DownloadHfFileAsync(HfFileResultViewModel? file)
@@ -1539,11 +2196,66 @@ public sealed partial class HfRepoResultViewModel : ObservableObject
     public long Downloads { get; }
     [ObservableProperty] private string _revisionSha = string.Empty;
     [ObservableProperty] private string _license = string.Empty;
+    [ObservableProperty] private HfArtworkState _artworkState = HfArtworkState.NoDeclaredArtwork;
+    [ObservableProperty] private string? _artworkPath;
+    [ObservableProperty] private string _artworkFailureCode = string.Empty;
+    [ObservableProperty] private HfArtworkSourceKind _artworkSource;
+
+    public bool HasArtwork => !string.IsNullOrWhiteSpace(ArtworkPath);
+    public string ArtworkSourceLabel => ArtworkSource switch
+    {
+        HfArtworkSourceKind.RepositoryFile or HfArtworkSourceKind.HuggingFaceSocialThumbnail => "Repository-declared artwork",
+        HfArtworkSourceKind.HuggingFaceAuthorAvatar => "Publisher avatar fallback",
+        _ => "No artwork available"
+    };
+    public string ArtworkTooltip =>
+        HasArtwork
+            ? $"{ArtworkSourceLabel} from Hugging Face: {RepoId}, revision {RevisionSha}."
+            : $"{ArtworkSourceLabel}: {ArtworkState}.";
 
     public HfRepoResultViewModel(string repoId, long downloads)
     {
         RepoId = repoId;
         Downloads = downloads;
+    }
+
+    public void SetArtworkLoading()
+    {
+        ArtworkPath = null;
+        ArtworkState = HfArtworkState.Loading;
+        ArtworkFailureCode = string.Empty;
+        ArtworkSource = HfArtworkSourceKind.None;
+    }
+
+    public void ApplyArtwork(HfArtworkResult result)
+    {
+        ArtworkPath = result.CachePath;
+        ArtworkState = result.State;
+        ArtworkFailureCode = result.FailureCode;
+        ArtworkSource = result.EffectiveSourceKind;
+        OnPropertyChanged(nameof(HasArtwork));
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
+    public void ApplyArtwork(string? path, HfArtworkState state, HfArtworkSourceKind source = HfArtworkSourceKind.None)
+    {
+        ArtworkPath = path;
+        ArtworkState = state;
+        ArtworkSource = source;
+    }
+
+    partial void OnArtworkPathChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasArtwork));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
+    partial void OnArtworkStateChanged(HfArtworkState value) => OnPropertyChanged(nameof(ArtworkTooltip));
+    partial void OnArtworkSourceChanged(HfArtworkSourceKind value)
+    {
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
     }
 }
 
@@ -1569,6 +2281,9 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     [ObservableProperty] private bool _isDownloading;
     [ObservableProperty] private double _downloadPercent;
     [ObservableProperty] private HfDownloadState _downloadState = HfDownloadState.NotDownloaded;
+    [ObservableProperty] private HfArtworkState _artworkState = HfArtworkState.NoDeclaredArtwork;
+    [ObservableProperty] private string? _artworkPath;
+    [ObservableProperty] private HfArtworkSourceKind _artworkSource;
     public string DownloadStateLabel => DownloadState switch
     {
         HfDownloadState.Downloaded => "On disk",
@@ -1576,6 +2291,17 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         HfDownloadState.Downloading => $"Downloading {DownloadPercent:F0}%",
         _ => "Download"
     };
+    public bool HasArtwork => !string.IsNullOrWhiteSpace(ArtworkPath);
+    public string ArtworkSourceLabel => ArtworkSource switch
+    {
+        HfArtworkSourceKind.RepositoryFile or HfArtworkSourceKind.HuggingFaceSocialThumbnail => "Repository-declared artwork",
+        HfArtworkSourceKind.HuggingFaceAuthorAvatar => "Publisher avatar fallback",
+        _ => "No artwork available"
+    };
+    public string ArtworkTooltip =>
+        HasArtwork
+            ? $"{ArtworkSourceLabel} from Hugging Face: {RepoId}, revision {RevisionSha}."
+            : $"{ArtworkSourceLabel}: {ArtworkState}.";
     partial void OnDownloadStateChanged(HfDownloadState value)
     {
         OnPropertyChanged(nameof(DownloadStateLabel));
@@ -1738,6 +2464,36 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         OnPropertyChanged(nameof(FitLabel));
     }
 
+    public void ApplyArtwork(HfArtworkResult result)
+    {
+        ArtworkPath = result.CachePath;
+        ArtworkState = result.State;
+        ArtworkSource = result.EffectiveSourceKind;
+        OnPropertyChanged(nameof(HasArtwork));
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
+    public void ApplyArtwork(string? path, HfArtworkState state, HfArtworkSourceKind source = HfArtworkSourceKind.None)
+    {
+        ArtworkPath = path;
+        ArtworkState = state;
+        ArtworkSource = source;
+    }
+
+    partial void OnArtworkPathChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasArtwork));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
+    partial void OnArtworkStateChanged(HfArtworkState value) => OnPropertyChanged(nameof(ArtworkTooltip));
+    partial void OnArtworkSourceChanged(HfArtworkSourceKind value)
+    {
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
     private void NotifyResolvedSetChanged()
     {
         OnPropertyChanged(nameof(IsSharded));
@@ -1751,6 +2507,75 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         OnPropertyChanged(nameof(CompanionReviewLabel));
         OnPropertyChanged(nameof(SetSummary));
         OnPropertyChanged(nameof(SelectedBytes));
+    }
+}
+
+public enum ModelCatalogRole
+{
+    Unknown,
+    ChatGeneration,
+    Embedding,
+    Reranker,
+    Companion
+}
+
+public sealed class ModelCatalogSectionViewModel(string title)
+{
+    public string Title { get; } = title;
+    public UiBoundCollection<ModelProfileItemViewModel> Models { get; } = [];
+}
+
+public sealed class ModelCompanionViewModel
+{
+    public string ModelId { get; }
+    public string LocalFilePath { get; }
+    public string FileName { get; }
+    public string RoleLabel { get; }
+    public string StateLabel { get; }
+    public string StateTooltip { get; }
+    public bool CanClear => !string.IsNullOrWhiteSpace(LocalFilePath);
+
+    public ModelCompanionViewModel(ModelCompanionManifestEntry companion, string modelId = "")
+    {
+        ModelId = modelId;
+        LocalFilePath = companion.LocalFilePath;
+        FileName = Path.GetFileName(LocalFilePath);
+        RoleLabel = ModelManagementViewModel.CompanionRoleLabelForDisplay(companion.Role);
+        var exists = false;
+        var sizeMatches = false;
+        try
+        {
+            var file = new FileInfo(companion.LocalFilePath);
+            exists = file.Exists;
+            sizeMatches = exists && companion.SizeBytes is > 0 && file.Length == companion.SizeBytes.Value;
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+
+        if (!exists)
+        {
+            StateLabel = companion.RequiresUserConfirmation ? "Unknown" : "Missing";
+            StateTooltip = companion.RequiresUserConfirmation
+                ? "The companion mapping requires review, so absence is not classified as a confirmed missing asset."
+                : "The linked companion file is not present at its recorded local path.";
+        }
+        else if (companion.SizeBytes is > 0 && !sizeMatches)
+        {
+            StateLabel = "Stale";
+            StateTooltip = "The file exists, but its size differs from the trusted manifest. Its current content hash was not inferred.";
+        }
+        else if (companion.SizeBytes is > 0)
+        {
+            StateLabel = "Present";
+            StateTooltip = companion.RequiresUserConfirmation
+                ? "The file is present, but compatibility evidence still requires review."
+                : "The file exists with the size recorded by the trusted manifest. Current content was not re-hashed during this refresh.";
+        }
+        else
+        {
+            StateLabel = "Unknown";
+            StateTooltip = "The file exists, but the manifest has no usable size evidence for a stronger state.";
+        }
     }
 }
 
@@ -1803,6 +2628,59 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private bool _isVisible;
     [ObservableProperty] private string _avatar;
     [ObservableProperty] private bool _autoManageCompanionAssets;
+    [ObservableProperty] private HfArtworkState _artworkState = HfArtworkState.Unavailable;
+    [ObservableProperty] private string? _artworkPath;
+    [ObservableProperty] private string _artworkFailureCode = string.Empty;
+    [ObservableProperty] private HfArtworkSourceKind _artworkSource;
+
+    private GgufModelInfo? _ggufInfo;
+    private ModelCatalogRole _catalogRole = ModelCatalogRole.Unknown;
+    public ModelCatalogRole CatalogRole => _catalogRole;
+    public string RoleLabel => _catalogRole switch
+    {
+        ModelCatalogRole.ChatGeneration => "Chat & Generation",
+        ModelCatalogRole.Embedding => "Embeddings",
+        ModelCatalogRole.Reranker => "Reranker",
+        ModelCatalogRole.Companion => "Companion",
+        _ => "Unknown role"
+    };
+    [ObservableProperty] private string _capabilityBadges = string.Empty;
+    public string CompanionSearchText => string.Join(" ", Companions.Select(companion =>
+        $"{companion.FileName} {companion.RoleLabel} {companion.StateLabel}"));
+    public UiBoundCollection<ModelCompanionViewModel> Companions { get; } = [];
+    public bool HasCompanionDetails => Companions.Count > 0;
+    public bool HasUnknownCompanions => Companions.Any(companion => companion.StateLabel == "Unknown");
+    public bool HasReviewableCompanions => Companions.Any(companion => companion.StateLabel is "Missing" or "Stale" or "Unknown");
+    public string CompanionSummary => !HasCompanionDetails
+        ? string.Empty
+        : $"Companions: {string.Join(", ", Companions.GroupBy(c => c.StateLabel).OrderBy(g => g.Key).Select(g => $"{g.Count()} {g.Key.ToLowerInvariant()}"))}";
+
+    public bool HasCustomAvatar => !string.IsNullOrWhiteSpace(Avatar);
+    public bool HasArtworkForDisplay => !HasCustomAvatar && !string.IsNullOrWhiteSpace(ArtworkPath);
+    public bool ShowArtworkFallback => !HasCustomAvatar && !HasArtworkForDisplay;
+    public string ArtworkFallbackGlyph => _catalogRole switch
+    {
+        ModelCatalogRole.Embedding => "E",
+        ModelCatalogRole.Reranker => "R",
+        ModelCatalogRole.Companion => "C",
+        _ => "AI"
+    };
+    public string ArtworkSourceLabel => ArtworkSource switch
+    {
+        HfArtworkSourceKind.RepositoryFile or HfArtworkSourceKind.HuggingFaceSocialThumbnail => "Repository-declared artwork",
+        HfArtworkSourceKind.HuggingFaceAuthorAvatar => "Publisher avatar fallback",
+        _ => "No artwork available"
+    };
+    public string ArtworkTooltip =>
+        HasArtworkForDisplay
+            ? $"{ArtworkSourceLabel} from Hugging Face: {RepoId}, revision {ArtworkRevision}."
+            : HasCustomAvatar ? "Custom model avatar."
+            : ArtworkState == HfArtworkState.NoDeclaredArtwork && ArtworkSource == HfArtworkSourceKind.None
+                ? "No artwork is available for this Hugging Face repository."
+                : ArtworkState == HfArtworkState.Unavailable && !string.IsNullOrWhiteSpace(ArtworkFailureCode)
+                    ? $"Hugging Face artwork is unavailable ({ArtworkFailureCode})."
+                    : "No verified repository artwork cached.";
+    private string ArtworkRevision { get; set; } = string.Empty;
 
     [ObservableProperty] private bool _hasMissingCompanions;
     [ObservableProperty] private bool _hasStaleCompanions;
@@ -1839,6 +2717,9 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private int _tunedContextSize;
 
     public bool HasTuneProfile => _tuneProfile is not null;
+    public string TunedGpuLayersDisplay => _tuneProfile?.TotalLayers is int total
+        ? $"{TunedGpuLayers}/{total} GPU layers"
+        : $"{TunedGpuLayers} GPU layers";
     public string TuneProfileContextWatermark => _tuneProfile is null
         ? "No saved tune"
         : "Saved context";
@@ -1850,6 +2731,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         TunedThreads = profile?.Threads ?? 0;
         TunedContextSize = profile?.ContextSize ?? 0;
         OnPropertyChanged(nameof(HasTuneProfile));
+        OnPropertyChanged(nameof(TunedGpuLayersDisplay));
         OnPropertyChanged(nameof(TuneProfileContextWatermark));
     }
 
@@ -1951,12 +2833,110 @@ public partial class ModelProfileItemViewModel : ObservableObject
         OnPropertyChanged(nameof(SourceTooltip));
         OnPropertyChanged(nameof(HasKnownSource));
     }
+    partial void OnAvatarChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasCustomAvatar));
+        OnPropertyChanged(nameof(HasArtworkForDisplay));
+        OnPropertyChanged(nameof(ShowArtworkFallback));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
+    public void ApplyArtwork(
+        string? path,
+        HfArtworkState state,
+        string failureCode,
+        string revisionSha = "",
+        HfArtworkSourceKind source = HfArtworkSourceKind.None)
+    {
+        ArtworkPath = path;
+        ArtworkState = state;
+        ArtworkFailureCode = failureCode;
+        ArtworkRevision = revisionSha;
+        ArtworkSource = source;
+        OnPropertyChanged(nameof(HasArtworkForDisplay));
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
+    partial void OnArtworkPathChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasArtworkForDisplay));
+        OnPropertyChanged(nameof(ShowArtworkFallback));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
+
+    partial void OnArtworkStateChanged(HfArtworkState value) => OnPropertyChanged(nameof(ArtworkTooltip));
+    partial void OnArtworkSourceChanged(HfArtworkSourceKind value)
+    {
+        OnPropertyChanged(nameof(ArtworkSourceLabel));
+        OnPropertyChanged(nameof(ArtworkTooltip));
+    }
     [ObservableProperty] private ModelUpdateStatus _updateStatus = ModelUpdateStatus.NotLinked;
     [ObservableProperty] private bool _isCheckingUpdate;
     [ObservableProperty] private bool _isUpdating;
     [ObservableProperty] private bool _retuneRecommended;
 
     public bool HasRepoLink => !string.IsNullOrWhiteSpace(RepoId);
+
+    public string CatalogSearchText => $"{RoleLabel} {CapabilityBadges} {CompanionSearchText}";
+
+    public void ApplyCatalogClassification(
+        ModelCatalogRole role,
+        GgufModelInfo? info,
+        ModelManifestEntry? manifest)
+    {
+        _catalogRole = role;
+        _ggufInfo = info;
+        RebuildCapabilityBadges(manifest);
+        ApplyCompanionDetails(manifest);
+        OnPropertyChanged(nameof(CatalogRole));
+        OnPropertyChanged(nameof(RoleLabel));
+        OnPropertyChanged(nameof(ArtworkFallbackGlyph));
+        OnPropertyChanged(nameof(CatalogSearchText));
+    }
+
+    public void ApplyCompanionDetails(ModelManifestEntry? manifest)
+    {
+        Companions.Clear();
+        if (manifest is not null)
+        {
+            foreach (var companion in manifest.Companions.Where(c => !string.IsNullOrWhiteSpace(c.LocalFilePath)))
+                Companions.Add(new ModelCompanionViewModel(companion, ModelId));
+        }
+
+        OnPropertyChanged(nameof(HasCompanionDetails));
+        OnPropertyChanged(nameof(HasUnknownCompanions));
+        OnPropertyChanged(nameof(HasReviewableCompanions));
+        OnPropertyChanged(nameof(CompanionSummary));
+        OnPropertyChanged(nameof(CompanionSearchText));
+        OnPropertyChanged(nameof(CatalogSearchText));
+    }
+
+    private void RebuildCapabilityBadges(ModelManifestEntry? manifest)
+    {
+        var badges = new List<string>();
+        if (_ggufInfo?.ExpertCount is > 0 || _ggufInfo?.GeneralType.Contains("moe", StringComparison.OrdinalIgnoreCase) == true)
+            badges.Add("MoE");
+        if (_ggufInfo?.NextnPredictLayers is > 0 || manifest?.Companions.Any(c =>
+                string.Equals(c.Role, "draft_head", StringComparison.OrdinalIgnoreCase)) == true)
+            badges.Add("MTP");
+        if (_ggufInfo?.NextnPredictLayers is > 0)
+            badges.Add("Draft");
+        if (manifest?.Companions.Any(c => string.Equals(c.Role, "projector", StringComparison.OrdinalIgnoreCase)) == true
+            || IsKnownVisionArchitecture(_ggufInfo?.Architecture))
+            badges.Add("Vision / Projector");
+        if (_catalogRole == ModelCatalogRole.Embedding)
+            badges.Add("Embedding");
+        if (_catalogRole == ModelCatalogRole.Reranker)
+            badges.Add("Reranker");
+        CapabilityBadges = string.Join(" · ", badges.Distinct(StringComparer.Ordinal));
+    }
+
+    private static bool IsKnownVisionArchitecture(string? architecture) =>
+        architecture?.Trim().ToLowerInvariant() is
+            "gemma3" or "gemma4" or "llama4" or "qwen2vl" or "qwen2_5_vl"
+            or "qwen2.5_vl" or "mllama" or "pixtral" or "minicpmv"
+            or "internvl" or "smolvlm" or "molmo" or "phi3v";
 
     /// <summary>Empty for NotLinked/CheckFailed so the UI shows nothing rather than a
     /// permanently-stuck error chip; CheckFailed is surfaced via the page-level status line

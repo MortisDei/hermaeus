@@ -199,6 +199,23 @@ public sealed class GgufMetadataReaderTests
     }
 
     [Fact]
+    public void Mixture_of_experts_and_nextn_metadata_are_read_as_capability_facts()
+    {
+        using var temp = new TempDir();
+        var w = new GgufWriter().Magic().Header(3, tensorCount: 0, kvCount: 3)
+            .StringValue("general.architecture", "mixtral")
+            .U32Value("mixtral.expert_count", 8)
+            .U32Value("mixtral.expert_used_count", 2);
+        var path = w.WriteToTempFile(temp, "moe.gguf");
+
+        var info = GgufMetadataReader.TryRead(path);
+
+        Assert.NotNull(info);
+        Assert.Equal(8, info!.ExpertCount);
+        Assert.Equal(2, info.ExpertUsedCount);
+    }
+
+    [Fact]
     public void Unknown_key_values_are_skipped_including_string_arrays_so_later_keys_are_still_reached()
     {
         using var temp = new TempDir();

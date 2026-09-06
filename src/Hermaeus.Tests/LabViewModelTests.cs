@@ -26,6 +26,20 @@ public sealed class LabViewModelTests
         Assert.False(vm.RunSelectedRecipeCommand.CanExecute(null));
     }
 
+    [Fact]
+    public void Lab_keeps_execution_and_source_restore_outcomes_separate()
+    {
+        using var temp = new TempDir();
+        var (_, vm) = Build(temp);
+
+        vm.RunStatus = "Succeeded";
+        vm.RestoreStatus = "Failed: source runtime did not return to Running state.";
+
+        Assert.Equal("Succeeded", vm.RunStatus);
+        Assert.Equal("Failed: source runtime did not return to Running state.", vm.RestoreStatus);
+        Assert.True(vm.HasRestoreFailure);
+    }
+
     private static (SqliteEmpiricalExperienceStore Store, LabViewModel ViewModel) Build(TempDir temp)
     {
         var settings = Helpers.NewSettings(temp);

@@ -33,23 +33,45 @@ for Knowledge behavior in Chat.
 
 - Models manages local GGUF files, provider-discovered models, model profiles,
   sampling defaults, visibility, tags, source provenance, updates, deletion,
-  and hardware-fit information. A saved auto-tune profile is shown directly on
-  the model card with its GPU layers, threads, and context. Opening the model
+  and hardware-fit information. Its bounded Services-owned inventory rechecks
+  file identity and reuses GGUF metadata until an explicit invalidation or a
+  file change. The primary model metadata/status row keeps role, capability,
+  size, fit, and update items inside the card and reflows whole items when the
+  card is narrow. A saved auto-tune profile is shown separately on the model
+  card with GPU layer, thread, and context fields. Opening the model
   configuration also hydrates the editable saved tune values from that shared
   profile; saving them remains separate from the runtime Save Config action on
   Services.
+- The Models catalog is organized into **Chat & Generation**, **Embeddings**,
+  and **Rerankers**. Role sections come from provider configuration, dedicated
+  asset layout, GGUF metadata, and trusted manifest provenance. Factual badges
+  such as MoE, MTP, Draft, and Vision / Projector remain separate from
+  configured or ready state. Proven companions stay owned by their primary
+  model card with Present, Missing, Stale, or Unknown detail; they do not
+  become standalone cards merely because they are GGUF-like files. Search
+  covers roles, capabilities, tags, and companion state.
 - Services manages local runtime processes and files. Managed `llama.cpp`,
   Ollama, and OpenAI-compatible profiles are supported, with explicit
   localhost, model, port, and launch configuration.
 - Data-root changes use an explicit confirmation and the existing safe
-  migration boundary. Ordinary Settings autosave does not move an existing
+  migration boundary. The Data Storage page distinguishes the configured root
+  from the root currently effective for composed stores and tells the user to
+  restart after a change. Startup migration verifies copied file length and
+  SHA256 before committing the new root and records a retryable receipt on
+  failure. Ordinary Settings autosave does not move an existing
   workspace, and llama.cpp pruning only deletes validated owned superseded
-  version directories while protecting the selected runtime.
+  version directories while protecting the selected runtime. Persisted caches
+  and state resolve beneath the effective root; selecting a root requires a
+  bounded write check, and cache-write failures remain visible instead of being
+  reported as successful persistence.
 - Managed llama.cpp update and recovery honor explicit backend choices. Auto is
   re-evaluated from current hardware when installation is required, may use a
   compatible accelerated fallback, and records the selected backend separately
   from the still-Auto preference. Missing or unlaunchable GPU backends are
   refused instead of silently becoming CPU.
+  Update identity uses the verified upstream b-numbered release tag and
+  SHA256-checked archive, with `--version` output captured from both stdout and
+  stderr. Help text or a zero exit code alone never proves build identity.
   Known upstream archive wrapper directories are removed at the owned version
   boundary, while flat upstream packages are accepted as well; mixed layouts
   fail closed and legacy nested installations remain discoverable and protected.
@@ -57,7 +79,9 @@ for Knowledge behavior in Chat.
   Attention, context shift, CPU-MoE placement, vision projectors, and
   capability-gated speculative decoding. Unsupported or unproven runtime
   features stay `Unknown` or `Unavailable`; Hermaeus does not guess from a
-  filename or a generic flag.
+  filename or a generic flag. Doctor recognizes GPU backend shared libraries
+  on Windows and Linux, and reports installed runtime identity separately from
+  an unavailable latest-release comparison.
 - Nested scroll surfaces give the wheel to the content under the pointer and
   bubble to a page only when that content reaches its edge. Horizontal wheel
   input is retained where a pane provides horizontal overflow.
@@ -69,10 +93,48 @@ for Knowledge behavior in Chat.
   projectors, and MTP companions are handled as a model file set when their
   relationship is proven. Ambiguous companions require review, and removing
   known companions is an explicit Keep, Remove, or Cancel choice.
+- Hugging Face repository artwork is optional decoration only. It is read from
+  the selected card's bounded `thumbnail` declaration in `cardData` or
+  normalized root metadata, pinned to the exact repository revision and tree
+  when it names a repository file, fetched only
+  through the reviewed Hugging Face host and delivery-host policy, and
+  independently checked for MIME, magic, format, animation, dimensions, and
+  size before Avalonia decode. When no repository declaration exists, the
+  verified publisher/organization avatar may be used as an explicit fallback;
+  its provenance remains distinct from repository-declared artwork. The
+  artwork cache is bounded, LRU-evictable, content-addressed for safe byte
+  reuse, excluded from Data Root backups, and has a separate Clear action. A
+  model update check may backfill either source when its verified manifest
+  revision matches the fetched card and tree; decoration failures never fail
+  the update check.
 - GPU Fit is a deterministic prediction over the current editor values. It
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are
   separate and comparable only under a compatible fingerprint.
+- System Overview shows the current whole-workload resource snapshot: registered
+  Chat, embeddings, Lab, voice, and in-process consumers; predicted or observed
+  device and system allocations; whole-device totals; and explicit evidence
+  states. Active values identify observed or planned bytes, while missing
+  component attribution, not-resident consumers, and lazy consumers remain
+  distinct. Whole-device totals are not assigned to a process or component.
+  It also shows recent release receipts with the caller's reason.
+  Services shows the admission receipt for each managed start.
+  Admission uses short-lived reservations to prevent concurrent approvals from
+  relying on the same stale headroom. It never stops, unloads, or changes
+  another consumer, and Unknown is never treated as zero.
+- Managed servers have an opt-in adaptive launch envelope. Fixed is the
+  default, Advise plans without launching, and AdaptAtLaunch may try only a
+  bounded single-axis GPU-layer, context, KV, or known MoE compromise that the
+  saved envelope allows. Each attempt uses fresh whole-workload admission and
+  an auditable structured runtime observation; Unknown effective placement or
+  context stops adaptive launch, and no transient candidate is written back to
+  saved settings. A recent compatible successful launch may be preferred only
+  when its exact runtime, model, hardware, base configuration, workload, and
+  bounded evidence age match; it never skips fresh admission. Unsupported fit,
+  cache, and multi-device behavior remains Unavailable or Unknown.
+- Model cards use the detailed versioned prediction when local GGUF shape
+  metadata is available. Remote or pre-download cards retain a clearly labelled
+  rough pre-download estimate until that metadata exists.
 - Settings preferences save automatically, including a pending edit flushed by
   clean shutdown. Process, model, and runtime changes retain explicit
   save/apply actions because they can affect files or running services.
@@ -87,15 +149,29 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
 - Retrieval combines planned query variants, keyword search, embeddings,
   optional ONNX reranking, structural boosts, confidence-aware refusal, and
   budget-aware context packing.
+- The pinned ONNX reranker is loaded only from verified assets. Asset changes
+  invalidate the old session cleanly, while normal ranking remains sequential;
+  a separate bounded batch diagnostic does not silently change query behavior.
 - Watched sources use cancellable drift scans. Refresh applies only new and
   changed files by default; removing missing sources remains a separate,
   explicitly confirmed action. Automatic refresh is off by default.
 - Dataset Manager exposes source and chunk health, embedding identity,
-  dimensions, missing and stale files, duplicate rows, index size, and reindex
-  state. A dataset embedded with another model falls back to keyword retrieval
-  or requires reindexing according to the operation.
+  dimensions, missing and stale files, duplicate rows, index size, reindex
+  state, and published generation history. A dataset embedded with another
+  model falls back to keyword retrieval or requires reindexing according to the
+  operation. RAG publication is atomic, and source citations retain the exact
+  generation, source revision, and content hash that supplied the chunk.
 - Chat Knowledge injection is bounded and cited. Weak retrieval adds nothing
   rather than forcing unrelated chunks into a response.
+- The RAG question panel can include an explicit combination of datasets per
+  question. Its multi-select scope is separate from the single-dataset
+  manager controls used for ingest, reindex, and evaluation.
+- On an empty RAG install, the panel can create a version-local **Hermaeus
+  Help** dataset through the normal ingestion pipeline. First-use question
+  scope is intentionally empty and asks the user to select at least one
+  dataset; later selections are persisted. Ask, Manage, Sources, and Diagnostics
+  are explicit workspace views, keeping persistent dataset administration
+  separate from per-question context selection and evidence inspection.
 - RAG has a native evaluation harness with retrieval metrics, refusal handling,
   cancellation, and export. The separate [eval harness plan](rag-eval-harness.md)
   describes proposed expansion beyond the shipped surface.
@@ -107,16 +183,33 @@ See the [RAG reference](rag.md).
 - Memories are a local, reviewable store of durable facts with categories,
   tags, scopes, importance, recall statistics, pinning, archive, expiry, and
   confirmed deletion. Pinned rows show a persistent Pinned state and an Unpin
-  action instead of relying on a transient notification.
+  action instead of relying on a transient notification, and the Memories
+  view groups pinned rows at the top. Agent workspace notes and generated
+  workspace profiles remain on the Agent surface rather than appearing as
+  ordinary memories.
 - Search blends full-text and embedding similarity when an embedding model is
-  available, with a bounded keyword fallback when it is not. Archived and
-  expired memories are excluded from search and injection.
+  available, with a bounded keyword fallback when it is not. Weak semantic
+  candidates are excluded from ordinary recall. Pinning affects prominence
+  only after relevance, so a pinned but unrelated memory is not injected.
+  Archived and expired memories are excluded from search and injection.
 - Chat can propose, update, or forget memories through bounded markers. Only a
   memory actually injected into that turn can be updated or forgotten, and
   marker syntax never reaches the persisted transcript.
 - Auto-summary extracts structured memory metadata in the background. Providers
   that can enforce the required response shape use that constraint, while the
   existing parse-and-repair fallback remains for other providers.
+- Each memory keeps a stable assertion id and immutable content revisions with
+  recorded time, optional established effective time, source references,
+  decisions, and explicit Current, Superseded, Disputed, or Archived state.
+  Current Chat receipts identify the exact revision; superseded and disputed
+  revisions are excluded from ordinary injection.
+- Memories offers a linear revision timeline with adjacent content diffs,
+  source and decision details, explicit revise/correct/dispute/restore actions,
+  and review-only contradiction proposals. A versioned redacted JSON export
+  preserves assertion, revision, effective-time, source, and decision
+  structure. The existing CSV export remains current-projection-only.
+- Background Activity is folded into the Memories surface as a collapsed,
+  refreshable section; it remains a separate trace projection and clear action.
 - Agent lessons are a separate, reviewable store. Optional read-only use of
   Global-scope lessons in Chat never changes the Agent safety gate.
 
@@ -126,7 +219,15 @@ Recall is one local search index over conversations, Agent tasks, Memories, and
 RAG chunks. Its command-palette search is distinct from RAG retrieval and
 Memory injection. Recall indexing is visible and clearable, and optional Chat
 injection is off by default. Chat traces label keyword-only Recall as degraded
-retrieval even when lexical hits are usable. See the [Recall reference](recall.md).
+retrieval even when lexical hits are usable. Incremental indexing immediately
+starts a bounded embedding backfill off the send path; failures retain a
+durable retry count and reason, retry after a delay while attempts remain, and
+surface exhausted rows as an explicit degraded state. Interactive embedding
+queries yield priority to queued optional backfill only after foreground work
+has been served. Document Recall scans the bounded storage embedding index and
+FTS candidate ids, hydrates only the combined candidate set, and returns
+calibrated source relevance rather than its tiny RRF ordering score. See the
+[Recall reference](recall.md).
 
 ## Agent Workbench
 
@@ -137,8 +238,24 @@ retrieval even when lexical hits are usable. See the [Recall reference](recall.m
   commands, MCP calls, and sub-task planning remain approval-gated and are
   classified deterministically by the safety gate.
 - The workbench exposes the current decision, live progress, plan, response,
-  changes, approvals, reservations, commands, and unfinished work. A run ledger
-  supports per-file Rewind with staleness checks.
+  changes, approvals, reservations, commands, and unfinished work. Responses
+  are selectable Markdown with an explicit copy action. Continue planned work,
+  continue with an instruction, Finish run, and Stop are distinct persisted
+  lifecycle transitions. A run ledger supports per-file Rewind with staleness
+  checks.
+- Scenario Evals supports both suite execution and an individual row Run
+  action. Those actions are disabled while definitions are loading or when no
+  model or scenario set is ready. Persisted evidence restoration runs after
+  definitions load and does not block a new run. The row action resolves
+  through the ItemsControl's owning workbench context so a visible click
+  reaches the runner.
+- Recent terminal top-level runs can be permanently deleted after confirmation,
+  including their persisted sub-task records and evidence files. Running runs
+  and direct child deletion are refused.
+- A persisted `Running` task found during startup recovery is marked
+  `Interrupted` with a reason when no execution owner is present. Child plan
+  entries are reconciled to the same state, and the task requires an explicit
+  Continue action before it can run again.
 - Workspace policy narrows paths and read budgets. Lessons inform the model
   but never widen authority. Native tool calling and constrained JSON planner
   output are alternate transport paths through the same gate.
@@ -177,11 +294,21 @@ review and confirmation owned by the Hermaeus window. The result card leads
 with the experiment, recorded model identity when available, status,
 timestamps, tested configurations, recommendation state, correctness, and
 measured or predicted resource deltas. Missing measurements remain `Unknown`.
+The Experiment card keeps the execution outcome separate from source-restore
+state and raises an explicit attention state when restoration fails or is
+blocked by a changed configuration.
 
-The Evidence surface stores typed Agent, GPU Fit, and Lab records with source
+The Evidence surface stores typed Agent, GPU Fit, Lab, and adaptive-launch records with source
 links, fingerprints, corrections, redacted export, and confirmed removal.
 Experience is descriptive evidence only. It never grants approval, changes a
 safety decision, or rewrites the analytical GPU Fit prediction.
+
+Successful auditable adaptive changes and correctness-gated Lab winners can
+produce a shared review card. The card shows current and proposed fields,
+evidence, trade-offs, target identity, and freshness. Apply and Undo are
+stale-guarded settings transactions; they never restart a running server.
+Benchmark model guidance is review-only and can be dismissed or opened in
+Models, but it never changes the selected model automatically.
 
 See the [Lab reference](lab.md).
 
@@ -203,11 +330,17 @@ See the [Benchmarks reference](benchmarks.md).
 
 Voice is optional and off by default. Native Kokoro, managed local providers,
 and remote OpenAI voice are supported, with provider-specific setup and
-configuration. Per-channel pickers use the active provider's discovered voice
-names without hardcoding a provider catalogue. Local speech recognition uses
+configuration. Per-channel pickers use an editable, unfiltered ComboBox backed
+by the active provider's discovered voice names without hardcoding a provider
+catalogue. A provider that cannot enumerate voices still accepts a manually
+entered voice id. Local speech recognition uses
 an in-process Whisper model when installed; remote transcription is explicit.
 Captured and uploaded audio is transient and is not persisted or attached to
 conversations.
+
+Native Kokoro health failures retain the provider's observed diagnosis in
+Services and link directly to Doctor. Doctor owns the verified asset repair
+action; a healthy native provider is not offered as an install action.
 
 Audio feedback is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
@@ -221,7 +354,9 @@ See the [Voice reference](voice.md).
 The setup wizard makes Data Root, AI Assets, runtime, model, and optional voice
 choices explicit. Doctor checks actual paths, executable readiness, runtimes,
 models, storage, RAG, voice, GPU, secrets, and update information. Remediation
-actions show their target and plan before a user approves them.
+actions show their target and plan before a user approves them. Ready
+informational checks do not expose a repair or navigation action; warning and
+other non-ready actions are contextual to the check.
 
 Doctor, Services, and Activity report observed state. They do not turn missing,
 unreachable, or unverified components into a false Ready state.
@@ -230,11 +365,20 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 
 ## System, Logs, Activity, and Settings
 
+- A second normal launch exits immediately when the existing per-user file
+  lock is held. It does not contact, activate, or change the existing
+  instance. The lock remains the cross-process data-safety gate; package
+  install and uninstall helpers remain separate utility launches.
+- Conversation deletion from its details flyout keeps confirmation beside the
+  initiating control. The context-menu path retains a full confirmation dialog
+  because it has no anchored details surface.
 - System shows app, operating-system, CPU, RAM, storage, database, managed
   component, and best-effort GPU information.
 - Chat telemetry can sample the currently active managed server process. Its
   process RAM and per-process GPU readings are tied to that process identity;
   missing counters remain Unknown.
+- Chat send traces retain the selected provider tag, separate first-event and
+  first-content timing, and count emitted reasoning deltas when available.
 - Activity records observed outcomes for operations such as model downloads,
   server lifecycle, ingest, backups, restores, memory sweeps, and voice.
   Artifact-specific rows open their artifact; rows without one stay inert.

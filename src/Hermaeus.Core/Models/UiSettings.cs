@@ -65,10 +65,11 @@ public class UiSettings
 
     /// <summary>
     /// Show a text label next to each icon in the top toolbar, instead of
-    /// relying on hover tooltips to discover what each icon does
+    /// relying on hover tooltips to discover what each icon does. New installs
+    /// start with labels visible; an explicitly persisted false remains false.
     /// (r6 01-first-five-minutes.md 1.1).
     /// </summary>
-    public bool ShowNavLabels { get; set; } = false;
+    public bool ShowNavLabels { get; set; } = true;
 
     /// <summary>
     /// Font family for page titles and headings. Empty means the OS-default

@@ -35,11 +35,20 @@ public static class HarnessCases
         [new HarnessCase("data root migration moves every known file family", BackupMigrationTests.DataRootMigrationMovesEveryKnownFileFamily)],
         [new HarnessCase("data root migration never moves settings.json", BackupMigrationTests.DataRootMigrationNeverMovesSettingsJson)],
         [new HarnessCase("data root migration ignores the current process lock", BackupMigrationTests.DataRootMigrationIgnoresTheCurrentProcessLock)],
+        [new HarnessCase("pending data root migration completes before store composition", BackupMigrationTests.PendingDataRootMigrationCompletesBeforeAStoreCanUseTheRoot)],
+        [new HarnessCase("pending data root migration receipt preserves preview and restart accounting", BackupMigrationTests.PendingDataRootMigrationReceiptPreservesPreviewAndRestartAccounting)],
+        [new HarnessCase("failed pending data root migration retains the old root and receipt", BackupMigrationTests.FailedPendingDataRootMigrationRetainsTheOldRootAndReceipt)],
+        [new HarnessCase("pending data root migration rejects an invalid destination", BackupMigrationTests.PendingDataRootMigrationRejectsAnInvalidDestinationWithoutMovingData)],
+        [new HarnessCase("pending data root migration repoints an already populated destination", BackupMigrationTests.PendingDataRootMigrationRepointsAnAlreadyPopulatedDestination)],
         [new HarnessCase("secrets resolve correctly after data root migration", BackupMigrationTests.SecretsResolveCorrectlyAfterDataRootMigration)],
         [new HarnessCase("backup excludes secrets and refuses overwrite restore", BackupMigrationTests.BackupExcludesSecretsAndRefusesOverwrite)],
         [new HarnessCase("backup of a database with an open writer yields a consistent snapshot", BackupMigrationTests.BackupOfADatabaseWithAnOpenWriterYieldsAConsistentSnapshot)],
         [new HarnessCase("backup restore rejects unsafe path prefixes", BackupMigrationTests.BackupRestoreRejectsUnsafePathPrefix)],
-        [new HarnessCase("backup restore rejects case-variant sibling paths", BackupMigrationTests.BackupRestoreRejectsCaseVariantSiblingOnCaseSensitiveFileSystems)]
+        [new HarnessCase("backup restore rejects case-variant sibling paths", BackupMigrationTests.BackupRestoreRejectsCaseVariantSiblingOnCaseSensitiveFileSystems)],
+        [new HarnessCase("backup restore allows nested legitimate entries", BackupMigrationTests.BackupRestoreAllowsNestedLegitimateEntries)],
+        [new HarnessCase("backup restore rejects adversarial archive entry paths", BackupMigrationTests.BackupRestoreRejectsAdversarialArchiveEntryPaths)],
+        [new HarnessCase("backup restore preflights all entries before writing", BackupMigrationTests.BackupRestorePreflightsAllEntriesBeforeWriting)],
+        [new HarnessCase("backup restore rejects reparse-point directory escapes", BackupMigrationTests.BackupRestoreRejectsReparsePointDirectoryEscapes)]
     ];
 
     public static IEnumerable<object[]> Services =>
@@ -90,6 +99,7 @@ public static class HarnessCases
         [new HarnessCase("Doctor warns for untuned local GGUF models", ServiceTests.DoctorWarnsForUntunedLocalGgufModels)],
         [new HarnessCase("Doctor startup scan raises problem toast", ServiceTests.DoctorStartupScanRaisesProblemToast)],
         [new HarnessCase("local AI setup detects Hermaeus folder layout", ServiceTests.LocalAiSetupDetectsFolderLayout)],
+        [new HarnessCase("local AI setup keeps Kokoro Python display name on Python path", ServiceTests.LocalAiSetupKeepsKokoroPythonDisplayNameOnThePythonPath)],
         [new HarnessCase("local AI setup script handling is approval gated", ServiceTests.LocalAiSetupScriptHandlingIsApprovalGated)],
         [new HarnessCase("local AI setup command previews stay shell-free", ServiceTests.LocalAiSetupCommandPreviewsStayShellFree)],
         [new HarnessCase("local AI setup builds correct torch install args per backend", ServiceTests.LocalAiSetupBuildsCorrectTorchInstallArgsPerBackend)],
@@ -191,7 +201,7 @@ public static class HarnessCases
         [new HarnessCase("RAG ingest cancellation during embedding stops gracefully", RagTests.RagIngestCancellationDuringEmbedding)],
         [new HarnessCase("RAG ingest cancellation during storage stops gracefully", RagTests.RagIngestCancellationDuringStorage)],
         [new HarnessCase("RAG ingest clamps oversized embedding inputs", RagTests.RagIngestClampsOversizedEmbeddingInputs)],
-        [new HarnessCase("RAG directory ingest persists completed file batches", RagTests.RagDirectoryIngestPersistsCompletedFileBatches)],
+        [new HarnessCase("RAG directory cancellation leaves the prior generation untouched", RagTests.RagDirectoryIngestCancellationLeavesPriorGenerationUntouched)],
         [new HarnessCase("RAG embedding input includes final sentence of default-sized chunk with long source path", RagTests.RagEmbeddingInputIncludesFinalSentenceOfDefaultSizedChunkWithLongSourcePath)],
         [new HarnessCase("RAG chunk size guard warns when target chunk chars exceeds the clamp", RagTests.RagChunkSizeGuardWarnsWhenTargetChunkCharsExceedsTheClamp)],
         [new HarnessCase("RAG raised embedding clamp improves recall on long-chunk fixture", RagTests.RagRaisedEmbeddingClampImprovesRecallOnLongChunkFixture)],
@@ -247,9 +257,11 @@ public static class HarnessCases
     public static IEnumerable<object[]> Tts =>
     [
         [new HarnessCase("voice provider capability gating prevents unsupported providers", TtsTests.VoiceProviderCapabilityGating)],
+        [new HarnessCase("native Kokoro health failure stays visible and opens Doctor", TtsTests.NativeKokoroHealthFailureStaysVisibleAndOpensDoctor)],
         [new HarnessCase("voice provider XTTS v2 requires local and TTS", TtsTests.VoiceProviderXttsV2RequiresLocalAndTts)],
         [new HarnessCase("voice device options include Apple Silicon MPS", TtsTests.VoiceDeviceOptionsIncludeMps)],
-        [new HarnessCase("voice preview skips blank text", TtsTests.VoicePreviewSkipsBlankText)]
+        [new HarnessCase("voice preview skips blank text", TtsTests.VoicePreviewSkipsBlankText)],
+        [new HarnessCase("native Kokoro resource admission identity is stable", VoiceTests.NativeKokoroResourceAdmissionIdentityIsStable)]
     ];
 
     public static IEnumerable<object[]> Agent =>
@@ -268,7 +280,10 @@ public static class HarnessCases
         [new HarnessCase("agent edit_file requires a unique match", AgentTests.AgentEditFileRequiresUniqueMatch)],
         [new HarnessCase("agent create_file refuses to overwrite existing files", AgentTests.AgentCreateFileRefusesToOverwriteExisting)],
         [new HarnessCase("agent glob_files matches patterns", AgentTests.AgentGlobFilesMatchesPatterns)],
+        [new HarnessCase("agent search and glob report result caps", AgentTests.AgentSearchAndGlobReportResultCaps)],
         [new HarnessCase("agent read_file pages by line", AgentTests.AgentReadFilePagesByLine)],
+        [new HarnessCase("agent read_file defaults to complete content through executor", AgentTests.AgentReadFileDefaultsToCompleteContentThroughExecutor)],
+        [new HarnessCase("agent deleting a root run removes its persisted sub-tasks", AgentTests.AgentDeletingRootRunRemovesItsPersistedSubtasks)],
         [new HarnessCase("agent search_files supports regex and context", AgentTests.AgentSearchFilesSupportsRegexAndContext)],
         [new HarnessCase("agent set_plan updates task state without approval", AgentTests.AgentSetPlanUpdatesTaskStateWithoutApproval)],
         [new HarnessCase("agent task state persists queued draft patches", AgentTests.AgentTaskStatePersistsQueuedDraftPatches)],
@@ -412,8 +427,10 @@ public static class HarnessCases
         [new HarnessCase("tokenizer returns empty for blank input", VoiceTests.TokenizerReturnsEmptyForBlankInput)],
         [new HarnessCase("onnx model refuses to load when assets are missing", VoiceTests.OnnxModelRefusesToLoadWhenAssetsAreMissing)],
         [new HarnessCase("onnx model hash verification rejects tampered file", VoiceTests.OnnxModelHashVerificationRejectsTamperedFile)],
+        [new HarnessCase("native preview keeps present asset failure distinct from not installed", VoiceTests.NativePreviewKeepsPresentAssetFailureDistinctFromNotInstalled)],
         [new HarnessCase("native provider reports not installed without assets", VoiceTests.NativeProviderReportsNotInstalledWithoutAssets)],
         [new HarnessCase("native provider re-resolves assets root after settings change", VoiceTests.NativeProviderReResolvesAssetsRootAfterSettingsChange)],
+        [new HarnessCase("native provider clears failed admission after assets root changes", VoiceTests.NativeProviderClearsFailedAdmissionAfterAssetsRootChanges)],
         [new HarnessCase("native provider requires no python version", VoiceTests.NativeProviderRequiresNoPythonVersion)]
     ];
 
@@ -474,8 +491,10 @@ public static class HarnessCases
 
     public static IEnumerable<object[]> SingleInstanceGuard =>
     [
-        [new HarnessCase("second acquire on the same lock file fails", SingleInstanceGuardTests.SecondAcquireOnTheSameLockFileFails)],
-        [new HarnessCase("release frees the lock for a next acquire", SingleInstanceGuardTests.ReleaseFreesTheLockForANextAcquire)]
+        [new HarnessCase("second normal launch stops before desktop startup", SingleInstanceGuardTests.SecondNormalLaunchStopsBeforeDesktopStartup)],
+        [new HarnessCase("second launch cannot acquire the application lock", SingleInstanceGuardTests.SecondLaunchCannotAcquireTheApplicationLock)],
+        [new HarnessCase("release frees the lock for a next acquire", SingleInstanceGuardTests.ReleaseFreesTheLockForANextAcquire)],
+        [new HarnessCase("repeated acquire in the same process is rejected", SingleInstanceGuardTests.RepeatedAcquireInTheSameProcessIsRejected)]
     ];
 
     public static IEnumerable<object[]> MarkdownViewer =>

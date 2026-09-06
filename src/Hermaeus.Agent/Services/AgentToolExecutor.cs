@@ -12,11 +12,13 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
 {
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly IMcpToolBridge? _mcpBridge;
+    private readonly IRuntimeLogService? _logs;
 
-    public AgentToolExecutor(IAgentWorkspaceTools workspaceTools, IMcpToolBridge? mcpBridge = null)
+    public AgentToolExecutor(IAgentWorkspaceTools workspaceTools, IMcpToolBridge? mcpBridge = null, IRuntimeLogService? logs = null)
     {
         _workspaceTools = workspaceTools;
         _mcpBridge = mcpBridge;
+        _logs = logs;
     }
 
     /// <summary>
@@ -44,7 +46,55 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         string toolName,
         Dictionary<string, object?> arguments,
         AgentWorkspaceOptions options,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? operationId = null)
+    {
+        operationId ??= OperationCorrelation.NewId();
+        var timer = Stopwatch.StartNew();
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Debug,
+            RuntimeLogCategory.Agent,
+            $"Agent tool started: tool={NormalizeToolForLog(toolName)}, arg_count={arguments.Count}, arg_keys={FormatArgumentKeys(arguments)}.",
+            operationId));
+        try
+        {
+            var result = await ExecuteCoreAsync(toolName, arguments, options, ct);
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Debug,
+                RuntimeLogCategory.Agent,
+                $"Agent tool completed: tool={NormalizeToolForLog(result.Tool)}, outcome={result.NormalizedOutcome.Outcome}, exit_code={result.ExitCode?.ToString() ?? "Unknown"}, timed_out={result.TimedOut}, duration_ms={timer.ElapsedMilliseconds}.",
+                operationId));
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Agent,
+                $"Agent tool cancelled: tool={NormalizeToolForLog(toolName)}, duration_ms={timer.ElapsedMilliseconds}.",
+                operationId));
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Agent,
+                $"Agent tool failed: tool={NormalizeToolForLog(toolName)}, exception={ex.GetType().Name}, duration_ms={timer.ElapsedMilliseconds}.",
+                operationId));
+            throw;
+        }
+    }
+
+    private async Task<AgentToolResult> ExecuteCoreAsync(
+        string toolName,
+        Dictionary<string, object?> arguments,
+        AgentWorkspaceOptions options,
+        CancellationToken ct)
     {
         var trimmedToolName = toolName.Trim();
         if (ct.IsCancellationRequested)
@@ -457,6 +507,9 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         if (json.Length <= cap)
             return json;
 
+        if (result is AgentFileReadResult fileRead)
+            return SummarizeTruncatedFileRead(fileRead, cap);
+
         // Says what to do about it, not just that it happened. A real run read
         // this as "the tool cannot return the entire file content in one go"
         // and abandoned the file, when reading it in slices was available all
@@ -468,7 +521,95 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             "search_files" => " Narrow the query, or use glob_files to find candidate files first.",
             _ => string.Empty
         };
-        return json[..cap] + $"\n[truncated: {json.Length - cap} of {json.Length} chars omitted.{advice}]";
+        return SummarizeTruncatedResult(result is string text ? text : json, cap, advice);
+    }
+
+    private static string NormalizeToolForLog(string toolName) =>
+        string.IsNullOrWhiteSpace(toolName) ? "Unknown" : toolName.Trim()[..Math.Min(toolName.Trim().Length, 80)];
+
+    private static string FormatArgumentKeys(Dictionary<string, object?> arguments) =>
+        arguments.Count == 0
+            ? "none"
+            : string.Join(',', arguments.Keys
+                .Select(key => key.Trim().ToLowerInvariant())
+                .Where(key => key.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(key => key, StringComparer.Ordinal));
+
+    private static string SummarizeTruncatedResult(string text, int cap, string advice)
+    {
+        // Keep every capped result valid JSON. A raw prefix used to be appended
+        // to the serialized value, so large command/MCP/list results could no
+        // longer be parsed and the planner could mistake the cut for a complete
+        // result. The preview is intentionally a string, so it remains valid
+        // even when the source itself was structured JSON.
+        var keep = Math.Min(text.Length, Math.Max(128, cap - 900));
+        while (keep >= 128)
+        {
+            var preview = text[..keep];
+            var clipped = JsonSerializer.Serialize(new
+            {
+                truncated = true,
+                result_preview = preview,
+                omitted_characters = text.Length - keep,
+                continuation_hint = $"The executor output cap clipped this result. Narrow the request or repeat the tool with a more focused scope.{advice}"
+            }, AgentJson.Options);
+            if (clipped.Length <= cap)
+                return clipped;
+            keep -= Math.Max(64, clipped.Length - cap);
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            truncated = true,
+            result_preview = string.Empty,
+            omitted_characters = text.Length,
+            continuation_hint = $"The executor output cap clipped this result. Narrow the request or repeat the tool with a more focused scope.{advice}"
+        }, AgentJson.Options);
+    }
+
+    private static string SummarizeTruncatedFileRead(AgentFileReadResult read, int cap)
+    {
+        // Keep the result parseable. The old raw JSON prefix could end inside
+        // the content string, which made a complete read look like a one-line
+        // or otherwise unusable result to the planner.
+        var content = read.Content;
+        var lineStart = read.LineOffset ?? 0;
+        var keep = Math.Min(content.Length, Math.Max(256, cap - 1200));
+        while (keep > 256)
+        {
+            var candidate = content[..keep];
+            var lastNewline = candidate.LastIndexOf('\n');
+            if (lastNewline >= 0)
+            {
+                candidate = candidate[..(lastNewline + 1)].TrimEnd('\n');
+                keep = candidate.Length;
+            }
+
+            var linesShown = candidate.Length == 0 ? 0 : candidate.Count(c => c == '\n') + 1;
+            var clipped = new
+            {
+                relative_path = read.RelativePath,
+                content = candidate,
+                truncated = true,
+                total_lines = read.TotalLines,
+                line_offset = read.LineOffset,
+                line_count = linesShown,
+                continuation_hint = $"The executor output cap clipped this result. Call read_file again with line_offset={lineStart + linesShown} and line_limit=400 to continue."
+            };
+            var clippedJson = JsonSerializer.Serialize(clipped, AgentJson.Options);
+            if (clippedJson.Length <= cap)
+                return clippedJson;
+            keep -= Math.Max(128, clippedJson.Length - cap);
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            relative_path = read.RelativePath,
+            content = string.Empty,
+            truncated = true,
+            continuation_hint = "The executor output cap clipped this result. Call read_file with line_offset=0 and line_limit=400 to continue."
+        }, AgentJson.Options);
     }
 
     private static string Normalize(string toolName) => toolName.Trim().Replace('-', '_').ToLowerInvariant();

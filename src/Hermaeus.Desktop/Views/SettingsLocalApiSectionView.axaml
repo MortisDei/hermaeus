@@ -39,10 +39,10 @@
                        IsVisible="{Binding !Tokens.Count}" />
 
             <StackPanel Spacing="6">
-                <TextBox Text="{Binding NewTokenName}" Watermark="Name this token (e.g. VS Code extension)" CornerRadius="6" Padding="10,6"
+                <TextBox Text="{Binding NewTokenName}" PlaceholderText="Name this token (e.g. VS Code extension)" CornerRadius="6" Padding="10,6"
                          ToolTip.Tip="A label to remember which app this token is for. Not used for authentication." />
                 <TextBox Text="{Binding NewTokenValue}"
-                         Watermark="Generate a token, then Add"
+                         PlaceholderText="Generate a token, then Add"
                          PasswordChar="*"
                          RevealPassword="False"
                          CornerRadius="6"

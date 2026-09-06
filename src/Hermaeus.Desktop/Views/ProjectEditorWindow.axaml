@@ -19,7 +19,7 @@
 
             <StackPanel Spacing="4">
                 <TextBlock Text="Name" FontSize="11" Opacity="0.6" />
-                <TextBox Text="{Binding EditingProject.Name, Mode=TwoWay}" Watermark="Required" />
+                <TextBox Text="{Binding EditingProject.Name, Mode=TwoWay}" PlaceholderText="Required" />
             </StackPanel>
 
             <StackPanel Spacing="4">
@@ -52,7 +52,7 @@
                 <TextBlock Text="Folder root (optional)" FontSize="11" Opacity="0.6" />
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBox Grid.Column="0" Text="{Binding EditingProject.FolderRoot, Mode=TwoWay}"
-                             Watermark="No folder - a topic project" />
+                             PlaceholderText="No folder - a topic project" />
                     <Button Grid.Column="1" Content="Browse..." Margin="6,0,0,0"
                             Command="{Binding BrowseEditingFolderRootCommand}" />
                 </Grid>
@@ -68,7 +68,7 @@
 
             <StackPanel Spacing="4">
                 <TextBlock Text="Default model id (optional)" FontSize="11" Opacity="0.6" />
-                <TextBox Text="{Binding EditingProject.DefaultModelId, Mode=TwoWay}" Watermark="e.g. llama-3.1-8b" />
+                <TextBox Text="{Binding EditingProject.DefaultModelId, Mode=TwoWay}" PlaceholderText="e.g. llama-3.1-8b" />
             </StackPanel>
 
             <StackPanel Spacing="4">
@@ -96,21 +96,21 @@
                     <TextBlock Text="State" FontSize="14" FontWeight="SemiBold" />
                     <TextBlock Text="Accepted, user-owned continuity. This is separate from Memory, Recall, RAG, and conversation history."
                                FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                    <TextBox Text="{Binding EditingState.CurrentObjective, Mode=TwoWay}" Watermark="Current objective" />
-                    <TextBox Text="{Binding EditingState.Milestone, Mode=TwoWay}" Watermark="Milestone" />
-                    <TextBox Text="{Binding EditingState.Status, Mode=TwoWay}" Watermark="Status" />
+                    <TextBox Text="{Binding EditingState.CurrentObjective, Mode=TwoWay}" PlaceholderText="Current objective" />
+                    <TextBox Text="{Binding EditingState.Milestone, Mode=TwoWay}" PlaceholderText="Milestone" />
+                    <TextBox Text="{Binding EditingState.Status, Mode=TwoWay}" PlaceholderText="Status" />
                     <ItemsControl ItemsSource="{Binding EditingState.Items}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="core:ProjectStateItem">
                                 <Grid ColumnDefinitions="130,*,Auto" RowDefinitions="Auto,Auto" Margin="0,2">
                                     <ComboBox Grid.Column="0" ItemsSource="{Binding $parent[Window].DataContext.StateItemKinds}"
                                               SelectedItem="{Binding Kind, Mode=TwoWay}" Margin="0,0,6,0" />
-                                    <TextBox Grid.Column="1" Text="{Binding Text, Mode=TwoWay}" Watermark="State item" />
+                                    <TextBox Grid.Column="1" Text="{Binding Text, Mode=TwoWay}" PlaceholderText="State item" />
                                     <Button Grid.Column="2" Classes="icon-btn" Content="Remove" ToolTip.Tip="Remove state item"
                                             Command="{Binding $parent[Window].DataContext.RemoveStateItemCommand}"
                                             CommandParameter="{Binding}" Margin="6,0,0,0" />
                                     <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ArtifactLocator, Mode=TwoWay}"
-                                             Watermark="Artifact locator (optional)" Margin="0,4,0,0" />
+                                             PlaceholderText="Artifact locator (optional)" Margin="0,4,0,0" />
                                     <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Origin}" FontSize="10" Opacity="0.6" />
                                 </Grid>
                             </DataTemplate>
@@ -118,7 +118,7 @@
                     </ItemsControl>
                     <Grid ColumnDefinitions="130,*,Auto">
                         <ComboBox Grid.Column="0" ItemsSource="{Binding StateItemKinds}" SelectedItem="{Binding NewStateItemKind}" Margin="0,0,6,0" />
-                        <TextBox Grid.Column="1" Text="{Binding NewStateItemText}" Watermark="Add accepted state item" />
+                        <TextBox Grid.Column="1" Text="{Binding NewStateItemText}" PlaceholderText="Add accepted state item" />
                         <Button Grid.Column="2" Content="Add" Command="{Binding AddStateItemCommand}" Margin="6,0,0,0" />
                     </Grid>
 
@@ -134,9 +134,9 @@
                     <StackPanel Spacing="5">
                         <TextBlock Text="{Binding SelectedStateProposal.Origin, StringFormat='Origin: {0}'}" FontSize="10" Opacity="0.6" />
                         <TextBlock Text="{Binding SelectedStateProposal.BaseRevision, StringFormat='Base revision: {0}'}" FontSize="10" Opacity="0.6" />
-                        <TextBox Text="{Binding EditingProposalState.CurrentObjective, Mode=TwoWay}" Watermark="Proposed objective" />
-                        <TextBox Text="{Binding EditingProposalState.Milestone, Mode=TwoWay}" Watermark="Proposed milestone" />
-                        <TextBox Text="{Binding EditingProposalState.Status, Mode=TwoWay}" Watermark="Proposed status" />
+                        <TextBox Text="{Binding EditingProposalState.CurrentObjective, Mode=TwoWay}" PlaceholderText="Proposed objective" />
+                        <TextBox Text="{Binding EditingProposalState.Milestone, Mode=TwoWay}" PlaceholderText="Proposed milestone" />
+                        <TextBox Text="{Binding EditingProposalState.Status, Mode=TwoWay}" PlaceholderText="Proposed status" />
                         <ItemsControl ItemsSource="{Binding EditingProposalState.Items}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="core:ProjectStateItem">
@@ -149,12 +149,12 @@
                                                 CommandParameter="{Binding}" Margin="6,0,0,0" />
                                         <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Origin}" FontSize="10" Opacity="0.6" />
                                         <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ArtifactLocator, Mode=TwoWay}"
-                                                 Watermark="Artifact locator (optional)" Margin="0,4,0,0" />
+                                                 PlaceholderText="Artifact locator (optional)" Margin="0,4,0,0" />
                                     </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <TextBox Text="{Binding ProposalRejectionReason}" Watermark="Rejection reason (optional)" />
+                        <TextBox Text="{Binding ProposalRejectionReason}" PlaceholderText="Rejection reason (optional)" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="Accept edited proposal" Command="{Binding AcceptStateProposalCommand}" />
                             <Button Content="Reject" Command="{Binding RejectStateProposalCommand}" />

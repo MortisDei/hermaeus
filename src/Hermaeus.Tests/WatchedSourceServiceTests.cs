@@ -113,6 +113,56 @@ public sealed class WatchedSourceServiceTests
     }
 
     [Fact]
+    public async Task Scan_keeps_root_identity_stable_when_children_change()
+    {
+        using var temp = new TempDir();
+        var (service, store, pipeline) = await NewAsync(temp);
+        var dir = temp.PathFor("watched");
+        Directory.CreateDirectory(dir);
+        var filePath = Path.Combine(dir, "a.md");
+        await File.WriteAllTextAsync(filePath, "content");
+
+        var dataset = new RagDataset { Name = "stable-root" };
+        dataset.Config.WatchedSources.Add(Watched(dir));
+        await pipeline.IngestDirectoryAsync(dataset, dir);
+        var reloaded = (await store.GetDatasetsAsync()).Single(d => d.Id == dataset.Id);
+
+        File.Delete(filePath);
+        await File.WriteAllTextAsync(Path.Combine(dir, "b.md"), "replacement content");
+        var plan = await service.ScanAsync(reloaded);
+
+        Assert.Empty(plan.Errors);
+        Assert.Single(plan.NewFiles);
+        Assert.Single(plan.MissingFiles);
+    }
+
+    [Fact]
+    public async Task Scan_rejects_a_replaced_root_until_its_identity_is_confirmed()
+    {
+        using var temp = new TempDir();
+        var (service, store, pipeline) = await NewAsync(temp);
+        var dir = temp.PathFor("watched");
+        Directory.CreateDirectory(dir);
+        var filePath = Path.Combine(dir, "a.md");
+        await File.WriteAllTextAsync(filePath, "content");
+
+        var dataset = new RagDataset { Name = "replaced-root" };
+        dataset.Config.WatchedSources.Add(Watched(dir));
+        await pipeline.IngestDirectoryAsync(dataset, dir);
+        var reloaded = (await store.GetDatasetsAsync()).Single(d => d.Id == dataset.Id);
+
+        var originalDir = temp.PathFor("original-watched");
+        Directory.Move(dir, originalDir);
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(Path.Combine(dir, "replacement.md"), "replacement");
+        var plan = await service.ScanAsync(reloaded);
+
+        Assert.Empty(plan.NewFiles);
+        Assert.Empty(plan.MissingFiles);
+        Assert.Contains(plan.Errors, error => error.Contains("root identity changed", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ApplyNewAndChangedAsync_never_touches_missing_files()
     {
         using var temp = new TempDir();

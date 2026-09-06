@@ -22,6 +22,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly ModelProfileService?  _modelProfiles;
     private readonly IActivityRecorder?    _activity;
     private readonly LocalModelCapabilityService? _capabilityService;
+    private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
+    private readonly RecommendationDerivationService? _recommendationDerivation;
     private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
@@ -39,6 +42,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int          _port;
     [ObservableProperty] private int          _contextSize;
     [ObservableProperty] private int          _gpuLayers;
+    [ObservableProperty] private string       _gpuPlacementSelection = "CPU";
     [ObservableProperty] private int          _threads;
     [ObservableProperty] private int          _promptThreads;
     [ObservableProperty] private int          _slots;
@@ -46,6 +50,38 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool         _autoStart;
     [ObservableProperty] private bool         _preserveReasoning;
     [ObservableProperty] private string       _extraArgs = string.Empty;
+    [ObservableProperty] private AdaptiveInferenceMode _adaptiveMode = AdaptiveInferenceMode.Fixed;
+    [ObservableProperty] private int          _adaptiveMinimumContext;
+    [ObservableProperty] private long         _adaptiveMinimumGpuHeadroomBytes = ResourceHeadroomPolicy.DefaultDeviceStabilityBytes;
+
+    /// <summary>
+    /// User-facing MiB projection of the persisted byte headroom value. The
+    /// settings contract stays in bytes so admission math does not lose
+    /// precision, while the editor avoids asking users to enter raw bytes.
+    /// </summary>
+    public double AdaptiveMinimumGpuHeadroomMiB
+    {
+        get => AdaptiveMinimumGpuHeadroomBytes / (1024d * 1024d);
+        set
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
+                value = 0;
+
+            var bytes = value >= long.MaxValue / (1024d * 1024d)
+                ? long.MaxValue
+                : (long)Math.Round(value * 1024d * 1024d, MidpointRounding.AwayFromZero);
+            AdaptiveMinimumGpuHeadroomBytes = bytes;
+        }
+    }
+    [ObservableProperty] private bool         _adaptiveAllowGpuLayerReduction;
+    [ObservableProperty] private bool         _adaptiveAllowContextReduction;
+    [ObservableProperty] private bool         _adaptiveAllowKvPrecisionChange;
+    [ObservableProperty] private bool         _adaptiveAllowCpuMoePlacement;
+    [ObservableProperty] private bool         _adaptiveAllowMultiDevicePlacement;
+    [ObservableProperty] private bool         _adaptivePreserveAcceleratedBackend = true;
+    [ObservableProperty] private int          _adaptivePreferredEvidenceAgeDays = 7;
+    public static IReadOnlyList<AdaptiveInferenceMode> AdaptiveModeOptions { get; } =
+        [AdaptiveInferenceMode.Fixed, AdaptiveInferenceMode.Advise, AdaptiveInferenceMode.AdaptAtLaunch];
 
     // r18 04-llama-server-engine-options.md 4.1: first-class engine options, editable-form
     // fields on the server editor next to Context Size/GPU Layers/Threads/Slots.
@@ -119,6 +155,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public bool CanEditNgramDecoding => CanEdit && (SupportsNgramDecoding || UseNgramDecoding);
     public bool CanEditDraftModelDecoding => CanEdit && (SupportsDraftModelDecoding || UseDraftModelDecoding);
     public bool HasPromptThreadsControl => SupportsPromptThreads || PromptThreads > 0;
+    public static IReadOnlyList<string> GpuPlacementOptions { get; } = ["CPU", "Auto", "All", "Exact"];
+    public bool IsExactGpuPlacement => string.Equals(GpuPlacementSelection, "Exact", StringComparison.Ordinal);
 
     private bool HasType(string type) =>
         ParseTypes(SpeculativeTypes).Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
@@ -171,10 +209,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string       _contextFitNote = string.Empty;
     [ObservableProperty] private bool         _hasContextFitWarning;
     [ObservableProperty] private string       _gpuFitBreakdown = string.Empty;
+    [ObservableProperty] private string       _admissionReceipt = string.Empty;
+    public bool HasAdmissionReceipt => !string.IsNullOrWhiteSpace(AdmissionReceipt);
     public bool HasGpuFitBreakdown => !string.IsNullOrWhiteSpace(GpuFitBreakdown);
     partial void OnGpuFitBreakdownChanged(string value) => OnPropertyChanged(nameof(HasGpuFitBreakdown));
 
-    /// <summary>r19 2.1: names where the current Context Size value came from ("Context from model card" / "Context from Auto Tune"), empty when the user set it directly.</summary>
+    /// <summary>Names where the current Context Size value came from, empty when the user set it directly.</summary>
     [ObservableProperty] private string       _contextSourceLabel = string.Empty;
     public bool HasContextSourceLabel => !string.IsNullOrEmpty(ContextSourceLabel);
     partial void OnContextSourceLabelChanged(string value) => OnPropertyChanged(nameof(HasContextSourceLabel));
@@ -205,7 +245,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.UseProjector != UseProjector ||
         _config.Port != Port ||
         _config.ContextSize != ContextSize ||
-        _config.GpuLayers != GpuLayers ||
+        PlacementCanonical(_config) != CurrentPlacementCanonical() ||
         _config.Threads != Threads ||
         _config.PromptThreads != PromptThreads ||
         _config.Slots != Slots ||
@@ -219,17 +259,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.MemoryLock != MemoryLock ||
         _config.NoMemoryMap != NoMemoryMap ||
         _config.CpuMoeLayers != ParseCpuMoeLayers(CpuMoeLayersText) ||
+        _config.AdaptiveEnvelope?.CanonicalValue != BuildAdaptiveEnvelope().CanonicalValue ||
         !SpeculativeMatchesConfig();
 
     /// <summary>
-    /// Human-readable effective GPU offload for the Services card (r14 1.3):
-    /// "all layers" for -1, "0 (CPU)" for 0, or the explicit layer count.
+    /// Human-readable configured GPU placement for the Services card. Effective
+    /// placement remains a runtime observation and is not guessed here.
     /// </summary>
-    public string EffectiveOffloadLabel => GpuLayers switch
+    public string EffectiveOffloadLabel => GpuPlacementSelection switch
     {
-        < 0 => "all layers",
-        0 => "0 (CPU)",
-        var n => n.ToString()
+        "CPU" => "0 (CPU)",
+        "Auto" => "automatic placement",
+        "All" => "all layers",
+        "Exact" => $"{GpuLayers} layers (exact)",
+        _ => "Unknown placement"
     };
 
     /// <summary>
@@ -519,9 +562,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         HardwareProfile? hardwareProfile = null,
         ModelProfileService? modelProfiles = null,
         IActivityRecorder? activity = null,
-        LocalModelCapabilityService? capabilityService = null)
+        LocalModelCapabilityService? capabilityService = null,
+        IResourceCoordinator? resourceCoordinator = null,
+        AdaptiveInferenceExperienceService? adaptiveExperience = null,
+        RecommendationDerivationService? recommendationDerivation = null)
     {
-        _mgr = new ServerProcessManager(redactor);
+        _mgr = new ServerProcessManager(redactor, resourceCoordinator: resourceCoordinator);
         _config   = config;
         _settings = settings;
         _trust = trust;
@@ -532,17 +578,32 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _modelProfiles = modelProfiles;
         _activity = activity;
         _capabilityService = capabilityService;
+        _resourceCoordinator = resourceCoordinator;
+        _adaptiveExperience = adaptiveExperience;
+        _recommendationDerivation = recommendationDerivation;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
         _modelPath      = config.ModelPath;
         _mmprojPath     = config.MmprojPath;
         _useProjector   = config.UseProjector;
+        var adaptive = config.AdaptiveEnvelope ?? new AdaptiveInferenceEnvelope();
+        _adaptiveMode = adaptive.Mode;
+        _adaptiveMinimumContext = adaptive.MinimumContext;
+        _adaptiveMinimumGpuHeadroomBytes = adaptive.MinimumGpuHeadroomBytes;
+        _adaptiveAllowGpuLayerReduction = adaptive.AllowGpuLayerReduction;
+        _adaptiveAllowContextReduction = adaptive.AllowContextReduction;
+        _adaptiveAllowKvPrecisionChange = adaptive.AllowKvPrecisionChange;
+        _adaptiveAllowCpuMoePlacement = adaptive.AllowCpuMoePlacement;
+        _adaptiveAllowMultiDevicePlacement = adaptive.AllowMultiDevicePlacement;
+        _adaptivePreserveAcceleratedBackend = adaptive.PreserveAcceleratedBackend;
+        _adaptivePreferredEvidenceAgeDays = Math.Clamp((int)Math.Round(adaptive.PreferredEvidenceAge.TotalDays), 1, 30);
         _lastModelPathForDefaults = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _modelPathForMmproj = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _port           = config.Port;
         _contextSize    = config.ContextSize;
         _gpuLayers      = config.GpuLayers;
+        _gpuPlacementSelection = PlacementSelection(config);
         _threads        = config.Threads;
         _promptThreads  = config.PromptThreads;
         _slots          = config.Slots;
@@ -670,6 +731,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private string ComputeGpuFitBreakdown()
     {
+        if (string.Equals(GpuPlacementSelection, "Auto", StringComparison.Ordinal))
+            return "GPU fit: Unknown until the selected runtime reports effective placement.";
+
         if (_hardwareProfile is null || _ggufInfo is null || TryGetModelFileSizeBytes() is not long modelBytes)
             return string.Empty;
 
@@ -744,6 +808,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         if (hw is null || info is null)
             return flatNote;
+
+        if (string.Equals(GpuPlacementSelection, "Auto", StringComparison.Ordinal))
+            return "GPU fit is Unknown until the selected runtime reports effective placement.";
 
         var fileSizeBytes = TryGetModelFileSizeBytes();
         var bpeK = KvCacheMath.ResolveBytesPerElement(KvCacheType, ExtraArgs, isKeyCache: true);
@@ -891,12 +958,243 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private async Task StartCoreAsync(CancellationToken ct)
     {
-        ApplyTuneProfileIfAvailable();
         SyncToConfig();
         await SaveConfigAsync();
+        if (_resourceCoordinator is null)
+        {
+            ErrorMessage = "Resource admission is unavailable; the managed server was not started.";
+            Status = ServerStatus.Error;
+            NotifyStatusProps();
+            return;
+        }
+
+        var config = BuildConfig();
+        _resourceCoordinator.RegisterConsumer(ResourceAllocationFactory.ManagedServerConsumer(config));
+
+        var envelope = config.AdaptiveEnvelope ?? new AdaptiveInferenceEnvelope();
+        try
+        {
+            if (envelope.Mode == AdaptiveInferenceMode.Fixed)
+            {
+                await StartCandidateAsync(config, AdaptiveInferencePlanner.HeadroomPolicy(config), ct);
+                return;
+            }
+
+            var runtime = await LocalModelCapabilityService.ProbeRuntimeAsync(config.ExecutablePath, ct);
+            var model = File.Exists(config.ModelPath)
+                ? await Task.Run(() => GgufMetadataReader.TryRead(config.ModelPath), ct)
+                : null;
+            var planningRequest = CreateAdmissionRequest(config, AdaptiveInferencePlanner.HeadroomPolicy(config));
+            var planningSnapshot = await _resourceCoordinator.PlanAsync(planningRequest, ct);
+            var adaptive = AdaptiveInferencePlanner.Build(config, planningSnapshot, runtime, model);
+            var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(
+                config.ExecutablePath, runtime.VersionOrHelpText, ct);
+            var modelIdentity = RuntimeIdentityFactory.CreateModelIdentity(config.ModelPath, model);
+            var configurationIdentity = ConfigurationIdentityFactory.Create(config).StableId;
+            var preference = _adaptiveExperience is null
+                ? null
+                : await _adaptiveExperience.FindPreferredCandidateAsync(
+                    planningSnapshot,
+                    runtimeIdentity,
+                    modelIdentity,
+                    configurationIdentity,
+                    envelope,
+                    ct: ct);
+            adaptive = AdaptiveInferencePlanner.PreferCandidate(adaptive, preference?.CandidateId);
+            AdmissionReceipt = FormatAdaptivePlan(adaptive, planningSnapshot);
+            if (preference is not null)
+                AdmissionReceipt += $" Preferred recent compatible success: {preference.CandidateId}.";
+
+            if (envelope.Mode == AdaptiveInferenceMode.Advise)
+                return;
+
+            var failures = new List<string>();
+            foreach (var candidate in adaptive.Candidates)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var candidateConfig = candidate.Configuration;
+                    var policy = AdaptiveInferencePlanner.HeadroomPolicy(candidateConfig);
+                    var request = CreateAdmissionRequest(candidateConfig, policy, allowUnknown: false);
+                    await using var lease = await _resourceCoordinator.AcquireAsync(request, ct);
+                    AdmissionReceipt = $"Adaptive candidate {candidate.Ordinal + 1}: {candidate.Reason} {FormatAdmissionReceipt(lease.Plan)}";
+                    if (BeforeStartAsync is not null)
+                        await BeforeStartAsync(this);
+                    await _mgr.StartAsync(candidateConfig, lease, ct);
+                    var launch = _mgr.LastLaunchResult;
+                    await TryRecordAdaptiveOutcomeAsync(
+                        config,
+                        lease.Plan,
+                        runtimeIdentity,
+                        modelIdentity,
+                        configurationIdentity,
+                        candidate,
+                        launch,
+                        ct);
+
+                    if (_mgr.Status == ServerStatus.Running)
+                    {
+                        if (candidate.RequiresEffectiveObservation && _mgr.LastEffectiveLaunch?.IsAuditable != true)
+                        {
+                            failures.Add($"{candidate.CandidateId}: effective placement/context remained Unknown after health.");
+                            await _mgr.StopAsync();
+                            ErrorMessage = "Adaptive launch stopped because the selected runtime did not expose an auditable effective placement and context. No fallback was attempted.";
+                            Status = ServerStatus.Error;
+                            NotifyStatusProps();
+                            return;
+                        }
+                        return;
+                    }
+
+                    failures.Add($"{candidate.CandidateId}: {launch.FailureKind}. {launch.ErrorMessage}");
+                    if (launch.FailureKind != ServerLaunchFailureKind.ResourceExhaustion)
+                        break;
+                    await _mgr.StopAsync();
+                }
+                catch (ResourceAdmissionException ex)
+                {
+                    AdmissionReceipt = $"Adaptive candidate {candidate.Ordinal + 1}: {candidate.Reason} {FormatAdmissionReceipt(ex.Plan)}";
+                    failures.Add($"{candidate.CandidateId}: admission refused because {ex.Plan.Feasibility}.");
+                    if (ex.Plan.Feasibility != ResourcePlanFeasibility.DoesNotFit)
+                        break;
+                }
+            }
+
+            ErrorMessage = failures.Count == 0
+                ? "No bounded adaptive launch candidate was available."
+                : $"No bounded adaptive launch candidate started successfully.\n\n{string.Join("\n", failures)}";
+            Status = ServerStatus.Error;
+            NotifyStatusProps();
+        }
+        catch (ResourceAdmissionException ex)
+        {
+            AdmissionReceipt = FormatAdmissionReceipt(ex.Plan);
+            ErrorMessage = ex.Message;
+            Status = ServerStatus.Error;
+            NotifyStatusProps();
+        }
+    }
+
+    private ResourceAdmissionRequest CreateAdmissionRequest(
+        ServerConfig config,
+        ResourceHeadroomPolicy policy,
+        bool allowUnknown = true) =>
+        new(
+            config.Id,
+            ResourceAllocationFactory.ManagedServerProposal(config),
+            policy,
+            callerId: $"services.server.{config.Id}",
+            allowUnknown: allowUnknown);
+
+    private async Task StartCandidateAsync(ServerConfig config, ResourceHeadroomPolicy policy, CancellationToken ct)
+    {
+        var request = CreateAdmissionRequest(config, policy);
+        await using var lease = await _resourceCoordinator!.AcquireAsync(request, ct);
+        AdmissionReceipt = FormatAdmissionReceipt(lease.Plan);
         if (BeforeStartAsync is not null)
             await BeforeStartAsync(this);
-        await _mgr.StartAsync(BuildConfig(), ct);
+        await _mgr.StartAsync(config, lease, ct);
+    }
+
+    private async Task TryRecordAdaptiveOutcomeAsync(
+        ServerConfig configured,
+        ResourceWorkloadPlan workload,
+        RuntimeIdentityV2 runtime,
+        ModelIdentityV2 model,
+        string configurationIdentity,
+        AdaptiveInferenceCandidate candidate,
+        ServerLaunchResult result,
+        CancellationToken ct)
+    {
+        if (_adaptiveExperience is null)
+            return;
+
+        try
+        {
+            await _adaptiveExperience.RecordAsync(
+                workload,
+                runtime,
+                model,
+                configurationIdentity,
+                candidate.CandidateId,
+                candidate.ChangedFields,
+                result,
+                ct);
+
+            if (_recommendationDerivation is not null
+                && candidate.ChangesConfiguration
+                && result.FailureKind == ServerLaunchFailureKind.None
+                && result.EffectiveLaunch?.IsAuditable == true)
+            {
+                var currentIdentity = ConfigurationIdentityFactory.Create(configured);
+                var patch = ManagedServerRecommendationPatch.Create(configured.Id, configured, candidate.Configuration);
+                var now = DateTime.UtcNow;
+                var recommendation = await _recommendationDerivation.DeriveAsync(new RecommendationProposal(
+                    RecommendationKind.RuntimeConfiguration,
+                    configured.Id,
+                    currentIdentity.StableId,
+                    patch,
+                    [new RecommendationEvidenceReference(
+                        $"adaptive-effective-{candidate.CandidateId}",
+                        "adaptive-effective-launch",
+                        Required: true,
+                        CapabilityState.Available,
+                        now,
+                        configured.AdaptiveEnvelope?.PreferredEvidenceAge)],
+                    [new RecommendationCondition("candidate", candidate.CandidateId)],
+                    [new RecommendationTradeoff("restart", "requires-explicit-restart")],
+                    "compatible-proven-launch",
+                    1,
+                    "adaptive-effective-values",
+                    now,
+                    currentIdentity.Completeness == IdentityCompleteness.Complete,
+                    TargetExists: true,
+                    RequiredEvidenceRevoked: false,
+                    Contradicted: false,
+                    RequiredEvidenceExpired: false,
+                    MinimumFactsComplete: currentIdentity.Completeness == IdentityCompleteness.Complete
+                        && runtime.Completeness == IdentityCompleteness.Complete
+                        && model.Completeness == IdentityCompleteness.Complete
+                        && workload.HardwareIdentityComplete,
+                    Actionable: true,
+                    ExpiresAtUtc: now + (configured.AdaptiveEnvelope?.PreferredEvidenceAge ?? TimeSpan.FromDays(7))));
+                AdmissionReceipt += $" Reviewable configuration recommendation: {recommendation.Id}.";
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            AdmissionReceipt += " Adaptive outcome persistence timed out.";
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            AdmissionReceipt += " Adaptive outcome persistence was unavailable.";
+        }
+    }
+
+    private static string FormatAdaptivePlan(AdaptiveInferencePlan plan, ResourceWorkloadPlan workload)
+    {
+        var candidates = plan.Candidates.Count == 0
+            ? "none"
+            : string.Join("; ", plan.Candidates.Select(candidate =>
+                $"{candidate.Ordinal + 1}. {candidate.CandidateId} ({string.Join(", ", candidate.ChangedFields.DefaultIfEmpty("unchanged"))})"));
+        var unavailable = plan.UnavailableReasons.Count == 0
+            ? string.Empty
+            : $" Unavailable/Unknown: {string.Join(" ", plan.UnavailableReasons)}";
+        return $"Adaptive {plan.Mode} plan from {workload.Feasibility}: {candidates}.{unavailable}";
+    }
+
+    private static string FormatAdmissionReceipt(ResourceWorkloadPlan plan)
+    {
+        var unknown = plan.UnknownComponents.Count == 0 ? "none" : $"{plan.UnknownComponents.Count} Unknown";
+        var system = plan.SystemRemainingBytes.HasValue
+            ? SystemOverviewViewModel.FormatBytes(plan.SystemRemainingBytes.Value)
+            : "Unknown";
+        var devices = plan.DeviceHeadroom.Count == 0
+            ? "no device total"
+            : string.Join(", ", plan.DeviceHeadroom.Select(device =>
+                $"{device.DeviceId}: {(device.RemainingBytes.HasValue ? SystemOverviewViewModel.FormatBytes(device.RemainingBytes.Value) : "Unknown")} remaining"));
+        return $"Workload fit: {plan.Feasibility}; system headroom {system}; {devices}; {unknown} component(s). Snapshot {plan.SnapshotId}.";
     }
 
     [RelayCommand]
@@ -1105,6 +1403,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// </summary>
     public Task StopAndWaitAsync() => _mgr.StopAsync();
 
+    /// <summary>Synchronizes the bound status after a programmatic start has
+    /// completed. The manager is authoritative, while its UI event is queued
+    /// through the dispatcher and can otherwise arrive after Lab checks it.</summary>
+    public void RefreshStatusFromManager()
+    {
+        Status = _mgr.Status;
+        ErrorMessage = _mgr.ErrorMessage;
+        NotifyStatusProps();
+    }
+
     /// <summary>
     /// r19 2.2: after an llama.cpp update rewrites <c>ExecutablePath</c>
     /// directly on the underlying <see cref="ServerConfig"/> (a live
@@ -1115,6 +1423,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// before restarting a server programmatically after such a mutation.
     /// </summary>
     public void SyncExecutablePathFromConfig() => ExecutablePath = _config.ExecutablePath;
+
+    /// <summary>Refreshes the displayed model path after another service has
+    /// changed the live server configuration, before a programmatic restart.
+    /// </summary>
+    public void SyncModelPathFromConfig() => ModelPath = _config.ModelPath;
 
     public async Task SelectModelAndRestartAsync(string modelPath, CancellationToken ct = default)
     {
@@ -1131,7 +1444,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         if (modelChanged)
         {
             ModelPath = normalized;
-            ApplyTuneProfileIfAvailable();
             SyncToConfig();
             await SaveConfigAsync();
         }
@@ -1145,24 +1457,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             throw new InvalidOperationException(ErrorMessage);
     }
 
-    private bool ApplyTuneProfileIfAvailable()
-    {
-        var profile = LlamaTuneProfileStore.Find(_settings.Settings, ModelPath);
-        if (profile is null)
-            return false;
-
-        GpuLayers = profile.GpuLayers;
-        Threads = profile.Threads;
-        if (profile.ContextSize > 0)
-            ContextSize = profile.ContextSize;
-        if (!string.IsNullOrWhiteSpace(profile.ExtraArgs))
-            ExtraArgs = profile.ExtraArgs;
-        return true;
-    }
-
     private Task PersistTuneProfileAsync(ServerTuneResult? result = null)
     {
-        LlamaTuneProfileStore.Upsert(_settings.Settings, ModelPath, ContextSize, ExtraArgs, GpuLayers, Threads, result);
+        LlamaTuneProfileStore.Upsert(_settings.Settings, ModelPath, ContextSize, ExtraArgs, GpuLayers, Threads, result, BuildGpuPlacement());
         return Task.CompletedTask;
     }
 
@@ -1201,7 +1498,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.UseProjector   = UseProjector;
         _config.Port           = Port;
         _config.ContextSize    = ContextSize;
-        _config.GpuLayers      = GpuLayers;
+        var placement = BuildGpuPlacement();
+        _config.GpuPlacement  = placement;
+        _config.GpuLayers      = placement.LegacyGpuLayers ?? 0;
         _config.Threads        = Threads;
         _config.PromptThreads  = PromptThreads;
         _config.Slots          = Slots;
@@ -1219,6 +1518,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.NoMemoryMap    = NoMemoryMap;
         _config.CpuMoeLayers   = ParseCpuMoeLayers(CpuMoeLayersText);
         _config.Speculative    = BuildSpeculative();
+        _config.AdaptiveEnvelope = BuildAdaptiveEnvelope();
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
@@ -1244,6 +1544,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             SyncChatBaseUrlToPort();
     }
 
+    private AdaptiveInferenceEnvelope BuildAdaptiveEnvelope() => new()
+    {
+        Mode = AdaptiveMode,
+        MinimumContext = AdaptiveMinimumContext,
+        MinimumGpuHeadroomBytes = AdaptiveMinimumGpuHeadroomBytes,
+        AllowGpuLayerReduction = AdaptiveAllowGpuLayerReduction,
+        AllowContextReduction = AdaptiveAllowContextReduction,
+        AllowKvPrecisionChange = AdaptiveAllowKvPrecisionChange,
+        AllowCpuMoePlacement = AdaptiveAllowCpuMoePlacement,
+        AllowMultiDevicePlacement = AdaptiveAllowMultiDevicePlacement,
+        PreserveAcceleratedBackend = AdaptivePreserveAcceleratedBackend,
+        PreferredEvidenceAge = TimeSpan.FromDays(Math.Clamp(AdaptivePreferredEvidenceAgeDays, 1, 30))
+    };
+
     private void SyncChatBaseUrlToPort()
     {
         var url = $"http://localhost:{Port}";
@@ -1253,6 +1567,37 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             .FirstOrDefault(p => p.Kind == RuntimeKind.LlamaCpp && p.LinkedServerId == _config.Id);
         if (linked is not null)
             linked.BaseUrl = url;
+    }
+
+    private GpuPlacementIntent BuildGpuPlacement() => GpuPlacementSelection switch
+    {
+        "CPU" => GpuPlacementIntent.Cpu(),
+        "Auto" => GpuPlacementIntent.Auto(),
+        "All" => GpuPlacementIntent.All(),
+        "Exact" => GpuPlacementIntent.Exact(GpuLayers),
+        _ => GpuPlacementIntent.Cpu()
+    };
+
+    private string CurrentPlacementCanonical() => BuildGpuPlacement().CanonicalValue;
+
+    private static string PlacementCanonical(ServerConfig config) =>
+        config.TryGetGpuPlacement(out var placement, out _)
+            ? placement!.CanonicalValue
+            : "invalid";
+
+    private static string PlacementSelection(ServerConfig config)
+    {
+        if (!config.TryGetGpuPlacement(out var placement, out _))
+            return "CPU";
+
+        return placement!.Kind switch
+        {
+            GpuPlacementKind.Cpu => "CPU",
+            GpuPlacementKind.Auto => "Auto",
+            GpuPlacementKind.All => "All",
+            GpuPlacementKind.Exact => "Exact",
+            _ => "CPU"
+        };
     }
 
     /// <summary>
@@ -1271,6 +1616,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         Port           = Port,
         ContextSize    = ContextSize,
         GpuLayers      = GpuLayers,
+        GpuPlacement   = BuildGpuPlacement(),
         Threads        = Threads,
         PromptThreads  = PromptThreads,
         Slots          = Slots,
@@ -1287,7 +1633,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         MemoryLock     = MemoryLock,
         NoMemoryMap    = NoMemoryMap,
         CpuMoeLayers   = ParseCpuMoeLayers(CpuMoeLayersText),
-        Speculative    = BuildSpeculative()
+        Speculative    = BuildSpeculative(),
+        AdaptiveEnvelope = BuildAdaptiveEnvelope()
     };
 
     /// <summary>
@@ -1403,8 +1750,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// r19 2.1: applies precedence tune-profile &gt; model-card default &gt;
-    /// leave-as-is when the selected model actually changes to a different
+    /// r32 Batch 1: applies the model-card context default only when the
+    /// selected model actually changes to a different
     /// file. <see cref="RefreshDetectedModels"/> re-assigns <see cref="ModelPath"/>
     /// back to its own current value to repair the ComboBox binding after a
     /// list rebuild; that reassignment must never re-apply defaults on top
@@ -1420,12 +1767,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         if (ModelPathSafety.AreSameLocalPath(value, _lastModelPathForDefaults))
             return;
         _lastModelPathForDefaults = value;
-
-        if (ApplyTuneProfileIfAvailable())
-        {
-            ContextSourceLabel = "Context from Auto Tune";
-            return;
-        }
 
         var card = _modelProfiles?.Get(value)
             ?? _modelProfiles?.Profiles.FirstOrDefault(p =>
@@ -1452,8 +1793,37 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
     partial void OnGpuLayersChanged(int value)
     {
+        if (value == -1)
+            GpuPlacementSelection = "All";
+        else if (value == 0 && string.Equals(GpuPlacementSelection, "Exact", StringComparison.Ordinal))
+            GpuPlacementSelection = "CPU";
+        else if (value > 0)
+            GpuPlacementSelection = "Exact";
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
+        OnPropertyChanged(nameof(IsExactGpuPlacement));
+        ApplyContextFitNote();
+    }
+    partial void OnGpuPlacementSelectionChanged(string value)
+    {
+        switch (value)
+        {
+            case "CPU":
+            case "Auto":
+                GpuLayers = 0;
+                break;
+            case "All":
+                GpuLayers = -1;
+                break;
+            case "Exact":
+                if (GpuLayers <= 0)
+                    GpuLayers = 1;
+                break;
+        }
+
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(EffectiveOffloadLabel));
+        OnPropertyChanged(nameof(IsExactGpuPlacement));
         ApplyContextFitNote();
     }
     partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1506,6 +1876,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasUnsavedChanges));
         ApplyContextFitNote();
     }
+    partial void OnAdaptiveModeChanged(AdaptiveInferenceMode value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveMinimumContextChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveMinimumGpuHeadroomBytesChanged(long value)
+    {
+        OnPropertyChanged(nameof(AdaptiveMinimumGpuHeadroomMiB));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+    }
+    partial void OnAdaptiveAllowGpuLayerReductionChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowContextReductionChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowKvPrecisionChangeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowCpuMoePlacementChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptiveAllowMultiDevicePlacementChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptivePreserveAcceleratedBackendChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAdaptivePreferredEvidenceAgeDaysChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 
     /// <summary>
     /// Empty/0 off, "all" (or any negative) all layers, otherwise N. Public
@@ -1559,11 +1943,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         var facts = await LocalModelCapabilityService.ProbeRuntimeAsync(executablePath);
         IReadOnlyList<CapabilityDrift> drift = [];
         LocalModelCapabilities? capabilities = null;
+        CapabilityCacheWriteResult? cacheWrite = null;
         if (_capabilityService is not null && File.Exists(ModelPath))
         {
             var probe = await _capabilityService.ProbeWithDriftAsync(ModelPath, executablePath);
             drift = probe.Drift;
             capabilities = probe.Capabilities;
+            cacheWrite = probe.CacheWrite;
         }
         RunOnUi(() =>
         {
@@ -1576,11 +1962,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                 _runtimeSpeculativeTypes.Add(type);
             SupportsPromptThreads = facts.SupportsPromptThreads;
             RuntimeCapabilitiesKnown = facts.HelpProbeSucceeded;
-            RuntimeCapabilityStatus = facts.HelpProbeSucceeded
+            var capabilityStatus = facts.HelpProbeSucceeded
                 ? facts.SpeculativeTypes.Count == 0
                     ? "This llama-server advertises no speculative types."
                     : $"Runtime speculative types: {string.Join(", ", facts.SpeculativeTypes)}."
                 : "Could not read selected llama-server help. Runtime-only options stay unavailable.";
+            RuntimeCapabilityStatus = cacheWrite?.State == CapabilityCacheWriteState.Failed
+                ? $"{capabilityStatus} Capability cache persistence failed at '{cacheWrite.Path}': {cacheWrite.Error}"
+                : capabilityStatus;
             OnPropertyChanged(nameof(SupportsNgramDecoding));
             OnPropertyChanged(nameof(SupportsDraftModelDecoding));
             OnPropertyChanged(nameof(SupportsPromptThreads));
@@ -1731,6 +2120,11 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly ISystemInfoService? _systemInfo;
     private readonly IActivityRecorder? _activity;
     private readonly ModelProfileService _modelProfiles;
+    private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
+    private readonly RecommendationDerivationService? _recommendationDerivation;
+    private readonly IRecommendationStore? _recommendationStore;
+    private readonly RecommendationApplicationService? _recommendationApplication;
     private HardwareProfile? _hardwareProfile;
 
     /// <summary>Shared (DI singleton) with <see cref="SettingsViewModel.Tts"/> - voice
@@ -1770,6 +2164,46 @@ public partial class ServicesViewModel : ViewModelBase
 
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
+    public UiBoundCollection<RecommendationReviewViewModel> Recommendations { get; } = [];
+    public bool HasRecommendations => Recommendations.Count > 0;
+    public Action<string>? RequestNavigate { get; set; }
+
+    /// <summary>
+    /// Loads current and accepted managed-server recommendations after startup
+    /// has selected the settings data root. Other recommendation kinds remain
+    /// owned by their source page and are not shown as Services actions.
+    /// </summary>
+    public async Task RefreshRecommendationsAsync(CancellationToken ct = default)
+    {
+        if (_recommendationStore is null || _recommendationApplication is null)
+            return;
+        try
+        {
+            var rows = await _recommendationStore.QueryAsync(new RecommendationQuery { Limit = 32 }, ct);
+            var servers = _settings.Settings.ManagedServers.ToDictionary(server => server.Id, StringComparer.Ordinal);
+            var cards = rows
+                .Where(row => row.Status is RecommendationStatus.Current or RecommendationStatus.Accepted
+                    && string.Equals(row.ProposedPatch.TargetDomain, ManagedServerRecommendationPatch.TargetDomain, StringComparison.Ordinal))
+                .Select(row => new RecommendationReviewViewModel(
+                    row,
+                    _recommendationApplication,
+                    servers.GetValueOrDefault(row.TargetIdentity),
+                    () => RefreshRecommendationsAsync(),
+                    RequestNavigate))
+                .ToList();
+            RunOnUi(() =>
+            {
+                Recommendations.Clear();
+                foreach (var card in cards)
+                    Recommendations.Add(card);
+                OnPropertyChanged(nameof(HasRecommendations));
+            });
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // A store timeout is not a reason to make the Services page fail.
+        }
+    }
 
     public void RefreshAllDetectedModels()
     {
@@ -1791,6 +2225,13 @@ public partial class ServicesViewModel : ViewModelBase
     /// Status changes already flow through.
     /// </summary>
     public bool AnyServerRunning => Servers.Any(s => s.Status == ServerStatus.Running);
+
+    /// <summary>
+    /// The non-embedding managed server is the owner of Chat launch settings.
+    /// Chat can expose a compact projection of this row without creating a
+    /// second settings owner or a second launch path.
+    /// </summary>
+    public ServerProcessViewModel? ChatServer => Servers.FirstOrDefault(server => !server.EmbeddingsMode);
 
     /// <summary>
     /// Identifies a loopback llama.cpp endpoint that belongs to a managed
@@ -1847,7 +2288,12 @@ public partial class ServicesViewModel : ViewModelBase
         IActivityRecorder? activity = null,
         SttSettingsViewModel? stt = null,
         IStartupTimingService? startupTiming = null,
-        LocalModelCapabilityService? capabilityService = null)
+        LocalModelCapabilityService? capabilityService = null,
+        IResourceCoordinator? resourceCoordinator = null,
+        AdaptiveInferenceExperienceService? adaptiveExperience = null,
+        RecommendationDerivationService? recommendationDerivation = null,
+        IRecommendationStore? recommendationStore = null,
+        RecommendationApplicationService? recommendationApplication = null)
     {
         _startupTiming = startupTiming;
         _settings = settings;
@@ -1862,9 +2308,18 @@ public partial class ServicesViewModel : ViewModelBase
         _systemInfo = systemInfo;
         _activity = activity;
         _capabilityService = capabilityService;
+        _resourceCoordinator = resourceCoordinator;
+        _adaptiveExperience = adaptiveExperience;
+        _recommendationDerivation = recommendationDerivation;
+        _recommendationStore = recommendationStore;
+        _recommendationApplication = recommendationApplication;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
-        _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
+        _settings.SettingsChanged += (_, _) =>
+        {
+            RunOnUi(Rebuild);
+            _ = RefreshRecommendationsAsync();
+        };
         if (_systemInfo is not null)
             _ = LoadHardwareProfileAsync();
     }
@@ -1923,24 +2378,7 @@ public partial class ServicesViewModel : ViewModelBase
         var companionIdentity = string.IsNullOrWhiteSpace(speculative.DraftModelPath)
             ? string.Empty
             : RuntimeIdentityFactory.CreateModelIdentity(speculative.DraftModelPath, null).StableId;
-        var configuration = new ConfigurationIdentityV2(
-            config.ContextSize,
-            config.GpuLayers,
-            config.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", > 0 => "gpu-partial", _ => string.Empty },
-            config.Threads,
-            config.PromptThreads,
-            config.Slots,
-            null,
-            null,
-            config.KvCacheTypeK,
-            config.KvCacheTypeV,
-            config.FlashAttention,
-            string.Join(",", speculative.Types),
-            companionIdentity,
-            $"nmax={speculative.NMax};nmin={speculative.NMin};pmin={speculative.PMin}",
-            config.CpuMoeLayers,
-            new Dictionary<string, string>(StringComparer.Ordinal),
-            IdentityCompleteness.Incomplete);
+        var configuration = ConfigurationIdentityFactory.Create(config, companionIdentity);
         var fingerprint = new EmpiricalProfileFingerprintV2(runtime, model, hardware, configuration);
         return new RuntimeTelemetryRequest(
             $"chat-{server.Id}", process.ProcessId, process.StartedAtUtc,
@@ -2017,7 +2455,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _adaptiveExperience, _recommendationDerivation)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };
@@ -2031,6 +2469,7 @@ public partial class ServicesViewModel : ViewModelBase
             RuntimeProfiles.Add(new RuntimeProfileViewModel(profile));
 
         OnPropertyChanged(nameof(AnyServerRunning));
+        OnPropertyChanged(nameof(ChatServer));
 
         var fingerprint = BuildAvailabilityFingerprint(configs);
         if (!string.Equals(_lastAvailabilityFingerprint, fingerprint, StringComparison.Ordinal))
@@ -2120,6 +2559,29 @@ public partial class ServicesViewModel : ViewModelBase
         return stopped;
     }
 
+    /// <summary>
+    /// Stops only managed embedding servers that are actually running. Doctor
+    /// uses this around a verified embedding-model migration so the process is
+    /// restarted with the new path and cannot continue serving the old vector
+    /// dimensions.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> StopRunningEmbeddingServersForModelChangeAsync()
+    {
+        var stopped = Servers
+            .Where(server => server.EmbeddingsMode && server.IsRunning)
+            .Select(server => server.Id)
+            .ToList();
+
+        foreach (var id in stopped)
+        {
+            var server = Servers.FirstOrDefault(candidate => candidate.Id == id);
+            if (server is not null)
+                await server.StopAndWaitAsync();
+        }
+
+        return stopped;
+    }
+
     /// <summary>Restarts exactly the servers named by id (r19 2.2), re-syncing each from its
     /// possibly just-updated <see cref="ServerConfig.ExecutablePath"/> first. Safe to call with
     /// ids for servers that no longer exist or are already running; both are no-ops.</summary>
@@ -2130,7 +2592,9 @@ public partial class ServicesViewModel : ViewModelBase
             var server = Servers.FirstOrDefault(s => s.Id == id);
             if (server is null || !server.IsStopped) continue;
             server.SyncExecutablePathFromConfig();
+            server.SyncModelPathFromConfig();
             await server.StartCommand.ExecuteAsync(null);
+            server.RefreshStatusFromManager();
         }
     }
 

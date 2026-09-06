@@ -16,6 +16,8 @@ public partial class DoctorViewModel : ObservableObject
     private readonly ISettingsService _settingsService;
     private readonly IVoiceOrchestrator? _voice;
     private readonly IActivityRecorder? _activity;
+    private readonly IRecommendationStore? _recommendationStore;
+    private readonly RecommendationApplicationService? _recommendationApplication;
     private CancellationTokenSource? _installCts;
 
     [ObservableProperty] private bool _isScanning;
@@ -69,6 +71,14 @@ public partial class DoctorViewModel : ObservableObject
     public Func<IReadOnlyList<string>, Task>? RequestRestartServers { get; set; }
 
     /// <summary>
+    /// Stops the dedicated embedding server before its model path changes and
+    /// returns the ids that should be started again after the verified model is
+    /// configured. The active process must not keep serving the old embedding
+    /// dimensions after Doctor reports a successful migration.
+    /// </summary>
+    public Func<Task<IReadOnlyList<string>>>? RequestStopRunningEmbeddingServersForModelChange { get; set; }
+
+    /// <summary>
     /// Re-syncs every Services row's displayed executable path after a
     /// successful llama.cpp update, since the update rewrites every managed
     /// server's path unconditionally, not just the ones that were running
@@ -76,13 +86,34 @@ public partial class DoctorViewModel : ObservableObject
     /// </summary>
     public Action? RequestSyncServerExecutablePaths { get; set; }
 
-    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null, IActivityRecorder? activity = null)
+    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null, IActivityRecorder? activity = null,
+        IRecommendationStore? recommendationStore = null, RecommendationApplicationService? recommendationApplication = null)
     {
         _doctor = doctor;
         _toasts = toasts;
         _settingsService = settings;
         _voice = voice;
         _activity = activity;
+        _recommendationStore = recommendationStore;
+        _recommendationApplication = recommendationApplication;
+    }
+
+    public UiBoundCollection<RecommendationReviewViewModel> Recommendations { get; } = [];
+    public bool HasRecommendations => Recommendations.Count > 0;
+
+    public async Task RefreshRecommendationsAsync(CancellationToken ct = default)
+    {
+        if (_recommendationStore is null || _recommendationApplication is null)
+            return;
+        var rows = await _recommendationStore.QueryAsync(new RecommendationQuery { Limit = 32 }, ct);
+        Recommendations.Clear();
+        foreach (var row in rows.Where(value => value.Status is RecommendationStatus.Current or RecommendationStatus.Accepted
+                     && value.Kind == RecommendationKind.ResourceConflict))
+        {
+            Recommendations.Add(new RecommendationReviewViewModel(
+                row, _recommendationApplication, null, () => RefreshRecommendationsAsync(), RequestNavigate));
+        }
+        OnPropertyChanged(nameof(HasRecommendations));
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
@@ -108,21 +139,21 @@ public partial class DoctorViewModel : ObservableObject
     [RelayCommand]
     private async Task ScanAsync()
     {
-        await ScanCoreAsync(showIssueToast: false);
+        await ScanCoreAsync(showIssueToast: false, CancellationToken.None);
     }
 
-    public async Task RunStartupScanAsync()
+    public async Task RunStartupScanAsync(CancellationToken ct = default)
     {
-        await ScanCoreAsync(showIssueToast: true);
+        await ScanCoreAsync(showIssueToast: true, ct);
     }
 
-    private async Task ScanCoreAsync(bool showIssueToast)
+    private async Task ScanCoreAsync(bool showIssueToast, CancellationToken ct)
     {
         if (IsScanning) return;
         IsScanning = true;
         try
         {
-            var report = await _doctor.ScanAsync();
+            var report = await _doctor.ScanAsync(ct);
             Checks.Clear();
             foreach (var check in report.Checks)
                 Checks.Add(check);
@@ -139,6 +170,10 @@ public partial class DoctorViewModel : ObservableObject
                 errors > 0 ? ActivityOutcome.Failed : warnings > 0 ? ActivityOutcome.Partial : ActivityOutcome.Succeeded,
                 "Doctor scan completed",
                 errors + warnings > 0 ? $"{errors} error(s), {warnings} warning(s)" : string.Empty);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Summary = "Doctor scan cancelled.";
         }
         catch (Exception ex)
         {
@@ -281,7 +316,7 @@ public partial class DoctorViewModel : ObservableObject
             if (idx >= 0)
             {
                 var existing = Checks[idx];
-                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, string.Join(Environment.NewLine, _embeddingLogLines), existing.Category);
+                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, string.Join(Environment.NewLine, _embeddingLogLines), existing.Category, existing.ActionKind, existing.ActionTarget);
                 // replace item to notify UI
                 Checks[idx] = updated;
             }
@@ -322,13 +357,19 @@ public partial class DoctorViewModel : ObservableObject
         string successTitle,
         string successBody,
         string failureTitle,
-        string cancelledTitle)
+        string cancelledTitle,
+        Func<Task<IReadOnlyList<string>>>? prepareAsync = null,
+        Func<IReadOnlyList<string>, Task>? restoreAsync = null)
     {
         if (isBusy()) return;
         setBusy(true);
         _installCts = new CancellationTokenSource();
+        IReadOnlyList<string> preparedServerIds = [];
         try
         {
+            if (prepareAsync is not null)
+                preparedServerIds = await prepareAsync();
+
             var progress = new Progress<string>(setProgress);
             var ok = await installAsync(progress, _installCts.Token);
             _toasts.Show(ok ? successTitle : failureTitle,
@@ -345,6 +386,16 @@ public partial class DoctorViewModel : ObservableObject
         }
         finally
         {
+            if (preparedServerIds.Count > 0 && restoreAsync is not null)
+            {
+                try { await restoreAsync(preparedServerIds); }
+                catch (Exception ex)
+                {
+                    _toasts.Show("Could not restart the embedding server", ex.Message, ToastKind.Warning, 7000);
+                }
+            }
+
+            await ScanAsync();
             setProgress(string.Empty);
             setBusy(false);
             _installCts?.Dispose();
@@ -438,9 +489,17 @@ public partial class DoctorViewModel : ObservableObject
     [RelayCommand]
     private async Task RunFix(DoctorCheck? check)
     {
-        if (check is null || !check.CanFix)
+        // Older callers and tests can still construct a non-ready DoctorCheck
+        // with the legacy CanFix-only shape. The rendered UI uses HasAction,
+        // while this narrow compatibility path keeps direct command callers
+        // working until they refresh their report.
+        var hasLegacyAction = check is not null
+            && check.ActionKind == DoctorActionKind.None
+            && check.CanFix
+            && check.Status != DoctorCheckStatus.Ready;
+        if (check is null || (!check.HasAction && !hasLegacyAction))
         {
-            _toasts.Show("No fix available", "This check does not provide an automated fix yet.", ToastKind.Info, 4000);
+            _toasts.Show("No action available", "This check is informational or has no action available in its current state.", ToastKind.Info, 4000);
             return;
         }
 
@@ -459,13 +518,16 @@ public partial class DoctorViewModel : ObservableObject
 
         if (check.Key == "kokoro-native")
         {
+            var retry = check.FixLabel.StartsWith("Retry", StringComparison.OrdinalIgnoreCase);
             await RunInstallAsync(
                 () => IsInstallingNativeKokoro,
                 v => IsInstallingNativeKokoro = v,
                 s => NativeKokoroProgress = s,
                 (p, ct) => _doctor.InstallNativeKokoroAssetsAsync(p, ct),
-                "Kokoro (native) installed", "Kokoro native ONNX model and voices installed.",
-                "Kokoro (native) install failed", "Kokoro (native) install cancelled");
+                retry ? "Kokoro (native) health restored" : "Kokoro (native) installed",
+                retry ? "Kokoro native assets were present and the ONNX session was retried." : "Kokoro native ONNX model and voices installed.",
+                retry ? "Kokoro (native) retry failed" : "Kokoro (native) install failed",
+                retry ? "Kokoro (native) health retry cancelled" : "Kokoro (native) install cancelled");
             return;
         }
 
@@ -489,7 +551,9 @@ public partial class DoctorViewModel : ObservableObject
                 HandleEmbeddingProgress,
                 (p, ct) => _doctor.InstallEmbeddingModelAsync(p, ct),
                 "Embedding model installed", "Embedding model downloaded and configured.",
-                "Embedding model install failed", "Embedding install cancelled");
+                "Embedding model install failed", "Embedding install cancelled",
+                RequestStopRunningEmbeddingServersForModelChange,
+                RequestRestartServers);
             return;
         }
 
@@ -500,7 +564,7 @@ public partial class DoctorViewModel : ObservableObject
             return;
         }
 
-        if (check.Key == "app-update")
+        if ((check.ActionKind == DoctorActionKind.OpenExternal || hasLegacyAction) && check.Key == "app-update")
         {
             if (RequestOpenUrl is null)
             {

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Hermaeus.Agent.Models;
@@ -157,9 +158,9 @@ public sealed class AgentService : IAgentService
                 Schema("""{"type":"object","properties":{"query":{"type":"string"},"regex":{"type":"boolean"},"context_lines":{"type":"integer"}},"required":["query"]}""")),
             new("glob_files", "Match workspace files against a glob pattern (supports * and **).",
                 Schema("""{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}""")),
-            new("read_file", "Read a workspace file, optionally a bounded line range via line_offset/line_limit. If the result is marked truncated, call again with line_offset past what you already read to get the rest.",
-                Schema("""{"type":"object","properties":{"relative_path":{"type":"string"},"line_offset":{"type":"integer"},"line_limit":{"type":"integer"}},"required":["relative_path"]}""")),
-            new("summarize_file", "Summarize a workspace file's readable content.",
+            new("read_file", "Read a workspace file completely by default. Omit line_offset and line_limit unless you deliberately need a bounded slice; never use line_limit=1 as a default. If the result is marked truncated, continue with the exact line_offset and line_limit shown in ContinuationHint.",
+                Schema("""{"type":"object","properties":{"relative_path":{"type":"string"},"line_offset":{"type":"integer","minimum":0,"description":"Optional 0-based first line. Omit for a complete read."},"line_limit":{"type":"integer","minimum":1,"description":"Optional number of lines. Omit for a complete read; use only for paging a large file."}},"required":["relative_path"]}""")),
+            new("summarize_file", "Return a short orientation summary, not the complete file. Use read_file when the file content itself is needed.",
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"}},"required":["relative_path"]}""")),
             new("inspect_git_diff", "Show git status for the workspace root.",
                 Schema("""{"type":"object","properties":{}}""")),
@@ -191,6 +192,7 @@ public sealed class AgentService : IAgentService
     private readonly ILessonStore? _lessons;
     private readonly IAgentWorkspaceTools? _workspaceTools;
     private readonly IEmpiricalExperienceStore? _experiences;
+    private readonly IRuntimeLogService? _logs;
 
     /// <summary>
     /// r29 doc 03 3.4: one interrupt source per running task, held for the
@@ -226,7 +228,8 @@ public sealed class AgentService : IAgentService
         ISettingsService? settings = null,
         ILessonStore? lessons = null,
         IAgentWorkspaceTools? workspaceTools = null,
-        IEmpiricalExperienceStore? experiences = null)
+        IEmpiricalExperienceStore? experiences = null,
+        IRuntimeLogService? logs = null)
     {
         _store = store;
         _contextBuilder = contextBuilder;
@@ -239,6 +242,7 @@ public sealed class AgentService : IAgentService
         _settings = settings;
         _workspaceTools = workspaceTools;
         _experiences = experiences;
+        _logs = logs;
     }
 
     private static readonly IReadOnlyList<string> BaseTaskConstraints =
@@ -316,12 +320,44 @@ public sealed class AgentService : IAgentService
     public async Task<AgentStepResult> RunStepAsync(
         string taskId,
         AgentWorkspaceOptions options,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? operationId = null)
+    {
+        operationId ??= OperationCorrelation.NewId();
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            var result = await RunStepCoreAsync(taskId, options, ct, operationId);
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Debug,
+                RuntimeLogCategory.Agent,
+                $"Agent step completed: task={taskId}, status={result.State.Status}, step={result.State.StepCount}, duration_ms={timer.ElapsedMilliseconds}.",
+                operationId));
+            return result;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Agent,
+                $"Agent step failed: task={taskId}, exception={ex.GetType().Name}, duration_ms={timer.ElapsedMilliseconds}.",
+                operationId));
+            throw;
+        }
+    }
+
+    private async Task<AgentStepResult> RunStepCoreAsync(
+        string taskId,
+        AgentWorkspaceOptions options,
+        CancellationToken ct,
+        string operationId)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
         var firstNewToolResult = state.ToolResults.Count;
-        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
+        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted)
             throw new InvalidOperationException("Agent task is already finished.");
         if (state.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
         {
@@ -656,7 +692,7 @@ public sealed class AgentService : IAgentService
                     AgentToolResult toolResult;
                     try
                     {
-                        toolResult = await _toolExecutor.ExecuteAsync(nextTool, response.NextAction.Arguments, toolOptions, ct);
+                        toolResult = await _toolExecutor.ExecuteAsync(nextTool, response.NextAction.Arguments, toolOptions, ct, operationId);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -870,9 +906,47 @@ public sealed class AgentService : IAgentService
         Action<AgentStepResult>? onStep = null,
         CancellationToken ct = default)
     {
+        var operationId = OperationCorrelation.NewId();
+        var timer = Stopwatch.StartNew();
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Agent,
+            $"Agent run started: task={taskId}.",
+            operationId));
+        try
+        {
+            var result = await RunCoreAsync(taskId, options, onStep, ct, operationId);
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Agent,
+                $"Agent run completed: task={taskId}, status={result.State.Status}, steps={result.State.StepCount}, duration_ms={timer.ElapsedMilliseconds}.",
+                operationId));
+            return result;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Agent,
+                $"Agent run failed: task={taskId}, exception={ex.GetType().Name}, duration_ms={timer.ElapsedMilliseconds}.",
+                operationId));
+            throw;
+        }
+    }
+
+    private async Task<AgentStepResult> RunCoreAsync(
+        string taskId,
+        AgentWorkspaceOptions options,
+        Action<AgentStepResult>? onStep,
+        CancellationToken ct,
+        string operationId)
+    {
         var loaded = await _store.LoadAsync(taskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
         if (loaded.SubTaskPlan.Count > 0)
-            return await RunOrchestrationAsync(loaded, options, onStep, ct);
+            return await RunOrchestrationAsync(loaded, options, onStep, ct, operationId);
 
         var maxSteps = Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1);
         AgentStepResult result;
@@ -880,7 +954,7 @@ public sealed class AgentService : IAgentService
         do
         {
             ct.ThrowIfCancellationRequested();
-            result = await RunStepAsync(taskId, options, ct);
+            result = await RunStepAsync(taskId, options, ct, operationId);
             steps++;
             onStep?.Invoke(result);
         }
@@ -930,9 +1004,10 @@ public sealed class AgentService : IAgentService
         AgentTaskState parent,
         AgentWorkspaceOptions options,
         Action<AgentStepResult>? onStep,
-        CancellationToken ct)
+        CancellationToken ct,
+        string operationId)
     {
-        if (parent.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed)
+        if (parent.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted)
             throw new InvalidOperationException("Agent task is already finished.");
 
         var maxOrchestrationSteps = Math.Max(_settings?.Settings.Agent.MaxOrchestrationSteps ?? 60, 1);
@@ -943,9 +1018,12 @@ public sealed class AgentService : IAgentService
             parent = await _store.LoadAsync(parent.TaskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
             await ReconcileSubTaskPlanAsync(parent, ct);
 
+            if (parent.Status is AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted)
+                throw new InvalidOperationException("Agent task is already finished.");
+
             var next = parent.SubTaskPlan.FirstOrDefault(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
             if (next is null)
-                return await RunSynthesisAsync(parent, options with { ModelId = parent.ModelId }, budgetTruncated: false, ct);
+                return await RunSynthesisAsync(parent, options with { ModelId = parent.ModelId }, budgetTruncated: false, ct, operationId);
 
             if (parent.OrchestrationStepsUsed >= maxOrchestrationSteps)
             {
@@ -957,7 +1035,7 @@ public sealed class AgentService : IAgentService
                     DateTime.UtcNow));
                 await _store.SaveAsync(parent, ct);
                 await _store.AppendLogAsync(parent.TaskId, "orchestration step budget exhausted; remaining sub-tasks skipped", ct);
-                return await RunSynthesisAsync(parent, options with { ModelId = parent.ModelId }, budgetTruncated: true, ct);
+                return await RunSynthesisAsync(parent, options with { ModelId = parent.ModelId }, budgetTruncated: true, ct, operationId);
             }
 
             if (next.Status == AgentSubTaskStatus.Pending)
@@ -973,19 +1051,24 @@ public sealed class AgentService : IAgentService
                 ?? throw new InvalidOperationException($"Sub-task '{childTaskId}' was not found.");
             var childOptions = options with { ModelId = persistedChild.ModelId };
             var childStepsUsed = 0;
-            var childResult = await RunAsync(childTaskId, childOptions, onStep: r =>
+            var childResult = await RunCoreAsync(childTaskId, childOptions, onStep: r =>
             {
                 childStepsUsed++;
                 onStep?.Invoke(r);
-            }, ct);
+            }, ct, operationId);
 
             parent = await _store.LoadAsync(parent.TaskId, ct) ?? parent;
             parent.OrchestrationStepsUsed += childStepsUsed;
 
-            if (childResult.State.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed)
+            if (childResult.State.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted)
             {
                 var spec = parent.SubTaskPlan.First(s => s.TaskId == childTaskId);
-                spec.Status = childResult.State.Status == AgentTaskStatus.Complete ? AgentSubTaskStatus.Complete : AgentSubTaskStatus.Failed;
+                spec.Status = childResult.State.Status switch
+                {
+                    AgentTaskStatus.Complete => AgentSubTaskStatus.Complete,
+                    AgentTaskStatus.Interrupted => AgentSubTaskStatus.Interrupted,
+                    _ => AgentSubTaskStatus.Failed
+                };
                 var combined = string.Join(" ", new[] { childResult.State.Summary, childResult.PlannerResponse.UserMessage }
                     .Where(s => !string.IsNullOrWhiteSpace(s)));
                 spec.ResultSummary = combined.Length > 1200 ? combined[..1200] + "..." : combined;
@@ -1024,11 +1107,17 @@ public sealed class AgentService : IAgentService
         foreach (var spec in parent.SubTaskPlan.Where(s => s.Status == AgentSubTaskStatus.Running && s.TaskId is not null))
         {
             var child = await _store.LoadAsync(spec.TaskId!, ct);
-            if (child is null || child.Status is not (AgentTaskStatus.Complete or AgentTaskStatus.Failed))
+            if (child is null || child.Status is not (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted))
                 continue;
 
-            spec.Status = child.Status == AgentTaskStatus.Complete ? AgentSubTaskStatus.Complete : AgentSubTaskStatus.Failed;
-            spec.ResultSummary = child.Summary.Length > 1200 ? child.Summary[..1200] + "..." : child.Summary;
+            spec.Status = child.Status switch
+            {
+                AgentTaskStatus.Complete => AgentSubTaskStatus.Complete,
+                AgentTaskStatus.Interrupted => AgentSubTaskStatus.Interrupted,
+                _ => AgentSubTaskStatus.Failed
+            };
+            var summary = string.IsNullOrWhiteSpace(child.InterruptionReason) ? child.Summary : child.InterruptionReason;
+            spec.ResultSummary = summary.Length > 1200 ? summary[..1200] + "..." : summary;
             changed = true;
         }
 
@@ -1045,7 +1134,7 @@ public sealed class AgentService : IAgentService
     /// sub-task work already happened, so a flaky synthesis step must not
     /// fail the whole run.
     /// </summary>
-    private async Task<AgentStepResult> RunSynthesisAsync(AgentTaskState parent, AgentWorkspaceOptions options, bool budgetTruncated, CancellationToken ct)
+    private async Task<AgentStepResult> RunSynthesisAsync(AgentTaskState parent, AgentWorkspaceOptions options, bool budgetTruncated, CancellationToken ct, string operationId)
     {
         parent.ActiveStep = "All sub-tasks are finished. Respond with next_action.type=\"final\" and a consolidated report covering every sub-task's outcome as user_message.";
         await _store.SaveAsync(parent, ct);
@@ -1053,7 +1142,7 @@ public sealed class AgentService : IAgentService
         AgentStepResult? stepResult;
         try
         {
-            stepResult = await RunStepAsync(parent.TaskId, options, ct);
+            stepResult = await RunStepAsync(parent.TaskId, options, ct, operationId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1143,6 +1232,9 @@ public sealed class AgentService : IAgentService
     public Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default) =>
         _store.ListRecentAsync(25, ct);
 
+    public Task DeleteTaskAsync(string taskId, CancellationToken ct = default) =>
+        _store.DeleteAsync(taskId, ct);
+
     public async Task<AgentTaskState> ChangeTaskModelAsync(string taskId, string modelId, CancellationToken ct = default)
     {
         var state = await _store.LoadAsync(taskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
@@ -1176,6 +1268,7 @@ public sealed class AgentService : IAgentService
 
     public async Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
     {
+        var operationId = OperationCorrelation.NewId();
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
         var firstNewToolResult = state.ToolResults.Count;
@@ -1272,7 +1365,7 @@ public sealed class AgentService : IAgentService
             AgentToolResult result;
             try
             {
-                result = await _toolExecutor.ExecuteAsync(pending.ToolName, pending.Arguments, effectiveOptions, ct);
+                result = await _toolExecutor.ExecuteAsync(pending.ToolName, pending.Arguments, effectiveOptions, ct, operationId);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1332,6 +1425,12 @@ public sealed class AgentService : IAgentService
         await _store.SaveAsync(state, ct);
         await RecordExperiencesAsync(state, options ?? new AgentWorkspaceOptions(state.WorkspaceRoot), firstNewToolResult, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Agent,
+            $"Agent approval recorded: task={taskId}, action={action}, approved={approved}.",
+            operationId));
         return new AgentApprovalResult(true, string.Empty);
     }
 
@@ -1420,7 +1519,7 @@ public sealed class AgentService : IAgentService
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
 
-        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
+        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted)
             return AgentSteeringResult.Refused("This task has finished. Use Continue to reopen it with a new instruction.");
 
         // An orchestration parent delegates each child to its own RunAsync
@@ -1588,8 +1687,6 @@ public sealed class AgentService : IAgentService
         await _store.SaveAsync(state, ct);
     }
 
-    private const string DefaultContinueInstruction = "Continue with the remaining pending steps.";
-
     public async Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default)
     {
         var state = await _store.LoadAsync(taskId, ct)
@@ -1602,10 +1699,40 @@ public sealed class AgentService : IAgentService
         if (state.PendingToolAction is not null)
             throw new InvalidOperationException("A tool approval is pending; approve or reject it from the review queue instead of continuing.");
 
-        var trimmedInstruction = string.IsNullOrWhiteSpace(instruction) ? DefaultContinueInstruction : instruction.Trim();
+        var trimmedInstruction = instruction?.Trim() ?? string.Empty;
+        if (trimmedInstruction.Length == 0)
+            throw new InvalidOperationException("Enter an instruction, or choose Continue planned work.");
+
+        return await ContinueLoadedTaskAsync(state, trimmedInstruction, AgentTaskTransitionKind.ContinueWithInstruction, ct);
+    }
+
+    public async Task<AgentTaskState> ContinuePlannedTaskAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            throw new InvalidOperationException("This task is a sub-task; continue the parent instead.");
+        if (state.Status == AgentTaskStatus.Running)
+            throw new InvalidOperationException("This task is already running.");
+        if (state.PendingToolAction is not null)
+            throw new InvalidOperationException("A tool approval is pending; approve or reject it from the review queue instead of continuing.");
+        if (state.PendingSteps.Count == 0)
+            throw new InvalidOperationException("This task has no remaining planned work. Enter an instruction for a follow-up, or finish the run.");
+
+        return await ContinueLoadedTaskAsync(state, "Continue with the remaining planned work.", AgentTaskTransitionKind.ContinuePlannedWork, ct);
+    }
+
+    private async Task<AgentTaskState> ContinueLoadedTaskAsync(
+        AgentTaskState state,
+        string transcriptInstruction,
+        AgentTaskTransitionKind transitionKind,
+        CancellationToken ct)
+    {
+        var taskId = state.TaskId;
 
         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-            state.StepCount, "user", null, $"continue: {trimmedInstruction}", DateTime.UtcNow, ModelId: state.ModelId), ct);
+            state.StepCount, "user", null, $"continue: {transcriptInstruction}", DateTime.UtcNow, ModelId: state.ModelId), ct);
 
         // Reconcile child statuses first (r16 01-orchestration-hardening.md
         // 1.1) so a resumed orchestration parent advances the next PENDING
@@ -1621,11 +1748,70 @@ public sealed class AgentService : IAgentService
         state.ConsecutiveStepErrors = 0;
         state.StepBudgetExhausted = false;
         state.PlanApprovalPending = false;
+        state.UserTransitions.Add(new AgentTaskTransition(transitionKind, DateTime.UtcNow,
+            transitionKind == AgentTaskTransitionKind.ContinueWithInstruction ? transcriptInstruction : string.Empty));
         // Reopening the task settles whatever it was last asking; the
         // instruction just given is the answer.
         state.LastUserMessage = string.Empty;
         await _store.SaveAsync(state, ct);
-        await _store.AppendLogAsync(taskId, $"continued: {trimmedInstruction}", ct);
+        await _store.AppendLogAsync(taskId, $"continued: {transcriptInstruction}", ct);
+        return state;
+    }
+
+    public async Task<AgentTaskState> FinishTaskAsync(string taskId, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+        if (state.Status == AgentTaskStatus.Running)
+            throw new InvalidOperationException("This task is still running. Stop it before finishing the run.");
+        if (state.PendingToolAction is not null)
+            throw new InvalidOperationException("A tool approval is pending. Approve, reject, or dismiss it before finishing the run.");
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            throw new InvalidOperationException("This task is a sub-task; finish the parent instead.");
+
+        if (state.Status != AgentTaskStatus.Complete)
+        {
+            state.Status = AgentTaskStatus.Complete;
+            state.StepBudgetExhausted = false;
+            state.PlanApprovalPending = false;
+            state.LastUserMessage = string.Empty;
+            state.ActiveStep = "Run finished by user. Completed work remains available below.";
+            state.Summary = string.IsNullOrWhiteSpace(state.Summary)
+                ? state.ActiveStep
+                : $"Run finished by user. {state.Summary}";
+            state.Decisions.Add(new AgentDecision("Run finished", "The user accepted the current result and ended the run.", DateTime.UtcNow));
+        }
+        state.UserTransitions.Add(new AgentTaskTransition(AgentTaskTransitionKind.FinishRun, DateTime.UtcNow));
+        await _store.AppendTranscriptEntryAsync(taskId,
+            new AgentTranscriptEntry(state.StepCount, "user", null, "finish: end run", DateTime.UtcNow, ModelId: state.ModelId), ct);
+        await _store.AppendLogAsync(taskId, "run finished by user", ct);
+        await _store.SaveAsync(state, ct);
+        return state;
+    }
+
+    public async Task<AgentTaskState> StopTaskAsync(string taskId, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted)
+            return state;
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            throw new InvalidOperationException("This task is a sub-task; stop the parent run instead.");
+
+        state.Status = AgentTaskStatus.Blocked;
+        state.StepBudgetExhausted = false;
+        state.PlanApprovalPending = false;
+        state.LastUserMessage = string.Empty;
+        state.ActiveStep = "Stopped by user. Completed work remains available below.";
+        state.Summary = string.IsNullOrWhiteSpace(state.Summary)
+            ? "Stopped by user. Completed work remains available below."
+            : $"Stopped by user. Completed work remains available below. {state.Summary}";
+        state.Decisions.Add(new AgentDecision("Run stopped", "The user stopped active work after cancellation reached a safe boundary.", DateTime.UtcNow));
+        state.UserTransitions.Add(new AgentTaskTransition(AgentTaskTransitionKind.StopRun, DateTime.UtcNow));
+        await _store.AppendTranscriptEntryAsync(taskId,
+            new AgentTranscriptEntry(state.StepCount, "user", null, "stop: active work cancelled", DateTime.UtcNow, ModelId: state.ModelId), ct);
+        await _store.AppendLogAsync(taskId, "run stopped by user; completed work retained", ct);
+        await _store.SaveAsync(state, ct);
         return state;
     }
 

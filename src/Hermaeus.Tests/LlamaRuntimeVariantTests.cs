@@ -276,12 +276,13 @@ public sealed class LlamaRuntimeVariantTests
     [Fact]
     public void Managed_llama_install_path_is_derived_from_the_configured_AI_assets_root()
     {
+        using var temp = new TempDir();
         var setup = new LlamaServerSetupService();
+        var assetsRoot = temp.PathFor("ai-assets");
 
         Assert.Equal(
-            Path.Combine("/mnt/Gaming/AI", "llama-server"),
-            setup.GetDefaultInstallPath("/mnt/Gaming/AI"));
-        Assert.DoesNotContain("Data", setup.GetDefaultInstallPath("/mnt/Gaming/AI"), StringComparison.OrdinalIgnoreCase);
+            Path.Combine(assetsRoot, "llama-server"),
+            setup.GetDefaultInstallPath(assetsRoot));
     }
 
     [Fact]
@@ -421,6 +422,40 @@ public sealed class LlamaRuntimeVariantTests
     public void ShouldRejectGpuRuntime_is_terminal_at_cpu(LlamaRuntimeVariant variant, bool probeOk, bool expected)
         => Assert.Equal(expected, DoctorService.ShouldRejectGpuRuntime(variant, probeOk));
 
+    [Fact]
+    public void Successful_zero_exit_without_build_identity_is_not_called_a_launch_failure()
+    {
+        Assert.Equal(
+            LlamaProbeFailureKind.IdentityUnverified,
+            DoctorService.ClassifyLlamaProbe(probeStarted: true, exitCode: 0, buildIdentityVerified: false));
+        Assert.True(DoctorService.ShouldRejectGpuRuntime(LlamaRuntimeVariant.Cuda, true, 0, false));
+        Assert.False(DoctorService.ShouldRejectGpuRuntime(LlamaRuntimeVariant.Cpu, true, 0, false));
+    }
+
+    [Theory]
+    [InlineData("version: 0.3.0-dev (build 10782, commit 0ba6499c3)\nbuilt with Clang 20.1.8 for Windows x86_64", 10782)]
+    [InlineData("version: 0.3.0-dev (build 10786, commit de8656bd9)\nbuilt with Clang 20.1.8 for Windows x86_64", 10786)]
+    [InlineData("----- common params -----\n--version show version and build info", null)]
+    public void Current_llama_windows_probe_output_requires_a_real_build_identity(string output, int? expected)
+        => Assert.Equal(expected, DoctorService.TryParseLlamaBuild(output));
+
+    [Fact]
+    public void Verified_release_artifact_can_supply_identity_when_version_is_not_parseable()
+    {
+        Assert.True(DoctorService.IsLlamaUpdateIdentityVerified(null, 10782, verifiedArtifact: true));
+        Assert.False(DoctorService.IsLlamaUpdateIdentityVerified(10786, 10782, verifiedArtifact: true));
+        Assert.False(DoctorService.IsLlamaUpdateIdentityVerified(null, 10782, verifiedArtifact: false));
+    }
+
+    [Theory]
+    [InlineData(false, null, false, "CouldNotStart")]
+    [InlineData(true, null, false, "TimedOut")]
+    [InlineData(true, 1, false, "NonZeroExit")]
+    [InlineData(true, 0, true, "None")]
+    public void Probe_classification_keeps_start_exit_and_identity_failures_distinct(
+        bool started, int? exitCode, bool identity, string expected)
+        => Assert.Equal(expected, DoctorService.ClassifyLlamaProbe(started, exitCode, identity).ToString());
+
     [Theory]
     [InlineData(true, true, 999, true)]   // GPU + CPU build -> advise
     [InlineData(true, false, 0, true)]    // GPU + zero offload -> advise
@@ -428,6 +463,50 @@ public sealed class LlamaRuntimeVariantTests
     [InlineData(false, true, 0, false)]   // no GPU -> quiet
     public void ShouldAdviseGpuInference_fires_only_when_gpu_wasted(bool gpu, bool cpuBuild, int layers, bool expected)
         => Assert.Equal(expected, DoctorService.ShouldAdviseGpuInference(gpu, cpuBuild, layers));
+
+    [Fact]
+    public void ShouldAdviseGpuInference_does_not_treat_typed_auto_as_cpu()
+    {
+        Assert.False(DoctorService.ShouldAdviseGpuInference(
+            hasRealGpu: true,
+            installedBuildIsCpu: false,
+            GpuPlacementIntent.Auto()));
+    }
+
+    [Fact]
+    public void Cpu_only_build_detection_recognizes_linux_gpu_shared_libraries()
+    {
+        using var temp = new TempDir();
+        var executable = temp.PathFor("llama-server");
+        File.WriteAllText(executable, "test executable");
+        File.WriteAllText(temp.PathFor("libggml-cpu.so"), "cpu backend");
+        File.WriteAllText(temp.PathFor("libggml-vulkan.so"), "vulkan backend");
+
+        Assert.False(DoctorService.IsCpuOnlyBuild(executable));
+    }
+
+    [Fact]
+    public void Cpu_only_build_detection_recognizes_windows_gpu_libraries()
+    {
+        using var temp = new TempDir();
+        var executable = temp.PathFor("llama-server.exe");
+        File.WriteAllText(executable, "test executable");
+        File.WriteAllText(temp.PathFor("ggml-cuda.dll"), "cuda backend");
+
+        Assert.False(DoctorService.IsCpuOnlyBuild(executable));
+    }
+
+    [Fact]
+    public void Cpu_only_build_detection_does_not_treat_unrelated_files_as_gpu_proof()
+    {
+        using var temp = new TempDir();
+        var executable = temp.PathFor("llama-server");
+        File.WriteAllText(executable, "test executable");
+        File.WriteAllText(temp.PathFor("model-cuda-not-a-library.gguf"), "model");
+        File.WriteAllText(temp.PathFor("notes-vulkan.txt"), "notes");
+
+        Assert.True(DoctorService.IsCpuOnlyBuild(executable));
+    }
 
     private static string? Select(LlamaPlatform platform, LlamaRuntimeVariant variant)
         => LlamaServerSetupService.SelectDownloadAsset(B10066Assets, platform, variant)?.BrowserDownloadUrl;

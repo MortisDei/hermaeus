@@ -173,6 +173,7 @@ public static class LabConfigurationMapper
         Label = label,
         ContextSize = source.ContextSize,
         GpuLayers = source.GpuLayers,
+        GpuPlacement = source.TryGetGpuPlacement(out var placement, out _) ? placement : null,
         Threads = source.Threads,
         PromptThreads = source.PromptThreads,
         Slots = source.Slots,
@@ -200,6 +201,7 @@ public static class LabConfigurationMapper
         Port = port,
         ContextSize = configuration.ContextSize,
         GpuLayers = configuration.GpuLayers,
+        GpuPlacement = configuration.GpuPlacement,
         Threads = configuration.Threads,
         PromptThreads = configuration.PromptThreads,
         Slots = configuration.Slots,
@@ -719,27 +721,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     }
 
     private static ConfigurationIdentityV2 CreateConfigurationIdentity(ServerConfig source, LabConfiguration configuration)
-    {
-        var parsed = string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
-            ? new Dictionary<string, string>(StringComparer.Ordinal)
-            : new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["extraArgumentsSha256"] = configuration.ExtraArgumentsSha256
-            };
-        if (configuration.PromptCacheMode != "default")
-            parsed["promptCacheMode"] = configuration.PromptCacheMode;
-        return new ConfigurationIdentityV2(configuration.ContextSize, configuration.GpuLayers,
-            configuration.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", _ => "gpu-partial" },
-            configuration.Threads, configuration.PromptThreads, configuration.Slots, null, null,
-            configuration.KvCacheTypeK, configuration.KvCacheTypeV, configuration.FlashAttention,
-            string.Join(',', configuration.SpeculativeTypes), configuration.SpeculativeCompanionIdentity,
-            $"nmax={configuration.SpeculativeNMax?.ToString(CultureInfo.InvariantCulture) ?? string.Empty};" +
-            $"nmin={configuration.SpeculativeNMin?.ToString(CultureInfo.InvariantCulture) ?? string.Empty};" +
-            $"pmin={configuration.SpeculativePMin?.ToString(CultureInfo.InvariantCulture) ?? string.Empty};" +
-            $"ngld={configuration.SpeculativeDraftGpuLayers?.ToString(CultureInfo.InvariantCulture) ?? string.Empty}",
-            configuration.CpuMoeLayers, parsed,
-            string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256) ? IdentityCompleteness.Complete : IdentityCompleteness.Incomplete);
-    }
+        => ConfigurationIdentityFactory.Create(configuration);
 
     private async Task<EmpiricalExperience> PersistAsync(LabRunSnapshot run, string code, NormalizedOutcome outcome,
         string detail, IReadOnlyList<string> priorEvidence, CancellationToken ct,

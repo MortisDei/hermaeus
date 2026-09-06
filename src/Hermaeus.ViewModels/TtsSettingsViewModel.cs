@@ -21,6 +21,12 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
 
     public VoiceChannel Channel { get; }
     public string DisplayName { get; }
+    /// <summary>
+    /// Per-row catalogue owned by this channel. Each editable ComboBox gets its
+    /// own collection instance so a provider refresh cannot share stale items
+    /// or selection state between rows.
+    /// </summary>
+    public UiBoundCollection<string> VoiceOptions { get; }
 
     [ObservableProperty] private bool _enabled;
     [ObservableProperty] private string _voiceId = string.Empty;
@@ -37,13 +43,32 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
     public string VoiceDisplay
     {
         get => string.IsNullOrEmpty(VoiceId) ? DefaultVoiceLabel : VoiceId;
-        set => VoiceId = value == DefaultVoiceLabel ? string.Empty : value;
+        set
+        {
+            if (string.Equals(value, DefaultVoiceLabel, StringComparison.Ordinal))
+            {
+                VoiceId = string.Empty;
+                return;
+            }
+
+            // An empty edit is not a deliberate channel reset. The explicit
+            // default sentinel remains the way to select the global voice,
+            // while transient empty edits preserve the last real choice.
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            VoiceId = value.Trim();
+        }
     }
 
-    public VoiceChannelSettingViewModel(VoiceChannel channel, string displayName)
+    public VoiceChannelSettingViewModel(
+        VoiceChannel channel,
+        string displayName,
+        UiBoundCollection<string>? voiceOptions = null)
     {
         Channel = channel;
         DisplayName = displayName;
+        VoiceOptions = voiceOptions ?? [];
     }
 
     partial void OnEnabledChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
@@ -75,14 +100,17 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     private readonly IVoiceOrchestrator? _voice;
     private bool _externalServiceRunning;
     private bool _isReloading;
+    private VoiceProvider? _lastHealthProvider;
+    private VoiceHealthStatus? _lastHealthStatus;
     private long _voiceRefreshGeneration;
     private CancellationTokenSource? _voiceRefreshCancellation;
 
     public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
     public UiBoundCollection<AudioFeedbackToggleViewModel> AudioFeedbackEvents { get; } = [];
 
-    /// <summary>r24: the channel voice picker's suggestion list - the default-voice sentinel
-    /// followed by the active provider's own voices, kept live as <see cref="TtsVoices"/> refreshes.</summary>
+    /// <summary>r24: the channel voice picker's catalogue - the default-voice sentinel
+    /// followed by the active provider's own voices. Each channel receives a
+    /// separate snapshot from this parent catalogue.</summary>
     public UiBoundCollection<string> ChannelVoiceOptions { get; } = [VoiceChannelSettingViewModel.DefaultVoiceLabel];
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
@@ -127,10 +155,31 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     public Action? RequestTtsModelDirectoryPicker { get; set; }
     public Action? RequestTtsOutputPicker { get; set; }
     public Action? RequestTtsVoiceDirectoryPicker { get; set; }
+    public Action<string>? RequestNavigate { get; set; }
 
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm", "mps"];
     public UiBoundCollection<string> TtsVoices { get; } = ["default"];
     public UiBoundCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
+
+    /// <summary>
+    /// The settings editor displays provider names, but persistence must use
+    /// the stable enum id so Kokoro (Python) cannot be reloaded as native
+    /// Kokoro on the next startup.
+    /// </summary>
+    public VoiceProvider SelectedVoiceProviderId
+    {
+        get
+        {
+            var selected = VoiceProviders.FirstOrDefault(p =>
+                p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            if (selected is not null)
+                return selected.Id;
+
+            return VoiceProviderIdentity.TryParse(SelectedVoiceProvider, out var parsed)
+                ? parsed
+                : VoiceProvider.KokoroNative;
+        }
+    }
 
     public bool IsTtsRunning => IsXttsV2Provider
         ? (_xttsProcess.IsRunning || _externalServiceRunning)
@@ -200,6 +249,16 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Native Kokoro's actionable failure is owned by Doctor, not by the
+    /// Services settings editor. This remains false until a health probe has
+    /// observed a non-healthy result for the currently selected provider.
+    /// </summary>
+    public bool CanOpenDoctor => IsKokoroNativeProvider
+        && _lastHealthProvider == VoiceProvider.KokoroNative
+        && _lastHealthStatus is not null
+        && _lastHealthStatus != VoiceHealthStatus.Healthy;
+
     public TtsSettingsViewModel(
         ITtsService tts,
         IVoiceProviderRegistry voiceProviderRegistry,
@@ -237,6 +296,12 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         ChannelVoiceOptions.Add(VoiceChannelSettingViewModel.DefaultVoiceLabel);
         foreach (var voice in TtsVoices)
             ChannelVoiceOptions.Add(voice);
+        foreach (var channel in VoiceChannels)
+        {
+            channel.VoiceOptions.Clear();
+            foreach (var voice in ChannelVoiceOptions)
+                channel.VoiceOptions.Add(voice);
+        }
         OnPropertyChanged(nameof(ChannelVoiceOptionsAreProviderSupplied));
         OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
     }
@@ -308,7 +373,11 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
             var hasConfig = tts.Channels.TryGetValue(channel.ToString(), out var config);
             var enabled = hasConfig ? config!.Enabled : channel == VoiceChannel.Chat;
             var voiceId = ResolveChannelVoiceId(tts, config);
-            VoiceChannels.Add(new VoiceChannelSettingViewModel(channel, channel.ToString()) { Enabled = enabled, VoiceId = voiceId });
+            var channelViewModel = new VoiceChannelSettingViewModel(channel, channel.ToString())
+            { Enabled = enabled, VoiceId = voiceId };
+            foreach (var option in ChannelVoiceOptions)
+                channelViewModel.VoiceOptions.Add(option);
+            VoiceChannels.Add(channelViewModel);
         }
 
         AutoSpeakChatReplies = tts.AutoSpeakChatReplies;
@@ -330,16 +399,22 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     private void ApplyXttsStatus()
     {
-        TtsStatus = IsXttsV2Provider
-            ? _xttsProcess.StatusLabel
-            : IsKokoroProvider
-                ? _kokoroProcess.StatusLabel
-                : "Ready";
+        if (!(IsKokoroNativeProvider && _lastHealthProvider == VoiceProvider.KokoroNative && _lastHealthStatus is not null))
+        {
+            TtsStatus = IsXttsV2Provider
+                ? _xttsProcess.StatusLabel
+                : IsKokoroProvider
+                    ? _kokoroProcess.StatusLabel
+                    : "Ready";
+        }
         OnPropertyChanged(nameof(IsTtsRunning));
         OnPropertyChanged(nameof(IsServerManagedProvider));
+        OnPropertyChanged(nameof(CanOpenDoctor));
         StartTtsCommand.NotifyCanExecuteChanged();
         StopTtsCommand.NotifyCanExecuteChanged();
     }
+
+    partial void OnTtsStatusChanged(string value) => OnPropertyChanged(nameof(CanOpenDoctor));
 
     public void Dispose()
     {
@@ -517,6 +592,9 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         }
     }
 
+    [RelayCommand]
+    private void OpenDoctor() => RequestNavigate?.Invoke("doctor");
+
     private bool OwnsVoiceRefresh(string providerName, long generation, CancellationTokenSource cancellation) =>
         generation == Volatile.Read(ref _voiceRefreshGeneration)
         && ReferenceEquals(cancellation, Volatile.Read(ref _voiceRefreshCancellation))
@@ -572,16 +650,22 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     public async Task ProbeActiveProviderHealthAsync(CancellationToken ct = default)
     {
+        VoiceProvider active;
         try
         {
-            var active = _voiceProviderRegistry.GetActiveProvider();
+            active = _voiceProviderRegistry.GetActiveProvider();
+            _lastHealthProvider = active;
             var provider = _voiceProviderRegistry.GetVoiceProvider(active);
             var health = await provider.HealthCheckAsync(ct);
+            _lastHealthStatus = health.Status;
             _externalServiceRunning = health.Status == VoiceHealthStatus.Healthy;
             TtsStatus = health.Summary;
         }
         catch (Exception ex)
         {
+            active = _voiceProviderRegistry.GetActiveProvider();
+            _lastHealthProvider = active;
+            _lastHealthStatus = VoiceHealthStatus.Unhealthy;
             _externalServiceRunning = false;
             TtsStatus = ex.Message;
         }
@@ -609,6 +693,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     partial void OnSelectedVoiceProviderChanged(string value)
     {
         SupersedeVoiceRefresh();
+        _lastHealthProvider = null;
+        _lastHealthStatus = null;
         OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
         NotifyProviderDependentProperties();
         ApplyXttsStatus();

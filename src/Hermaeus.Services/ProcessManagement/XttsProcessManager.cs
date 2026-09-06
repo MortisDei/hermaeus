@@ -10,14 +10,21 @@ public sealed class XttsProcessManager : IDisposable
     private CancellationTokenSource? _healthCts;
     private readonly IProcessJobObject _jobObject;
     private readonly IRuntimeLogService? _runtimeLogs;
+    private readonly IResourceCoordinator? _resourceCoordinator;
+    private string? _resourceAllocationId;
     /// <summary>r28 doc 03 3.3. Fire-and-forget; a recorder failure never fails a voice start.</summary>
     private readonly IActivityRecorder? _activity;
 
-    public XttsProcessManager(IProcessJobObject? jobObject = null, IRuntimeLogService? runtimeLogs = null, IActivityRecorder? activity = null)
+    public XttsProcessManager(
+        IProcessJobObject? jobObject = null,
+        IRuntimeLogService? runtimeLogs = null,
+        IActivityRecorder? activity = null,
+        IResourceCoordinator? resourceCoordinator = null)
     {
         _jobObject = jobObject ?? ProcessJobObject.Default;
         _runtimeLogs = runtimeLogs;
         _activity = activity;
+        _resourceCoordinator = resourceCoordinator;
     }
 
     public bool IsRunning => _process is { HasExited: false };
@@ -77,11 +84,26 @@ public sealed class XttsProcessManager : IDisposable
         _process.Exited += (_, _) =>
         {
             StatusLabel = "Stopped";
+            ReleaseResourceAllocation();
             StatusChanged?.Invoke();
         };
 
+        IResourceAdmissionLease? lease = null;
         try
         {
+            if (_resourceCoordinator is not null)
+            {
+                const string consumerId = "tts.xtts";
+                _resourceCoordinator.RegisterConsumer(
+                    ResourceAllocationFactory.LocalVoiceProcessConsumer(consumerId, nameof(XttsProcessManager)));
+                lease = await _resourceCoordinator.AcquireAsync(
+                    new ResourceAdmissionRequest(
+                        consumerId,
+                        ResourceAllocationFactory.LocalVoiceProcessProposal(consumerId),
+                        callerId: "voice.xtts.start",
+                        allowUnknown: true), ct);
+            }
+
             if (!_process.Start())
                 throw new InvalidOperationException("Failed to start XTTS v2 server.");
 
@@ -93,6 +115,16 @@ public sealed class XttsProcessManager : IDisposable
             await WaitForHealthAsync(settings.Tts.ServiceUrl, _healthCts.Token);
             StatusLabel = "Running";
             StatusChanged?.Invoke();
+            if (lease is not null)
+            {
+                var process = _process ?? throw new InvalidOperationException("The XTTS process disappeared after health became ready.");
+                var active = ResourceAllocationFactory.ActiveFromProcess(
+                    lease.Plan.ProposedAllocations.Single(),
+                    $"pid-{process.Id}-xtts",
+                    GetProcessStartUtc(process));
+                await lease.CompleteAsync(active, ct);
+                _resourceAllocationId = active.AllocationId;
+            }
             _activity.RecordSafe("voice.backend-start", "xtts", ActivityOutcome.Succeeded, "XTTS v2 voice service started");
         }
         catch (Exception ex)
@@ -100,6 +132,11 @@ public sealed class XttsProcessManager : IDisposable
             _activity.RecordSafe("voice.backend-start", "xtts", ActivityOutcome.Failed, "XTTS v2 voice service failed to start", ex.Message);
             Stop();
             throw;
+        }
+        finally
+        {
+            if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
+                await lease.ReleaseAsync("XTTS start did not complete");
         }
     }
 
@@ -120,8 +157,24 @@ public sealed class XttsProcessManager : IDisposable
         catch { }
         _process?.Dispose();
         _process = null;
+        ReleaseResourceAllocation();
         StatusLabel = "Stopped";
         StatusChanged?.Invoke();
+    }
+
+    private void ReleaseResourceAllocation()
+    {
+        if (_resourceAllocationId is not { } allocationId)
+            return;
+        _resourceCoordinator?.ReleaseAllocation(allocationId);
+        _resourceAllocationId = null;
+    }
+
+    private static DateTime GetProcessStartUtc(Process process)
+    {
+        try { return process.StartTime.ToUniversalTime(); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        { return DateTime.UtcNow; }
     }
 
     private static async Task WaitForHealthAsync(string baseUrl, CancellationToken ct)

@@ -361,6 +361,19 @@ public partial class ChatViewModel : ViewModelBase
     public bool HasNoAvailableModels => AvailableModels.Count == 0;
 
     /// <summary>
+    /// Shared Services-page owner for managed llama.cpp launch settings. Chat
+    /// only projects this row in its compact flyout, so editing placement does
+    /// not create a second configuration or launch authority.
+    /// </summary>
+    public ServicesViewModel? ManagedServices { get; private set; }
+
+    internal void AttachManagedServices(ServicesViewModel services)
+    {
+        ManagedServices = services;
+        OnPropertyChanged(nameof(ManagedServices));
+    }
+
+    /// <summary>
     /// First-run setup is a recovery path only while onboarding is incomplete.
     /// A completed user with no live model belongs in Services instead.
     /// </summary>
@@ -1270,6 +1283,13 @@ public partial class ChatViewModel : ViewModelBase
         ClearContextAttachments();
 
         var selectedModelId = SelectedModel.Id;
+        var operationId = OperationCorrelation.NewId();
+        _runtimeLogs.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Service,
+            $"Chat turn started; model={selectedModelId}, provider={SelectedModel.ProviderTag}.",
+            operationId));
         var asst = new MessageViewModel
         {
             Role = "assistant",
@@ -1291,14 +1311,15 @@ public partial class ChatViewModel : ViewModelBase
         var chunker = streamingSpeech ? new SentenceChunker() : null;
         try
         {
-            // r27 02-retrieval-that-scales.md 2.6: the three injections are
+            // r27 02-retrieval-that-scales.md 2.6: the four injections are
             // independent, and r21 1.3's reason for keeping them sequential (a
             // legible trace breakdown) survives concurrency untouched, because
             // each already carries its own stopwatch and each timer still
             // measures only its own task. The pre-stream wait becomes the
-            // slowest of the three rather than their sum.
+            // slowest of the four rather than their sum.
+            var preparationClock = Stopwatch.StartNew();
             var memoryTask = BuildMemoryInjectionAsync(text, _cts.Token);
-            var ragTask = BuildRagInjectionAsync(text, _cts.Token);
+            var ragTask = BuildRagInjectionAsync(text, _cts.Token, operationId);
             var recallTask = BuildRecallInjectionAsync(text, _cts.Token);
             var projectStateTask = BuildProjectStateInjectionAsync(_cts.Token);
 
@@ -1362,6 +1383,7 @@ public partial class ChatViewModel : ViewModelBase
                 phaseCts.Token);
 
             var sendOptions = BuildChatOptions(memoryContext, ragAndRecallContext);
+            var preparationMs = preparationClock.ElapsedMilliseconds;
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
                 sendOptions,
@@ -1396,8 +1418,17 @@ public partial class ChatViewModel : ViewModelBase
                 asst.Content += remainder;
             }
 
-            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs);
-            Telemetry?.RecordRequest(selectedModelId, SelectedModel.ProviderTag, result.ServerTimings, result.Usage, result.FirstTokenMs, result.TotalLatencyMs);
+            var providerTag = SelectedModel.ProviderTag;
+            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs,
+                result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs,
+                result.ReasoningEventCount, result.ReasoningCharacterCount, providerTag, operationId, preparationMs);
+            _runtimeLogs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Chat turn completed; {timing.Format()}.",
+                operationId));
+            Telemetry?.RecordRequest(selectedModelId, providerTag, result.ServerTimings, result.Usage, result.FirstTokenMs, result.TotalLatencyMs);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"
@@ -1413,7 +1444,7 @@ public partial class ChatViewModel : ViewModelBase
                 var warning = $"Slow chat send ({timing.PreFirstTokenMs} ms before first content): {timing.Format()}";
                 if (hint is not null)
                     warning += $" - {hint}";
-                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, warning));
+                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, warning, operationId));
             }
 
             if (result.Cancelled)
@@ -1494,7 +1525,7 @@ public partial class ChatViewModel : ViewModelBase
                 asst.Content = $"{asst.Content.TrimEnd()}\n\n[Error: {ex.Message}]";
             }
             _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
-                $"Chat send failed: {ex.Message}"));
+                $"Chat send failed: {ex.Message}", operationId));
             _toasts.Show("Send failed", ex.Message, ToastKind.Error, 7000);
         }
         finally
@@ -2157,6 +2188,13 @@ public partial class ChatViewModel : ViewModelBase
                     injectedIds.AddRange(selected.Select(m => m.Id));
                     await _memoryStore.MarkRecalledAsync(injectedIds, ct);
                 }
+
+                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Debug, RuntimeLogCategory.Rag,
+                    $"Memory injection completed; candidates={candidates.Count}, selected={selected.Count}, recall_ms={recallMs}, select_ms={selectMs}."));
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -2192,11 +2230,12 @@ public partial class ChatViewModel : ViewModelBase
     /// it logs one Warning and returns empty. Cancellation propagates
     /// (never swallowed into the best-effort catch), matching 2.1's fallback.
     /// </summary>
-    private async Task<(string ContextText, List<SourceReference> Sources, long RagMs, int RagContextItems, string RagNote)> BuildRagInjectionAsync(string question, CancellationToken ct)
+    private async Task<(string ContextText, List<SourceReference> Sources, long RagMs, int RagContextItems, string RagNote)> BuildRagInjectionAsync(string question, CancellationToken ct, string? operationId = null)
     {
         if (_rag is null || string.IsNullOrWhiteSpace(RagDatasetId) || string.IsNullOrWhiteSpace(question))
             return (string.Empty, [], 0, 0, string.Empty);
 
+        operationId ??= OperationCorrelation.NewId();
         var sw = Stopwatch.StartNew();
         try
         {
@@ -2208,14 +2247,20 @@ public partial class ChatViewModel : ViewModelBase
                 TopK: 5,
                 UseParentChild: dataset.Config.UseParentChild,
                 ContextTokenBudget: _settings.Settings.Rag.ChatInjectionTokenBudget);
-            var retrieval = await _rag.RetrieveAsync(dataset.Id, question, opts, ct);
+            var retrieval = await _rag.RetrieveAsync(dataset.Id, question, opts, ct, operationId);
 
             // r21 1.3: the entire reason attaching a dataset does not degrade
             // normal conversation - chat must not parrot weakly-related
             // chunks into "thanks!" or "write me a poem" just because a
             // dataset happens to be attached.
             if (RagQueryService.WouldRefuse(retrieval.SemanticCandidates, retrieval.Bm25Candidates, opts.RefusalThreshold))
-                return (string.Empty, [], sw.ElapsedMilliseconds, 0, "retrieval below confidence threshold; nothing injected");
+            {
+                const string refusalNote = "retrieval below confidence threshold; nothing injected";
+                var note = string.IsNullOrWhiteSpace(retrieval.PlannerNotes)
+                    ? refusalNote
+                    : $"{retrieval.PlannerNotes}; {refusalNote}";
+                return (string.Empty, [], sw.ElapsedMilliseconds, 0, note);
+            }
 
             var pack = _rag.BuildContextPack(retrieval.Selected, opts);
             if (pack.PackedChunks.Count == 0 || string.IsNullOrWhiteSpace(pack.Text))
@@ -2232,9 +2277,10 @@ public partial class ChatViewModel : ViewModelBase
             var sources = pack.PackedChunks.Select(packed => new SourceReference(
                 ProvenanceKind.Rag,
                 packed.Chunk.SourceTitle,
-                Locator: string.IsNullOrWhiteSpace(packed.Chunk.SourcePath) ? packed.Chunk.SourceFile : packed.Chunk.SourcePath,
+                Locator: RagCitationIdentity.BuildLocator(packed.Chunk),
                 Snippet: packed.Content,
-                Timestamp: null)).ToList();
+                Timestamp: packed.Chunk.SourceModifiedUtc,
+                EvidenceOrigin: EvidenceOrigin.DirectObservation)).ToList();
 
             return (contextText, sources, sw.ElapsedMilliseconds, pack.PackedChunks.Count, retrieval.PlannerNotes);
         }
@@ -2245,7 +2291,7 @@ public partial class ChatViewModel : ViewModelBase
         catch (Exception ex)
         {
             _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                $"Knowledge context injection failed: {ex.Message}"));
+                $"Knowledge context injection failed: {ex.Message}", operationId));
             return (string.Empty, [], sw.ElapsedMilliseconds, 0, string.Empty);
         }
     }
@@ -2311,6 +2357,9 @@ public partial class ChatViewModel : ViewModelBase
             var note = result.OmittedSources.Count > 0
                 ? $"omitted: {string.Join(", ", result.OmittedSources)}"
                 : result.KeywordOnly ? "keyword-only (no embedding model)" : string.Empty;
+
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Debug, RuntimeLogCategory.Rag,
+                $"Recall injection completed; source_hits={result.Hits.Count}, selected={selected.Count}, budget_tokens={budget}, used_tokens={used}, total_ms={sw.ElapsedMilliseconds}, note={note}."));
 
             return (contextText, sources, sw.ElapsedMilliseconds, selected.Count, note);
         }
@@ -2627,7 +2676,9 @@ public partial class ChatViewModel : ViewModelBase
             return false;
         var chatServer = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
             ?? _settings.Settings.ManagedServers.FirstOrDefault();
-        if (chatServer is not null && chatServer.GpuLayers != 0)
+        if (chatServer is null
+            || !chatServer.TryGetGpuPlacement(out var placement, out _)
+            || placement?.Kind != GpuPlacementKind.Cpu)
             return false;
         try
         {
@@ -2748,8 +2799,29 @@ public partial class ChatViewModel : ViewModelBase
         // r24 doc 02 2.2/06: never on the send path - fire and forget, off the
         // caller's await chain, so a slow embedding endpoint cannot slow a send.
         if (_recallIndexing is not null)
-            _ = Task.Run(() => _recallIndexing.IndexConversationAsync(conv));
+            _ = Task.Run(() => RunRecallIndexingAsync(conv));
         await RefreshMemoryStatusAsync();
+    }
+
+    private async Task RunRecallIndexingAsync(Conversation conversation)
+    {
+        try
+        {
+            await _recallIndexing!.IndexConversationAsync(conversation);
+        }
+        catch (OperationCanceledException)
+        {
+            // This background operation has no caller waiting on it. Cancellation
+            // is expected during shutdown and is deliberately observed here.
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                $"Chat recall indexing deferred: {ex.GetType().Name}: {ex.Message}"));
+        }
     }
 
     private async Task RunConversationMemoryAsync(string conversationId)

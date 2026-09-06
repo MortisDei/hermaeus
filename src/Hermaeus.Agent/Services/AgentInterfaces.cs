@@ -7,6 +7,7 @@ public interface IAgentTaskStateStore
     Task InitializeAsync(CancellationToken ct = default);
     Task SaveAsync(AgentTaskState state, CancellationToken ct = default);
     Task<AgentTaskState?> LoadAsync(string taskId, CancellationToken ct = default);
+    Task DeleteAsync(string taskId, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> ListRecentAsync(int limit = 25, CancellationToken ct = default);
     Task<IReadOnlyList<AgentReviewQueueItem>> ListReviewQueueAsync(int limit = 25, CancellationToken ct = default);
     Task AppendLogAsync(string taskId, string line, CancellationToken ct = default);
@@ -81,7 +82,7 @@ public interface IAgentSafetyGate
 public interface IAgentToolExecutor
 {
     bool CanExecute(string toolName);
-    Task<AgentToolResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, AgentWorkspaceOptions options, CancellationToken ct = default);
+    Task<AgentToolResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, AgentWorkspaceOptions options, CancellationToken ct = default, string? operationId = null);
 }
 
 public interface IAgentContextBuilder
@@ -92,7 +93,7 @@ public interface IAgentContextBuilder
 public interface IAgentService
 {
     Task<AgentTaskState> CreateTaskAsync(string goal, AgentWorkspaceOptions options, CancellationToken ct = default, string projectId = "");
-    Task<AgentStepResult> RunStepAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default);
+    Task<AgentStepResult> RunStepAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default, string? operationId = null);
     /// <summary>
     /// Runs steps back to back without waiting for a manual "run step" click,
     /// stopping when the model reaches a final answer, asks the user a
@@ -103,6 +104,8 @@ public interface IAgentService
     /// </summary>
     Task<AgentStepResult> RunAsync(string taskId, AgentWorkspaceOptions options, Action<AgentStepResult>? onStep = null, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default);
+    /// <summary>Deletes a terminal top-level run and its persisted child runs.</summary>
+    Task DeleteTaskAsync(string taskId, CancellationToken ct = default);
     /// <summary>Explicitly changes a paused task's frozen model after validating
     /// that the exact visible model is currently available. This is a user
     /// review action, never automatic fallback.</summary>
@@ -136,7 +139,7 @@ public interface IAgentService
     Task<AgentApprovalResult> DismissTaskAsync(string taskId, CancellationToken ct = default);
 
     /// <summary>
-    /// r19 3.1: reopens a terminal or stalled task with a user instruction,
+    /// r19 3.1: reopens a terminal or stalled task with a non-empty user instruction,
     /// so a task that finished (prematurely or not), failed, or got blocked
     /// can keep going without the user retyping the whole goal as a brand
     /// new task. Never auto-approves anything - a reopened task that
@@ -147,6 +150,12 @@ public interface IAgentService
     /// the task is a sub-task child (continue the parent instead).
     /// </summary>
     Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default);
+    /// <summary>Resumes the remaining persisted plan without adding user text.</summary>
+    Task<AgentTaskState> ContinuePlannedTaskAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default);
+    /// <summary>Ends a paused run while preserving its history and evidence.</summary>
+    Task<AgentTaskState> FinishTaskAsync(string taskId, CancellationToken ct = default);
+    /// <summary>Persists a safe stop after the caller has cancelled active work.</summary>
+    Task<AgentTaskState> StopTaskAsync(string taskId, CancellationToken ct = default);
 
     /// <summary>
     /// r29 doc 03: delivers an instruction into a task that is already running.

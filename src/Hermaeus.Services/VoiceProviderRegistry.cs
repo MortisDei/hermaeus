@@ -32,27 +32,13 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
         };
 
         var configured = settingsService.Settings.Tts.VoiceProvider;
-        _activeProvider = ParseProviderFromSettings(configured);
-        if (!IsRecognizedProviderName(configured))
+        if (!VoiceProviderIdentity.TryParse(configured, out _activeProvider))
         {
+            _activeProvider = VoiceProvider.KokoroNative;
             _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
                 $"Unrecognised voice provider '{configured}' in settings; defaulting to {_activeProvider}."));
         }
     }
-
-    private static bool IsRecognizedProviderName(string providerName) => providerName switch
-    {
-        "Kokoro" => true,
-        "F5Tts" => true,
-        "F5-TTS" => true,
-        "XttsV2" => true,
-        "XTTS" => true,
-        "XTTS v2" => true,
-        "OpenAi" => true,
-        "OpenAI" => true,
-        "KokoroNative" => true,
-        _ => false
-    };
 
     public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders()
     {
@@ -116,7 +102,7 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             throw new ArgumentException($"Unknown voice provider: {provider}");
 
         _activeProvider = provider;
-        _settingsService.Settings.Tts.VoiceProvider = provider.ToString();
+        _settingsService.Settings.Tts.VoiceProvider = VoiceProviderIdentity.CanonicalId(provider);
         await _settingsService.SaveAsync();
     }
 
@@ -142,16 +128,4 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
         return (ITtsService)service;
     }
 
-    private static VoiceProvider ParseProviderFromSettings(string providerName)
-    {
-        return providerName switch
-        {
-            "Kokoro" => VoiceProvider.Kokoro,
-            "F5Tts" or "F5-TTS" => VoiceProvider.F5Tts,
-            "XttsV2" or "XTTS" or "XTTS v2" => VoiceProvider.XttsV2,
-            "OpenAi" or "OpenAI" => VoiceProvider.OpenAi,
-            "KokoroNative" => VoiceProvider.KokoroNative,
-            _ => VoiceProvider.KokoroNative // Native Kokoro is the default; no Python subprocess required
-        };
-    }
 }

@@ -10,6 +10,19 @@ namespace Hermaeus.Services;
 /// </summary>
 public sealed class MemoryExtractionService
 {
+    private static readonly Regex ModelAbsenceConclusionRegex = new(
+        @"(?:\bno\b|\bnothing\b|\bnot enough\b|\bwithout\b).{0,120}\b(?:prior|previous|earlier|past|record|conversation|discussion|evidence|information|mention|memory)\b.{0,120}\b(?:found|find|exists|available|mentioned|determine|support)\b|(?:could not|couldn't|unable to|did not|didn't)\s+(?:find|locate|recall).{0,120}\b(?:prior|previous|earlier|past|record|conversation|discussion|evidence|information|mention|memory)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(500));
+
+    /// <summary>
+    /// Model-generated search-state conclusions describe missing evidence, not
+    /// a durable user fact. They may remain in the transcript, but must not be
+    /// promoted into authoritative memory or suppress later positive evidence.
+    /// </summary>
+    public static bool IsUnsupportedAbsenceConclusion(string content) =>
+        !string.IsNullOrWhiteSpace(content) && ModelAbsenceConclusionRegex.IsMatch(content);
+
     // Pattern to match [MEMORY: content] markers (case-insensitive)
     private static readonly Regex MemoryMarkerRegex = new(
         @"\[MEMORY:\s*(.+?)\]",

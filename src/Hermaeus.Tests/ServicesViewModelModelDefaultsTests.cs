@@ -52,7 +52,7 @@ public sealed class ServicesViewModelModelDefaultsTests
     }
 
     [Fact]
-    public void A_tune_profile_wins_over_the_card_default()
+    public void A_tune_profile_does_not_override_the_card_default_or_editor()
     {
         using var temp = new TempDir();
         var (_, server, settings, modelPath) = Build(temp, cardDefaultContextSize: 24000);
@@ -60,8 +60,8 @@ public sealed class ServicesViewModelModelDefaultsTests
 
         server.ModelPath = modelPath;
 
-        Assert.Equal(9000, server.ContextSize);
-        Assert.Equal("Context from Auto Tune", server.ContextSourceLabel);
+        Assert.Equal(24000, server.ContextSize);
+        Assert.Equal("Context from model card", server.ContextSourceLabel);
     }
 
     [Fact]

@@ -19,16 +19,6 @@ public partial class ModelManagementView : UserControl
         DataContextChanged += OnDataContextChanged;
     }
 
-    private void OnHfSearchKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter || DataContext is not ModelManagementViewModel vm
-            || !vm.SearchHuggingFaceCommand.CanExecute(null))
-            return;
-
-        vm.SearchHuggingFaceCommand.Execute(null);
-        e.Handled = true;
-    }
-
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not ModelManagementViewModel vm)
@@ -78,6 +68,14 @@ public partial class ModelManagementView : UserControl
                 return CompanionDisableChoice.Cancel;
             var dialog = new CompanionDisableDialog(plan);
             return await dialog.ShowDialog<CompanionDisableChoice>(owner);
+        };
+
+        vm.RequestCompanionRemovalConfirmation = async plan =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+            var dialog = new ConfirmActionDialog("Clear companion", plan.Description);
+            return await dialog.ShowDialog<bool>(owner);
         };
     }
 

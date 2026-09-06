@@ -9,10 +9,11 @@ public static class EmpiricalExperienceDomains
     public const string AgentToolOutcome = "agent-tool-outcome";
     public const string GpuFitObservation = "gpu-fit-observation";
     public const string LabRun = "lab-run";
+    public const string AdaptiveLaunch = "adaptive-launch";
 
     public static readonly IReadOnlySet<string> Initial = new HashSet<string>(StringComparer.Ordinal)
     {
-        AgentToolOutcome, GpuFitObservation, LabRun
+        AgentToolOutcome, GpuFitObservation, LabRun, AdaptiveLaunch
     };
 }
 

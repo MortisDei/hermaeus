@@ -84,16 +84,15 @@
             </Grid>
         </Border>
 
-        <!-- Decision strip. Collapses to nothing when nothing is waiting on the
-             user, and carries whatever the review queue says needs a decision:
-             an approval, a reply, or an instruction for a blocked run. -->
+        <!-- Decision strip. Approval cards stay visible here; reply and continue
+             states point to the matching controls beside the Run response. -->
         <Border Grid.Row="1" Padding="12,10"
                 Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 IsVisible="{Binding HasDecisionWaiting}">
             <StackPanel Spacing="8">
-                <TextBlock Text="{Binding ReviewQueueLabel}" FontSize="12" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding DecisionStripLabel}" FontSize="12" FontWeight="SemiBold" />
 
                 <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto" IsVisible="{Binding HasReviewQueue}">
                     <ItemsControl ItemsSource="{Binding ReviewQueue}">
@@ -226,79 +225,18 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <!-- r24: the reply box is the immediate next action after reading the
-                     agent's response, so it stays with the decision rather than
-                     behind a tab. -->
-                <!-- r29 doc 03 3.5: the same row also steers a run in flight. Its
-                     caption, watermark and button label change with state, so the
-                     user always knows which of the two they are doing. -->
-                <StackPanel Spacing="8" IsVisible="{Binding ShowReplyBox}">
-                    <TextBlock Text="{Binding ReplyBoxTitle}"
-                               FontWeight="SemiBold"
-                               FontSize="12" />
-                    <!-- The question itself. It used to reach only the log and the
-                         transcript, so this box asked for an answer without ever
-                         saying what the question was. -->
-                    <SelectableTextBlock Text="{Binding CurrentQuestion}"
-                                         IsVisible="{Binding HasCurrentQuestion}"
-                                         FontSize="12"
-                                         Opacity="0.85"
-                                         MaxHeight="160"
-                                         TextWrapping="Wrap" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <TextBox Grid.Column="0"
-                                 Text="{Binding ReplyText}"
-                                 Watermark="{Binding ReplyWatermark}"
-                                 AcceptsReturn="True"
-                                 MinHeight="56"
-                                 TextWrapping="Wrap" />
-                        <Button Grid.Column="1"
-                                Command="{Binding SendReplyCommand}"
-                                Content="{Binding ReplyButtonLabel}"
-                                VerticalAlignment="Bottom"
-                                Padding="14,8"
-                                CornerRadius="6" />
-                    </Grid>
-                </StackPanel>
-
-                <!-- r19 3.1: a finished/failed/blocked task can be reopened with a new
-                     instruction instead of only being restartable as a brand new task.
-                     r23 2.1: the same box also resumes past the opt-in plan-approval
-                     checkpoint - ContinueTaskAsync either way. -->
-                <StackPanel Spacing="8" IsVisible="{Binding ShowContinueBox}">
-                    <TextBlock Text="{Binding ContinueBoxTitle}"
-                               FontWeight="SemiBold"
-                               FontSize="12" />
-                    <TextBlock Text="Step budget exhausted. Add steps or leave the instruction empty to continue the remaining plan."
-                               FontSize="11"
-                               Opacity="0.75"
-                               TextWrapping="Wrap"
-                               IsVisible="{Binding IsStepBudgetExhausted}" />
-                    <TextBlock Text="Plan is ready for review. Continue when you are ready to let the run proceed, or leave it paused here."
-                               FontSize="11"
-                               Opacity="0.75"
-                               TextWrapping="Wrap"
-                               IsVisible="{Binding IsWaitingForPlanApproval}" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <TextBox Grid.Column="0"
-                                 Text="{Binding ContinueInstructionText}"
-                                 Watermark="{Binding ContinueInstructionWatermark}"
-                                 AcceptsReturn="True"
-                                 MinHeight="56"
-                                 TextWrapping="Wrap" />
-                        <Button Grid.Column="1"
-                                Command="{Binding ContinueTaskCommand}"
-                                Content="Continue"
-                                VerticalAlignment="Bottom"
-                                Padding="14,8"
-                                CornerRadius="6" />
-                    </Grid>
+                <StackPanel Spacing="8" IsVisible="{Binding HasNonReviewDecision}">
+                    <TextBlock Text="{Binding NextUserActionLabel}" FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                    <Button Content="Open Run"
+                            Command="{Binding ShowRunTabCommand}"
+                            HorizontalAlignment="Left"
+                            Padding="10,4"
+                            CornerRadius="6"
+                            ToolTip.Tip="Opens the Run tab beside the agent response and its next action." />
                 </StackPanel>
             </StackPanel>
         </Border>
 
-        <!-- Four tabs, named for what the user is doing rather than for which
-             subsystem produced the data. BenchmarkView.axaml sets the precedent. -->
         <TabControl Grid.Row="2" SelectedIndex="{Binding SelectedTabIndex}">
 
             <TabItem Header="Run">
@@ -320,7 +258,7 @@
                                        Opacity="0.6" />
                             <TextBox Grid.Row="0" Grid.Column="1"
                                      Text="{Binding GoalText}"
-                                     Watermark="Describe the task for Hermaeus Agent..."
+                                     PlaceholderText="Describe the task for Hermaeus Agent..."
                                      AcceptsReturn="True"
                                      MinHeight="82"
                                      MaxHeight="120"
@@ -333,7 +271,7 @@
                                        Opacity="0.6" />
                             <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
                                 <TextBox Text="{Binding WorkspaceRoot}"
-                                         Watermark="/path/to/project"
+                                         PlaceholderText="/path/to/project"
                                          IsEnabled="{Binding !IsRunning}"
                                          ToolTip.Tip="The folder the agent can read and edit. Nothing outside it is touched." />
                                 <TextBlock Text="No workspace selected. Choose a folder so the agent has somewhere to work."
@@ -447,13 +385,90 @@
                             <StackPanel Spacing="6">
                                 <TextBlock Text="Agent response" FontSize="12" FontWeight="SemiBold" Opacity="0.7" />
                                 <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
-                                    <SelectableTextBlock Text="{Binding CurrentTaskSummaryLabel}"
-                                                         FontSize="13"
-                                                         TextWrapping="Wrap"
-                                                         MinHeight="220" />
+                                    <controls:MarkdownViewer Markdown="{Binding CurrentTaskSummaryLabel}"
+                                                              RequestCopyToClipboard="{Binding RequestCopyToClipboard}"
+                                                              FontSize="13" />
                                 </ScrollViewer>
+                                <Button Content="Copy response"
+                                        Command="{Binding CopyResponseCommand}"
+                                        HorizontalAlignment="Left"
+                                        Padding="8,3"
+                                        ToolTip.Tip="Copy the Agent response as Markdown text." />
                             </StackPanel>
                         </Border>
+
+                        <!-- The reply and continue controls live beside the response
+                             they act on. The pinned strip above only points here when
+                             the user is viewing another Agent tab. -->
+                        <StackPanel Spacing="8" IsVisible="{Binding ShowReplyBox}">
+                            <TextBlock Text="{Binding ReplyBoxTitle}"
+                                       FontWeight="SemiBold"
+                                       FontSize="12" />
+                            <SelectableTextBlock Text="{Binding CurrentQuestion}"
+                                                 IsVisible="{Binding HasCurrentQuestion}"
+                                                 FontSize="12"
+                                                 Opacity="0.85"
+                                                 MaxHeight="160"
+                                                 TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding ReplyText}"
+                                         PlaceholderText="{Binding ReplyWatermark}"
+                                         AcceptsReturn="True"
+                                         MinHeight="56"
+                                         TextWrapping="Wrap" />
+                                <Button Grid.Column="1"
+                                        Command="{Binding SendReplyCommand}"
+                                        Content="{Binding ReplyButtonLabel}"
+                                        VerticalAlignment="Bottom"
+                                        Padding="14,8"
+                                        CornerRadius="6" />
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="8" IsVisible="{Binding ShowContinueBox}">
+                            <TextBlock Text="{Binding ContinueBoxTitle}"
+                                       FontWeight="SemiBold"
+                                       FontSize="12" />
+                            <TextBlock Text="Step budget exhausted. Choose Continue planned work or add a follow-up instruction."
+                                       FontSize="11"
+                                       Opacity="0.75"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding IsStepBudgetExhausted}" />
+                            <TextBlock Text="Plan is ready for review. Choose Continue planned work, add an instruction, or finish the run."
+                                       FontSize="11"
+                                       Opacity="0.75"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding IsWaitingForPlanApproval}" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding ContinueInstructionText}"
+                                         PlaceholderText="{Binding ContinueInstructionWatermark}"
+                                         AcceptsReturn="True"
+                                         MinHeight="56"
+                                         TextWrapping="Wrap" />
+                                <Button Grid.Column="1"
+                                        Command="{Binding ContinueTaskCommand}"
+                                        Content="Continue with instruction"
+                                        VerticalAlignment="Bottom"
+                                        Padding="14,8"
+                                        CornerRadius="6" />
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Continue planned work"
+                                        Command="{Binding ContinuePlannedTaskCommand}"
+                                        IsVisible="{Binding HasPendingPlan}"
+                                        Padding="14,8"
+                                        CornerRadius="6"
+                                        ToolTip.Tip="Resume the persisted plan without adding new instruction text." />
+                                <Button Content="Finish run"
+                                        Command="{Binding FinishTaskCommand}"
+                                        IsVisible="{Binding ShowFinishRun}"
+                                        Padding="14,8"
+                                        CornerRadius="6"
+                                        ToolTip.Tip="Accept the current result and end the run while preserving its history and evidence." />
+                            </StackPanel>
+                        </StackPanel>
 
                         <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
                                 IsVisible="{Binding HasSubTaskPlan}">
@@ -957,7 +972,7 @@
                                                             ToolTip.Tip="Adds this recipe and saves it to .hermaeus/workspace.json straight away." />
                                                     <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
                                                              Text="{Binding NewRecipeArgument}"
-                                                             Watermark="Optional argument, e.g. src/Hermaeus.Tests/Hermaeus.Tests.csproj"
+                                                             PlaceholderText="Optional argument, e.g. src/Hermaeus.Tests/Hermaeus.Tests.csproj"
                                                              FontFamily="{DynamicResource AppMonoFont}"
                                                              FontSize="11"
                                                              ToolTip.Tip="Optional. Narrows the recipe to one project or script. Leave empty to allow the bare command." />
@@ -1030,7 +1045,7 @@
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                         <TextBox Grid.Column="0"
                                                  Text="{Binding WorkspaceFileQuery}"
-                                                 Watermark="Search workspace files by path or content..."
+                                                 PlaceholderText="Search workspace files by path or content..."
                                                  IsEnabled="{Binding !IsRunning}" />
                                         <Button Grid.Column="1"
                                                 Command="{Binding RefreshWorkspaceFilesCommand}"
@@ -1080,12 +1095,12 @@
                                             <Expander Header="Draft Patch" IsExpanded="False" Margin="0,8,0,0">
                                                 <StackPanel Spacing="8">
                                                     <TextBox Text="{Binding DraftRationale}"
-                                                             Watermark="Rationale for this patch..."
+                                                             PlaceholderText="Rationale for this patch..."
                                                              AcceptsReturn="True"
                                                              MinHeight="56"
                                                              TextWrapping="Wrap" />
                                                     <TextBox Text="{Binding DraftProposedContent}"
-                                                             Watermark="Proposed file content..."
+                                                             PlaceholderText="Proposed file content..."
                                                              AcceptsReturn="True"
                                                              MinHeight="120"
                                                              TextWrapping="Wrap"
@@ -1184,7 +1199,7 @@
                                                     CornerRadius="6"
                                                     Padding="10"
                                                     Margin="{Binding IsSubTask, Converter={StaticResource BoolToIndentMargin}}">
-                                                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="8">
+                                                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
                                                     <Border Grid.Column="0" CornerRadius="4" Padding="6,1" MinWidth="90"
                                                             Background="{Binding Status, Converter={StaticResource AgentTaskStatusColor}}">
                                                         <TextBlock Text="{Binding StatusLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
@@ -1206,6 +1221,12 @@
                                                             Command="{Binding DataContext.LoadTaskCommand, ElementName=Root}"
                                                             CommandParameter="{Binding TaskId}"
                                                             Padding="8,3" CornerRadius="6" FontSize="11" />
+                                                    <Button Grid.Column="5" Content="Delete"
+                                                            IsVisible="{Binding CanDelete}"
+                                                            Command="{Binding DataContext.DeleteRecentTaskCommand, ElementName=Root}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="8,3" CornerRadius="6" FontSize="11"
+                                                            ToolTip.Tip="Permanently deletes this historical run and its persisted sub-tasks. Running tasks must be stopped first." />
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>
@@ -1282,7 +1303,7 @@
                                                              FontSize="11"
                                                              Opacity="0.75"
                                                              TextWrapping="Wrap"
-                                                             Watermark="Guidance (optional)" />
+                                                             PlaceholderText="Guidance (optional)" />
                                                     <TextBlock Text="{Binding ConfidenceLabel}"
                                                                FontSize="11"
                                                                Opacity="0.5" />
@@ -1319,14 +1340,39 @@
                                     <Button Content="Run suite"
                                             Command="{Binding ScenarioSuite.RunSuiteCommand}"
                                             Padding="12,6" CornerRadius="6" />
-                                    <Button Content="Cancel"
-                                            Command="{Binding ScenarioSuite.CancelSuiteCommand}"
-                                            IsVisible="{Binding ScenarioSuite.IsRunning}"
-                                            Padding="12,6" CornerRadius="6" />
                                     <TextBlock Text="{Binding ScenarioSuite.StatusMessage}"
                                                FontSize="11" Opacity="0.6" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis" />
+                                               TextTrimming="CharacterEllipsis"
+                                               IsVisible="{Binding !ScenarioSuite.IsRunning}" />
                                 </StackPanel>
+                                <TextBlock Text="Restoring persisted evidence..."
+                                           FontSize="11" Opacity="0.6"
+                                           IsVisible="{Binding ScenarioSuite.IsRestoringEvidence}" />
+                                <Border IsVisible="{Binding ScenarioSuite.IsRunning}"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="{Binding ScenarioSuite.RunningHeadline}"
+                                                       FontSize="13" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding ScenarioSuite.ScenarioProgressLabel}"
+                                                       FontSize="12" />
+                                            <TextBlock Text="{Binding ScenarioSuite.CurrentScenarioLabel}"
+                                                       FontSize="11" Opacity="0.75" />
+                                            <TextBlock Text="{Binding ScenarioSuite.CurrentStepLabel}"
+                                                       FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding ScenarioSuite.RunningCountsLabel}"
+                                                       FontSize="11" Opacity="0.75" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="Cancel suite"
+                                                Command="{Binding ScenarioSuite.CancelSuiteCommand}"
+                                                Padding="12,6" CornerRadius="6"
+                                                VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
                                 <TextBlock Text="{Binding ScenarioSuite.HeadlineResult}"
                                            FontSize="12" FontWeight="SemiBold"
                                            IsVisible="{Binding !!ScenarioSuite.HeadlineResult.Length}"
@@ -1351,7 +1397,8 @@
                                                             <TextBlock Text="{Binding SourceLabel}" FontSize="10" Opacity="0.7" />
                                                         </Border>
                                                         <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
-                                                                Background="{Binding Passed, Converter={StaticResource AgentScenarioStatusColor}}">
+                                                                Background="{Binding EvidenceStatus, Converter={StaticResource AgentScenarioStatusColor}}"
+                                                                ToolTip.Tip="{Binding EvidenceTooltip}">
                                                             <TextBlock Text="{Binding StatusLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
                                                         </Border>
                                                     </Grid>
@@ -1365,7 +1412,7 @@
                                                         <TextBlock Text="{Binding DurationDisplay}" FontSize="11" Opacity="0.5" />
                                                     </StackPanel>
                                                     <Button Content="Run"
-                                                            Command="{Binding DataContext.ScenarioSuite.RunScenarioCommand, ElementName=Root}"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.ScenarioSuite.RunScenarioCommand}"
                                                             CommandParameter="{Binding}"
                                                             Padding="10,4" CornerRadius="6" HorizontalAlignment="Left"
                                                             x:CompileBindings="False" />

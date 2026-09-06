@@ -26,7 +26,9 @@ public sealed record RagTraceSummary(
     string? PlannerNotes = null,
     string? ContextPackingSummary = null,
     bool? Refused = null,
-    string? RefusalReason = null);
+    string? RefusalReason = null,
+    /// <summary>Comma-separated dataset ids included in this query.</summary>
+    string? DatasetId = null);
 
 /// <summary>
 /// Typed replacement for the "__RAG_SOURCES__...__END_SOURCES__" and

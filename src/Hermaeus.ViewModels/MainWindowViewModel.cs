@@ -77,6 +77,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowWizard => ActivePanel == "wizard";
     public bool SetupIncomplete => !_settingsService.Settings.SetupWizardCompleted;
     public bool ShowSetupResume => SetupIncomplete && !ShowWizard;
+    public bool HasPendingAgentAction => Agent.HasDecisionWaiting && !ShowAgent;
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -133,6 +134,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services;
+        Chat.AttachManagedServices(services);
         Benchmarks = benchmarks; Lab = lab; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Projects = projects;
         // r24 doc 01 1.6: switching a project only ever changes what NEW work
@@ -166,11 +168,15 @@ public partial class MainWindowViewModel : ViewModelBase
         };
         Chat.RequestNavigate = panel => ActivePanel = panel;
         Models.RequestNavigate = panel => ActivePanel = panel;
+        Services.RequestNavigate = panel => ActivePanel = panel;
+        Benchmarks.RequestNavigate = panel => ActivePanel = panel;
         // r25 follow-up: Services reports whether the speech model is installed and
         // sends the user to Doctor to install it, rather than carrying a second,
         // independent install button that never learned it had succeeded.
         if (Services.Stt is { } stt)
             stt.RequestNavigate = panel => ActivePanel = panel;
+        if (Settings.Tts is { } tts)
+            tts.RequestNavigate = panel => ActivePanel = panel;
         // r19 6.1: memory pill flyout's "Open in Memories" navigates and prefills search.
         Chat.RequestNavigateToMemory = title =>
         {
@@ -183,10 +189,17 @@ public partial class MainWindowViewModel : ViewModelBase
         // r19 2.2: Doctor has no server-process knowledge of its own; bridge
         // the llama.cpp update flow's stop-before/restart-after to Services.
         Doctor.RequestStopRunningLlamaServersForUpdate = Services.StopRunningLlamaServersForUpdate;
+        Doctor.RequestStopRunningEmbeddingServersForModelChange = Services.StopRunningEmbeddingServersForModelChangeAsync;
         Doctor.RequestRestartServers = Services.RestartServersAsync;
         Doctor.RequestSyncServerExecutablePaths = Services.SyncAllExecutablePathsFromConfig;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
+        Agent.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(AgentViewModel.HasDecisionWaiting)
+                or nameof(AgentViewModel.CurrentTask))
+                OnPropertyChanged(nameof(HasPendingAgentAction));
+        };
         UpdateDoctorStatus();
         Wizard.WizardCompleted += () =>
         {
@@ -282,7 +295,12 @@ public partial class MainWindowViewModel : ViewModelBase
         Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
         Nav("nav.memories", "Memories", "Memory", "", "memories");
         Nav("nav.logs", "Logs", "System", "", "logs");
-        Nav("nav.activity", "Activity", "Activity", "", "activity");
+        registry.Register(new AppCommand(
+            Id: "nav.activity", Title: "Activity", Area: "Memory",
+            Description: "Open Memories with background activity expanded.",
+            Keywords: ["activity", "history", "memory"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { ShowActivityPanel(); return Task.CompletedTask; }));
         Nav("nav.settings", "Settings", "Settings", "", "settings");
 
         registry.Register(new AppCommand(
@@ -408,6 +426,8 @@ public partial class MainWindowViewModel : ViewModelBase
             TimedStepAsync(children, "RAG datasets", () => Rag.LoadDatasetsAsync()),
             TimedStepAsync(children, "agent", () => Agent.LoadAsync()),
             TimedStepAsync(children, "benchmarks", () => Benchmarks.LoadAsync()));
+        await Services.RefreshRecommendationsAsync();
+        await Doctor.RefreshRecommendationsAsync();
         _startupPhases.Add(new StartupPhase("stores", block.ElapsedMilliseconds,
             children.OrderBy(c => c.Name, StringComparer.Ordinal).ToList(), ChildrenRanConcurrently: true));
 
@@ -416,7 +436,11 @@ public partial class MainWindowViewModel : ViewModelBase
         _startupPhases.Add(new StartupPhase("local API state", step.ElapsedMilliseconds));
 
         step.Restart();
-        await RunBackgroundTaskCoreAsync("load chat models", () => Chat.LoadModelsAsync());
+        await RunBackgroundTaskCoreAsync("load chat and agent models", async () =>
+        {
+            await Chat.LoadModelsAsync();
+            await Agent.LoadAsync();
+        });
         _startupPhases.Add(new StartupPhase("chat models", step.ElapsedMilliseconds));
         // Fire and forget: the same isolation and the same log line, without the
         // await. A model load behind a five-minute health deadline is no longer
@@ -669,9 +693,26 @@ public partial class MainWindowViewModel : ViewModelBase
     public Func<ConversationItemViewModel, Task<bool>>? RequestDeleteConversationConfirmation { get; set; }
 
     [RelayCommand]
-    private async Task DeleteConversationAsync(ConversationItemViewModel item)
+    private Task DeleteConversationAsync(ConversationItemViewModel item) =>
+        DeleteConversationCoreAsync(item, alreadyConfirmed: false);
+
+    /// <summary>
+    /// Completes the explicit confirmation rendered in the conversation
+    /// details flyout. Context-menu deletion continues through the modal
+    /// confirmation delegate above because it has no anchored details surface.
+    /// </summary>
+    public async Task DeleteConversationAfterInlineConfirmationAsync(ConversationItemViewModel item)
     {
-        var confirmed = RequestDeleteConversationConfirmation is not null
+        if (!item.IsDeleteConfirmationVisible)
+            return;
+
+        await DeleteConversationCoreAsync(item, alreadyConfirmed: true);
+        item.IsDeleteConfirmationVisible = false;
+    }
+
+    private async Task DeleteConversationCoreAsync(ConversationItemViewModel item, bool alreadyConfirmed)
+    {
+        var confirmed = alreadyConfirmed || RequestDeleteConversationConfirmation is not null
             && await RequestDeleteConversationConfirmation(item);
         if (!confirmed)
             return;
@@ -682,7 +723,9 @@ public partial class MainWindowViewModel : ViewModelBase
         // r24 doc 02 2.0: deletion propagates, always - a record that survives
         // its own source is treated as a bug of the highest severity in that doc.
         if (_recallIndexing is not null)
-            _ = Task.Run(() => _recallIndexing.RemoveConversationAsync(item.Id));
+            _ = Task.Run(() => ObserveRecallOperationAsync(
+                () => _recallIndexing.RemoveConversationAsync(item.Id),
+                $"remove conversation {item.Id} from Recall"));
         _toasts.Show("Conversation deleted", $"\"{item.Title}\" was removed.", ToastKind.Info);
     }
 
@@ -739,7 +782,9 @@ public partial class MainWindowViewModel : ViewModelBase
         conv.RecallExcluded = item.IsRecallExcluded;
         await _store.SaveAsync(conv);
         if (_recallIndexing is not null)
-            _ = Task.Run(() => _recallIndexing.IndexConversationAsync(conv));
+            _ = Task.Run(() => ObserveRecallOperationAsync(
+                () => _recallIndexing.IndexConversationAsync(conv),
+                $"index conversation {conv.Id} in Recall"));
 
         // In-place update only: a full LoadConversationsAsync() reload here would replace every
         // ConversationItemViewModel instance out from under the open details flyout on each save
@@ -860,7 +905,33 @@ public partial class MainWindowViewModel : ViewModelBase
         RunBackgroundTaskAsync("load memories", () => Memories.InitializeCommand.ExecuteAsync(null));
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
-    [RelayCommand] private void ShowActivityPanel()    { ActivePanel = "activity"; RunBackgroundTaskAsync("refresh activity", Activity.RefreshAsync); }
+    [RelayCommand]
+    private void ShowActivityPanel()
+    {
+        Memories.IsActivityExpanded = true;
+        ActivePanel = "memories";
+        RunBackgroundTaskAsync("load memories and activity", () => Memories.InitializeCommand.ExecuteAsync(null));
+    }
+
+    private async Task ObserveRecallOperationAsync(Func<Task> operation, string description)
+    {
+        try
+        {
+            await operation();
+        }
+        catch (OperationCanceledException)
+        {
+            // Background recall work is cancelled during shutdown; observe it.
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                $"Recall operation deferred ({description}): {ex.GetType().Name}: {ex.Message}"));
+        }
+    }
     [RelayCommand] private void ResumeSetup()           => ActivePanel = "wizard";
     [RelayCommand]
     private void ShowWizardPanel()
@@ -927,6 +998,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowActivity));
         OnPropertyChanged(nameof(ShowWizard));
         OnPropertyChanged(nameof(ShowSetupResume));
+        OnPropertyChanged(nameof(HasPendingAgentAction));
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));
     }
@@ -1163,7 +1235,7 @@ public partial class MainWindowViewModel : ViewModelBase
                         return Task.CompletedTask;
                 }
 
-                return Chat.LoadModelsAsync(force: true);
+                return RefreshChatAndAgentModelsAsync();
             });
         }
         catch (Exception ex)
@@ -1172,6 +1244,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 $"Model refresh failed: {ex.Message}"));
             _toasts.Show("Model refresh failed", ex.Message, ToastKind.Warning, 7000);
         }
+    }
+
+    private async Task RefreshChatAndAgentModelsAsync()
+    {
+        await Chat.LoadModelsAsync(force: true);
+        await Agent.LoadAsync();
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using System.Text;
 using System.Text.Json;
 
 namespace Hermaeus.ViewModels;
@@ -514,6 +515,9 @@ public partial class LabViewModel : ViewModelBase
     private readonly ILabRecipeService? _recipes;
     private readonly ISettingsService? _settings;
     private readonly ServicesViewModel? _services;
+    private readonly RecommendationDerivationService? _recommendationDerivation;
+    private readonly RecommendationApplicationService? _recommendationApplication;
+    private string? _reviewRecommendationId;
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts)
         : this(store, toasts, null, null, null)
@@ -522,7 +526,9 @@ public partial class LabViewModel : ViewModelBase
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts,
         ILabExperimentService? experiments, ISettingsService? settings, ILabRecipeService? recipes,
-        ServicesViewModel? services = null)
+        ServicesViewModel? services = null,
+        RecommendationDerivationService? recommendationDerivation = null,
+        RecommendationApplicationService? recommendationApplication = null)
     {
         _store = store;
         _toasts = toasts;
@@ -530,6 +536,8 @@ public partial class LabViewModel : ViewModelBase
         _settings = settings;
         _recipes = recipes;
         _services = services;
+        _recommendationDerivation = recommendationDerivation;
+        _recommendationApplication = recommendationApplication;
         if (_services is not null)
             _services.ServerAvailabilityChanged += OnServicesAvailabilityChanged;
 
@@ -565,6 +573,9 @@ public partial class LabViewModel : ViewModelBase
     [ObservableProperty] private int _candidateContextSize = 4096;
     [ObservableProperty] private string _definitionPreview = string.Empty;
     [ObservableProperty] private string _runStatus = "Not started";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRestoreFailure))]
+    private string _restoreStatus = "Not required";
     [ObservableProperty] private string _runtimeIsolation = "No Lab runtime is active.";
     [ObservableProperty] private string _comparisonSummary = string.Empty;
     [ObservableProperty] private string _applyReviewSummary = string.Empty;
@@ -573,6 +584,9 @@ public partial class LabViewModel : ViewModelBase
     [ObservableProperty] private string _recipePrompt = "Reply with exactly: Hermaeus Lab.";
     [ObservableProperty] private bool _isRecipeRunning;
     [ObservableProperty] private string _tradeoffSummary = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUndoAppliedRecommendation))]
+    private string _appliedRecommendationId = string.Empty;
 
     private LabRunSnapshot? _currentRun;
     private LabApplyReview? _applyReview;
@@ -582,6 +596,8 @@ public partial class LabViewModel : ViewModelBase
     private readonly Dictionary<string, string> _suspendedSourceConfigurationFingerprints = new(StringComparer.Ordinal);
 
     public bool HasSelection => SelectedExperience is not null;
+    public bool HasRestoreFailure => RestoreStatus.StartsWith("Failed:", StringComparison.Ordinal)
+        || RestoreStatus.StartsWith("Blocked:", StringComparison.Ordinal);
     [ObservableProperty] private bool _hasAnyEvidence;
     public string EvidenceEmptyState => HasAnyEvidence
         ? "No evidence matches these filters."
@@ -601,12 +617,15 @@ public partial class LabViewModel : ViewModelBase
     public UiBoundCollection<LabRecipeRowViewModel> RecipeOptions { get; } = [];
     public Func<EmpiricalExperience, Task<bool>>? ConfirmRemoval { get; set; }
     public Func<LabApplyReview, Task<bool>>? ConfirmApply { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
     public bool CanStartRun => !IsRunActive && !IsRecipeRunning && !IsBusy;
     public bool CanRunRecipe => !IsRunActive && !IsRecipeRunning && !IsBusy;
     public bool CanReviewCurrentRun => GetReviewRun() is
         { Status: LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded } run
         && run.Comparisons.Any(comparison => comparison.CanShowHeadlineDelta);
     public bool CanConfirmApply => _applyReview?.CanApply == true && ConfirmApply is not null;
+    public bool CanUndoAppliedRecommendation => _recommendationApplication is not null
+        && !string.IsNullOrWhiteSpace(AppliedRecommendationId);
 
     partial void OnSelectedServerChanged(ServerConfig? value)
     {
@@ -724,6 +743,47 @@ public partial class LabViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private async Task CopyEvidenceDetailAsync()
+    {
+        if (SelectedExperience is null)
+            return;
+        if (RequestCopyToClipboard is null)
+        {
+            StatusMessage = "Clipboard access is unavailable in this session.";
+            return;
+        }
+
+        var copied = await RequestCopyToClipboard(BuildEvidenceDetail(SelectedExperience));
+        StatusMessage = copied
+            ? "Copied Lab evidence detail."
+            : "Could not copy Lab evidence detail.";
+    }
+
+    internal static string BuildEvidenceDetail(ExperienceRowViewModel row)
+    {
+        var text = new StringBuilder();
+        text.AppendLine("Lab evidence detail");
+        text.AppendLine($"Record: {row.Id}");
+        text.AppendLine($"Domain: {row.Domain}");
+        text.AppendLine($"Outcome: {row.OutcomeLabel}");
+        text.AppendLine($"Status: {row.StatusLabel}");
+        text.AppendLine();
+        foreach (var evidence in row.EvidenceRecords)
+        {
+            text.AppendLine($"Evidence {evidence.Id}");
+            text.AppendLine($"Created: {evidence.CreatedAtUtc:O}");
+            text.AppendLine($"Domain: {evidence.Domain}");
+            text.AppendLine($"Outcome: {evidence.Outcome.Outcome} - {evidence.Outcome.Detail}");
+            text.AppendLine($"Context: {evidence.ContextJson}");
+            text.AppendLine($"Action: {evidence.ActionJson}");
+            foreach (var provenance in evidence.Provenance)
+                text.AppendLine($"Source: {provenance.Source.Title} ({provenance.Source.EvidenceOrigin})");
+            text.AppendLine();
+        }
+        return text.ToString().TrimEnd();
+    }
+
+    [RelayCommand]
     private async Task RefreshRecipesAsync()
     {
         if (_recipes is null)
@@ -781,6 +841,8 @@ public partial class LabViewModel : ViewModelBase
         IsBusy = true;
         try
         {
+            if (_suspendedSourceServers.Count == 0)
+                RestoreStatus = "Not required";
             await SuspendSelectedSourceAsync();
             _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt, _recipeCts.Token);
             ShowCompletedRun(_currentRun);
@@ -876,6 +938,8 @@ public partial class LabViewModel : ViewModelBase
         IsBusy = true;
         try
         {
+            if (_suspendedSourceServers.Count == 0)
+                RestoreStatus = "Not required";
             await SuspendSelectedSourceAsync();
             var baseline = ConfigurationFrom(SelectedServer, "baseline", "Baseline");
             var candidate = baseline with { Id = "candidate-1", Label = "Candidate", ContextSize = CandidateContextSize };
@@ -997,7 +1061,7 @@ public partial class LabViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void ReviewApply()
+    private async Task ReviewApplyAsync()
     {
         var run = GetReviewRun();
         if (_experiments is null || run is null)
@@ -1019,9 +1083,62 @@ public partial class LabViewModel : ViewModelBase
             }
 
             _applyReview = _experiments.CreateApplyReview(run.Id, candidateId);
+            _reviewRecommendationId = null;
+            try
+            {
+                if (_recommendationDerivation is not null && _recommendationApplication is not null
+                    && _settings is not null && _settings.Settings.ManagedServers.FirstOrDefault(server => server.Id == run.Definition.TargetServerId) is { } current
+                    && run.Definition.Candidates.FirstOrDefault(candidate => candidate.Id == candidateId) is { } candidate
+                    && run.Comparisons.FirstOrDefault(comparison => comparison.CandidateConfigurationId == candidateId) is { } comparison
+                    && comparison.CanShowHeadlineDelta)
+                {
+                    var proposed = _settings.Settings.Clone().ManagedServers.First(server => server.Id == current.Id);
+                    LabConfigurationMapper.ApplyTo(proposed, candidate);
+                    var currentIdentity = ConfigurationIdentityFactory.Create(current);
+                    var evaluatedAt = run.CompletedAtUtc ?? DateTime.UtcNow;
+                    var evidenceId = string.IsNullOrWhiteSpace(run.CompletionEvidenceId)
+                        ? $"lab-completion-{run.Id}"
+                        : run.CompletionEvidenceId;
+                    var recommendation = await _recommendationDerivation.DeriveAsync(new RecommendationProposal(
+                        RecommendationKind.RuntimeConfiguration,
+                        current.Id,
+                        currentIdentity.StableId,
+                        ManagedServerRecommendationPatch.Create(current.Id, current, proposed),
+                        [new RecommendationEvidenceReference(
+                            evidenceId,
+                            "lab-correctness-gated-comparison",
+                            Required: true,
+                            run.Definition.ProfileFingerprint.Completeness == IdentityCompleteness.Complete
+                                ? CapabilityState.Available : CapabilityState.Unknown,
+                            evaluatedAt,
+                            TimeSpan.FromDays(30))],
+                        [new RecommendationCondition("candidate", candidate.Id),
+                            new RecommendationCondition("correctness", "passed")],
+                        [new RecommendationTradeoff("restart", "requires-explicit-restart")],
+                        "review-lab-winner",
+                        1,
+                        "lab-correctness-gated-winner",
+                        evaluatedAt,
+                        currentIdentity.Completeness == IdentityCompleteness.Complete,
+                        TargetExists: true,
+                        RequiredEvidenceRevoked: false,
+                        Contradicted: false,
+                        RequiredEvidenceExpired: false,
+                        MinimumFactsComplete: run.Definition.ProfileFingerprint.Completeness == IdentityCompleteness.Complete,
+                        Actionable: true,
+                        ExpiresAtUtc: evaluatedAt.AddDays(30)));
+                    if (recommendation.Eligibility == RecommendationEligibility.Actionable)
+                        _reviewRecommendationId = recommendation.Id;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or JsonException)
+            {
+                _reviewRecommendationId = null;
+            }
             ApplyReviewSummary = _applyReview.CanApply
                 ? "Review ready. No settings have been saved." + Environment.NewLine
                     + string.Join(Environment.NewLine, _applyReview.Changes.Select(change => $"{change.Field}: {change.CurrentValue} -> {change.ProposedValue}"))
+                    + (_reviewRecommendationId is null ? string.Empty : Environment.NewLine + $"Recommendation {_reviewRecommendationId} is ready for explicit Apply.")
                 : _applyReview.RefusalReason;
             OnPropertyChanged(nameof(CanConfirmApply));
         }
@@ -1051,12 +1168,41 @@ public partial class LabViewModel : ViewModelBase
 
         try
         {
-            await _experiments.ApplyAsync(review);
+            if (_reviewRecommendationId is not null && _recommendationApplication is not null)
+            {
+                var result = await _recommendationApplication.ApplyAsync(_reviewRecommendationId);
+                if (!result.Succeeded)
+                    throw new InvalidOperationException(result.Message);
+                AppliedRecommendationId = _reviewRecommendationId;
+            }
+            else
+            {
+                await _experiments.ApplyAsync(review);
+            }
             ApplyReviewSummary = "Reviewed fields were saved through the normal Settings flow.";
             _applyReview = null;
+            _reviewRecommendationId = null;
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
         }
         catch (Exception ex) { _toasts.Show("Could not apply Lab result", ex.Message, ToastKind.Error, 5000); }
+    }
+
+    [RelayCommand]
+    private async Task UndoAppliedRecommendationAsync()
+    {
+        if (_recommendationApplication is null || string.IsNullOrWhiteSpace(AppliedRecommendationId))
+            return;
+        try
+        {
+            var result = await _recommendationApplication.UndoAsync(AppliedRecommendationId);
+            if (!result.Succeeded)
+                throw new InvalidOperationException(result.Message);
+            AppliedRecommendationId = string.Empty;
+            ApplyReviewSummary = "The reviewed settings were restored. Any running server remains unchanged.";
+            OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
+        }
+        catch (Exception ex) { _toasts.Show("Could not undo Lab result", ex.Message, ToastKind.Error, 5000); }
     }
 
     private LabRunSnapshot? GetReviewRun()
@@ -1157,9 +1303,15 @@ public partial class LabViewModel : ViewModelBase
         _suspendedSourceConfigurationFingerprints[source.Id] = JsonSerializer.Serialize(source.BuildConfig());
         _suspendedSourceServers = await _services.SuspendRunningServersAsync([SelectedServer.Id]);
         if (_suspendedSourceServers.Count > 0)
+        {
+            RestoreStatus = "Pending";
             RuntimeIsolation = "The source Chat runtime is stopped and fully unloaded while Lab uses the GPU. It will be restored when the run ends.";
+        }
         else
+        {
+            RestoreStatus = "Not required";
             _suspendedSourceConfigurationFingerprints.Clear();
+        }
     }
 
     private async Task RestoreSuspendedSourceAsync()
@@ -1177,6 +1329,7 @@ public partial class LabViewModel : ViewModelBase
         if (changed.Length > 0)
         {
             _toasts.Show("Lab source was not restarted", "The source configuration changed during the run. Review it and start the original runtime manually instead of silently launching a different configuration.", ToastKind.Warning, 7000);
+            RestoreStatus = "Blocked: source configuration changed during Lab.";
             RuntimeIsolation = "The source Chat runtime stayed stopped because its configuration changed during Lab. Review Services before restarting it.";
             _suspendedSourceServers = [];
             _suspendedSourceConfigurationFingerprints.Clear();
@@ -1191,11 +1344,13 @@ public partial class LabViewModel : ViewModelBase
                 throw new InvalidOperationException($"The source runtime did not return to Running state: {string.Join(", ", failed)}.");
             _suspendedSourceServers = [];
             _suspendedSourceConfigurationFingerprints.Clear();
+            RestoreStatus = "Restored";
             RuntimeIsolation = "The isolated Lab runtime was torn down and the original source Chat runtime was restored.";
         }
         catch (Exception ex)
         {
             _toasts.Show("Could not restore Lab source", ex.Message, ToastKind.Warning, 7000);
+            RestoreStatus = $"Failed: {ex.Message}";
             RuntimeIsolation = $"The source Chat runtime remains stopped after Lab. Restore failed: {ex.Message}";
         }
     }

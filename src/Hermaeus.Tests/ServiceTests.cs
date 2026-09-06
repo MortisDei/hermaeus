@@ -1192,7 +1192,28 @@ namespace Hermaeus.Tests
             var report = await service.ScanAsync(settings.Settings);
 
             True(report.Items.Any(item => item.Status == LocalAiReadinessStatus.Found), "scan should find ready items");
+            Equal(LocalAiReadinessStatus.Optional, report.Items.Single(item => item.Key == "voice-native").Status,
+                "native voice assets are owned by Doctor and must not be reported as installed by Local AI setup");
             True(report.Actions.Count > 0, "scan should produce setup actions");
+        }
+
+        public static async Task LocalAiSetupKeepsKokoroPythonDisplayNameOnThePythonPath()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(root);
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.Tts.VoiceProvider = "Kokoro (Python)";
+
+            var report = await new LocalAiSetupService(new PythonHealthValidator()).ScanAsync(settings.Settings);
+
+            True(report.Actions.Any(action => action.CommandPreview.Any(argument =>
+                argument.Equals("kokoro", StringComparison.OrdinalIgnoreCase))),
+                "The Kokoro Python display name must select the Python package setup path.");
+            False(report.Items.Any(item => item.Key == "voice-native"),
+                "The Kokoro Python display name must not select native voice handling.");
         }
 
         public static async Task LocalAiSetupScriptHandlingIsApprovalGated()
@@ -2243,7 +2264,8 @@ namespace Hermaeus.Tests
             Equal("http://127.0.0.1:9000", settings.Settings.Llm.LlamaCppBaseUrl, "llm section should apply base URL");
             Equal(true, settings.Settings.Llm.OpenAiEnabled, "llm section should apply remote toggle");
             Equal(temp.PathFor("reranker"), settings.Settings.Rag.RerankerModelPath, "rag section should apply reranker path");
-            Equal(temp.PathFor("data"), settings.Settings.DataManagement.DataRootDirectory, "data section should apply data root");
+            Equal(temp.PathFor("initial-data"), settings.Settings.DataManagement.DataRootDirectory, "data section should keep the active root until restart");
+            Equal(temp.PathFor("data"), settings.Settings.DataManagement.PendingDataRootDirectory, "data section should queue the confirmed root for startup");
             Equal(temp.PathFor("ai"), settings.Settings.DataManagement.LocalAiAssetsRoot, "data section should apply AI assets root");
             Equal("Dark", settings.Settings.Ui.Theme, "ui section should apply theme");
             Equal(true, settings.Settings.Ui.EnableGlobalHotkeys, "ui section should apply global hotkey toggle");
@@ -2314,7 +2336,7 @@ namespace Hermaeus.Tests
             var settings = NewSettings(temp);
             settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
             var vm = NewSettingsViewModel(settings, new FakeSecretStore());
-            False(vm.Ui.ShowNavLabels, "toolbar labels should default off, matching the pre-r6 icon-only layout");
+            True(vm.Ui.ShowNavLabels, "toolbar labels should default on for a fresh settings object");
 
             vm.Ui.ShowNavLabels = true;
             await vm.SaveCommand.ExecuteAsync(null);
@@ -2335,14 +2357,14 @@ namespace Hermaeus.Tests
                 Threads = 6,
                 GpuLayers = 12,
                 EmbeddingsMode = true,
-                ExtraArgs = "--alias \"local model\" --host 0.0.0.0 --flag"
+                ExtraArgs = "--alias \"local model\" --flag"
             }).ToList();
 
             Equal("-m", args[0], "model flag should be first");
             Equal("/models/local model.gguf", args[1], "model path with spaces should remain one argument");
             ContainsInOrder(args, "--host", "127.0.0.1", "managed host should be loopback by default");
             ContainsInOrder(args, "--alias", "local model", "quoted extra arg should remain one argument");
-            ContainsInOrder(args, "--host", "0.0.0.0", "extra args should be preserved as data arguments");
+            True(args.Contains("--flag"), "non-core extra args should be preserved as data arguments");
             False(args.Any(a => a.Contains(';', StringComparison.Ordinal)), "argument builder should not synthesize shell separators");
             True(args.Contains("--embeddings"), "embeddings mode should add embeddings flag");
             ContainsInOrder(args, "--pooling", "mean", "embeddings mode should default to OAI-compatible mean pooling");

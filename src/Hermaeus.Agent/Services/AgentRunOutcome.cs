@@ -15,7 +15,7 @@ public static class AgentRunOutcome
     public static AgentRunOutcomeSummary Describe(AgentRunLedger ledger, AgentTaskState state)
     {
         var terminal = state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed
-            or AgentTaskStatus.Blocked or AgentTaskStatus.Cancelled;
+            or AgentTaskStatus.Blocked or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted;
         if (!terminal)
             return AgentRunOutcomeSummary.None;
 
@@ -48,11 +48,15 @@ public static class AgentRunOutcome
             ? changedNothing
                 ? "You dismissed this run. It changed no files and ran no commands."
                 : "You dismissed this run. What it had already done is below."
-            : changedNothing
-                ? "This run changed no files and ran no commands."
-                : failedCommands > 0
-                    ? "This run finished with a failed command."
-                    : "This run finished.";
+            : state.Status == AgentTaskStatus.Interrupted
+                ? changedNothing
+                    ? "This run was interrupted during startup recovery. It did not resume and changed no files or ran no commands."
+                    : "This run was interrupted during startup recovery. What it had already done is below."
+                : changedNothing
+                    ? "This run changed no files and ran no commands."
+                    : failedCommands > 0
+                        ? "This run finished with a failed command."
+                        : "This run finished.";
 
         var unfinished = state.PendingSteps.Count > 0
             ? $"Finished with {Plural(state.PendingSteps.Count, "planned step")} not run."

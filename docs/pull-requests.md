@@ -41,6 +41,12 @@ item in the PR template. A documentation change must preserve current
 authority, keep historical review records intact, and leave no planned feature
 described as shipped.
 
+For review-round development pushes matching `r*/round`, `branch-ci.yml`
+provides non-required Linux and Windows feedback until an exact open
+same-repository pull request exists. The required `build-and-test` checks are
+published by `ci.yml` for the pull-request merge context and `main` pushes.
+The branch workflow never reuses those required check names.
+
 For test execution, coverage, platform skips, and the evidence behind the
 Windows CI timing guidance, use the [test-suite reference](testing.md). It is
 the canonical home for that material and avoids duplicating measurements here.

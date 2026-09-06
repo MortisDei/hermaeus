@@ -19,6 +19,10 @@ public partial class RagSourceViewModel : ObservableObject
     public string Title   { get; init; } = string.Empty;
     public string File    { get; init; } = string.Empty;
     public string Path    { get; init; } = string.Empty;
+    public string SourceId { get; init; } = string.Empty;
+    public string SourceRevisionId { get; init; } = string.Empty;
+    public string ContentHash { get; init; } = string.Empty;
+    public string GenerationId { get; init; } = string.Empty;
     public string Content { get; init; } = string.Empty;
     public float  Score   { get; init; }
     public string ScoreDisplay => $"{Score:F3}";
@@ -40,6 +44,9 @@ public partial class RagSourceViewModel : ObservableObject
 
     public string CitationLabel => $"[{Rank}] {Title}";
     public string ShortCitationLabel => $"[{Rank}]";
+    public string CitationIdentity => string.IsNullOrWhiteSpace(SourceRevisionId)
+        ? "Legacy or unversioned source"
+        : $"Revision {SourceRevisionId} · {ContentHash[..Math.Min(ContentHash.Length, 12)]}";
     public string Snippet
     {
         get
@@ -102,7 +109,14 @@ public sealed class RagDatasetManagerItemViewModel
     public int StaleFiles { get; set; }
     public int DuplicateSources { get; set; }
     public IReadOnlyList<string> MissingSourcePaths { get; set; } = [];
+    public IReadOnlyList<RagDatasetGeneration> GenerationHistory { get; set; } = [];
     public string LastIngestLabel => CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    public string GenerationHistoryLabel => GenerationHistory.Count switch
+    {
+        0 => "Generations: none",
+        1 => "Generations: 1 published",
+        var count => $"Generations: {count} published, latest is current"
+    };
 
     /// <summary>doc 03 3.5: watched-source surfacing on the Dataset Manager card.</summary>
     public int WatchedSourceCount => Dataset.Config.WatchedSources.Count;
@@ -163,6 +177,43 @@ public sealed class RagDatasetManagerItemViewModel
         : $"Embedding model: {EmbeddingModel}";
 }
 
+/// <summary>
+/// One dataset that can be included in the next RAG question. This is kept
+/// separate from the manager's SelectedDataset because ingest, reindex and
+/// evaluation still operate on exactly one dataset at a time.
+/// </summary>
+public sealed class RagDatasetQueryOptionViewModel : ObservableObject
+{
+    private bool _isIncluded;
+
+    public RagDatasetQueryOptionViewModel(RagDataset dataset, bool isIncluded)
+    {
+        Dataset = dataset;
+        _isIncluded = isIncluded;
+    }
+
+    public RagDataset Dataset { get; }
+    public string Id => Dataset.Id;
+    public string Name => Dataset.Name;
+    public int ChunkCount => Dataset.ChunkCount;
+    public string ChunkLabel => $"{ChunkCount} chunk{(ChunkCount == 1 ? "" : "s")}";
+
+    public bool IsIncluded
+    {
+        get => _isIncluded;
+        set
+        {
+            if (_isIncluded == value)
+                return;
+            _isIncluded = value;
+            OnPropertyChanged();
+            SelectionChanged?.Invoke();
+        }
+    }
+
+    internal Action? SelectionChanged { get; set; }
+}
+
 public partial class RagViewModel : ObservableObject
 {
     private readonly RagQueryService _query;
@@ -187,6 +238,48 @@ public partial class RagViewModel : ObservableObject
     public UiBoundCollection<RagEvalResultViewModel> EvalResults { get; } = [];
     public UiBoundCollection<RagIngestReportItemViewModel> IngestReportItems { get; } = [];
     public UiBoundCollection<RagDatasetManagerItemViewModel> DatasetManagerItems { get; } = [];
+    public UiBoundCollection<RagDatasetQueryOptionViewModel> QueryDatasetOptions { get; } = [];
+
+    public bool HasDatasets => Datasets.Count > 0;
+    public const string QuerySubview = "query";
+    public const string SourcesSubview = "sources";
+    public const string DiagnosticsSubview = "diagnostics";
+    public const string DatasetManagerSubview = "dataset-manager";
+
+    [ObservableProperty] private string _activeSubview = QuerySubview;
+    public bool IsQuerySubview => ActiveSubview == QuerySubview;
+    public bool IsSourcesSubview => ActiveSubview == SourcesSubview;
+    public bool IsDiagnosticsSubview => ActiveSubview == DiagnosticsSubview;
+    public bool IsDatasetManagerSubview => ActiveSubview == DatasetManagerSubview;
+
+    partial void OnActiveSubviewChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsQuerySubview));
+        OnPropertyChanged(nameof(IsSourcesSubview));
+        OnPropertyChanged(nameof(IsDiagnosticsSubview));
+        OnPropertyChanged(nameof(IsDatasetManagerSubview));
+    }
+
+    [RelayCommand]
+    private void ShowQuerySubview() => ActiveSubview = QuerySubview;
+
+    [RelayCommand]
+    private void ShowSourcesSubview() => ActiveSubview = SourcesSubview;
+
+    [RelayCommand]
+    private void ShowDiagnosticsSubview() => ActiveSubview = DiagnosticsSubview;
+
+    [RelayCommand]
+    private void ShowDatasetManagerSubview() => ActiveSubview = DatasetManagerSubview;
+    public bool ShowBundledHelpOnboarding => !HasDatasets && Directory.Exists(BundledHelpDirectory);
+    public string BundledHelpDirectory => ResolveBundledHelpDirectory();
+    public string BundledHelpStatus => ShowBundledHelpOnboarding
+        ? "Create a searchable, version-local help dataset from the Hermaeus documentation bundled with this build."
+        : string.Empty;
+
+    /// <summary>The settings service is exposed for the desktop input handler,
+    /// matching ChatView's shared Enter-to-send policy.</summary>
+    public ISettingsService Settings => _settings;
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
@@ -201,7 +294,23 @@ public partial class RagViewModel : ObservableObject
 
         var match = Datasets.FirstOrDefault(d => d.Id == datasetId);
         if (match is not null)
+        {
             SelectedDataset = match;
+            SetQueryDatasetIncluded(match.Id, true);
+        }
+    }
+
+    public string QueryDatasetSelectionLabel
+    {
+        get
+        {
+            var selected = QueryDatasetOptions.Where(option => option.IsIncluded).Select(option => option.Name).ToList();
+            if (selected.Count == 0 && QueryDatasetOptions.Count == 0 && SelectedDataset is not null)
+                return $"Using 1 dataset: {SelectedDataset.Name}";
+            return selected.Count == 0
+                ? "Select at least one dataset before asking."
+                : $"Using {selected.Count} dataset{(selected.Count == 1 ? "" : "s")}: {string.Join(", ", selected)}";
+        }
     }
     [ObservableProperty] private string      _answerText      = string.Empty;
 
@@ -301,10 +410,32 @@ public partial class RagViewModel : ObservableObject
     {
         try
         {
+            var previousSelectedId = SelectedDataset?.Id;
             var all = await _query.GetDatasetsAsync();
             Datasets.Clear();
             foreach (var d in all) Datasets.Add(d);
-            SelectedDataset = Datasets.FirstOrDefault();
+            OnPropertyChanged(nameof(HasDatasets));
+            OnPropertyChanged(nameof(ShowBundledHelpOnboarding));
+            OnPropertyChanged(nameof(BundledHelpStatus));
+            SelectedDataset = Datasets.FirstOrDefault(d => d.Id == previousSelectedId)
+                ?? Datasets.FirstOrDefault();
+            QueryDatasetOptions.Clear();
+            var savedIncludedIds = _settings.Settings.Rag.LastQueryDatasetIds;
+            var includedIds = savedIncludedIds is null
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : savedIncludedIds
+                    .Where(id => Datasets.Any(dataset => dataset.Id == id))
+                    .ToHashSet(StringComparer.Ordinal);
+            foreach (var dataset in Datasets)
+            {
+                var option = new RagDatasetQueryOptionViewModel(dataset, includedIds.Contains(dataset.Id))
+                {
+                    SelectionChanged = OnQueryDatasetSelectionChanged
+                };
+                QueryDatasetOptions.Add(option);
+            }
+            OnPropertyChanged(nameof(QueryDatasetSelectionLabel));
+            QueryCommand.NotifyCanExecuteChanged();
             await RefreshDatasetManagerAsync();
         }
         catch (Exception ex) { SetError(ex.Message); }
@@ -313,7 +444,24 @@ public partial class RagViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanQuery))]
     private async Task QueryAsync()
     {
-        if (SelectedDataset is null || string.IsNullOrWhiteSpace(QuestionText)) return;
+        var selectedDatasets = QueryDatasetOptions.Where(option => option.IsIncluded).ToList();
+        var datasetIds = selectedDatasets.Count > 0
+            ? selectedDatasets.Select(option => option.Id).ToArray()
+            : SelectedDataset is not null && QueryDatasetOptions.Count == 0
+                ? [SelectedDataset.Id]
+                : [];
+        var datasetNames = selectedDatasets.Count > 0
+            ? selectedDatasets.Select(option => option.Name).ToArray()
+            : SelectedDataset is not null && QueryDatasetOptions.Count == 0
+                ? [SelectedDataset.Name]
+                : [];
+        if (string.IsNullOrWhiteSpace(QuestionText)) return;
+        if (datasetIds.Length == 0)
+        {
+            StatusMessage = "Choose at least one dataset before asking a question.";
+            IsError = false;
+            return;
+        }
 
         // The box empties on send, the way the chat composer does, so a sent
         // question never looks like an unsent one. The text is not lost: it is
@@ -334,7 +482,7 @@ public partial class RagViewModel : ObservableObject
         try
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-                $"RAG query started for dataset {SelectedDataset.Name}"));
+                $"RAG query started for dataset(s) {string.Join(", ", datasetNames)}"));
             // Ask used to pass an empty model id unconditionally and let the
             // query service fall back to Llm.DefaultModel. That setting is
             // empty on any install where the user only ever picked a model from
@@ -350,7 +498,7 @@ public partial class RagViewModel : ObservableObject
             var answerBuilder = new StringBuilder();
 
             await foreach (var evt in _query.StreamQueryAsync(
-                SelectedDataset.Id, question, opts, _cts.Token))
+                datasetIds, question, opts, _cts.Token))
             {
                 switch (evt.Kind)
                 {
@@ -373,7 +521,7 @@ public partial class RagViewModel : ObservableObject
                 AnswerText,
                 string.Join(" ", Sources.Select(s => s.Content)));
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-                $"RAG query completed for dataset {SelectedDataset.Name}"));
+                $"RAG query completed for dataset(s) {string.Join(", ", datasetNames)}"));
         }
         catch (OperationCanceledException) { RestoreQuestion(question); }
         catch (Exception ex) { SetError(ex.Message); RestoreQuestion(question); }
@@ -397,6 +545,33 @@ public partial class RagViewModel : ObservableObject
 
     [RelayCommand]
     private void StopQuery() => _cts?.Cancel();
+
+    [RelayCommand(CanExecute = nameof(CanCreateBundledHelpDataset))]
+    private async Task CreateBundledHelpDatasetAsync()
+    {
+        if (!CanCreateBundledHelpDataset())
+            return;
+
+        var previousName = NewDatasetName;
+        var previousPath = IngestPath;
+        var previousWebLoader = EnableWebLoader;
+        var previousPolicy = IngestPolicy;
+        try
+        {
+            NewDatasetName = "Hermaeus Help";
+            IngestPath = BundledHelpDirectory;
+            EnableWebLoader = false;
+            IngestPolicy = IngestDuplicatePolicy.Replace;
+            await IngestAsync();
+        }
+        finally
+        {
+            NewDatasetName = previousName;
+            IngestPath = previousPath;
+            EnableWebLoader = previousWebLoader;
+            IngestPolicy = previousPolicy;
+        }
+    }
 
     [RelayCommand(CanExecute = nameof(CanIngest))]
     private async Task IngestAsync()
@@ -1072,8 +1247,11 @@ public partial class RagViewModel : ObservableObject
     [RelayCommand]
     private void StopEval() => _evalCts?.Cancel();
 
-    private bool CanQuery()  => !IsQuerying && !IsIngesting && SelectedDataset is not null
+    private bool CanQuery()  => !IsQuerying && !IsIngesting
+                                && Datasets.Count > 0
                                 && !string.IsNullOrWhiteSpace(QuestionText);
+    private bool CanCreateBundledHelpDataset() => !IsIngesting && !IsQuerying && !HasDatasets
+                                                  && Directory.Exists(BundledHelpDirectory);
     private bool CanIngest() => !IsIngesting && !IsQuerying
                                 && !string.IsNullOrWhiteSpace(NewDatasetName)
                                 && (EnableWebLoader
@@ -1114,6 +1292,15 @@ public partial class RagViewModel : ObservableObject
                 item.SourceCount = 0;
             }
 
+            try
+            {
+                item.GenerationHistory = await _query.GetGenerationHistoryAsync(dataset.Id);
+            }
+            catch
+            {
+                item.GenerationHistory = [];
+            }
+
             DatasetManagerItems.Add(item);
         }
 
@@ -1134,6 +1321,10 @@ public partial class RagViewModel : ObservableObject
                 Title = chunk.Title,
                 File = chunk.File,
                 Path = chunk.Path,
+                SourceId = chunk.SourceId,
+                SourceRevisionId = chunk.SourceRevisionId,
+                ContentHash = chunk.ContentHash,
+                GenerationId = chunk.GenerationId,
                 Score = chunk.Score,
                 Content = chunk.Content,
                 OutOfCount = chunk.OutOfCount,
@@ -1211,6 +1402,58 @@ public partial class RagViewModel : ObservableObject
         RunFullEvalCommand.NotifyCanExecuteChanged();
     }
     partial void OnIsQueryingChanged(bool value) => QueryCommand.NotifyCanExecuteChanged();
+
+    private void SetQueryDatasetIncluded(string datasetId, bool included)
+    {
+        var option = QueryDatasetOptions.FirstOrDefault(candidate => candidate.Id == datasetId);
+        if (option is not null)
+            option.IsIncluded = included;
+    }
+
+    private void OnQueryDatasetSelectionChanged()
+    {
+        _settings.Settings.Rag.LastQueryDatasetIds = QueryDatasetOptions
+            .Where(option => option.IsIncluded)
+            .Select(option => option.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        _ = PersistQueryDatasetSelectionAsync();
+        OnPropertyChanged(nameof(QueryDatasetSelectionLabel));
+        QueryCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task PersistQueryDatasetSelectionAsync()
+    {
+        try
+        {
+            await _settings.SaveAsync();
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Rag,
+                $"RAG dataset selection could not be persisted: {ex.Message}"));
+        }
+    }
+
+    private static string ResolveBundledHelpDirectory()
+    {
+        var direct = Path.Combine(AppContext.BaseDirectory, "BundledHelp");
+        if (Directory.Exists(direct))
+            return direct;
+
+        var packageDocs = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "docs"));
+        return Directory.Exists(packageDocs) ? packageDocs : direct;
+    }
+
+    partial void OnIsIngestingChanged(bool value)
+    {
+        IngestCommand.NotifyCanExecuteChanged();
+        QueryCommand.NotifyCanExecuteChanged();
+        CreateBundledHelpDatasetCommand.NotifyCanExecuteChanged();
+    }
     partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnWebUrlListChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnEnableWebLoaderChanged(bool value)

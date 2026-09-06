@@ -3,6 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Input.Platform;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Hermaeus.Core.Services;
@@ -112,13 +114,7 @@ public partial class ChatView : UserControl
                 var top = TopLevel.GetTopLevel(this);
                 if (top is null) return;
 
-                var textAndCodePatterns = new[]
-                {
-                    "*.txt", "*.md", "*.cs", "*.fs", "*.vb", "*.csproj", "*.props", "*.json",
-                    "*.xml", "*.xaml", "*.axaml", "*.yaml", "*.yml", "*.toml", "*.sh", "*.ps1",
-                    "*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.css", "*.html", "*.razor",
-                    "*.sql", "*.rs", "*.go", "*.java", "*.c", "*.h", "*.cpp", "*.hpp"
-                };
+                var textAndCodePatterns = SupportedTextFileTypes.PickerPatterns.ToArray();
                 var documentPatterns = new[] { "*.docx", "*.pdf" };
                 var imagePatterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp" };
 
@@ -371,12 +367,11 @@ public partial class ChatView : UserControl
 
         try
         {
-            var formats = await clipboard.GetFormatsAsync();
-            var imageFormat = formats.FirstOrDefault(f => f.Contains("png", StringComparison.OrdinalIgnoreCase));
-            if (imageFormat is not null && await clipboard.GetDataAsync(imageFormat) is byte[] { Length: > 0 } bytes)
+            if (await clipboard.TryGetBitmapAsync() is { } bitmap)
             {
                 var tempPath = Path.Combine(Path.GetTempPath(), $"hermaeus-paste-{Guid.NewGuid():N}.png");
-                await File.WriteAllBytesAsync(tempPath, bytes);
+                using (bitmap)
+                    bitmap.Save(tempPath, PngBitmapEncoderOptions.Default);
                 await _vm.AddContextFilesAsync([tempPath]);
                 return;
             }
@@ -386,7 +381,7 @@ public partial class ChatView : UserControl
             Console.Error.WriteLine($"Clipboard image paste failed: {ex.Message}");
         }
 
-        var text = await clipboard.GetTextAsync();
+        var text = await clipboard.TryGetTextAsync();
         if (!string.IsNullOrEmpty(text))
             textBox.SelectedText = text;
     }
@@ -398,7 +393,7 @@ public partial class ChatView : UserControl
 
     private void OnContextDragOver(object? sender, DragEventArgs e)
     {
-        var hasFiles = e.Data.Contains(DataFormats.Files);
+        var hasFiles = e.DataTransfer.Contains(DataFormat.File);
         e.DragEffects = hasFiles ? DragDropEffects.Copy : DragDropEffects.None;
         if (_vm is not null)
             _vm.IsContextDragOver = hasFiles;
@@ -416,8 +411,8 @@ public partial class ChatView : UserControl
     {
         if (_vm is not null)
             _vm.IsContextDragOver = false;
-        if (_vm is null || !e.Data.Contains(DataFormats.Files)) return;
-        var files = e.Data.GetFiles();
+        if (_vm is null || !e.DataTransfer.Contains(DataFormat.File)) return;
+        var files = e.DataTransfer.TryGetFiles();
         if (files is null) return;
 
         var paths = files

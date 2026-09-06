@@ -1,0 +1,141 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:views="using:Hermaeus.Desktop.Views"
+             x:Class="Hermaeus.Desktop.Views.RagDatasetManagerView"
+             x:DataType="vm:RagViewModel">
+
+    <StackPanel Margin="24,0" Spacing="14" MaxWidth="1200">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel Spacing="3">
+                <TextBlock Text="Dataset management" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Text="Persistent datasets, ingestion, watched folders, and embedding maintenance. Query context is selected separately in Ask."
+                           FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Back to Ask" Command="{Binding ShowQuerySubviewCommand}"
+                    Padding="10,5" CornerRadius="6"
+                    ToolTip.Tip="Return to the question workflow." />
+        </Grid>
+
+        <Border Classes="settings-card" Padding="14"
+                IsVisible="{Binding Datasets.Count, Converter={x:Static views:RagView.IsNonZero}}">
+            <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding DatasetManagerStatus}"
+                               FontSize="12"
+                               Opacity="0.65"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1"
+                            Content="Refresh datasets"
+                            Command="{Binding RefreshDatasetManagerCommand}"
+                            Padding="10,6"
+                            ToolTip.Tip="Refresh dataset health and watched-folder state." />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding DatasetManagerItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:RagDatasetManagerItemViewModel">
+                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="12"
+                                    Margin="0,0,0,8">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ReindexStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding DimensionsLabel}" FontSize="11" Opacity="0.55" />
+                                        <TextBlock Text="{Binding GenerationHistoryLabel}" FontSize="11" Opacity="0.55" />
+                                        <ItemsControl ItemsSource="{Binding GenerationHistory}" Margin="0,0,0,2">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock FontSize="10" Opacity="0.5">
+                                                        <Run Text="{Binding State}" />
+                                                        <Run Text=" · " />
+                                                        <Run Text="{Binding ChunkCount, StringFormat='{}{0} chunks'}" />
+                                                        <Run Text=" · " />
+                                                        <Run Text="{Binding EmbeddingIdentity}" />
+                                                    </TextBlock>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <!-- r27 02 2.7: keep the ingestion memory ceiling visible beside
+                                             dataset health while a corpus grows. -->
+                                        <TextBlock Text="{Binding ScanIndexLabel}"
+                                                   FontSize="11"
+                                                   Opacity="0.55"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock FontSize="11" Opacity="0.6" IsVisible="{Binding WatchedSourceCount, Converter={x:Static views:RagView.IsNonZero}}">
+                                            <Run Text="{Binding WatchedSourceCount, StringFormat='{}{0} watched folder(s),'}" />
+                                            <Run Text="{Binding WatchedLastRefreshLabel}" />
+                                            <Run Text="{Binding WatchedDriftSummary, StringFormat=' - {0}'}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" ColumnDefinitions="Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                                        <UniformGrid Grid.Row="0" Columns="2" Rows="3" MinWidth="260">
+                                            <TextBlock Text="{Binding ChunkCount, StringFormat=Chunks: {0}}" FontSize="11" />
+                                            <TextBlock Text="{Binding SourceCount, StringFormat=Sources: {0}}" FontSize="11" />
+                                            <TextBlock Text="{Binding MissingFiles, StringFormat=Missing: {0}}" FontSize="11" />
+                                            <TextBlock Text="{Binding StaleFiles, StringFormat=Stale: {0}}" FontSize="11" />
+                                            <TextBlock Text="{Binding DuplicateSources, StringFormat=Duplicates: {0}}" FontSize="11" />
+                                            <TextBlock Text="{Binding LastIngestLabel}" FontSize="11" />
+                                        </UniformGrid>
+                                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Open in chat"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.OpenInChatCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Padding="10,6"
+                                                    CornerRadius="6"
+                                                    ToolTip.Tip="Start a new chat conversation with this dataset attached." />
+                                            <Button Content="Add"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.AddToDatasetCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Padding="10,6"
+                                                    CornerRadius="6"
+                                                    ToolTip.Tip="Add more documents to this dataset." />
+                                            <Button Content="Reindex"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.ReindexDatasetCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    IsVisible="{Binding ReindexRequired}"
+                                                    Padding="10,6"
+                                                    CornerRadius="6"
+                                                    ToolTip.Tip="Re-embed every chunk with the current embedding model." />
+                                            <Button Content="Remove missing"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.RemoveMissingSourcesCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    IsVisible="{Binding MissingFiles, Converter={x:Static views:RagView.IsNonZero}}"
+                                                    Padding="10,6"
+                                                    CornerRadius="6"
+                                                    ToolTip.Tip="Remove chunks whose source files no longer exist on disk." />
+                                            <Button Content="Delete"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.DeleteDatasetCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Padding="10,6"
+                                                    CornerRadius="6"
+                                                    Foreground="Red"
+                                                    ToolTip.Tip="Delete this dataset. This cannot be undone." />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                                            <Button Content="Watch folder..."
+                                                    Command="{Binding $parent[ItemsControl].DataContext.AddWatchedSourceCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Padding="10,6" CornerRadius="6"
+                                                    ToolTip.Tip="Watch a folder for edited, added, or removed source files." />
+                                            <Button Content="Refresh now"
+                                                    Command="{Binding $parent[ItemsControl].DataContext.RefreshWatchedSourcesCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    IsVisible="{Binding WatchedSourceCount, Converter={x:Static views:RagView.IsNonZero}}"
+                                                    Padding="10,6" CornerRadius="6"
+                                                    ToolTip.Tip="Scan watched folders and ingest anything new or changed." />
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>
