@@ -73,9 +73,26 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Contains("rm -f \"$DESKTOP_FILE\" \"$PNG_ICON_FILE\"", buildScript, StringComparison.Ordinal);
 
         var program = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Program.cs"));
-        var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Views/MainWindow.axaml"));
         Assert.Contains("WmClass = \"hermaeus\"", program, StringComparison.Ordinal);
-        Assert.Contains("Icon=\"/Assets/hermaeus-app.png\"", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Windows_main_window_uses_canonical_ico_while_tray_keeps_its_png()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var project = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Hermaeus.Desktop.csproj"));
+        var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Views/MainWindow.axaml"));
+        var trayService = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/DesktopIntegrationService.cs"));
+        var icoPath = Path.Combine(repoRoot, "src/Hermaeus.Desktop/Assets/hermaeus.ico");
+        var trayPath = Path.Combine(repoRoot, "src/Hermaeus.Desktop/Assets/hermaeus-tray.png");
+
+        Assert.Contains("<ApplicationIcon>Assets/hermaeus.ico</ApplicationIcon>", project, StringComparison.Ordinal);
+        Assert.Contains("<AvaloniaResource Include=\"Assets/**\" />", project, StringComparison.Ordinal);
+        Assert.Contains("Icon=\"/Assets/hermaeus.ico\"", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("Icon=\"/Assets/hermaeus-app.png\"", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("avares://Hermaeus.Desktop/Assets/hermaeus-tray.png", trayService, StringComparison.Ordinal);
+        Assert.True(File.Exists(icoPath), $"Missing canonical Windows icon: {icoPath}");
+        Assert.True(File.Exists(trayPath), $"Missing canonical tray icon: {trayPath}");
     }
 
     [Fact]

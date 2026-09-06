@@ -309,7 +309,8 @@
                                     </StackPanel>
 
                                     <!-- Badge row -->
-                                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding RoleLabel, Converter={x:Static views:NotEmptyConverter.Instance}}">
+                                <WrapPanel Orientation="Horizontal" ItemSpacing="6" LineSpacing="4"
+                                           IsVisible="{Binding RoleLabel, Converter={x:Static views:NotEmptyConverter.Instance}}">
                                     <Border CornerRadius="4" Padding="6,1"
                                             Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                                             ToolTip.Tip="Model role derived from the provider route, configured service role, GGUF metadata, or trusted manifest provenance.">
@@ -342,7 +343,7 @@
                                                    IsVisible="{Binding RetuneRecommended}"
                                                    FontSize="10" Opacity="0.6" FontStyle="Italic"
                                                    VerticalAlignment="Center" />
-                                    </StackPanel>
+                                </WrapPanel>
 
                                     <!-- Tags -->
                                     <TextBlock Text="{Binding TagsDisplay}"

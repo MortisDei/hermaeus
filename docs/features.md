@@ -35,9 +35,10 @@ for Knowledge behavior in Chat.
   sampling defaults, visibility, tags, source provenance, updates, deletion,
   and hardware-fit information. Its bounded Services-owned inventory rechecks
   file identity and reuses GGUF metadata until an explicit invalidation or a
-  file change. A saved auto-tune profile is shown directly on
-  the model card with independently wrappable GPU layer, thread, and context
-  fields. Opening the model
+  file change. The primary model metadata/status row keeps role, capability,
+  size, fit, and update items inside the card and reflows whole items when the
+  card is narrow. A saved auto-tune profile is shown separately on the model
+  card with GPU layer, thread, and context fields. Opening the model
   configuration also hydrates the editable saved tune values from that shared
   profile; saving them remains separate from the runtime Save Config action on
   Services.
@@ -243,9 +244,11 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   lifecycle transitions. A run ledger supports per-file Rewind with staleness
   checks.
 - Scenario Evals supports both suite execution and an individual row Run
-  action. Those actions are disabled when no model or scenario set is ready,
-  and the row action resolves through the ItemsControl's owning workbench
-  context so a visible click reaches the runner.
+  action. Those actions are disabled while definitions are loading or when no
+  model or scenario set is ready. Persisted evidence restoration runs after
+  definitions load and does not block a new run. The row action resolves
+  through the ItemsControl's owning workbench context so a visible click
+  reaches the runner.
 - Recent terminal top-level runs can be permanently deleted after confirmation,
   including their persisted sub-task records and evidence files. Running runs
   and direct child deletion are refused.

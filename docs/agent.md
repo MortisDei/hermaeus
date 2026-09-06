@@ -1020,11 +1020,12 @@ known, the current scenario id and title, the current step/status, observed
 pass/fail counts, and a Cancel suite action. It does not manufacture a
 percentage or timing estimate. Completed rows retain the actual PASS or FAIL
 result, including failed checks, and a cancelled run retains its partial
-counts. The suite action and each row's Run action are disabled until a model
-and loaded scenario set are available; row commands resolve through the
-owning ItemsControl data context. Persisted evidence remains subject to the
-model-content, scenario-definition, evaluator-contract, and runtime-provenance
-checks described above.
+counts. The suite action and each row's Run action are disabled while
+definitions are loading or until a model and loaded scenario set are available.
+Persisted evidence restoration is separate background work and does not disable
+a new run. Row commands resolve through the owning ItemsControl data context.
+Persisted evidence remains subject to the model-content, scenario-definition,
+evaluator-contract, and runtime-provenance checks described above.
 
 ## Manual Verification
 

@@ -1091,8 +1091,9 @@ public partial class AgentViewModel : ViewModelBase
             await ExplainWorkspaceAsync();
             if (ScenarioSuite is not null)
             {
+                ScenarioSuite.ModelId = string.Empty;
+                await ScenarioSuite.LoadDefinitionsAsync();
                 ScenarioSuite.ModelId = SelectedModel?.Id ?? string.Empty;
-                await ScenarioSuite.LoadScenariosAsync();
             }
         }
         catch (Exception ex)

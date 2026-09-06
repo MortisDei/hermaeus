@@ -13,10 +13,15 @@ limit.
 
 ### Changed
 
-- Model cards now render saved tune metadata as independently wrappable GPU,
-  thread, and context fields. Scenario Eval suite and row Run actions now use
-  truthful command availability and the row binding resolves through the
-  ItemsControl data context. Foreground embedding queries are prioritized over
+- Windows desktop identity now uses the canonical Moss `hermaeus.ico` for the
+  application executable and Avalonia main window, covering taskbar and
+  Alt-Tab icon paths. The existing tray PNG path is unchanged.
+- Model cards now keep the primary role, capability, size, fit, and update
+  metadata inside a wrapping row, preserving whole badges when the card is
+  narrow. Saved tune metadata remains a separate card section. Scenario Eval
+  suite and row Run actions now use truthful command availability and the row
+  binding resolves through the ItemsControl data context. Foreground embedding
+  queries are prioritized over
   queued optional backfill, while physical gate, request, parse, coalescing,
   payload, and logical timings are recorded without query text. Recall document
   search scans the storage embedding index and FTS candidates before bounded
@@ -34,6 +39,11 @@ limit.
   Capability-cache replacement now closes the existing read handle before the
   atomic write. The observed background embedding admission denial remains an
   explicit bounded deferral when whole-workload headroom is insufficient.
+- Scenario Eval history restoration is now independent of run availability:
+  definitions become runnable before persisted evidence is restored, a new
+  live run takes precedence over late history, and unchanged local model files
+  reuse a bounded in-session content-hash cache. Restored evidence remains
+  isolated by model id and retains Pass, Fail, Stale, and Unknown semantics.
 - The four Avalonia framework packages are now pinned coherently to 12.1.2.
   AvaloniaEdit remains on its separate 12.0.0 package line; no new framework
   controls or backend-selection changes are included.

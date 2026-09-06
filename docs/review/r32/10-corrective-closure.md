@@ -28,8 +28,19 @@ upgrade is included.
   navigation strip is removed in source and covered by regression tests.
 - Settings voice pickers now use an editable, unfiltered ComboBox per row.
   Provider catalogue items, the default sentinel, and manually entered ids use the same bound text surface, so the prior autocomplete popup/filter state is no longer part of the lifecycle. Source-level coverage covers the control contract and per-row catalogue snapshots. Repeated live open, close, selection, reopen, and cross-channel checks remain an owner gate.
+- Model cards now use a wrapping primary metadata/status row for role,
+  capability, size, fit, and update items, keeping whole badges inside the card
+  at constrained widths. Tune metadata remains a separate card section and is
+  not used as the containment contract for this row. Source coverage checks the
+  primary row's semantic children and unconstrained-width contract; owner
+  visual validation remains authoritative.
 - Scenario Evals now exposes a bounded running card with current/total
   completion, scenario id/title, current step/status, observed pass/fail counts, and cancellation. It retains actual partial and failed results and does not invent a percentage or timing subsystem.
+- Scenario Eval definitions now become runnable before persisted evidence
+  restoration completes. Restoration is cancellable and model-scoped, so a
+  live run wins over late history; unchanged local model files reuse a bounded
+  in-session content-hash cache rather than being hashed for each restore
+  trigger.
 - Scenario Eval results now survive restart for both suite and individual runs.
   Each persisted result carries the model id and content hash, scenario
   definition hash, evaluator contract version, runtime identity, observation

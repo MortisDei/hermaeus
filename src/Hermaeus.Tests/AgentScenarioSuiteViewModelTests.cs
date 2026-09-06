@@ -124,6 +124,238 @@ public sealed class AgentScenarioSuiteViewModelTests
     }
 
     [Fact]
+    public async Task Run_commands_remain_available_while_persisted_evidence_restores()
+    {
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        await File.WriteAllTextAsync(modelPath, "model");
+        var hashStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHash = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hashCalls = 0;
+
+        async Task<string> HashAsync(string _, CancellationToken ct)
+        {
+            Interlocked.Increment(ref hashCalls);
+            hashStarted.TrySetResult();
+            await releaseHash.Task.WaitAsync(ct);
+            return "model-hash";
+        }
+
+        var scenario = BuildScenario("s1", "One", [], isBuiltIn: true);
+        var vm = new AgentScenarioSuiteViewModel(
+            new FakeAgentScenarioStore([scenario]),
+            new FakeAgentScenarioRunner(),
+            new FakeToasts(),
+            new FakeEvalStore(),
+            HashAsync)
+        {
+            ModelId = modelPath
+        };
+
+        await vm.LoadScenariosAsync();
+        await hashStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var row = Assert.Single(vm.Scenarios);
+        Assert.False(vm.IsLoading);
+        Assert.True(vm.IsRestoringEvidence);
+        Assert.True(vm.RunSuiteCommand.CanExecute(null));
+        Assert.True(vm.RunScenarioCommand.CanExecute(row));
+        Assert.Equal(1, hashCalls);
+
+        releaseHash.TrySetResult();
+        await WaitForAsync(() => !vm.IsRestoringEvidence, "scenario evidence restoration completion");
+    }
+
+    [Fact]
+    public async Task Repeated_history_restoration_reuses_the_unchanged_model_hash()
+    {
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        await File.WriteAllTextAsync(modelPath, "model");
+        var hashStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHash = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hashCalls = 0;
+
+        async Task<string> HashAsync(string modelId, CancellationToken ct)
+        {
+            Interlocked.Increment(ref hashCalls);
+            hashStarted.TrySetResult();
+            await releaseHash.Task;
+            return "hash";
+        }
+
+        var vm = new AgentScenarioSuiteViewModel(
+            new FakeAgentScenarioStore([BuildScenario("s1", "One", [], isBuiltIn: true)]),
+            new FakeAgentScenarioRunner(),
+            new FakeToasts(),
+            new FakeEvalStore(),
+            HashAsync)
+        {
+            ModelId = modelPath
+        };
+
+        await vm.LoadScenariosAsync();
+        await hashStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var secondLoad = vm.LoadScenariosAsync();
+        await secondLoad;
+        Assert.Equal(1, hashCalls);
+
+        releaseHash.TrySetResult();
+        await WaitForAsync(() => !vm.IsRestoringEvidence, "second scenario evidence restoration");
+
+        Assert.Equal(1, hashCalls);
+    }
+
+    [Fact]
+    public async Task A_live_run_wins_over_late_persisted_evidence()
+    {
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        await File.WriteAllTextAsync(modelPath, "model");
+        var scenario = BuildScenario("s1", "One", [], isBuiltIn: true);
+        var modelHash = await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelPath);
+        var failed = new AgentScenarioRunResult(
+            "s1",
+            "One",
+            false,
+            [new AgentScenarioCheckResult("history", false, "late history")],
+            1,
+            1,
+            "Blocked",
+            null,
+            AgentScenarioEvidenceContract.Create(scenario, modelPath, modelHash, "Fake", DateTime.UtcNow.AddMinutes(-1)));
+        var evalStore = new FakeEvalStore();
+        await evalStore.SaveRunAsync(new EvalRun(
+            "history",
+            EvalMode.AgentScenario,
+            new EvalTarget(modelPath, Label: "agent-scenarios"),
+            [new CaseResult(
+                "s1",
+                "history",
+                1,
+                Metadata: new Dictionary<string, string>
+                {
+                    [AgentScenarioEvidenceContract.ResultJsonKey] = JsonSerializer.Serialize(
+                        failed,
+                        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
+                })],
+            DateTime.UtcNow.AddMinutes(-1),
+            DateTime.UtcNow.AddMinutes(-1),
+            "history"));
+
+        var hashStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHash = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hashCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<string> HashAsync(string _, CancellationToken __)
+        {
+            hashStarted.TrySetResult();
+            await releaseHash.Task;
+            hashCompleted.TrySetResult();
+            return modelHash;
+        }
+
+        var runner = new FakeAgentScenarioRunner
+        {
+            OnRunSuite = (_, _) => Task.FromResult(new AgentScenarioSuiteResult
+            {
+                Id = "live",
+                ModelId = modelPath,
+                Results = [new AgentScenarioRunResult("s1", "One", true, [], 1, 1, "Complete", null)]
+            })
+        };
+        var vm = new AgentScenarioSuiteViewModel(
+            new FakeAgentScenarioStore([scenario]),
+            runner,
+            new FakeToasts(),
+            evalStore,
+            HashAsync)
+        {
+            ModelId = modelPath
+        };
+
+        await vm.LoadScenariosAsync();
+        await hashStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await vm.RunSuiteCommand.ExecuteAsync(null);
+
+        var row = Assert.Single(vm.Scenarios);
+        Assert.True(row.Passed);
+
+        releaseHash.TrySetResult();
+        await hashCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await Task.Yield();
+
+        Assert.True(row.Passed);
+        Assert.Equal(AgentScenarioEvidenceStatus.Pass, row.EvidenceStatus);
+    }
+
+    [Fact]
+    public async Task Changing_model_restores_only_that_models_history()
+    {
+        using var temp = new TempDir();
+        var modelA = temp.PathFor("model-a.gguf");
+        var modelB = temp.PathFor("model-b.gguf");
+        await File.WriteAllTextAsync(modelA, "model-a");
+        await File.WriteAllTextAsync(modelB, "model-b");
+        var scenario = BuildScenario("s1", "One", [], isBuiltIn: true);
+        var hashA = await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelA);
+        var hashB = await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelB);
+        var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+        var evalStore = new FakeEvalStore();
+
+        async Task SaveAsync(string runId, string modelId, string modelHash, bool passed, DateTime startedAt)
+        {
+            var result = new AgentScenarioRunResult(
+                "s1",
+                "One",
+                passed,
+                [],
+                1,
+                5,
+                passed ? "Complete" : "Blocked",
+                null,
+                AgentScenarioEvidenceContract.Create(scenario, modelId, modelHash, "Fake", startedAt));
+            await evalStore.SaveRunAsync(new EvalRun(
+                runId,
+                EvalMode.AgentScenario,
+                new EvalTarget(modelId, Label: "agent-scenarios"),
+                [new CaseResult(
+                    "s1",
+                    "check",
+                    5,
+                    Metadata: new Dictionary<string, string>
+                    {
+                        [AgentScenarioEvidenceContract.ResultJsonKey] = JsonSerializer.Serialize(result, jsonOptions)
+                    })],
+                startedAt,
+                startedAt,
+                runId));
+        }
+
+        await SaveAsync("run-a", modelA, hashA, true, DateTime.UtcNow.AddMinutes(-1));
+        await SaveAsync("run-b", modelB, hashB, false, DateTime.UtcNow);
+
+        var vm = new AgentScenarioSuiteViewModel(
+            new FakeAgentScenarioStore([scenario]),
+            new FakeAgentScenarioRunner(),
+            new FakeToasts(),
+            evalStore)
+        {
+            ModelId = modelA
+        };
+
+        await vm.LoadScenariosAsync();
+        await WaitForAsync(() => !vm.IsRestoringEvidence, "model A history restoration");
+        var row = Assert.Single(vm.Scenarios);
+        Assert.Equal(AgentScenarioEvidenceStatus.Pass, row.EvidenceStatus);
+
+        vm.ModelId = modelB;
+        await WaitForAsync(() => !vm.IsRestoringEvidence, "model B history restoration");
+
+        Assert.Equal(AgentScenarioEvidenceStatus.Fail, row.EvidenceStatus);
+        Assert.False(row.Passed);
+    }
+
+    [Fact]
     public async Task RunSuiteCommand_cannot_execute_with_no_scenarios_loaded()
     {
         var vm = new AgentScenarioSuiteViewModel(new FakeAgentScenarioStore([]), new FakeAgentScenarioRunner(), new FakeToasts())
@@ -320,6 +552,7 @@ public sealed class AgentScenarioSuiteViewModelTests
         };
 
         await vm.LoadScenariosAsync();
+        await WaitForAsync(() => !vm.IsRestoringEvidence, "scenario evidence restoration");
 
         var row = Assert.Single(vm.Scenarios);
         Assert.Equal(AgentScenarioEvidenceStatus.Fail, row.EvidenceStatus);
@@ -328,6 +561,7 @@ public sealed class AgentScenarioSuiteViewModelTests
 
         await File.WriteAllTextAsync(modelPath, "model version two");
         await vm.LoadScenariosAsync();
+        await WaitForAsync(() => !vm.IsRestoringEvidence, "scenario evidence restoration after model change");
 
         row = Assert.Single(vm.Scenarios);
         Assert.Equal(AgentScenarioEvidenceStatus.Stale, row.EvidenceStatus);

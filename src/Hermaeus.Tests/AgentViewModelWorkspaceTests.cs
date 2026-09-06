@@ -18,7 +18,10 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class AgentViewModelWorkspaceTests
 {
-    private static async Task<(AgentViewModel vm, ScriptedModelsLlm llm, FileAgentTaskStateStore store)> NewViewModelAsync(TempDir temp, ScriptedModelsLlm llm)
+    private static async Task<(AgentViewModel vm, ScriptedModelsLlm llm, FileAgentTaskStateStore store)> NewViewModelAsync(
+        TempDir temp,
+        ScriptedModelsLlm llm,
+        AgentScenarioSuiteViewModel? scenarioSuite = null)
     {
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
@@ -37,11 +40,43 @@ public sealed class AgentViewModelWorkspaceTests
         var manifests = new WorkspaceManifestService();
         var activation = new WorkspaceActivationService(manifests, profiles);
 
-        var vm = new AgentViewModel(agentService, store, memoryStore, tools, llm, rag, logs, analysis, activation, manifests, settings);
+        var vm = new AgentViewModel(
+            agentService,
+            store,
+            memoryStore,
+            tools,
+            llm,
+            rag,
+            logs,
+            analysis,
+            activation,
+            manifests,
+            settings,
+            scenarioSuite: scenarioSuite);
         return (vm, llm, store);
     }
 
     private static LlmModel Model(string id) => new() { Id = id, Name = id, Provider = "Test" };
+
+    private sealed class SingleScenarioStore : IAgentScenarioStore
+    {
+        public Task<IReadOnlyList<AgentScenario>> LoadAllAsync(ICollection<string>? warnings = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<AgentScenario>>(
+            [new AgentScenario(new AgentScenarioManifest { Id = "s1", Title = "One", Goal = "goal" }, "unused", "unused", true)]);
+    }
+
+    private sealed class NoOpScenarioRunner : IAgentScenarioRunner
+    {
+        public Task<AgentScenarioRunResult> RunScenarioAsync(AgentScenario scenario, string modelId, IProgress<string>? progress = null, CancellationToken ct = default) =>
+            Task.FromResult(new AgentScenarioRunResult(scenario.Manifest.Id, scenario.Manifest.Title, true, [], 1, 1, "Complete", null));
+
+        public Task<AgentScenarioSuiteResult> RunSuiteAsync(IReadOnlyList<AgentScenario> scenarios, string modelId, IProgress<string>? progress = null, CancellationToken ct = default) =>
+            Task.FromResult(new AgentScenarioSuiteResult
+            {
+                ModelId = modelId,
+                Results = scenarios.Select(s => new AgentScenarioRunResult(s.Manifest.Id, s.Manifest.Title, true, [], 1, 1, "Complete", null)).ToList()
+            });
+    }
 
     // ── 3.5: the agent no longer treats the user profile as an implicit workspace ──
 
@@ -58,6 +93,21 @@ public sealed class AgentViewModelWorkspaceTests
 
         Assert.Empty(vm.WorkspaceMemory);
         Assert.False(vm.IsAnalyzingWorkspace);
+    }
+
+    [Fact]
+    public async Task Agent_load_propagates_its_selected_model_to_the_real_scenario_suite()
+    {
+        using var temp = new TempDir();
+        var suite = new AgentScenarioSuiteViewModel(new SingleScenarioStore(), new NoOpScenarioRunner(), new FakeToasts());
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]), suite);
+
+        await vm.LoadAsync();
+
+        Assert.Equal("a", vm.SelectedModel?.Id);
+        Assert.Equal("a", suite.ModelId);
+        Assert.Single(suite.Scenarios);
+        Assert.True(suite.RunSuiteCommand.CanExecute(null));
     }
 
     // ── 3.4: LoadAsync must re-match SelectedModel/SelectedDataset by id, not keep a stale reference ──

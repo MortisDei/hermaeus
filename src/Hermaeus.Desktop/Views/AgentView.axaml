@@ -1345,6 +1345,9 @@
                                                TextTrimming="CharacterEllipsis"
                                                IsVisible="{Binding !ScenarioSuite.IsRunning}" />
                                 </StackPanel>
+                                <TextBlock Text="Restoring persisted evidence..."
+                                           FontSize="11" Opacity="0.6"
+                                           IsVisible="{Binding ScenarioSuite.IsRestoringEvidence}" />
                                 <Border IsVisible="{Binding ScenarioSuite.IsRunning}"
                                         Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"

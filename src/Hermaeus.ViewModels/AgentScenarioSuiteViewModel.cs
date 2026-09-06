@@ -110,6 +110,20 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     private IReadOnlyList<AgentScenario> _loadedScenarios = [];
     private CancellationTokenSource? _cts;
     private readonly SemaphoreSlim _restoreGate = new(1, 1);
+    private readonly Func<string, CancellationToken, Task<string>> _computeModelContentHashAsync;
+    private readonly Dictionary<string, CachedModelHash> _modelHashCache = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private readonly object _modelHashGate = new();
+    private readonly Dictionary<string, InFlightModelHash> _inFlightModelHashes = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private CancellationTokenSource? _restoreCts;
+    private Task? _restoreTask;
+    private string _restoreModelId = string.Empty;
+    private int _restoreScenarioGeneration;
+    private int _scenarioGeneration;
+    private int _restoreEpoch;
+    private long _modelHashUseCounter;
+    private const int ModelHashCacheLimit = 8;
     private static readonly JsonSerializerOptions EvalResultJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -119,6 +133,7 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     public UiBoundCollection<AgentScenarioRowViewModel> Scenarios { get; } = [];
 
     [ObservableProperty] private bool _isLoading;
+    [ObservableProperty] private bool _isRestoringEvidence;
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private string _headlineResult = string.Empty;
@@ -136,40 +151,53 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
 
     public int ScenarioCount => Scenarios.Count;
 
-    public AgentScenarioSuiteViewModel(IAgentScenarioStore store, IAgentScenarioRunner runner, IToastService toasts, IEvalStore? evalStore = null)
+    public AgentScenarioSuiteViewModel(
+        IAgentScenarioStore store,
+        IAgentScenarioRunner runner,
+        IToastService toasts,
+        IEvalStore? evalStore = null,
+        Func<string, CancellationToken, Task<string>>? computeModelContentHashAsync = null)
     {
         _store = store;
         _runner = runner;
         _toasts = toasts;
         _evalStore = evalStore;
+        _computeModelContentHashAsync = computeModelContentHashAsync ?? AgentScenarioEvidenceContract.ComputeModelContentHashAsync;
         Scenarios.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(ScenarioCount));
             RunSuiteCommand.NotifyCanExecuteChanged();
+            RunScenarioCommand.NotifyCanExecuteChanged();
         };
     }
 
     private readonly IEvalStore? _evalStore;
 
     [RelayCommand]
-    public async Task LoadScenariosAsync()
+    public Task LoadScenariosAsync() => LoadScenariosCoreAsync(restoreEvidence: true);
+
+    public Task LoadDefinitionsAsync() => LoadScenariosCoreAsync(restoreEvidence: false);
+
+    private async Task LoadScenariosCoreAsync(bool restoreEvidence)
     {
+        CancelEvidenceRestore();
         IsLoading = true;
         try
         {
             var warnings = new List<string>();
             _loadedScenarios = await _store.LoadAllAsync(warnings);
+            _scenarioGeneration++;
             Scenarios.Clear();
             foreach (var scenario in _loadedScenarios)
-            Scenarios.Add(new AgentScenarioRowViewModel(scenario));
+                Scenarios.Add(new AgentScenarioRowViewModel(scenario));
 
             RunScenarioCommand.NotifyCanExecuteChanged();
-
-            await RestorePersistedResultsAsync();
 
             StatusMessage = $"{Scenarios.Count} scenario(s) loaded.";
             if (warnings.Count > 0)
                 _toasts.Show("Scenario library warnings", string.Join("; ", warnings), ToastKind.Warning);
+            if (restoreEvidence)
+                QueueEvidenceRestore();
         }
         catch (Exception ex)
         {
@@ -186,6 +214,7 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     {
         if (_loadedScenarios.Count == 0) return;
 
+        CancelEvidenceRestore();
         IsRunning = true;
         HeadlineResult = string.Empty;
         foreach (var row in Scenarios)
@@ -228,6 +257,7 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
         var scenario = _loadedScenarios.FirstOrDefault(s => s.Manifest.Id == row.Id);
         if (scenario is null) return;
 
+        CancelEvidenceRestore();
         IsRunning = true;
         row.ResetResult();
         ResetRunningProgress(1, $"Running scenario: {row.Title}");
@@ -363,28 +393,65 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
         RunSuiteCommand.NotifyCanExecuteChanged();
         RunScenarioCommand.NotifyCanExecuteChanged();
     }
-    private async Task RestorePersistedResultsAsync()
+    private void QueueEvidenceRestore()
     {
         if (_evalStore is null || _loadedScenarios.Count == 0 || string.IsNullOrWhiteSpace(ModelId))
             return;
 
         var modelId = ModelId;
-        await _restoreGate.WaitAsync();
+        var scenarioGeneration = _scenarioGeneration;
+        if (_restoreTask is { IsCompleted: false }
+            && string.Equals(_restoreModelId, modelId, StringComparison.OrdinalIgnoreCase)
+            && _restoreScenarioGeneration == scenarioGeneration)
+            return;
+
+        CancelEvidenceRestore();
+        var cts = new CancellationTokenSource();
+        _restoreCts = cts;
+        _restoreModelId = modelId;
+        _restoreScenarioGeneration = scenarioGeneration;
+        var epoch = _restoreEpoch;
+        IsRestoringEvidence = true;
+        _restoreTask = RestorePersistedResultsAsync(modelId, scenarioGeneration, epoch, cts);
+    }
+
+    private async Task RestorePersistedResultsAsync(
+        string modelId,
+        int scenarioGeneration,
+        int epoch,
+        CancellationTokenSource owner)
+    {
+        var enteredGate = false;
         try
         {
-            var modelHash = await AgentScenarioEvidenceContract.ComputeModelContentHashAsync(modelId);
-            var runs = await _evalStore.GetRunsAsync(EvalMode.AgentScenario);
-            if (!string.Equals(ModelId, modelId, StringComparison.OrdinalIgnoreCase))
+            if (_evalStore is null || _loadedScenarios.Count == 0 || string.IsNullOrWhiteSpace(modelId))
                 return;
+
+            await _restoreGate.WaitAsync(owner.Token);
+            enteredGate = true;
+            if (!IsCurrentEvidenceRestore(modelId, scenarioGeneration, epoch))
+                return;
+
+            var modelHash = await ResolveModelContentHashAsync(modelId, owner.Token);
+            if (!IsCurrentEvidenceRestore(modelId, scenarioGeneration, epoch))
+                return;
+
+            var runs = await _evalStore.GetRunsAsync(EvalMode.AgentScenario, owner.Token);
+            if (!IsCurrentEvidenceRestore(modelId, scenarioGeneration, epoch))
+                return;
+
             var latestByScenario = runs
                 .OrderByDescending(run => run.StartedAt)
                 .SelectMany(run => run.CaseResults.Select(caseResult => (run, caseResult)))
+                .Where(item => string.Equals(item.run.Target.ModelId, modelId, StringComparison.OrdinalIgnoreCase))
                 .Where(item => item.caseResult.Metadata?.ContainsKey(AgentScenarioEvidenceContract.ResultJsonKey) == true)
                 .GroupBy(item => item.caseResult.CaseId, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.First().caseResult, StringComparer.Ordinal);
 
             foreach (var scenario in _loadedScenarios)
             {
+                if (!IsCurrentEvidenceRestore(modelId, scenarioGeneration, epoch))
+                    return;
                 if (!latestByScenario.TryGetValue(scenario.Manifest.Id, out var caseResult)
                     || caseResult.Metadata is null
                     || !caseResult.Metadata.TryGetValue(AgentScenarioEvidenceContract.ResultJsonKey, out var resultJson))
@@ -408,13 +475,22 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
                     ?.ApplyPersistedResult(result, status);
             }
         }
+        catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             _toasts.Show("Scenario history unavailable", ex.Message, ToastKind.Warning);
         }
         finally
         {
-            _restoreGate.Release();
+            if (enteredGate)
+                _restoreGate.Release();
+            if (epoch == _restoreEpoch && ReferenceEquals(_restoreCts, owner))
+            {
+                IsRestoringEvidence = false;
+                _restoreTask = null;
+                _restoreCts = null;
+            }
+            owner.Dispose();
         }
     }
 
@@ -422,6 +498,102 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     {
         RunSuiteCommand.NotifyCanExecuteChanged();
         RunScenarioCommand.NotifyCanExecuteChanged();
-        _ = RestorePersistedResultsAsync();
+        CancelEvidenceRestore();
+        QueueEvidenceRestore();
     }
+
+    private bool IsCurrentEvidenceRestore(string modelId, int scenarioGeneration, int epoch) =>
+        epoch == _restoreEpoch
+        && scenarioGeneration == _scenarioGeneration
+        && !IsRunning
+        && string.Equals(ModelId, modelId, StringComparison.OrdinalIgnoreCase);
+
+    private void CancelEvidenceRestore()
+    {
+        _restoreEpoch++;
+        _restoreCts?.Cancel();
+        _restoreCts = null;
+        _restoreTask = null;
+        IsRestoringEvidence = false;
+    }
+
+    private async Task<string> ResolveModelContentHashAsync(string modelId, CancellationToken ct)
+    {
+        if (!File.Exists(modelId))
+            return await _computeModelContentHashAsync(modelId, ct);
+
+        var path = Path.GetFullPath(modelId);
+        var before = new FileInfo(path);
+        if (!before.Exists)
+            return string.Empty;
+
+        Task<string> hashTask;
+        var attachCleanup = false;
+        lock (_modelHashGate)
+        {
+            if (_modelHashCache.TryGetValue(path, out var cached)
+                && cached.Length == before.Length
+                && cached.LastWriteTimeUtc == before.LastWriteTimeUtc)
+            {
+                _modelHashCache[path] = cached with { LastUsed = ++_modelHashUseCounter };
+                return cached.Hash;
+            }
+
+            if (_inFlightModelHashes.TryGetValue(path, out var inFlight)
+                && inFlight.Length == before.Length
+                && inFlight.LastWriteTimeUtc == before.LastWriteTimeUtc)
+            {
+                hashTask = inFlight.Task;
+            }
+            else
+            {
+                hashTask = ComputeAndCacheModelHashAsync(path, before);
+                _inFlightModelHashes[path] = new InFlightModelHash(before.Length, before.LastWriteTimeUtc, hashTask);
+                attachCleanup = true;
+            }
+        }
+
+        if (attachCleanup)
+        {
+            _ = hashTask.ContinueWith(completed =>
+            {
+                _ = completed.Exception;
+                lock (_modelHashGate)
+                {
+                    if (_inFlightModelHashes.TryGetValue(path, out var current)
+                        && ReferenceEquals(current.Task, completed))
+                        _inFlightModelHashes.Remove(path);
+                }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+
+        return await hashTask.WaitAsync(ct);
+    }
+
+    private async Task<string> ComputeAndCacheModelHashAsync(string path, FileInfo before)
+    {
+        var hash = await _computeModelContentHashAsync(path, CancellationToken.None);
+        var after = new FileInfo(path);
+        if (after.Exists && after.Length == before.Length && after.LastWriteTimeUtc == before.LastWriteTimeUtc)
+        {
+            lock (_modelHashGate)
+            {
+                _modelHashCache[path] = new CachedModelHash(
+                    before.Length,
+                    before.LastWriteTimeUtc,
+                    hash,
+                    ++_modelHashUseCounter);
+                while (_modelHashCache.Count > ModelHashCacheLimit)
+                {
+                    var oldest = _modelHashCache.MinBy(pair => pair.Value.LastUsed).Key;
+                    _modelHashCache.Remove(oldest);
+                }
+            }
+        }
+
+        return hash;
+    }
+
+    private sealed record CachedModelHash(long Length, DateTime LastWriteTimeUtc, string Hash, long LastUsed);
+    private sealed record InFlightModelHash(long Length, DateTime LastWriteTimeUtc, Task<string> Task);
 }

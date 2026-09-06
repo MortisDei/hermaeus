@@ -69,22 +69,45 @@ public sealed class LabEvidenceLayoutTests
     }
 
     [Fact]
-    public void Model_cards_render_tune_metadata_as_independent_wrappable_fields()
+    public void Model_cards_wrap_primary_metadata_inside_the_card_and_keep_tune_metadata_separate()
     {
         var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "ModelManagementView.axaml");
         var doc = XDocument.Load(path);
-        var tunePanel = doc.Descendants().Single(element => element.Name.LocalName == "Border"
-            && (string?)element.Attribute("IsVisible") == "{Binding TuneSummary, Converter={x:Static views:NotEmptyConverter.Instance}}");
-        var fields = tunePanel.Descendants().Where(element => element.Name.LocalName == "Border").ToList();
-        Assert.Equal(3, fields.Count);
-        Assert.DoesNotContain(tunePanel.Descendants(), element => element.Name.LocalName == "WrapPanel");
-        var bindings = fields
-            .SelectMany(field => field.Descendants().Where(element => element.Name.LocalName == "TextBlock"))
+        var cards = doc.Descendants().Single(element => element.Name.LocalName == "ItemsControl"
+            && (string?)element.Attribute("ItemsSource") == "{Binding Models}");
+        var card = cards.Descendants().Single(element => element.Name.LocalName == "Border"
+            && (string?)element.Attribute("MinHeight") == "320");
+        var primaryRow = card.Descendants().Single(element => element.Name.LocalName == "WrapPanel"
+            && (string?)element.Attribute("IsVisible") == "{Binding RoleLabel, Converter={x:Static views:NotEmptyConverter.Instance}}");
+
+        Assert.Equal("6", (string?)primaryRow.Attribute("ItemSpacing"));
+        Assert.Equal("4", (string?)primaryRow.Attribute("LineSpacing"));
+        Assert.Null((string?)primaryRow.Attribute("Width"));
+        Assert.Null((string?)primaryRow.Attribute("MinWidth"));
+        Assert.Null((string?)primaryRow.Attribute("MaxWidth"));
+        Assert.Null((string?)card.Attribute("Width"));
+        Assert.Null((string?)card.Attribute("MinWidth"));
+
+        var primaryBindings = primaryRow
+            .Descendants()
+            .Where(element => element.Name.LocalName == "TextBlock")
             .Select(element => (string?)element.Attribute("Text"))
             .ToList();
+        Assert.Contains("{Binding RoleLabel}", primaryBindings);
+        Assert.Contains("{Binding CapabilityBadges}", primaryBindings);
+        Assert.Contains("{Binding SizeDisplay}", primaryBindings);
+        Assert.Contains("{Binding FitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}", primaryRow.Descendants().Select(element => (string?)element.Attribute("IsVisible")));
+        Assert.Contains("{Binding UpdateLabel, Converter={x:Static views:NotEmptyConverter.Instance}}", primaryRow.Descendants().Select(element => (string?)element.Attribute("IsVisible")));
 
-        Assert.Contains("{Binding TunedGpuLayersDisplay}", bindings);
-        Assert.Contains("{Binding TunedThreads, StringFormat='{}{0} threads'}", bindings);
-        Assert.Contains("{Binding TunedContextSize, StringFormat='Context {0:N0}'}", bindings);
+        var statusBadges = primaryRow.Descendants().Where(element => element.Name.LocalName == "Border").ToList();
+        Assert.Contains(statusBadges, border => border.Descendants().Any(element => (string?)element.Attribute("Text") == "{Binding FitLabel}"));
+        Assert.Contains(statusBadges, border => border.Descendants().Any(element => (string?)element.Attribute("Text") == "{Binding UpdateLabel}"));
+
+        var tunePanel = doc.Descendants().Single(element => element.Name.LocalName == "Border"
+            && (string?)element.Attribute("IsVisible") == "{Binding TuneSummary, Converter={x:Static views:NotEmptyConverter.Instance}}");
+        Assert.NotSame(tunePanel, primaryRow);
+        Assert.DoesNotContain(primaryBindings, binding => binding?.Contains("Tuned", StringComparison.Ordinal) == true);
+        Assert.Contains(tunePanel.Descendants(), element =>
+            ((string?)element.Attribute("Text"))?.Contains("Tuned", StringComparison.Ordinal) == true);
     }
 }

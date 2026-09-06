@@ -164,6 +164,12 @@ behavior. The launcher exists only to keep the portable archive tidy and give
 users a normal double-click entry point. The old `Launch-Hermaeus.cmd` is not
 packaged.
 
+The bundled Windows apphost declares `src/Hermaeus.Desktop/Assets/hermaeus.ico`
+as its application icon, and the Avalonia main window uses that same multi-size
+ICO for the Windows window, taskbar, and Alt-Tab identity. The system tray keeps
+its separate `hermaeus-tray.png` path because tray integration consumes the
+existing raster asset.
+
 The build requires a native compiler only for this small launcher. Windows
 builds use the Visual Studio C++ tools already present on GitHub's
 `windows-latest` release runner. A non-Windows `win-x64` build uses
