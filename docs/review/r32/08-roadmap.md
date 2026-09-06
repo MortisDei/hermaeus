@@ -566,14 +566,14 @@ Ubuntu and Windows.
 
 ### 8.2.15 Batch 13 readiness audit
 
-The automated R32 release-readiness audit is complete for `0.39.0-beta`:
+The automated R32 release-readiness audit is complete for `0.40.0-beta`:
 
 - The solution build passed with 0 warnings and 0 errors. The complete
   sequential suite passed with 2,535 passed, 17 skipped, and 2,552 total
   tests. The canonical 60% line-coverage gate passed with all generated
   results outside the checkout.
 - The Linux `linux-x64` tarball and cross-built Windows `win-x64` ZIP both
-  built as `0.39.0-beta`; each checksum verified, each archive passed its
+  built as `0.40.0-beta`; each checksum verified, each archive passed its
   integrity test, required launcher/application/package files were present,
   and no PDB files were included. The Windows result proves packaging only,
   not Windows runtime or GUI behavior.
@@ -583,7 +583,7 @@ The automated R32 release-readiness audit is complete for `0.39.0-beta`:
   accidental workflow or repository-setting changes. No new violation was
   found. The Batch 12 branch CI run `33393611503` passed on Ubuntu and
   Windows.
-- An isolated Linux/COSMIC `0.39.0-beta` package smoke using temporary HOME
+- An isolated Linux/COSMIC `0.40.0-beta` package smoke using temporary HOME
   and XDG data reached a real Hermaeus window and initialized its stores. The
   temporary XDG root also moved `SingleInstanceGuard`, so this run deliberately
   created an unsupported second Hermaeus process beside the owner's already
