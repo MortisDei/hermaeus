@@ -113,6 +113,8 @@ public sealed class BackupService
 
         using var zip = ZipFile.OpenRead(backupPath);
         var files = new List<(ZipArchiveEntry Entry, string Target, string TargetDirectory)>();
+        var fullRootPath = Path.GetFullPath(root + Path.DirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var entry in zip.Entries)
         {
             ct.ThrowIfCancellationRequested();
@@ -134,11 +136,17 @@ public sealed class BackupService
         {
             ct.ThrowIfCancellationRequested();
             Directory.CreateDirectory(file.TargetDirectory);
-            EnsureNoReparsePoints(file.Target);
-            if (File.Exists(file.Target) && !allowOverwrite)
-                throw new IOException($"Restore refused because '{file.Target}' already exists.");
+            var normalizedEntryName = file.Entry.FullName.Replace('\\', '/');
+            var target = Path.GetFullPath(Path.Combine(root, normalizedEntryName));
+            if (!target.StartsWith(fullRootPath, comparison)
+                && !string.Equals(target, root, comparison))
+                throw new InvalidOperationException("Backup contains an unsafe path.");
 
-            file.Entry.ExtractToFile(file.Target, allowOverwrite);
+            EnsureNoReparsePoints(target);
+            if (File.Exists(target) && !allowOverwrite)
+                throw new IOException($"Restore refused because '{target}' already exists.");
+
+            file.Entry.ExtractToFile(target, allowOverwrite);
         }
 
         return Task.CompletedTask;
