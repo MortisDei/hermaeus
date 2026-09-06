@@ -64,7 +64,7 @@ penetration-test report.
 | Area | Current control | Residual risk |
 | --- | --- | --- |
 | Secrets | API keys are converted to `secret:` references and stored in Linux Secret Service, macOS Keychain, or Windows Credential Manager when available. A local fallback vault is used only when needed and writes encrypted values with a random salt per ciphertext plus atomic file replacement. Its random key is stored outside the portable data root in a user-specific OS configuration location, and a legacy same-root key is migrated there and removed when the secret store initializes. Decryption under a replaced or unavailable key fails closed. | Copying the Hermaeus data root no longer supplies the fallback decryption key, but theft of the complete user profile or same-user access can still obtain both locations. The fallback format remains unauthenticated AES-CBC rather than an AEAD cipher with a cryptographic integrity tag. |
-| Backups | Backup excludes the fallback vault and legacy key filename. The active fallback key lives outside the data root, so it is outside the backup scope as well. Restore rejects path traversal, path-prefix escapes, case-variant sibling escapes on case-sensitive platforms, directory entries, and existing-file overwrites. | Credentials are not restored and must be re-entered on another machine. Backup archives can still contain chat, RAG, benchmark, Agent, and path metadata. Restore has no total uncompressed-size budget and does not reject a pre-existing symlink ancestor under the selected data root, so only restore trusted Hermaeus backups. |
+| Backups | Backup excludes the fallback vault and legacy key filename. The active fallback key lives outside the data root, so it is outside the backup scope as well. Restore preflights every file, normalizes both archive separators, ignores directory entries, rejects traversal, rooted, drive-qualified, UNC, path-prefix, case-variant sibling, and reparse-point escapes, and refuses existing-file overwrites unless explicitly allowed. | Credentials are not restored and must be re-entered on another machine. Backup archives can still contain chat, RAG, benchmark, Agent, and path metadata. Restore has no total uncompressed-size budget and should still be limited to archives the user intends to restore. |
 | Data root | Migration previews moved files, includes Agent state under `agent/`, refuses destination DB conflicts, rejects filesystem roots, and creates migration backup copies. | A user can still choose a broad writable directory that exposes metadata to other local apps. |
 | Memory revisions | Memory assertions use additive normalized lineage tables in `memories.db`. Legacy rows receive one lazy current revision without synthetic history. Content updates, corrections, dispute decisions, restores, and hard deletion use the revision authority; current Chat receipts carry the exact revision identity. Versioned memory export is bounded and redacts recognized secrets and home paths, while the existing CSV export is current-projection-only. | Memory revision content remains plaintext at rest. Hard deletion removes active logical rows, FTS, embeddings, sources, and proposals but cannot revoke prior exports, backups, snapshots, or prove physical storage erasure. |
 | Process launch | `llama-server`, XTTS, Kokoro, voice helpers, and secret backend helpers use `ProcessStartInfo.ArgumentList` / no shell execution. Setup and voice subprocesses are killed on cancellation. PATH lookup ignores empty segments when detecting `llama-server`. | Extra args are still user-controlled runtime behavior and can weaken local-only assumptions. |
@@ -183,9 +183,11 @@ overwrites an existing database.
 
 Current mitigations:
 
-- Restore uses full-path checks and rejects unsafe entry paths.
-- Restore rejects path-prefix escapes that only look like they are under the
-  data root.
+- Restore preflights every file, normalizes archive separators, and rejects
+  unsafe entry paths including rooted, drive-qualified, traversal, and
+  path-prefix escapes.
+- Restore rejects reparse-point targets and ancestors before creating or
+  extracting any target directory.
 - Restore refuses existing target files.
 - Restore UI states that credentials and fallback secret material are not
   included in backups. Credentials must be re-entered after restoring on
@@ -413,7 +415,8 @@ from the original gate not yet addressed by a later round now live in
 
 - Data migration refuses conflicts and preserves SQLite sidecar files.
 - Backup excludes local fallback secret vault.
-- Restore rejects unsafe paths and existing-file overwrites.
+- Restore rejects unsafe paths, reparse-point escapes, and existing-file
+  overwrites.
 - Managed process launch avoids shell execution.
 - Settings and Agent JSON state use atomic replacement writes.
 - SQLite stores record schema versions before applying additive migrations.

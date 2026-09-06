@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.IO;
 using System.Linq;
@@ -632,6 +633,142 @@ namespace Hermaeus.Tests
 
             await ThrowsAsync<InvalidOperationException>(() => backups.RestoreAsync(backup));
             False(File.Exists(Path.Combine(unsafePeer, "escape.txt")), "restore should not treat case-variant siblings as the data root");
+        }
+
+        public static async Task BackupRestoreAllowsNestedLegitimateEntries()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("restore-root");
+            var backup = temp.PathFor("legitimate.zip");
+            Directory.CreateDirectory(root);
+
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("nested/deeper/legitimate.txt");
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write("safe content");
+            }
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = root;
+            await new BackupService(service).RestoreAsync(backup);
+
+            Equal("safe content", await File.ReadAllTextAsync(Path.Combine(root, "nested", "deeper", "legitimate.txt")),
+                "nested legitimate archive entries should restore beneath the data root");
+        }
+
+        public static async Task BackupRestoreRejectsAdversarialArchiveEntryPaths()
+        {
+            using var temp = new TempDir();
+            var cases = new[]
+            {
+                (Name: "parent", Entry: "../outside/escape.txt"),
+                (Name: "repeated-parent", Entry: "nested/../../outside/escape.txt"),
+                (Name: "prefix", Entry: "../restore-root-evil/escape.txt"),
+                (Name: "absolute", Entry: "/absolute-escape.txt"),
+                (Name: "drive", Entry: "C:/drive-qualified.txt"),
+                (Name: "unc", Entry: "\\\\server\\share\\unc-escape.txt"),
+                (Name: "mixed-separators", Entry: "nested\\..\\mixed-escape.txt")
+            };
+
+            for (var i = 0; i < cases.Length; i++)
+            {
+                var testCase = cases[i];
+                var caseRoot = temp.PathFor($"{testCase.Name}/restore-root");
+                var outside = temp.PathFor($"{testCase.Name}/outside");
+                var backup = temp.PathFor($"{testCase.Name}.zip");
+                Directory.CreateDirectory(caseRoot);
+                Directory.CreateDirectory(outside);
+
+                using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+                    archive.CreateEntry(testCase.Entry);
+
+                var service = NewSettings(temp);
+                service.Settings.DataManagement.DataRootDirectory = caseRoot;
+                await ThrowsAsync<InvalidOperationException>(() => new BackupService(service).RestoreAsync(backup));
+
+                False(Directory.EnumerateFiles(caseRoot, "*", SearchOption.AllDirectories).Any(),
+                    $"malicious {testCase.Name} entry must not create a file under the root");
+                False(Directory.EnumerateFiles(outside, "*", SearchOption.AllDirectories).Any(),
+                    $"malicious {testCase.Name} entry must not create a file outside the root");
+            }
+        }
+
+        public static async Task BackupRestorePreflightsAllEntriesBeforeWriting()
+        {
+            using var temp = new TempDir();
+            var caseRoot = temp.PathFor("preflight/restore-root");
+            var outside = temp.PathFor("preflight/outside");
+            var backup = temp.PathFor("preflight.zip");
+            Directory.CreateDirectory(caseRoot);
+            Directory.CreateDirectory(outside);
+
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+            {
+                var safe = archive.CreateEntry("safe/should-not-exist.txt");
+                using (var writer = new StreamWriter(safe.Open()))
+                    writer.Write("must not be partially restored");
+                archive.CreateEntry("../outside/escape.txt");
+            }
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = caseRoot;
+            await ThrowsAsync<InvalidOperationException>(() => new BackupService(service).RestoreAsync(backup));
+
+            False(File.Exists(Path.Combine(caseRoot, "safe", "should-not-exist.txt")),
+                "an unsafe later entry must prevent earlier legitimate entries from being written");
+            False(File.Exists(Path.Combine(outside, "escape.txt")),
+                "the unsafe entry must not write outside the root");
+        }
+
+        public static async Task BackupRestoreRejectsReparsePointDirectoryEscapes()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor(Path.Combine("reparse", "restore-root"));
+            var outside = temp.PathFor(Path.Combine("reparse", "outside"));
+            var linked = Path.Combine(root, "linked");
+            var backup = temp.PathFor("reparse.zip");
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(outside);
+            CreateDirectoryReparsePoint(linked, outside);
+
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+                archive.CreateEntry("linked/escape.txt");
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = root;
+            await ThrowsAsync<InvalidOperationException>(() => new BackupService(service).RestoreAsync(backup));
+
+            False(File.Exists(Path.Combine(outside, "escape.txt")),
+                "a reparse-point directory must not redirect restore output outside the root");
+        }
+
+        private static void CreateDirectoryReparsePoint(string link, string target)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                Directory.CreateSymbolicLink(link, target);
+                return;
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add($"mklink /J {link} {target}");
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not create the reparse-point test fixture.");
+            process.WaitForExit();
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            Equal(0, process.ExitCode, $"the reparse-point test fixture should be created: {output} {error}");
         }
     }
 }

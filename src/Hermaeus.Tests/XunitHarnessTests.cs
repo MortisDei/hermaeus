@@ -44,7 +44,11 @@ public static class HarnessCases
         [new HarnessCase("backup excludes secrets and refuses overwrite restore", BackupMigrationTests.BackupExcludesSecretsAndRefusesOverwrite)],
         [new HarnessCase("backup of a database with an open writer yields a consistent snapshot", BackupMigrationTests.BackupOfADatabaseWithAnOpenWriterYieldsAConsistentSnapshot)],
         [new HarnessCase("backup restore rejects unsafe path prefixes", BackupMigrationTests.BackupRestoreRejectsUnsafePathPrefix)],
-        [new HarnessCase("backup restore rejects case-variant sibling paths", BackupMigrationTests.BackupRestoreRejectsCaseVariantSiblingOnCaseSensitiveFileSystems)]
+        [new HarnessCase("backup restore rejects case-variant sibling paths", BackupMigrationTests.BackupRestoreRejectsCaseVariantSiblingOnCaseSensitiveFileSystems)],
+        [new HarnessCase("backup restore allows nested legitimate entries", BackupMigrationTests.BackupRestoreAllowsNestedLegitimateEntries)],
+        [new HarnessCase("backup restore rejects adversarial archive entry paths", BackupMigrationTests.BackupRestoreRejectsAdversarialArchiveEntryPaths)],
+        [new HarnessCase("backup restore preflights all entries before writing", BackupMigrationTests.BackupRestorePreflightsAllEntriesBeforeWriting)],
+        [new HarnessCase("backup restore rejects reparse-point directory escapes", BackupMigrationTests.BackupRestoreRejectsReparsePointDirectoryEscapes)]
     ];
 
     public static IEnumerable<object[]> Services =>
