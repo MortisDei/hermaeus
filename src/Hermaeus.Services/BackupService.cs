@@ -112,9 +112,6 @@ public sealed class BackupService
         EnsureNoReparsePoints(root);
 
         using var zip = ZipFile.OpenRead(backupPath);
-        var files = new List<(ZipArchiveEntry Entry, string Target, string TargetDirectory)>();
-        var fullRootPath = Path.GetFullPath(root + Path.DirectorySeparatorChar);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var entry in zip.Entries)
         {
             ct.ThrowIfCancellationRequested();
@@ -128,25 +125,32 @@ public sealed class BackupService
             var targetDirectory = Path.GetDirectoryName(target);
             if (string.IsNullOrWhiteSpace(targetDirectory))
                 throw new InvalidOperationException("Backup entry target directory could not be resolved.");
-
-            files.Add((entry, target, targetDirectory));
         }
 
-        foreach (var file in files)
+        var fullRootPath = Path.GetFullPath(root + Path.DirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var entry in zip.Entries)
         {
             ct.ThrowIfCancellationRequested();
-            Directory.CreateDirectory(file.TargetDirectory);
-            var normalizedEntryName = file.Entry.FullName.Replace('\\', '/');
+            if (string.IsNullOrWhiteSpace(entry.Name))
+                continue;
+
+            var normalizedEntryName = entry.FullName.Replace('\\', '/');
             var target = Path.GetFullPath(Path.Combine(root, normalizedEntryName));
             if (!target.StartsWith(fullRootPath, comparison)
                 && !string.Equals(target, root, comparison))
                 throw new InvalidOperationException("Backup contains an unsafe path.");
 
+            var targetDirectory = Path.GetDirectoryName(target);
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+                throw new InvalidOperationException("Backup entry target directory could not be resolved.");
+
+            Directory.CreateDirectory(targetDirectory);
             EnsureNoReparsePoints(target);
             if (File.Exists(target) && !allowOverwrite)
                 throw new IOException($"Restore refused because '{target}' already exists.");
 
-            file.Entry.ExtractToFile(target, allowOverwrite);
+            entry.ExtractToFile(target, allowOverwrite);
         }
 
         return Task.CompletedTask;
