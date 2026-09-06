@@ -137,8 +137,9 @@ public sealed class BackupService
 
             var normalizedEntryName = entry.FullName.Replace('\\', '/');
             var target = Path.GetFullPath(Path.Combine(root, normalizedEntryName));
-            if (!target.StartsWith(fullRootPath, comparison)
-                && !string.Equals(target, root, comparison))
+            if (!target.StartsWith(fullRootPath))
+                throw new InvalidOperationException("Backup contains an unsafe path.");
+            if (!target.StartsWith(fullRootPath, comparison))
                 throw new InvalidOperationException("Backup contains an unsafe path.");
 
             var targetDirectory = Path.GetDirectoryName(target);
