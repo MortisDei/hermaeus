@@ -81,6 +81,39 @@ public sealed class AgentLifecycleRecoveryTests
     }
 
     [Fact]
+    public async Task Startup_recovery_blocks_a_terminal_parent_with_unfinished_children()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var first = new FileAgentTaskStateStore(settings);
+        await first.InitializeAsync();
+        await first.SaveAsync(new AgentTaskState
+        {
+            TaskId = "terminal-parent",
+            Goal = "parent",
+            Status = AgentTaskStatus.Complete,
+            Summary = "Reported complete.",
+            SubTaskPlan =
+            [
+                new AgentSubTaskSpec
+                {
+                    TaskId = "pending-child",
+                    Goal = "child",
+                    Status = AgentSubTaskStatus.Pending
+                }
+            ]
+        });
+
+        var recoveredStore = new FileAgentTaskStateStore(settings);
+        await recoveredStore.InitializeAsync();
+        var recovered = await recoveredStore.LoadAsync("terminal-parent");
+
+        Assert.NotNull(recovered);
+        Assert.Equal(AgentTaskStatus.Blocked, recovered!.Status);
+        Assert.Contains("unfinished", recovered.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Startup_recovery_marks_a_written_pending_receipt_applied_without_replay()
     {
         using var temp = new TempDir();

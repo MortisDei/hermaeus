@@ -403,6 +403,10 @@ public sealed class AgentDraftPatchViewModel
         RelativePath = patch.RelativePath;
         Rationale = patch.Rationale;
         ProposedContent = patch.ProposedContent;
+        PreImageContent = patch.PreImageContent ?? string.Empty;
+        AppliedContent = patch.AppliedContent;
+        MutationReceiptId = patch.MutationReceiptId ?? string.Empty;
+        PreImageLabel = patch.PreImageExisted ? PreImageContent : "(file did not exist before this mutation)";
         Status = patch.Status;
         CreatedAt = patch.CreatedAt;
         ApprovedAt = patch.ApprovedAt;
@@ -418,6 +422,12 @@ public sealed class AgentDraftPatchViewModel
     public string RelativePath { get; }
     public string Rationale { get; }
     public string ProposedContent { get; }
+    public string PreImageContent { get; }
+    public string AppliedContent { get; }
+    public string MutationReceiptId { get; }
+    public string PreImageLabel { get; }
+    public bool HasHistoricalImages => MutationReceiptId.Length > 0;
+    public string ReceiptLabel => HasHistoricalImages ? $"Verified receipt {MutationReceiptId}" : string.Empty;
     public AgentDraftPatchStatus Status { get; }
     public DateTime CreatedAt { get; }
     public DateTime? ApprovedAt { get; }
@@ -570,6 +580,7 @@ public partial class AgentViewModel : ViewModelBase
     private readonly ISettingsService? _settings;
     private readonly ILessonStore? _lessons;
     private readonly IVoiceOrchestrator? _voice;
+    private readonly IAudioFeedbackService? _audioFeedback;
     /// <summary>r29 doc 03 3.5: steering refusals need a reason the user sees.
     /// Optional so the existing test constructions are unaffected.</summary>
     private readonly IToastService? _toasts;
@@ -587,6 +598,7 @@ public partial class AgentViewModel : ViewModelBase
     private string _activeWorkspaceVoiceProfile = string.Empty;
     private Task? _loadTask;
     private CancellationTokenSource? _workspaceFileQueryCts;
+    private int _workspaceFilesGeneration;
     private int _workspaceFileSelectionGeneration;
     private int _taskViewGeneration;
 
@@ -673,6 +685,12 @@ public partial class AgentViewModel : ViewModelBase
 
     /// <summary>Drives the "no workspace selected" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasWorkspace => !string.IsNullOrWhiteSpace(WorkspaceRoot) && Directory.Exists(WorkspaceRoot);
+
+    public bool CanReviewSuggestedAgents => CurrentTask is not null
+        && !IsRunning
+        && RequestDraftPatchPreview is not null
+        && SuggestedAgentsMd.Length > 0
+        && !File.Exists(Path.Combine(WorkspaceRoot, "AGENTS.md"));
 
     /// <summary>An orchestration parent whose synthesis has written report.md (r15 02-orchestration-ui.md 2.4).</summary>
     public bool HasReport => CurrentTask is { SubTaskPlan.Count: > 0 } && File.Exists(ReportPath);
@@ -842,6 +860,8 @@ public partial class AgentViewModel : ViewModelBase
         ? $"Finished with {t.PendingSteps.Count} planned step{(t.PendingSteps.Count == 1 ? "" : "s")} not run."
         : string.Empty;
     public bool HasPrematureCompleteNote => !string.IsNullOrEmpty(PrematureCompleteNote);
+    public bool HasUnfinishedSubTaskPlan => CurrentTask is { SubTaskPlan.Count: > 0 }
+        && CurrentTask.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
 
     /// <summary>r23 2.1: the task is paused at the opt-in plan-approval checkpoint, distinct from an ordinary ask_user reply-wait.</summary>
     public bool IsWaitingForPlanApproval => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null } && CurrentTask.PlanApprovalPending;
@@ -860,6 +880,7 @@ public partial class AgentViewModel : ViewModelBase
         ? "Tell it what to do next"
         : "Describe the follow-up instruction";
     public bool ShowFinishRun => !IsRunning && CurrentTask is not null
+        && !HasUnfinishedSubTaskPlan
         && (IsWaitingForReply || ShowContinueBox) && CurrentTask.PendingToolAction is null;
     public bool ShowRunStep => !IsRunning && CurrentTask is { Status: AgentTaskStatus.New or AgentTaskStatus.Running }
         && (SelectedModel is not null || !string.IsNullOrWhiteSpace(CurrentTask.ModelId));
@@ -957,7 +978,8 @@ public partial class AgentViewModel : ViewModelBase
         AgentScenarioSuiteViewModel? scenarioSuite = null,
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
         IToastService? toasts = null,
-        IAgentTaskCommandOwner? commandOwner = null)
+        IAgentTaskCommandOwner? commandOwner = null,
+        IAudioFeedbackService? audioFeedback = null)
     {
         _toasts = toasts;
         _agent = agent;
@@ -974,6 +996,7 @@ public partial class AgentViewModel : ViewModelBase
         _settings = settings;
         _lessons = lessons;
         _voice = voice;
+        _audioFeedback = audioFeedback;
         ScenarioSuite = scenarioSuite;
         _patchReview = new AgentPatchReviewService(workspaceTools, store, workspaceManifests, commandOwner);
         // r12 03-runtime-vm-correctness.md 3.5: defaulting to the whole user
@@ -1465,6 +1488,9 @@ public partial class AgentViewModel : ViewModelBase
         var result = await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, expectedFingerprint, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
+        if (result.Outcome is AgentMutationOutcome.Applied or AgentMutationOutcome.AlreadySatisfied)
+            await RefreshWorkspaceFilesAsync();
+
         if (!result.Applied)
         {
             // The pending action changed since this row was rendered (r23
@@ -2005,38 +2031,50 @@ public partial class AgentViewModel : ViewModelBase
     [RelayCommand]
     private async Task RefreshWorkspaceFilesAsync()
     {
+        var generation = ++_workspaceFilesGeneration;
+        var selectedPath = SelectedWorkspaceFile?.RelativePath;
+        var query = WorkspaceFileQuery;
+        var options = BuildOptions();
         WorkspaceFiles.Clear();
         WorkspaceFilePreview = string.Empty;
         WorkspaceFileSummary = string.Empty;
         SelectedWorkspaceFile = null;
 
-        if (string.IsNullOrWhiteSpace(WorkspaceRoot))
+        if (string.IsNullOrWhiteSpace(options.WorkspaceRoot))
             return;
 
         try
         {
             var files = await Task.Run(() =>
             {
-                var options = BuildOptions();
-                return string.IsNullOrWhiteSpace(WorkspaceFileQuery)
+                return string.IsNullOrWhiteSpace(query)
                     ? _workspaceTools.ListFiles(options)
                         .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
                         .ToList()
-                    : _workspaceTools.SearchFiles(options, WorkspaceFileQuery)
+                    : _workspaceTools.SearchFiles(options, query)
                         .Where(result => !result.IsTruncationNotice)
                         .Select(result => new AgentWorkspaceFileViewModel(result.RelativePath, result.Snippet, result.ModifiedUtc))
                         .ToList();
             });
 
+            if (generation != _workspaceFilesGeneration
+                || !string.Equals(BuildOptions().WorkspaceRoot, options.WorkspaceRoot, StringComparison.OrdinalIgnoreCase))
+                return;
+
             foreach (var file in files)
                 WorkspaceFiles.Add(file);
+
+            if (!string.IsNullOrWhiteSpace(selectedPath))
+                SelectedWorkspaceFile = WorkspaceFiles.FirstOrDefault(file =>
+                    string.Equals(file.RelativePath, selectedPath, StringComparison.Ordinal));
 
             OnPropertyChanged(nameof(WorkspaceFileCount));
             OnPropertyChanged(nameof(HasWorkspaceFiles));
         }
         catch (Exception ex)
         {
-            SetError($"Could not list workspace files: {ex.Message}");
+            if (generation == _workspaceFilesGeneration)
+                SetError($"Could not list workspace files: {ex.Message}");
         }
     }
 
@@ -2319,6 +2357,35 @@ public partial class AgentViewModel : ViewModelBase
         finally
         {
             IsAnalyzingWorkspace = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanReviewSuggestedAgents))]
+    private async Task ReviewSuggestedAgentsAsync()
+    {
+        if (!CanReviewSuggestedAgents || CurrentTask is null)
+            return;
+
+        var taskId = CurrentTask.TaskId;
+        try
+        {
+            var approved = await RequestDraftPatchPreview!(new DraftPatchPreviewRequest(
+                $"suggested-agents-{taskId}", "AGENTS.md", string.Empty, SuggestedAgentsMd));
+            if (!approved)
+                return;
+
+            await _patchReview.QueueAsync(
+                taskId,
+                "AGENTS.md",
+                "Create the workspace instruction file suggested by the workspace analysis.",
+                SuggestedAgentsMd,
+                BuildOptions());
+            StatusMessage = "Suggested AGENTS.md queued for review. The file is not written until you approve the queued patch.";
+            await LoadTaskIfOpenAsync(taskId);
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not queue suggested AGENTS.md: {ex.Message}");
         }
     }
 
@@ -2648,7 +2715,24 @@ public partial class AgentViewModel : ViewModelBase
     /// </summary>
     private void NarrateStatusTransition(AgentTaskStatus? previousStatus, AgentTaskState state)
     {
-        if (_voice is null || previousStatus == state.Status)
+        if (previousStatus == state.Status)
+            return;
+
+        if (_audioFeedback is not null)
+        {
+            var audioKind = state.Status switch
+            {
+                AgentTaskStatus.WaitingForUser when state.PendingToolAction is not null
+                    => AudioFeedbackEventKind.TaskNeedsApproval,
+                AgentTaskStatus.Complete => AudioFeedbackEventKind.TaskCompleted,
+                AgentTaskStatus.Failed => AudioFeedbackEventKind.TaskFailed,
+                _ => (AudioFeedbackEventKind?)null
+            };
+            if (audioKind is { } kind)
+                _ = _audioFeedback.PublishAsync(kind);
+        }
+
+        if (_voice is null)
             return;
 
         switch (state.Status)
@@ -2696,6 +2780,7 @@ public partial class AgentViewModel : ViewModelBase
 
     private bool CanStart() =>
         !IsRunning
+        && CurrentTask is null
         && !string.IsNullOrWhiteSpace(GoalText)
         && !string.IsNullOrWhiteSpace(WorkspaceRoot)
         && SelectedModel is not null;
@@ -2751,6 +2836,7 @@ public partial class AgentViewModel : ViewModelBase
 
     private void ClearSelectedWorkspaceFile()
     {
+        ++_workspaceFilesGeneration;
         ++_workspaceFileSelectionGeneration;
         SelectedWorkspaceFile = null;
         WorkspaceFilePreview = string.Empty;
@@ -2778,6 +2864,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasReport));
         OnPropertyChanged(nameof(HasTaskArtifacts));
         OnPropertyChanged(nameof(HasSubTaskPlan));
+        OnPropertyChanged(nameof(HasUnfinishedSubTaskPlan));
         OnPropertyChanged(nameof(CurrentTaskParentGoalLabel));
         OnPropertyChanged(nameof(HasCurrentTaskParentGoal));
 
@@ -2809,7 +2896,9 @@ public partial class AgentViewModel : ViewModelBase
         StartCommand.NotifyCanExecuteChanged();
         ExplainWorkspaceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasWorkspace));
+        SuggestedAgentsMd = string.Empty;
         RefreshCapabilityNotes();
+        ClearSelectedWorkspaceFile();
         // The file list only ever populated on panel load, so choosing a
         // workspace (or opening a task belonging to a different one) left an
         // empty list behind until the user found the Refresh button. The list
@@ -2855,6 +2944,8 @@ public partial class AgentViewModel : ViewModelBase
     }
     partial void OnCurrentTaskChanged(AgentTaskState? value)
     {
+        StartCommand.NotifyCanExecuteChanged();
+        ReviewSuggestedAgentsCommand.NotifyCanExecuteChanged();
         RunStepCommand.NotifyCanExecuteChanged();
         SendReplyCommand.NotifyCanExecuteChanged();
         NewTaskCommand.NotifyCanExecuteChanged();
@@ -2866,6 +2957,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(NextUserActionLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
         OnPropertyChanged(nameof(HasTaskArtifacts));
+        OnPropertyChanged(nameof(CanReviewSuggestedAgents));
         OnPropertyChanged(nameof(HasPendingPlan));
         OnPropertyChanged(nameof(ShowFinishRun));
         OnPropertyChanged(nameof(IsWaitingForReply));
@@ -2886,6 +2978,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowRunStep));
         OnPropertyChanged(nameof(CanShowNewTaskButton));
         OnPropertyChanged(nameof(IsTaskTerminal));
+        OnPropertyChanged(nameof(HasUnfinishedSubTaskPlan));
         OnPropertyChanged(nameof(PrematureCompleteNote));
         OnPropertyChanged(nameof(HasPrematureCompleteNote));
         OnPropertyChanged(nameof(IsWaitingForPlanApproval));
@@ -2955,6 +3048,7 @@ public partial class AgentViewModel : ViewModelBase
     }
     partial void OnIsRunningChanged(bool value)
     {
+        ReviewSuggestedAgentsCommand.NotifyCanExecuteChanged();
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
         ContinuePlannedTaskCommand.NotifyCanExecuteChanged();
@@ -2979,6 +3073,12 @@ public partial class AgentViewModel : ViewModelBase
             StartActivityTicker();
         else
             StopActivityTicker();
+    }
+
+    partial void OnSuggestedAgentsMdChanged(string value)
+    {
+        ReviewSuggestedAgentsCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanReviewSuggestedAgents));
     }
 
     /// <summary>

@@ -423,6 +423,13 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         foreach (var entry in states.Values)
         {
             var stateChanged = false;
+            if (entry.State.Status == AgentTaskStatus.Complete
+                && entry.State.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
+            {
+                MarkIncompleteOrchestration(entry.State);
+                stateChanged = true;
+            }
+
             if (entry.State.Status == AgentTaskStatus.Running)
             {
                 MarkInterrupted(entry.State, reason);
@@ -592,6 +599,18 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
             spec.Status = AgentSubTaskStatus.Interrupted;
             spec.ResultSummary = reason;
         }
+    }
+
+    private static void MarkIncompleteOrchestration(AgentTaskState state)
+    {
+        const string reason = "The parent run was marked complete while one or more required sub-tasks were still unfinished. Review the child states before continuing.";
+        state.Status = AgentTaskStatus.Blocked;
+        state.ActiveStep = "Blocked: unfinished sub-task plan requires review";
+        state.LastUserMessage = reason;
+        state.Decisions.Add(new AgentDecision("Incomplete orchestration recovered", reason, DateTime.UtcNow));
+        state.Summary = string.IsNullOrWhiteSpace(state.Summary)
+            ? reason
+            : $"{state.Summary} {reason}";
     }
 
     /// <summary>Additive schema change for r15 sub-task orchestration (doc 01 1.1): a fresh install already gets the column from CREATE TABLE, so this only matters for a pre-r15 index file.</summary>

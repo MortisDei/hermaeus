@@ -192,6 +192,24 @@ public sealed class AgentViewModelWorkspaceTests
         Assert.True(vm.HasSubTaskPlan, "an orchestration parent with a materialized plan should show the chrome");
     }
 
+    [Fact]
+    public async Task Start_command_is_disabled_while_an_existing_task_is_open()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        await vm.LoadAsync();
+        vm.WorkspaceRoot = temp.PathFor("workspace");
+        vm.GoalText = "start another task";
+        vm.CurrentTask = new AgentTaskState
+        {
+            TaskId = "existing",
+            Goal = "already open",
+            Status = AgentTaskStatus.WaitingForUser
+        };
+
+        Assert.False(vm.StartCommand.CanExecute(null));
+    }
+
     // ── r16 03-workbench-and-desktop.md 3.1: recent-tasks list / LoadTaskCommand ──
 
     [Fact]

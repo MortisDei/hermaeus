@@ -657,6 +657,45 @@
                                                                              MinHeight="80"
                                                                              MaxHeight="140" />
                                                     </Border>
+                                                    <Expander Header="Verified before and after"
+                                                              IsVisible="{Binding HasHistoricalImages}"
+                                                              Margin="0,4,0,0">
+                                                        <StackPanel Spacing="6" Margin="0,6,0,0">
+                                                            <TextBlock Text="{Binding ReceiptLabel}"
+                                                                       FontFamily="{DynamicResource AppMonoFont}"
+                                                                       FontSize="10"
+                                                                       Opacity="0.55"
+                                                                       TextWrapping="Wrap" />
+                                                            <TextBlock Text="Before"
+                                                                       FontSize="10"
+                                                                       Opacity="0.55" />
+                                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="4"
+                                                                    Padding="8"
+                                                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                                <SelectableTextBlock Text="{Binding PreImageLabel}"
+                                                                                     FontFamily="{DynamicResource AppMonoFont}"
+                                                                                     FontSize="10"
+                                                                                     TextWrapping="Wrap"
+                                                                                     MaxHeight="140" />
+                                                            </Border>
+                                                            <TextBlock Text="After"
+                                                                       FontSize="10"
+                                                                       Opacity="0.55" />
+                                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="4"
+                                                                    Padding="8"
+                                                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                                <SelectableTextBlock Text="{Binding AppliedContent}"
+                                                                                     FontFamily="{DynamicResource AppMonoFont}"
+                                                                                     FontSize="10"
+                                                                                     TextWrapping="Wrap"
+                                                                                     MaxHeight="140" />
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </Expander>
                                                     <TextBlock Text="{Binding OutcomeLabel}"
                                                                FontSize="10"
                                                                Opacity="0.5"
@@ -1033,11 +1072,18 @@
                                             </ItemsControl>
                                         </Expander>
                                         <Expander Grid.Column="1" Header="Suggested AGENTS.md">
-                                            <SelectableTextBlock Text="{Binding SuggestedAgentsMd}"
-                                                                 FontFamily="{DynamicResource AppMonoFont}"
-                                                                 FontSize="11"
-                                                                 TextWrapping="Wrap"
-                                                                 Margin="0,8,0,0" />
+                                            <StackPanel Spacing="8" Margin="0,8,0,0">
+                                                <SelectableTextBlock Text="{Binding SuggestedAgentsMd}"
+                                                                     FontFamily="{DynamicResource AppMonoFont}"
+                                                                     FontSize="11"
+                                                                     TextWrapping="Wrap" />
+                                                <Button Content="Review and create AGENTS.md"
+                                                        Command="{Binding ReviewSuggestedAgentsCommand}"
+                                                        IsVisible="{Binding CanReviewSuggestedAgents}"
+                                                        ToolTip.Tip="Preview the suggested workspace instructions, then queue the file through the normal patch review flow. It is not written automatically."
+                                                        Padding="10,6"
+                                                        HorizontalAlignment="Left" />
+                                            </StackPanel>
                                         </Expander>
                                     </Grid>
                                 </StackPanel>

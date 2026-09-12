@@ -287,6 +287,30 @@ public sealed class AgentReviewQueueTests
     }
 
     [Fact]
+    public async Task Dismissing_a_parent_with_unfinished_children_is_refused()
+    {
+        using var temp = new TempDir();
+        var (agent, store, _) = await BuildAsync(temp);
+        var parent = TaskWithApprovals("parent-with-child", AgentTaskStatus.WaitingForUser, 0);
+        parent.SubTaskPlan =
+        [
+            new AgentSubTaskSpec
+            {
+                TaskId = "child-pending",
+                Goal = "still running",
+                Status = AgentSubTaskStatus.Pending
+            }
+        ];
+        await store.SaveAsync(parent);
+
+        var result = await agent.DismissTaskAsync("parent-with-child");
+
+        Assert.False(result.Applied);
+        Assert.Contains("unfinished", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync("parent-with-child"))!.Status);
+    }
+
+    [Fact]
     public async Task Dismissing_an_already_dismissed_task_is_refused()
     {
         using var temp = new TempDir();

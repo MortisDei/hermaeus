@@ -1967,6 +1967,10 @@ public sealed class AgentService : IAgentService
         if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
             return new AgentApprovalResult(false, "This is a sub-task. Dismiss its parent task instead.");
 
+        if (state.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
+            return new AgentApprovalResult(false,
+                "This parent still has unfinished sub-tasks. Stop or finish the child work before dismissing the parent.");
+
         // Discarding, not deciding: no approval record is written, because the
         // user did not approve or reject the action, they walked away from it.
         // The trace records that so the history stays readable.
@@ -2299,6 +2303,9 @@ public sealed class AgentService : IAgentService
             throw new InvalidOperationException("A tool approval is pending. Approve, reject, or dismiss it before finishing the run.");
         if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
             throw new InvalidOperationException("This task is a sub-task; finish the parent instead.");
+        if (state.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
+            throw new InvalidOperationException(
+                "This parent still has unfinished sub-tasks. Run or resolve every child before finishing the parent.");
 
         if (state.Status != AgentTaskStatus.Complete)
         {

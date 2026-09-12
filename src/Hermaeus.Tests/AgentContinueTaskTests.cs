@@ -155,6 +155,35 @@ public sealed class AgentContinueTaskTests
     }
 
     [Fact]
+    public async Task FinishTaskAsync_refuses_a_parent_with_unfinished_children()
+    {
+        using var temp = new TempDir();
+        var llm = new FakeSequencedAgentLlmForContinue([FinalResponse]);
+        var (agent, store, _, options) = await BuildAsync(temp, llm);
+        await store.SaveAsync(new AgentTaskState
+        {
+            TaskId = "parent-with-child",
+            Goal = "parent",
+            Status = AgentTaskStatus.WaitingForUser,
+            SubTaskPlan =
+            [
+                new AgentSubTaskSpec
+                {
+                    TaskId = "child-pending",
+                    Goal = "still running",
+                    Status = AgentSubTaskStatus.Running
+                }
+            ]
+        });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => agent.FinishTaskAsync("parent-with-child"));
+
+        Assert.Contains("unfinished", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync("parent-with-child"))!.Status);
+    }
+
+    [Fact]
     public async Task StopTaskAsync_records_a_resumable_stop_without_erasing_history()
     {
         using var temp = new TempDir();
