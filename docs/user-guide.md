@@ -77,14 +77,21 @@ Extra arguments and live process overrides remain on Services, where their
 trust checks and process state are visible. Runtime process settings still use
 **Save Config** on Services.
 
-Auto-tune uses the saved server configuration as its probe baseline and changes
-only the candidate axes for each transient probe. When available, local GGUF
-metadata and the current hardware profile inform the probe envelope. Tuning
-does not silently overwrite the saved runtime configuration; review and save
-any desired values explicitly. Services and Models expose cancellation for an
-individual tune and the **Auto-tune all** operation. Cancellation reports a
-cancelled result, releases the probe, and does not save a profile after the
-cancellation boundary.
+Services auto-tune uses the saved server configuration as its probe baseline and
+changes only the candidate axes for each transient probe. Models-card
+auto-tune instead builds an isolated target probe from the selected model and
+only its verified companions, so it does not inherit another loaded Chat
+model's draft, projector, or extra arguments. Before a Models-card tune,
+currently running managed servers are stopped at the awaited process boundary;
+the previously running servers are restored after success, failure, or
+cancellation. A target that is itself running must still be stopped first.
+When available, local GGUF metadata and the current hardware profile inform the
+probe envelope. Tuning does not silently overwrite the saved runtime
+configuration; a model profile is saved only after the prior running servers
+have been restored. Services and Models expose cancellation for an individual
+tune and the **Auto-tune all** operation. Cancellation reports a cancelled
+result, releases the probe, restores the source services, and does not save a
+profile after the cancellation boundary.
 
 Factual capability badges such as **MoE**, **MTP**, **Draft**, and
 **Vision / Projector** describe model metadata only. They do not mean that a

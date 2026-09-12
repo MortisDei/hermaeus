@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     public DesktopIntegrationService? DesktopIntegration { get; set; }
     public IPatchDiffService? PatchDiffService { get; set; }
     public IApplicationLifecycleCoordinator? ApplicationLifecycle { get; set; }
+    public Action? RequestApplicationExit { get; set; }
     private IInputElement? _prePaletteFocus;
     private bool _closeAfterShutdown;
 
@@ -193,7 +194,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("Hermaeus could not start the replacement process.");
 
         _closeAfterShutdown = true;
-        Close();
+        ExitApplicationLifetime();
     }
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
@@ -228,7 +229,21 @@ public partial class MainWindow : Window
         }
         finally
         {
-            Close();
+            ExitApplicationLifetime();
         }
+    }
+
+    private void ExitApplicationLifetime()
+    {
+        if (RequestApplicationExit is not null)
+        {
+            RequestApplicationExit();
+            return;
+        }
+
+        // The callback is supplied by App for the normal desktop lifetime. The
+        // fallback keeps this window usable in a host that does not expose an
+        // application lifetime, such as an isolated view test.
+        Close();
     }
 }

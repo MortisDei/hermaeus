@@ -25,7 +25,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly IActivityRecorder?    _activity;
     private readonly LocalModelCapabilityService? _capabilityService;
     private readonly IResourceCoordinator? _resourceCoordinator;
-    private readonly ManagedRuntimeTuningService? _runtimeTuning;
+    private readonly IManagedRuntimeTuningService? _runtimeTuning;
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly ManagedRuntimeRegistry? _runtimeRegistry;
@@ -815,7 +815,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         IActivityRecorder? activity = null,
         LocalModelCapabilityService? capabilityService = null,
         IResourceCoordinator? resourceCoordinator = null,
-        ManagedRuntimeTuningService? runtimeTuning = null,
+        IManagedRuntimeTuningService? runtimeTuning = null,
         AdaptiveInferenceExperienceService? adaptiveExperience = null,
         RecommendationDerivationService? recommendationDerivation = null,
         ManagedRuntimeRegistry? runtimeRegistry = null,
@@ -1691,10 +1691,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// </summary>
     public bool WillAutoStart => AutoStart && !string.IsNullOrWhiteSpace(ModelPath);
 
-    public async Task AutoStartIfConfiguredAsync()
+    public async Task AutoStartIfConfiguredAsync(CancellationToken ct = default)
     {
         if (WillAutoStart)
-            await StartCoreAsync(CancellationToken.None);
+            await StartCoreAsync(ct);
     }
 
     public async Task StartIfStoppedAsync()
@@ -2479,7 +2479,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly IActivityRecorder? _activity;
     private readonly ModelProfileService _modelProfiles;
     private readonly IResourceCoordinator? _resourceCoordinator;
-    private readonly ManagedRuntimeTuningService? _runtimeTuning;
+    private readonly IManagedRuntimeTuningService? _runtimeTuning;
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly IRecommendationStore? _recommendationStore;
@@ -2684,7 +2684,7 @@ public partial class ServicesViewModel : ViewModelBase
         IStartupTimingService? startupTiming = null,
         LocalModelCapabilityService? capabilityService = null,
         IResourceCoordinator? resourceCoordinator = null,
-        ManagedRuntimeTuningService? runtimeTuning = null,
+        IManagedRuntimeTuningService? runtimeTuning = null,
         AdaptiveInferenceExperienceService? adaptiveExperience = null,
         RecommendationDerivationService? recommendationDerivation = null,
         IRecommendationStore? recommendationStore = null,
@@ -2992,7 +2992,7 @@ public partial class ServicesViewModel : ViewModelBase
     /// <summary>Restarts exactly the servers named by id (r19 2.2), re-syncing each from its
     /// possibly just-updated <see cref="ServerConfig.ExecutablePath"/> first. Safe to call with
     /// ids for servers that no longer exist or are already running; both are no-ops.</summary>
-    public async Task RestartServersAsync(IReadOnlyList<string> serverIds)
+    public virtual async Task RestartServersAsync(IReadOnlyList<string> serverIds)
     {
         foreach (var id in serverIds)
         {
@@ -3089,13 +3089,13 @@ public partial class ServicesViewModel : ViewModelBase
     /// launched, and two servers on separate ports and separate processes have
     /// no reason to wait for each other.
     /// </summary>
-    public Task AutoStartAllAsync() =>
-        Task.WhenAll(SelectAutoStartTargets(Servers).Select(TimedAutoStartAsync));
+    public Task AutoStartAllAsync(CancellationToken ct = default) =>
+        Task.WhenAll(SelectAutoStartTargets(Servers).Select(server => TimedAutoStartAsync(server, ct)));
 
-    private async Task TimedAutoStartAsync(ServerProcessViewModel server)
+    private async Task TimedAutoStartAsync(ServerProcessViewModel server, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await server.AutoStartIfConfiguredAsync();
+        await server.AutoStartIfConfiguredAsync(ct);
         _startupTiming?.RecordServerStart(new StartupServerStart(server.Name, sw.ElapsedMilliseconds, server.IsRunning));
     }
 
@@ -3146,13 +3146,33 @@ public partial class ServicesViewModel : ViewModelBase
         return await Task.FromResult(suspended);
     }
 
-    public async Task<IReadOnlyList<string>> SuspendRunningServersAsync(IEnumerable<string> serverIds)
+    public virtual async Task<IReadOnlyList<string>> SuspendRunningServersAsync(IEnumerable<string> serverIds)
     {
         var requested = serverIds.ToHashSet(StringComparer.Ordinal);
         var suspended = Servers.Where(server => requested.Contains(server.Id) && server.IsRunning)
             .Select(server => server.Id).ToArray();
-        foreach (var id in suspended)
-            await Servers.First(server => server.Id == id).StopAndWaitAsync();
+        try
+        {
+            foreach (var id in suspended)
+                await Servers.First(server => server.Id == id).StopAndWaitAsync();
+        }
+        catch (Exception stopFailure)
+        {
+            try
+            {
+                await RestartServersAsync(suspended);
+            }
+            catch (Exception restoreFailure)
+            {
+                throw new AggregateException(
+                    "A managed server could not be suspended and the earlier servers could not all be restored.",
+                    stopFailure,
+                    restoreFailure);
+            }
+
+            throw;
+        }
+
         return suspended;
     }
 

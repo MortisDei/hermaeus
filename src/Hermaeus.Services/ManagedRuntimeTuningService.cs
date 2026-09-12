@@ -11,7 +11,7 @@ namespace Hermaeus.Services;
 /// useful only after the candidate process has been stopped and its allocation
 /// released.
 /// </summary>
-public sealed class ManagedRuntimeTuningService
+public sealed class ManagedRuntimeTuningService : IManagedRuntimeTuningService
 {
     private readonly IManagedRuntimeProcessFactory _runtimeFactory;
     private readonly IResourceCoordinator _resourceCoordinator;

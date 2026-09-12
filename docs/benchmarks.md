@@ -570,9 +570,14 @@ profile before starting the managed server. The Models card shows the current
 profile directly, while the model configuration editor hydrates the same saved
 GPU layer, thread, and context values for intentional review or editing.
 **Save model profile** remains separate from Services **Save Config**, and
-extra arguments remain a Services concern. Auto-tune probes are temporary owned
-processes and require the target managed server to be stopped; they do not
-silently stop and replace a running Chat process.
+extra arguments remain a Services concern. Services probes use the saved server
+configuration, while Models-card probes use a fresh target configuration and
+only verified target companions. They do not inherit the draft, projector, or
+extra arguments of another loaded Chat model. Models-card tuning temporarily
+stops currently running managed servers at the awaited process boundary and
+restores them after success, failure, or cancellation. A target that is itself
+running must still be stopped first, and a profile is saved only after source
+restoration succeeds.
 
 Doctor alerts when local GGUF models do not have matching tuned profiles. It
 also checks the configured `llama-server` binary version and, when GitHub

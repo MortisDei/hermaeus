@@ -98,8 +98,8 @@ The supplied dogfood classes are listed in `docs/review/r33/01-current-state-and
 | G4 New Task leaks old projections | **owner validation required** | Original finding `:46`; `AgentViewModel.NewTask`, task-generation checks, and `AgentTaskContinuityViewModelTests` close the deterministic reset path. Delayed callbacks in a live view remain owner validation. |
 | G5 child mutation has unreliable ownership | **owner validation required** | Original finding `:48`; canonical child inheritance in `AgentService.CreateChildTaskAsync`, orchestration/patch/revert tests, and durable receipts cover the local contract. Owner-selected child filesystem execution/reopen remains unproven. |
 | G6 direct/queued policy drift after review | **Implemented and verified** | Original finding `:47`; `AgentPatchReviewService.WithPolicyAsync` clears stale caller policy, and `AgentPolicyRevalidationTests.Direct_approval_refuses_when_the_persisted_policy_changes_after_review` plus `Queued_patch_refuses_when_the_persisted_policy_changes_after_review` cover both paths. |
-| R1 reduced-config/direct AutoTune allocation path | **owner validation required** | Original finding `:49`; `ManagedRuntimeTuningService`, `ResourceAllocationFactory`, full launch configuration preservation test, candidate evidence, and production caller routing repair the local authority bypass. Native runtime fit and the reported crash remain owner validation. |
-| R2 model switch or Models tuning loses recovery context | **owner validation required** | Original finding `:50`; Services and Models use the canonical service with GGUF/hardware inputs and cancellation; `ModelManagementViewModel` refuses post-cancel save. Real model switch, effective backend, and VRAM behavior remain unproven. |
+| R1 reduced-config/direct AutoTune allocation path | **owner validation required** | Original finding `:49`; `ManagedRuntimeTuningService`, `ResourceAllocationFactory`, full launch configuration preservation coverage, candidate evidence, and production caller routing repair the local authority bypass. Native runtime fit and the reported crash remain owner validation. |
+| R2 model switch or Models tuning loses recovery context | **owner validation required** | Original finding `:50`; Services and Models use the canonical service with GGUF/hardware inputs and cancellation. `ModelManagementViewModel` now suspends running source servers, builds an isolated target probe from verified companions, restores the source on success/failure/cancel, and saves only after restoration. Focused coverage proves a loaded source plus unloaded target; real model-card/GPU behavior remains owner validation. |
 | R3 external Apply overwrites editor state | **owner validation required** | Original finding `:51`; `ServicesViewModel` base revision/dirty-field reconciliation plus both `ServicesConfigurationReconciliationTests` repair the local seam. Owner must exercise actual open editor/rapid-save/restart behavior. |
 | L1 recommendation decision publication ordering | **owner validation required** | Original finding `:52`; `RecommendationApplicationService`, `RecommendationReviewViewModel`, `RecommendationApplicationTests`, and E4 establish durable status before the visible transaction result. Owner must validate refresh ordering and retained Details. |
 | L2 stale/satisfied recommendation and discarded details | **owner validation required** | Original finding `:53`; `RecommendationReviewViewModel` now presents transaction result/status, Lab baseline reconciliation preserves Unknown reasons, and E4 proves Apply/reopen. Full stale Undo, deleted evidence, and owner UI navigation remain live. |
@@ -124,7 +124,7 @@ The supplied dogfood classes are listed in `docs/review/r33/01-current-state-and
 | Doctor remediation | **owner validation required** | `DoctorActionTarget`, `DoctorService`, `DoctorViewModel`, `MainWindowViewModel`, `ServicesViewModel`, Services focus mapping, and `DoctorAdvisoryTests` implement the typed destination and unavailable reason. Physical focus and keyboard proof remain. |
 | Linux launcher | **Implemented and verified** | `build.sh`, `ReleaseReadinessRegressionTests`, E5 package checksum, quoted `Exec`, symlink/executable check, and space-containing scratch install pass. Owner visible menu/window launch remains a separate live cell. |
 | Restore budgets | **Implemented and verified** | `BackupService` and the four named `BackupRestoreSafetyTests` prove declared-entry, total, actual expansion, cancellation, duplicate-target, and cleanup boundaries. |
-| Runtime/AutoTune recovery | **owner validation required** | `ManagedRuntimeTuningService`, `ServerProcessManager`, `ResourceAllocationFactory`, Services/Models/bulk routes, cancellation handling, and full-config test repair the local authority/recovery path. The original crash mechanism and native fit are Unknown, exactly as required by the pack. |
+| Runtime/AutoTune recovery | **owner validation required** | `ManagedRuntimeTuningService`, `ServerProcessManager`, `ResourceAllocationFactory`, Services/Models/bulk routes, source suspension/restoration, cancellation handling, and `ModelAutoTuneLifecycleTests` repair and locally verify the source-loaded/target-unloaded lifecycle and save ordering. The original crash mechanism, real model-card interaction, and native fit are Unknown, exactly as required by the pack. |
 | Benchmark cancellation | **owner validation required** | `BenchmarkService`, `BenchmarkViewModel`, registered harness case, and E4 persist preparation cancellation. The full phase matrix and owner dispatcher behavior remain. |
 | Whole-product driver | **Implemented and verified** | `src/Tools/R33Driver/Program.cs` and E4 exercise production composition across Agent, benchmark, RAG, Chat, voice, Lab, Apply/reopen, and shutdown with isolated settings/data/workspace. It is not a native or GUI proof. |
 | Desktop/service authority and security | **owner validation required** | `ApplicationLifecycleCoordinator`, `ManagedRuntimeRegistry`, `AgentTaskCommandOwner`, prepared mutation/receipt boundaries, `Program` handoff, `SingleInstanceGuard`, `BackupService`, security docs, E1-E5, and `cc494ac` cover local authority and safety. Owner two-process, hardware, Windows, visible UI, PR, and CodeQL enforcement gates remain. |
@@ -258,6 +258,22 @@ cancellation, RAG generation/query, Chat retrieval context, voice completion,
 Lab failure cleanup, Lab Apply/settings reopen, and runtime stop count one.
 This is production-composition evidence, not native runtime, GUI, or pixel
 acceptance evidence.
+
+The focused AutoTune regression suite now covers a loaded source server and an
+unloaded target model. It observes the order `suspend -> tune -> restore`,
+builds the target probe without the source model's draft, projector, or extra
+arguments, and proves that failure and cancellation restore the source without
+saving a target profile. A real Models-card click with two owner model assets,
+native candidate fit, and the original hardware failure mechanism were not
+exercised here, so that AutoTune gate remains open.
+
+On 2026-09-13, the Release Linux package was launched with the owner's
+configured Chat and Embeddings services, then the real status-notifier tray
+item **Quit Hermaeus** was invoked. The process exited with code 0, both
+`llama-server` children were gone, and the lifecycle journal recorded
+`CleanExit:true`; runtime logs recorded all three shutdown owners and
+`timedOut:false`. This is native Linux shutdown evidence for the exact tray
+path. Windows, restart handoff, and broader owner-live GUI checks remain open.
 
 ## Final owner gate
 

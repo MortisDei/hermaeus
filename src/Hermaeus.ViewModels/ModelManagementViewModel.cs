@@ -23,7 +23,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly HuggingFaceArtworkService _artwork;
     private readonly ModelDownloadService _downloader;
     private readonly ModelInventoryService _inventory;
-    private readonly ManagedRuntimeTuningService? _runtimeTuning;
+    private readonly IManagedRuntimeTuningService? _runtimeTuning;
     private readonly IActivityRecorder? _activity;
     private readonly IRuntimeLogService? _runtimeLogs;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
@@ -272,7 +272,7 @@ public partial class ModelManagementViewModel : ObservableObject
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null,
         ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null,
-        IRuntimeLogService? runtimeLogs = null, ManagedRuntimeTuningService? runtimeTuning = null)
+        IRuntimeLogService? runtimeLogs = null, IManagedRuntimeTuningService? runtimeTuning = null)
     {
         _activity = activity;
         _runtimeLogs = runtimeLogs;
@@ -942,14 +942,66 @@ public partial class ModelManagementViewModel : ObservableObject
         string executable,
         int contextSize)
     {
-        var probe = _services.ChatServer?.BuildConfig() ?? new ServerConfig();
-        probe.ExecutablePath = executable;
-        probe.ModelPath = item.ModelId;
-        probe.Port = GetFreePort();
-        probe.ContextSize = contextSize;
-        probe.EmbeddingsMode = false;
-        probe.AutoStart = false;
-        return probe;
+        var draft = item.Companions.FirstOrDefault(companion => companion.IsVerifiedDraftHead);
+        var projector = item.Companions.FirstOrDefault(companion => companion.IsVerifiedProjector);
+        return new ServerConfig
+        {
+            Id = $"model-tune-{Guid.NewGuid():N}",
+            Name = $"Auto-tune {item.EffectiveName}",
+            ExecutablePath = executable,
+            ModelPath = item.ModelId,
+            MmprojPath = projector?.LocalFilePath ?? string.Empty,
+            UseProjector = projector is not null,
+            Port = GetFreePort(),
+            ContextSize = contextSize,
+            EmbeddingsMode = false,
+            AutoStart = false,
+            Speculative = draft is null
+                ? new SpeculativeDecodingConfig()
+                : new SpeculativeDecodingConfig
+                {
+                    Types = ["draft-mtp"],
+                    DraftModelPath = draft.LocalFilePath
+                }
+        };
+    }
+
+    private async Task<T> RunWithRunningServersSuspendedAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        var serverIds = _services.Servers.Select(server => server.Id).ToArray();
+        var suspended = await _services.SuspendRunningServersAsync(serverIds);
+        Exception? operationFailure = null;
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            return await operation();
+        }
+        catch (Exception ex)
+        {
+            operationFailure = ex;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                await _services.RestartServersAsync(suspended);
+            }
+            catch (Exception restoreFailure)
+            {
+                if (operationFailure is null)
+                    throw;
+
+                throw new AggregateException(
+                    "Auto-tune failed and the previously running managed servers could not all be restored.",
+                    operationFailure,
+                    restoreFailure);
+            }
+        }
     }
 
     [RelayCommand]
@@ -984,20 +1036,24 @@ public partial class ModelManagementViewModel : ObservableObject
         try
         {
             var ct = tuneCts.Token;
-            var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
-            var contextSize = ResolveProbeContextSize(item, existing);
-            var probe = BuildModelTuneProbe(item, executable, contextSize);
-            var ggufInfo = File.Exists(item.ModelId)
-                ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), ct)
-                : null;
-            var hardware = await GetHardwareProfileAsync(ct);
+            var tuned = await RunWithRunningServersSuspendedAsync(async () =>
+            {
+                var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
+                var contextSize = ResolveProbeContextSize(item, existing);
+                var probe = BuildModelTuneProbe(item, executable, contextSize);
+                var ggufInfo = File.Exists(item.ModelId)
+                    ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), ct)
+                    : null;
+                var hardware = await GetHardwareProfileAsync(ct);
 
-            if (_runtimeTuning is null)
-                throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
-            var result = await _runtimeTuning.RunAsync(probe, ct: ct, ggufInfo: ggufInfo, hardware: hardware);
-            ct.ThrowIfCancellationRequested();
-            var effectiveContext = result.TunedContextSize ?? contextSize;
-            LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
+                if (_runtimeTuning is null)
+                    throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
+                var result = await _runtimeTuning.RunAsync(probe, ct: ct, ggufInfo: ggufInfo, hardware: hardware);
+                ct.ThrowIfCancellationRequested();
+                return (Result: result, ContextSize: contextSize);
+            }, ct);
+            var effectiveContext = tuned.Result.TunedContextSize ?? tuned.ContextSize;
+            LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, tuned.Result.GpuLayers, tuned.Result.Threads, tuned.Result);
             await _settings.SaveAsync();
             RefreshTuneSummary(item);
             item.RetuneRecommended = false;
@@ -1082,20 +1138,24 @@ public partial class ModelManagementViewModel : ObservableObject
                 item.IsTuning = true;
                 try
                 {
-                    var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
-                    var contextSize = ResolveProbeContextSize(item, existing);
-                    var probe = BuildModelTuneProbe(item, executable, contextSize);
-                    var ggufInfo = File.Exists(item.ModelId)
-                        ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), _autoTuneAllCts.Token)
-                        : null;
-                    var hardware = await GetHardwareProfileAsync(_autoTuneAllCts.Token);
+                    var tunedResult = await RunWithRunningServersSuspendedAsync(async () =>
+                    {
+                        var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
+                        var contextSize = ResolveProbeContextSize(item, existing);
+                        var probe = BuildModelTuneProbe(item, executable, contextSize);
+                        var ggufInfo = File.Exists(item.ModelId)
+                            ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), _autoTuneAllCts.Token)
+                            : null;
+                        var hardware = await GetHardwareProfileAsync(_autoTuneAllCts.Token);
 
-                    if (_runtimeTuning is null)
-                        throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
-                    var result = await _runtimeTuning.RunAsync(probe, ct: _autoTuneAllCts.Token, ggufInfo: ggufInfo, hardware: hardware);
-                    _autoTuneAllCts.Token.ThrowIfCancellationRequested();
-                    var effectiveContext = result.TunedContextSize ?? contextSize;
-                    LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
+                        if (_runtimeTuning is null)
+                            throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
+                        var result = await _runtimeTuning.RunAsync(probe, ct: _autoTuneAllCts.Token, ggufInfo: ggufInfo, hardware: hardware);
+                        _autoTuneAllCts.Token.ThrowIfCancellationRequested();
+                        return (Result: result, ContextSize: contextSize);
+                    }, _autoTuneAllCts.Token);
+                    var effectiveContext = tunedResult.Result.TunedContextSize ?? tunedResult.ContextSize;
+                    LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, tunedResult.Result.GpuLayers, tunedResult.Result.Threads, tunedResult.Result);
                     await _settings.SaveAsync();
                     RefreshTuneSummary(item);
                     tuned++;
@@ -2591,16 +2651,26 @@ public sealed class ModelCompanionViewModel
     public string ModelId { get; }
     public string LocalFilePath { get; }
     public string FileName { get; }
+    public string Role { get; }
     public string RoleLabel { get; }
     public string StateLabel { get; }
     public string StateTooltip { get; }
     public bool CanClear => !string.IsNullOrWhiteSpace(LocalFilePath);
+    public bool IsVerifiedDraftHead => string.Equals(Role, "draft_head", StringComparison.OrdinalIgnoreCase)
+        && StateLabel == "Present"
+        && !RequiresUserConfirmation;
+    public bool IsVerifiedProjector => string.Equals(Role, "projector", StringComparison.OrdinalIgnoreCase)
+        && StateLabel == "Present"
+        && !RequiresUserConfirmation;
+    private bool RequiresUserConfirmation { get; }
 
     public ModelCompanionViewModel(ModelCompanionManifestEntry companion, string modelId = "")
     {
         ModelId = modelId;
         LocalFilePath = companion.LocalFilePath;
         FileName = Path.GetFileName(LocalFilePath);
+        Role = companion.Role;
+        RequiresUserConfirmation = companion.RequiresUserConfirmation;
         RoleLabel = ModelManagementViewModel.CompanionRoleLabelForDisplay(companion.Role);
         var exists = false;
         var sizeMatches = false;

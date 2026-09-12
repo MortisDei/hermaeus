@@ -132,10 +132,15 @@ for Knowledge behavior in Chat.
   when its exact runtime, model, hardware, base configuration, workload, and
   bounded evidence age match; it never skips fresh admission. Unsupported fit,
   cache, and multi-device behavior remains Unavailable or Unknown.
-- AutoTune probes preserve the complete managed-server configuration and
-  change only the candidate axes for each probe. Local GGUF metadata and the
-  current hardware profile are supplied when available; transient probe
-  values are never written back to saved settings.
+- Services AutoTune probes preserve the complete managed-server configuration
+  and change only the candidate axes for each probe. Models-card AutoTune
+  probes build an independent target configuration and use only verified
+  target companions, so a loaded source model cannot contribute its draft,
+  projector, or extra arguments. Running managed servers are suspended before
+  the Models-card probe and restored after success, failure, or cancellation;
+  the profile is saved only after restoration. Local GGUF metadata and the
+  current hardware profile are supplied when available; transient probe values
+  are never written back to saved settings.
 - Model cards use the detailed versioned prediction when local GGUF shape
   metadata is available. Remote or pre-download cards retain a clearly labelled
   rough pre-download estimate until that metadata exists.
@@ -455,8 +460,10 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   starts the replacement. The replacement uses a bounded internal lock
   handoff, while ordinary second launches remain fail-fast.
 - Window close and tray **Stop Services** use the same bounded managed-process
-  stop path. An incomplete drain is journaled as incomplete instead of leaving
-  the interface indefinitely stuck on a quitting state.
+  stop path. After the drain completes, the desktop exits through the Avalonia
+  application lifetime rather than re-entering a cancelled window close. An
+  incomplete drain is journaled as incomplete, with per-owner and final result
+  diagnostics, instead of being presented as a clean exit.
 - Runtime Logs apply redaction before display and persistence, omit repetitive
   low-level llama slot scheduler chatter from the normal persistent sink, and
   rotate with bounded file-count, age, and total-size retention. Settings holds

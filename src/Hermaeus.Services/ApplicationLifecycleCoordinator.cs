@@ -133,7 +133,21 @@ public sealed class ApplicationLifecycleCoordinator : IApplicationLifecycleCoord
             owners = _owners.AsEnumerable().Reverse().ToArray();
 
         foreach (var owner in owners)
+        {
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Startup,
+                $"Application shutdown owner started: {owner.Name}."));
             await RunPhaseAsync(phases, owner.Name, owner.Shutdown, linked.Token, allowCancellation: true);
+            var phase = phases[^1];
+            var detail = phase.Succeeded ? "completed" : $"incomplete: {phase.Error}";
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                phase.Succeeded ? RuntimeLogLevel.Info : RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Startup,
+                $"Application shutdown owner {detail}: {owner.Name} ({phase.DurationMilliseconds} ms)."));
+        }
 
         var timedOut = deadline.IsCancellationRequested || callerToken.IsCancellationRequested;
         var clean = !timedOut && phases.All(phase => phase.Succeeded);
@@ -151,6 +165,11 @@ public sealed class ApplicationLifecycleCoordinator : IApplicationLifecycleCoord
                 RuntimeLogCategory.Startup,
                 $"Application shutdown incomplete: reason={reason}."));
         }
+        _logs.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            clean ? RuntimeLogLevel.Info : RuntimeLogLevel.Warning,
+            RuntimeLogCategory.Startup,
+            $"Application shutdown result: clean={clean}, timedOut={timedOut}, owners={phases.Count}."));
 
         return new ApplicationShutdownResult(clean, timedOut, phases);
     }

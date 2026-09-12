@@ -75,6 +75,7 @@ public partial class App : Application
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
+            window.RequestApplicationExit = () => desktop.Shutdown();
             var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
             window.ApplicationLifecycle = lifecycle;
             lifecycle.RegisterShutdownOwner("desktop view models", ct => vm.ShutdownAsync(ct));

@@ -585,6 +585,8 @@ public partial class AgentViewModel : ViewModelBase
     /// Optional so the existing test constructions are unaffected.</summary>
     private readonly IToastService? _toasts;
     private CancellationTokenSource? _cts;
+    private readonly object _runGate = new();
+    private TaskCompletionSource? _runCompletion;
     private string? _activeRunTaskId;
     private bool _stopRequested;
     /// <summary>
@@ -1194,6 +1196,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         var viewGeneration = ++_taskViewGeneration;
         IsRunning = true;
+        var runCompletion = BeginRun();
         _stopRequested = false;
         _activeRunTaskId = null;
         IsError = false;
@@ -1235,6 +1238,7 @@ public partial class AgentViewModel : ViewModelBase
             FinishTaskCommand.NotifyCanExecuteChanged();
             _activeRunTaskId = null;
             _stopRequested = false;
+            CompleteRun(runCompletion);
         }
     }
 
@@ -1242,6 +1246,7 @@ public partial class AgentViewModel : ViewModelBase
     private async Task RunStepAsync()
     {
         IsRunning = true;
+        var runCompletion = BeginRun();
         _stopRequested = false;
         _activeRunTaskId = CurrentTask?.TaskId;
         IsError = false;
@@ -1272,6 +1277,7 @@ public partial class AgentViewModel : ViewModelBase
             FinishTaskCommand.NotifyCanExecuteChanged();
             _activeRunTaskId = null;
             _stopRequested = false;
+            CompleteRun(runCompletion);
         }
     }
 
@@ -1284,6 +1290,39 @@ public partial class AgentViewModel : ViewModelBase
         _stopRequested = true;
         _cts?.Cancel();
         return Task.CompletedTask;
+    }
+
+    public async Task ShutdownAsync(CancellationToken ct = default)
+    {
+        if (IsRunning)
+        {
+            _stopRequested = true;
+            _cts?.Cancel();
+        }
+
+        Task? run;
+        lock (_runGate)
+            run = _runCompletion?.Task;
+        if (run is not null)
+            await run.WaitAsync(ct);
+    }
+
+    private TaskCompletionSource BeginRun()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_runGate)
+            _runCompletion = completion;
+        return completion;
+    }
+
+    private void CompleteRun(TaskCompletionSource completion)
+    {
+        completion.TrySetResult();
+        lock (_runGate)
+        {
+            if (ReferenceEquals(_runCompletion, completion))
+                _runCompletion = null;
+        }
     }
 
     private async Task FinalizeRequestedStopAsync()
@@ -1717,6 +1756,7 @@ public partial class AgentViewModel : ViewModelBase
             return;
 
         IsRunning = true;
+        var runCompletion = BeginRun();
         _stopRequested = false;
         _activeRunTaskId = taskId;
         IsError = false;
@@ -1746,6 +1786,7 @@ public partial class AgentViewModel : ViewModelBase
             FinishTaskCommand.NotifyCanExecuteChanged();
             _activeRunTaskId = null;
             _stopRequested = false;
+            CompleteRun(runCompletion);
         }
     }
 

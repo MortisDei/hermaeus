@@ -20,10 +20,13 @@ limit.
   pretending it stopped cleanly. Settings-triggered restart now uses the same
   owner drain and a bounded single-instance handoff.
 - Window close and tray service stopping now use the bounded managed-process
-  stop boundary. Agent refuses a second top-level task and refuses to finish
-  or dismiss an orchestration parent with a live child; inconsistent recovered
-  parents are blocked for explicit continuation. Missing workspace `AGENTS.md`
-  suggestions enter the normal prepared-mutation review queue.
+  stop boundary and hand the completed drain to the Avalonia application
+  lifetime, avoiding a re-entrant cancelled window close. Shutdown logs owner
+  start/completion and the final clean or timed-out result. Agent refuses a
+  second top-level task and refuses to finish or dismiss an orchestration parent
+  with a live child; inconsistent recovered parents are blocked for explicit
+  continuation. Missing workspace `AGENTS.md` suggestions enter the normal
+  prepared-mutation review queue.
 - Agent task commands and prepared workspace mutations now use one task and
   target ownership boundary. Mutating proposals carry typed arguments,
   workspace policy, target identity, preimage, and proposed output before
@@ -39,14 +42,19 @@ limit.
   data-root staging directory with actual-byte checks before a rollback-safe
   commit. Cancellation and reparse-point checks remain part of the restore
   boundary.
-- AutoTune probes clone the complete managed-server configuration and preserve
-  configured runtime fields while applying only the candidate axes. Local GGUF
-  metadata and the current hardware profile are used when available, and
-  transient probe settings are not saved. Services and Models share operation
-  cancellation; a cancelled individual or bulk tune reports cancellation and
-  does not save a profile after the cancellation boundary. Candidate failure,
-  admission refusal, and cancellation retain path-free adaptive evidence when
-  their workload identity is available.
+- Services AutoTune probes clone the complete managed-server configuration and
+  preserve configured runtime fields while applying only the candidate axes.
+  Models-card AutoTune builds an isolated target configuration from the selected
+  model and verified target companions, so it cannot inherit another loaded
+  model's draft, projector, or extra arguments. Running managed servers are
+  suspended and restored around the Models-card operation, and a profile is
+  saved only after restoration. Local GGUF metadata and the current hardware
+  profile are used when available, and transient probe settings are not saved.
+  Services and Models share operation cancellation; a cancelled individual or
+  bulk tune reports cancellation, restores the source services, and does not
+  save a profile after the cancellation boundary. Candidate failure, admission
+  refusal, and cancellation retain path-free adaptive evidence when their
+  workload identity is available.
 - Lab recipe availability now reconciles the selected baseline's model, GGUF,
   and exact executable identity before offering a run. Doctor actions carry
   typed panel, section, entity, and control targets, with an explicit missing

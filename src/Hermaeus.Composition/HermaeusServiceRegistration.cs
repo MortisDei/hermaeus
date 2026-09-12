@@ -56,6 +56,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IManagedRuntimeProcessFactory, ManagedRuntimeProcessFactory>();
         s.AddSingleton<ManagedRuntimeRegistry>();
         s.AddSingleton<ManagedRuntimeTuningService>();
+        s.AddSingleton<IManagedRuntimeTuningService>(sp => sp.GetRequiredService<ManagedRuntimeTuningService>());
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
         s.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();

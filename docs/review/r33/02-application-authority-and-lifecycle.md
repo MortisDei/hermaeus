@@ -71,14 +71,14 @@ and interrupted. Capability-specific detail stays typed in its subsystem.
 - Preserve configured, planned, rendered, effective and observed runtime values;
   these are not aliases for the operation's status.
 
-Normal MainWindow close already awaits `ShutdownAsync`. Preserve that mechanism;
-the repair is complete operation coverage and truthful failure handling, not
-inventing async close. Include App's detached embedding warmup/backfill in the
-owned inventory. Restart currently starts a replacement before the parent exits
-and releases its single-instance lock. Define a bounded handoff/ready protocol
-or release-and-transfer sequence that prevents the replacement losing that race
-without allowing two authoritative writers. Test failure on either side of the
-handoff; do not solve it with an arbitrary delay or another real data migration.
+MainWindow close now requests the bounded `ShutdownAsync` drain from the
+cancellable close event, then exits through the Avalonia application lifetime
+after the drain completes. It does not re-enter `Window.Close()` after the
+original close was cancelled. App's embedding warmup/backfill is part of the
+owned inventory and receives shutdown cancellation. Restart uses the same
+application-lifetime exit boundary after the replacement is ready. Test failure
+on either side of the handoff; do not solve it with an arbitrary delay or
+another real data migration.
 
 **Boundary:** existing stores remain authoritative. `task_state.json` remains
 task truth, task_index.db remains rebuildable. Add versioned/additive fields;
