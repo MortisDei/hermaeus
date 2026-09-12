@@ -51,7 +51,7 @@ internal static class SingleInstanceGuardTests
         True(SingleInstanceGuard.TryAcquire(lockPath), "the first acquire should succeed");
         SingleInstanceGuard.Release();
 
-        True(SingleInstanceGuard.TryAcquire(lockPath),
+        True(SingleInstanceGuard.TryAcquireForHandoff(TimeSpan.FromMilliseconds(100), lockPath),
             "acquiring again after Release should succeed, exactly like relaunching once Hermaeus has fully exited");
         SingleInstanceGuard.Release();
         return Task.CompletedTask;

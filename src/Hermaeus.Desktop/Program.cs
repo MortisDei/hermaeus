@@ -6,6 +6,8 @@ namespace Hermaeus.Desktop;
 
 class Program
 {
+    internal const string RestartHandoffArgument = "--hermaeus-restart-handoff";
+    private static readonly TimeSpan RestartHandoffTimeout = TimeSpan.FromSeconds(20);
     internal static PackageIntegrationLaunch? PackageIntegrationLaunch { get; private set; }
     private const long MaxCrashLogBytes = 512 * 1024;
     private const int MaxCrashEntryCharacters = 128 * 1024;
@@ -84,7 +86,10 @@ class Program
 
         // A second instance would write to the same SQLite data root with no
         // cross-process coordination; refuse to start rather than risk it.
+        var restartHandoff = args.Contains(RestartHandoffArgument, StringComparer.Ordinal);
         var ownsInstance = SingleInstanceGuard.TryAcquire();
+        if (!ownsInstance && restartHandoff)
+            ownsInstance = SingleInstanceGuard.TryAcquireForHandoff(RestartHandoffTimeout);
         if (!ShouldContinueStartup(ownsInstance))
             return;
 
@@ -102,7 +107,10 @@ class Program
                 AppendCrashLog("hermaeus_unobserved.log", "UNOBSERVED", e.Exception.ToString());
             };
 
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            var applicationArgs = args
+                .Where(argument => !string.Equals(argument, RestartHandoffArgument, StringComparison.Ordinal))
+                .ToArray();
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(applicationArgs);
         }
         finally
         {

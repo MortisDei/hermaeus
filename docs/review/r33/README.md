@@ -1,7 +1,9 @@
 # Review round 33: Hermaeus beyond the desktop
 
-Status: **implemented locally on `r33/planning`**. The pack is the authoritative
-R33 implementation record for the `v0.41.0-beta` target. Local commits are
+Status: **mandatory local implementation complete on `r33/planning`; owner
+validation remains**. The pack is the authoritative R33 implementation record
+for the `v0.41.0-beta` target.
+Local commits are
 authorized; push, PR, merge, tag, release, settings, and other publication
 actions remain owner-only.
 
@@ -29,23 +31,30 @@ exit gates. Neither may hold correctness repairs hostage.
 The mandatory R33 scope is implemented locally:
 
 - B0: shared lifecycle authority, startup recovery, retryable partial startup,
-  and bounded shutdown evidence.
+  operation identity, and bounded shutdown evidence.
 - B1: benchmark operation identity, phase reporting, cancellation persistence,
   terminal evidence save, and Linux installer path escaping.
-- B2: task and target command ownership across direct and queued operations.
+- B2: shared host ownership, Services runtime registry, embedding/voice owner
+  drain, bounded restart handoff, and the first production-composition driver.
 - B3: typed prepared mutation proposals with exact policy, target, preimage,
   and post-image facts.
 - B4: durable mutation receipts, readback verification, `AlreadySatisfied`,
   child-task ownership, and fresh-task view isolation.
 - B5: canonical AutoTune configuration and recommendation save-failure
   reconciliation.
-- B6: full-config transient tuning probes with GGUF and hardware context.
-- B7: isolated whole-product driver using the production composition graph.
-- B8: restore budgets, duplicate-target checks, atomic extraction, and release
-  documentation updates.
+- B6: full-config transient tuning probes with GGUF and hardware context,
+  shared Services/Models cancellation, bounded failure evidence, and cleanup.
+  The original native/runtime crash reproduction is still an owner validation
+  gate because the planning pack did not contain a reproducible stack or
+  runtime fixture.
+- B7: baseline-aware Lab availability plus isolated run, failure cleanup,
+  Apply, settings reopen, and retained evidence paths.
+- B8: Agent/RAG/Lab hierarchy, save-state visibility, typed Doctor target
+  mapping, missing-entity feedback, and focused control navigation.
+- S: restore budgets, duplicate-target checks, transactional staging, actual
+  expanded-byte enforcement, and rollback-safe commit cleanup.
 - B9: integrated sequential verification, package validation, and this
   implementation ledger. Owner platform and publication gates remain open.
-- S: the restore and lifecycle safety boundaries remain bounded and explicit.
 
 The conditional Monaco spike and Agent HTTP execution remain deferred because
 their R33 exit gates were not earned. JSONL/runtime experiments remain deferred
@@ -56,7 +65,9 @@ and test harnesses, focused lifecycle/restore/Agent regression tests, the
 isolated driver mutation receipt, Linux package creation, package checksum
 verification, and an installed-path test with spaces. Native Windows, live
 managed-runtime/GPU behavior, and GUI pixel acceptance remain owner validation
-gates.
+gates. The exact dispositions for every batch, acceptance cell, V01-V14
+scenario, owner defect, and conditional branch are recorded in
+[12-completion-audit.md](12-completion-audit.md).
 
 ## Read order
 
@@ -73,6 +84,7 @@ gates.
 | [09-security-platform-and-release.md](09-security-platform-and-release.md) | Installed Linux launch, Doctor, restore, real CI gates |
 | [10-scope-and-deferred-decisions.md](10-scope-and-deferred-decisions.md) | Every open ledger item, rejection and descope decisions |
 | [11-dependency-roadmap.md](11-dependency-roadmap.md) | Batches, dependencies, acceptance gates, implementation handoff |
+| [12-completion-audit.md](12-completion-audit.md) | Strict batch, scenario, defect, conditional, and owner-gate audit |
 
 ## Evidence vocabulary
 
@@ -126,10 +138,10 @@ gates.
 ## Verification performed during implementation
 
 - Debug and Release solution builds passed with zero warnings and zero errors.
-- The complete sequential Debug and Release harnesses each passed 2,683 tests,
-  skipped 17 platform-gated tests, and reported 0 failures out of 2,700.
-- Focused lifecycle, restore-safety, Agent patch, steering, and sub-task tests
-  passed 53 of 53.
+- The complete sequential Debug and Release harnesses each passed 2,695 tests,
+  skipped 17 platform-gated tests, and reported 0 failures out of 2,712.
+- Focused lifecycle, restore-safety, Agent patch, steering, sub-task, runtime
+  ownership, restart, Doctor, and voice tests passed in their targeted runs.
 - The isolated R33 driver completed a real prepared file mutation and emitted
   an `Applied`, changed, readback-verified receipt. An unknown-argument run was
   rejected before startup.
@@ -137,9 +149,11 @@ gates.
   and its installer was exercised from a path containing spaces against an
   isolated XDG data directory. The desktop entry passed validation apart from
   the existing category hint.
-- Coverage is the final automated gate immediately before the authorized local
-  commit. Native Windows, live managed-runtime/GPU behavior, GUI pixel
-  acceptance, and the owner PR/check gate remain outside this local proof.
+- The direct final coverage command passed at 65.21% line coverage against the
+  60% ratchet, with results kept under `/tmp`. The shell wrapper itself hit a
+  silent host-boundary exit, so its documented inner command was rerun directly
+  on the approved host. Native Windows, live managed-runtime/GPU behavior, GUI
+  pixel acceptance, and the owner PR/check gate remain outside this local proof.
 
 Authoritative user-facing behavior docs and CHANGELOG now describe the
 implemented R33 behavior and `v0.41.0-beta` target. Archived R32 evidence and

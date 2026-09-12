@@ -395,8 +395,12 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   Artifact-specific rows open their artifact; rows without one stay inert.
 - Data Root restore preflights all file entries for safe paths, duplicate
   targets, and bounded per-entry and total uncompressed sizes before writing.
-  Each file is copied to a same-directory temporary file and atomically
-  replaced only after its declared size and destination safety checks pass.
+  The archive is expanded beneath a data-root staging directory, with actual
+  expanded bytes checked while copying. Commit moves are rollback-safe, and
+  existing files are preserved if a late commit step fails.
+- Settings-triggered restart drains the shared application owners before it
+  starts the replacement. The replacement uses a bounded internal lock
+  handoff, while ordinary second launches remain fail-fast.
 - Runtime Logs apply redaction before display and persistence, omit repetitive
   low-level llama slot scheduler chatter from the normal persistent sink, and
   rotate with bounded file-count, age, and total-size retention. Settings holds

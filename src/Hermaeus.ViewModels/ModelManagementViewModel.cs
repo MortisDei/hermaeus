@@ -62,6 +62,7 @@ public partial class ModelManagementViewModel : ObservableObject
     public bool HasSelectedProfile => SelectedProfile is not null;
 
     private volatile bool _isTuneInProgress;
+    private CancellationTokenSource? _autoTuneCts;
     private CancellationTokenSource? _autoTuneAllCts;
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
@@ -978,19 +979,23 @@ public partial class ModelManagementViewModel : ObservableObject
 
         _isTuneInProgress = true;
         item.IsTuning = true;
+        using var tuneCts = new CancellationTokenSource();
+        _autoTuneCts = tuneCts;
         try
         {
+            var ct = tuneCts.Token;
             var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
             var contextSize = ResolveProbeContextSize(item, existing);
             var probe = BuildModelTuneProbe(item, executable, contextSize);
             var ggufInfo = File.Exists(item.ModelId)
-                ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), CancellationToken.None)
+                ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), ct)
                 : null;
-            var hardware = await GetHardwareProfileAsync(CancellationToken.None);
+            var hardware = await GetHardwareProfileAsync(ct);
 
             if (_runtimeTuning is null)
                 throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
-            var result = await _runtimeTuning.RunAsync(probe, ggufInfo: ggufInfo, hardware: hardware);
+            var result = await _runtimeTuning.RunAsync(probe, ct: ct, ggufInfo: ggufInfo, hardware: hardware);
+            ct.ThrowIfCancellationRequested();
             var effectiveContext = result.TunedContextSize ?? contextSize;
             LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
             await _settings.SaveAsync();
@@ -998,12 +1003,18 @@ public partial class ModelManagementViewModel : ObservableObject
             item.RetuneRecommended = false;
             _toasts.Show("Auto-tune complete", $"{item.EffectiveName}: {item.TuneSummary}.", ToastKind.Success);
         }
+        catch (OperationCanceledException) when (tuneCts.IsCancellationRequested)
+        {
+            _toasts.Show("Auto-tune cancelled", $"{item.EffectiveName}: no tune profile was saved.", ToastKind.Info, 5000);
+        }
         catch (Exception ex)
         {
             _toasts.Show("Auto-tune failed", $"{item.EffectiveName}: {ex.Message}", ToastKind.Warning, 7000);
         }
         finally
         {
+            if (ReferenceEquals(_autoTuneCts, tuneCts))
+                _autoTuneCts = null;
             item.IsTuning = false;
             _isTuneInProgress = false;
         }
@@ -1054,13 +1065,17 @@ public partial class ModelManagementViewModel : ObservableObject
         IsAutoTuningAll = true;
         var tuned = 0;
         var failed = 0;
+        var cancelled = false;
         string? firstFailure = null;
         try
         {
             for (var i = 0; i < candidates.Count; i++)
             {
                 if (_autoTuneAllCts.IsCancellationRequested)
+                {
+                    cancelled = true;
                     break;
+                }
 
                 var item = candidates[i];
                 AutoTuneAllStatus = $"Tuning {i + 1}/{candidates.Count}: {item.EffectiveName}";
@@ -1078,6 +1093,7 @@ public partial class ModelManagementViewModel : ObservableObject
                     if (_runtimeTuning is null)
                         throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
                     var result = await _runtimeTuning.RunAsync(probe, ct: _autoTuneAllCts.Token, ggufInfo: ggufInfo, hardware: hardware);
+                    _autoTuneAllCts.Token.ThrowIfCancellationRequested();
                     var effectiveContext = result.TunedContextSize ?? contextSize;
                     LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
                     await _settings.SaveAsync();
@@ -1086,6 +1102,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 }
                 catch (OperationCanceledException)
                 {
+                    cancelled = true;
                     break;
                 }
                 catch (Exception ex)
@@ -1100,8 +1117,17 @@ public partial class ModelManagementViewModel : ObservableObject
             }
 
             var skipped = eligible.Count - candidates.Count;
-            AutoTuneAllStatus = $"Tuned {tuned}, skipped {skipped}, failed {failed}" + (firstFailure is not null ? $" (first failure: {firstFailure})" : "");
-            _toasts.Show("Auto-tune all complete", AutoTuneAllStatus, failed > 0 ? ToastKind.Warning : ToastKind.Success, 7000);
+            cancelled |= _autoTuneAllCts.IsCancellationRequested;
+            AutoTuneAllStatus = cancelled
+                ? $"Auto-tune all cancelled after tuning {tuned}, skipped {skipped}, failed {failed}"
+                : $"Tuned {tuned}, skipped {skipped}, failed {failed}";
+            if (firstFailure is not null)
+                AutoTuneAllStatus += $" (first failure: {firstFailure})";
+            _toasts.Show(
+                cancelled ? "Auto-tune all cancelled" : "Auto-tune all complete",
+                AutoTuneAllStatus,
+                cancelled ? ToastKind.Info : failed > 0 ? ToastKind.Warning : ToastKind.Success,
+                7000);
         }
         finally
         {
@@ -1114,6 +1140,16 @@ public partial class ModelManagementViewModel : ObservableObject
 
     [RelayCommand]
     private void CancelAutoTuneAll() => _autoTuneAllCts?.Cancel();
+
+    [RelayCommand]
+    private void CancelAutoTuneModel(ModelProfileItemViewModel? item)
+    {
+        if (item is null || !item.IsTuning)
+            return;
+
+        _autoTuneCts?.Cancel();
+        _autoTuneAllCts?.Cancel();
+    }
 
     private bool IsTuneStale(ModelProfileItemViewModel item)
     {

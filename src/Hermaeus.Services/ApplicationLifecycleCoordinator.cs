@@ -37,7 +37,7 @@ public sealed class ApplicationLifecycleCoordinator : IApplicationLifecycleCoord
         _logs = logs;
     }
 
-    public bool IsStopping => _shutdownCts is not null;
+    public bool IsStopping => _shutdownTask is not null || _shutdownCts is not null;
 
     public async Task<ApplicationStartupResult> StartAsync(CancellationToken ct = default)
     {
@@ -127,7 +127,10 @@ public sealed class ApplicationLifecycleCoordinator : IApplicationLifecycleCoord
 
         (string Name, Func<CancellationToken, Task> Shutdown)[] owners;
         lock (_ownerGate)
-            owners = _owners.ToArray();
+            // Shutdown unwinds owners in the opposite order from registration:
+            // late-started work such as embedding warm-up must stop before the
+            // ViewModel owner closes the stores and managed resources it uses.
+            owners = _owners.AsEnumerable().Reverse().ToArray();
 
         foreach (var owner in owners)
             await RunPhaseAsync(phases, owner.Name, owner.Shutdown, linked.Token, allowCancellation: true);

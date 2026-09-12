@@ -223,9 +223,11 @@ response, steering instruction, or repeated fingerprint grants approval.
 
 The isolated R33 driver exercises the production composition graph through task
 creation, planning, explicit approval, mutation execution, receipt persistence,
-readback, and shared startup and shutdown. It requires separate scratch paths
-for settings, Data Root, and workspace, and refuses unknown arguments or
-workspace-overlapping paths. For a local run:
+readback, benchmark cancellation, RAG generation/query, Chat retrieval
+context, voice orchestration, Lab failure cleanup, Lab Apply/settings reopen,
+and shared startup/shutdown. It requires separate scratch paths for settings,
+Data Root, and workspace, and refuses unknown arguments or workspace-overlapping
+paths. For a local run:
 
 ```bash
 dotnet run --project src/Tools/R33Driver/R33Driver.csproj -- \

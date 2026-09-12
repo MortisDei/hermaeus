@@ -105,6 +105,15 @@ public sealed class DoctorAdvisoryTests
         Assert.Equal("chat-server", check.Target?.ItemId);
         Assert.Equal("draft-model", check.Target?.Focus);
         Assert.Equal("services/managed-server-draft/chat-server/draft-model", check.ActionTarget);
+
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.ManagedServers.Clear();
+        settings.Settings.ManagedServers.Add(new ServerConfig { Id = "chat-server", Name = "Chat" });
+        var services = Helpers.NewServicesViewModel(settings);
+        Assert.True(services.NavigateToDoctorTarget(check.Target!));
+        Assert.Equal("chat-server", services.SelectedServer?.Id);
+        Assert.Same(check.Target, services.PendingDoctorTarget);
     }
 
     /// <summary>

@@ -769,6 +769,12 @@ namespace Hermaeus.Tests
 
         public void StopAll() => IsSpeaking = false;
 
+        public Task ShutdownAsync(CancellationToken ct = default)
+        {
+            StopAll();
+            return Task.CompletedTask;
+        }
+
         /// <summary>Test hook: simulates the orchestrator finishing an utterance on its own (not via StopChannel).</summary>
         public void RaiseUtteranceCompleted(VoiceChannel channel)
         {

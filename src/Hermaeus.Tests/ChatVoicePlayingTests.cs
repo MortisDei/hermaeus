@@ -80,6 +80,12 @@ public sealed class ChatVoicePlayingTests
 
         public void StopAll() => IsSpeaking = false;
 
+        public Task ShutdownAsync(CancellationToken ct = default)
+        {
+            StopAll();
+            return Task.CompletedTask;
+        }
+
         public void RaiseStarted(VoiceChannel channel, string text)
         {
             IsSpeaking = true;

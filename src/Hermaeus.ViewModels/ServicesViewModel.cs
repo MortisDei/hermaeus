@@ -2511,8 +2511,41 @@ public partial class ServicesViewModel : ViewModelBase
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
     public UiBoundCollection<RecommendationReviewViewModel> Recommendations { get; } = [];
+    [ObservableProperty] private ServerProcessViewModel? _selectedServer;
+    [ObservableProperty] private DoctorActionTarget? _pendingDoctorTarget;
+    [ObservableProperty] private string _doctorNavigationStatus = string.Empty;
     public bool HasRecommendations => Recommendations.Count > 0;
     public Action<string>? RequestNavigate { get; set; }
+
+    /// <summary>
+    /// Resolves a Doctor target against the live Services rows. The stable
+    /// server id is the only acceptable item identity; display names and row
+    /// order are not remediation authorities. The view consumes the pending
+    /// target to scroll to and focus the named editor control.
+    /// </summary>
+    public bool NavigateToDoctorTarget(DoctorActionTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (!string.Equals(target.Area, "services", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        PendingDoctorTarget = target;
+        DoctorNavigationStatus = string.Empty;
+        if (string.IsNullOrWhiteSpace(target.ItemId)
+            || !target.Section.StartsWith("managed-server", StringComparison.Ordinal))
+            return true;
+
+        var server = Servers.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, target.ItemId, StringComparison.Ordinal));
+        if (server is null)
+        {
+            DoctorNavigationStatus = $"Doctor target unavailable: managed server '{target.ItemId}' is no longer configured.";
+            return false;
+        }
+
+        SelectedServer = server;
+        return true;
+    }
 
     /// <summary>
     /// Loads current and accepted managed-server recommendations after startup
@@ -2770,6 +2803,7 @@ public partial class ServicesViewModel : ViewModelBase
     {
         Hermaeus.Services.SettingsService.NormalizeManagedServers(_settings.Settings.ManagedServers);
         var configs = _settings.Settings.ManagedServers;
+        var selectedId = SelectedServer?.Id;
 
         // Ensure we always have the two default slots
         while (configs.Count < 2)
@@ -2787,6 +2821,8 @@ public partial class ServicesViewModel : ViewModelBase
 
         foreach (var stale in Servers.Where(s => !configIds.Contains(s.Id)).ToList())
         {
+            if (ReferenceEquals(stale, SelectedServer))
+                SelectedServer = null;
             stale.PropertyChanged -= OnServerPropertyChanged;
             Servers.Remove(stale);
             stale.Dispose();
@@ -2813,6 +2849,10 @@ public partial class ServicesViewModel : ViewModelBase
                 Servers.Insert(index, vm);
             }
         }
+
+        if (selectedId is not null)
+            SelectedServer = Servers.FirstOrDefault(server =>
+                string.Equals(server.Id, selectedId, StringComparison.Ordinal));
 
         RuntimeProfiles.Clear();
         foreach (var profile in _runtimeProfiles.Profiles)

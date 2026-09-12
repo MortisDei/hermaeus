@@ -60,6 +60,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool   _doctorHasErrors;
     [ObservableProperty] private bool   _doctorHasWarnings;
     [ObservableProperty] private bool   _doctorIsOk;
+    [ObservableProperty] private DoctorActionTarget? _pendingDoctorTarget;
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowAgent    => ActivePanel == "agent";
@@ -155,7 +156,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // uses, so there is one answer to "where does a task live".
         Activity.RequestNavigate = NavigateToRecallHitAsync;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
-        Doctor.RequestNavigateToTarget = target => ActivePanel = target.Area;
+        Doctor.RequestNavigateToTarget = NavigateToDoctorTarget;
         Doctor.RequestOpenUrl = url =>
         {
             try
@@ -269,6 +270,19 @@ public partial class MainWindowViewModel : ViewModelBase
         Logs.RegisterCommands(commands);
         Projects.RegisterCommands(commands);
         Activity.RegisterCommands(commands);
+    }
+
+    private void NavigateToDoctorTarget(DoctorActionTarget target)
+    {
+        PendingDoctorTarget = target;
+        var resolved = target.Area switch
+        {
+            "services" => Services.NavigateToDoctorTarget(target),
+            _ => true
+        };
+        ActivePanel = target.Area;
+        if (!resolved)
+            _toasts.Show("Doctor target unavailable", Services.DoctorNavigationStatus, ToastKind.Warning, 5000);
     }
 
     public ICommandRegistry Commands { get; }

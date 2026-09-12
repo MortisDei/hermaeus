@@ -408,7 +408,7 @@
                                     </Border>
 
                                     <!-- Footer row -->
-                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2,0,0">
+                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2,0,0">
                                         <TextBlock Grid.Column="0"
                                                    Text="{Binding ModifiedDisplay}"
                                                    FontSize="11" Classes="faint"
@@ -425,7 +425,15 @@
                                                 FontSize="12" Padding="10,4" CornerRadius="6"
                                                 VerticalAlignment="Center"
                                                 ToolTip.Tip="{Binding AutoTuneTooltip}" />
-                                        <Button Grid.Column="2" Classes="icon-btn"
+                                        <Button Grid.Column="2"
+                                                Content="Cancel"
+                                                IsVisible="{Binding IsTuning}"
+                                                Command="{Binding DataContext.CancelAutoTuneModelCommand, ElementName=Root}"
+                                                CommandParameter="{Binding}"
+                                                FontSize="12" Padding="10,4" CornerRadius="6"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="Cancel this managed-runtime tune operation without saving a profile." />
+                                        <Button Grid.Column="3" Classes="icon-btn"
                                                       VerticalAlignment="Center"
                                                       Command="{Binding DataContext.OpenProfileEditorCommand, ElementName=Root}"
                                                       CommandParameter="{Binding}"
@@ -435,7 +443,7 @@
                                             <!-- r29 doc 02 2.4: reuses ModelProfileItemViewModel.IsExpanded,
                                                  which had no other consumer once the Expander went. -->
                                         </Button>
-                                        <Button Grid.Column="3" Classes="icon-btn"
+                                        <Button Grid.Column="4" Classes="icon-btn"
                                                 IsVisible="{Binding IsLocalGguf}"
                                                 ToolTip.Tip="Delete this local model"
                                                 Command="{Binding DataContext.DeleteModelCommand, ElementName=Root}"

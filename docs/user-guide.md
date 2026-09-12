@@ -81,7 +81,10 @@ Auto-tune uses the saved server configuration as its probe baseline and changes
 only the candidate axes for each transient probe. When available, local GGUF
 metadata and the current hardware profile inform the probe envelope. Tuning
 does not silently overwrite the saved runtime configuration; review and save
-any desired values explicitly.
+any desired values explicitly. Services and Models expose cancellation for an
+individual tune and the **Auto-tune all** operation. Cancellation reports a
+cancelled result, releases the probe, and does not save a profile after the
+cancellation boundary.
 
 Factual capability badges such as **MoE**, **MTP**, **Draft**, and
 **Vision / Projector** describe model metadata only. They do not mean that a
@@ -573,7 +576,8 @@ avoiding large re-downloads matters; those files are replaceable, while Data
 Root contains the user-created state that is not. Credentials and fallback
 secret material are not included in Data Root backups. Restore preflights all
 file entries for safe paths, duplicate targets, and size budgets of 10,000 file
-entries, 128 MiB per entry, and 512 MiB total by default. Each file is written
-to a temporary file beside its target and atomically replaced only after the
-readback checks pass. Existing files still require the explicit overwrite
-choice. Re-enter credentials after restoring on another machine.
+entries, 128 MiB per entry, and 512 MiB total by default. The archive is first
+expanded beneath a temporary staging root, with actual expanded bytes checked
+while copying. Commit moves are rollback-safe and existing files still require
+the explicit overwrite choice. Re-enter credentials after restoring on another
+machine.

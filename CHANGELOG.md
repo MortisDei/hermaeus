@@ -15,8 +15,10 @@ limit.
 
 - Shared application lifecycle now owns startup, recovery, and bounded shutdown
   across Desktop, Local API, and the R33 headless driver. Partial startup can
-  retry, and shutdown records an incomplete phase when an owner exceeds its
-  deadline instead of pretending it stopped cleanly.
+  retry, shutdown drains owners in reverse registration order, and shutdown
+  records an incomplete phase when an owner exceeds its deadline instead of
+  pretending it stopped cleanly. Settings-triggered restart now uses the same
+  owner drain and a bounded single-instance handoff.
 - Agent task commands and prepared workspace mutations now use one task and
   target ownership boundary. Mutating proposals carry typed arguments,
   workspace policy, target identity, preimage, and proposed output before
@@ -28,17 +30,30 @@ limit.
   production composition graph to create, approve, execute, and verify a real
   Agent file mutation without using owner settings, data, or workspace paths.
 - Backup restore now preflights every archive file with duplicate-target,
-  per-entry, and total uncompressed-size limits, then extracts each file to a
-  same-directory temporary file before an atomic replacement. Cancellation and
-  reparse-point checks remain part of the restore boundary.
+  per-entry, and total uncompressed-size limits, then expands into a temporary
+  data-root staging directory with actual-byte checks before a rollback-safe
+  commit. Cancellation and reparse-point checks remain part of the restore
+  boundary.
 - AutoTune probes clone the complete managed-server configuration and preserve
   configured runtime fields while applying only the candidate axes. Local GGUF
   metadata and the current hardware profile are used when available, and
-  transient probe settings are not saved.
+  transient probe settings are not saved. Services and Models share operation
+  cancellation; a cancelled individual or bulk tune reports cancellation and
+  does not save a profile after the cancellation boundary. Candidate failure,
+  admission refusal, and cancellation retain path-free adaptive evidence when
+  their workload identity is available.
+- Lab recipe availability now reconciles the selected baseline's model, GGUF,
+  and exact executable identity before offering a run. Doctor actions carry
+  typed panel, section, entity, and control targets, with an explicit missing
+  entity explanation and focus request.
 - Benchmark preparation and execution now persist operation evidence before
   work begins, retain a truthful cancelled or partial result, and make final
   evidence persistence independent of caller cancellation. The Linux desktop
   installer also safely escapes package paths containing spaces.
+- The R33 driver now exercises production-composed RAG generation and query,
+  Chat retrieval context, deterministic voice orchestration, Lab failure
+  cleanup, Lab Apply, settings reopen, and shared shutdown in addition to the
+  Agent mutation receipt.
 - R33 development is prepared as `v0.41.0-beta`. This local implementation
   creates no tag, release, push, pull request, merge, or other publication.
 

@@ -76,7 +76,11 @@ public partial class App : Application
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
             var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
+            window.ApplicationLifecycle = lifecycle;
             lifecycle.RegisterShutdownOwner("desktop view models", _ => vm.ShutdownAsync());
+            lifecycle.RegisterShutdownOwner(
+                "voice orchestrator",
+                ct => sp.GetRequiredService<IVoiceOrchestrator>().ShutdownAsync(ct));
             window.Opened += async (_, _) =>
             {
                 if (Interlocked.Exchange(ref _initialized, 1) != 0) return;

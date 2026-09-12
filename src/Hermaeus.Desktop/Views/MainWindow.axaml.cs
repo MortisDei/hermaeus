@@ -17,6 +17,7 @@ public partial class MainWindow : Window
 {
     public DesktopIntegrationService? DesktopIntegration { get; set; }
     public IPatchDiffService? PatchDiffService { get; set; }
+    public IApplicationLifecycleCoordinator? ApplicationLifecycle { get; set; }
     private IInputElement? _prePaletteFocus;
     private bool _closeAfterShutdown;
 
@@ -171,7 +172,12 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(processPath))
             throw new InvalidOperationException("The current application path is unavailable, so Hermaeus cannot restart itself.");
 
-        await vm.ShutdownAsync();
+        if (ApplicationLifecycle is null)
+            throw new InvalidOperationException("The application lifecycle coordinator is not configured.");
+
+        var shutdown = await ApplicationLifecycle.ShutdownAsync(TimeSpan.FromSeconds(15));
+        if (!shutdown.Clean)
+            throw new InvalidOperationException("Hermaeus could not complete its bounded shutdown, so restart was refused.");
 
         var startInfo = new ProcessStartInfo
         {
@@ -181,6 +187,7 @@ public partial class MainWindow : Window
         };
         foreach (var argument in Environment.GetCommandLineArgs().Skip(1))
             startInfo.ArgumentList.Add(argument);
+        startInfo.ArgumentList.Add(Program.RestartHandoffArgument);
 
         if (Process.Start(startInfo) is null)
             throw new InvalidOperationException("Hermaeus could not start the replacement process.");
