@@ -75,6 +75,7 @@ public sealed class RecommendationApplicationService
             }
             catch
             {
+                await _store.ConsumeRollbackAsync(rollback.Id, CancellationToken.None);
                 await _store.AddDecisionAsync(new RecommendationDecisionRecord(
                     NewId(), recommendation.Id, RecommendationDecisionKind.Apply, actor,
                     currentIdentity, "failed", DateTime.UtcNow), CancellationToken.None);
@@ -101,6 +102,22 @@ public sealed class RecommendationApplicationService
         CancellationToken ct = default)
     {
         ValidateId(recommendationId, nameof(recommendationId));
+        await _gate.WaitAsync(ct);
+        try
+        {
+            return await DismissOwnedAsync(recommendationId, actor, ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<RecommendationTransactionResult> DismissOwnedAsync(
+        string recommendationId,
+        string actor,
+        CancellationToken ct)
+    {
         var recommendation = await GetRequiredAsync(recommendationId, ct);
         if (recommendation.Status != RecommendationStatus.Current)
             return new(recommendation.Id, false, "not-current", "This recommendation is no longer current.");
@@ -153,6 +170,7 @@ public sealed class RecommendationApplicationService
             }
             catch
             {
+                await _store.ConsumeRollbackAsync(undoRollback.Id, CancellationToken.None);
                 await _store.AddDecisionAsync(new RecommendationDecisionRecord(
                     NewId(), recommendation.Id, RecommendationDecisionKind.Undo, actor,
                     currentIdentity, "failed", DateTime.UtcNow), CancellationToken.None);
@@ -175,6 +193,19 @@ public sealed class RecommendationApplicationService
     }
 
     public async Task<int> ReconcileAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            return await ReconcileOwnedAsync(ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<int> ReconcileOwnedAsync(CancellationToken ct)
     {
         var decisions = await _store.QueryDecisionsAsync(ct: ct);
         var reconciled = 0;

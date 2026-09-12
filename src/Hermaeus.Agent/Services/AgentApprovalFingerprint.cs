@@ -29,6 +29,33 @@ public static class AgentApprovalFingerprint
     }
 
     /// <summary>
+    /// Fingerprints the complete R33 prepared proposal, not merely the model's
+    /// argument dictionary. A changed target, pre-image, payload, policy or
+    /// proposal revision therefore invalidates an approval rendered earlier.
+    /// </summary>
+    public static string Compute(AgentPendingToolAction pending)
+    {
+        var payload = new
+        {
+            tool = pending.ToolName,
+            arguments = pending.Arguments,
+            proposal_id = pending.ProposalId,
+            proposal_revision = pending.ProposalRevision,
+            schema_version = pending.SchemaVersion,
+            workspace_root = pending.WorkspaceRoot,
+            mutation_kind = pending.MutationKind,
+            relative_path = pending.RelativePath,
+            expected_pre_image_sha256 = pending.ExpectedPreImageSha256,
+            expected_pre_image_existed = pending.ExpectedPreImageExisted,
+            proposed_content_sha256 = pending.ProposedContentSha256,
+            policy_fingerprint = pending.PolicyFingerprint,
+            prepared_at = pending.PreparedAt
+        };
+        var canonical = JsonSerializer.Serialize(payload, CanonicalOptions);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
+
+    /// <summary>
     /// The fingerprint to treat as "current" for a pending action: its own
     /// stored value when present, else freshly computed from ToolName and
     /// Arguments (covers a pre-r23 persisted task with no stored
@@ -37,5 +64,7 @@ public static class AgentApprovalFingerprint
     public static string Resolve(AgentPendingToolAction? pending) =>
         pending is null
             ? string.Empty
-            : pending.Fingerprint is { Length: > 0 } ? pending.Fingerprint : Compute(pending.ToolName, pending.Arguments);
+            : pending.ProposalId.Length > 0
+                ? Compute(pending)
+                : pending.Fingerprint is { Length: > 0 } ? pending.Fingerprint : Compute(pending.ToolName, pending.Arguments);
 }

@@ -77,6 +77,12 @@ Extra arguments and live process overrides remain on Services, where their
 trust checks and process state are visible. Runtime process settings still use
 **Save Config** on Services.
 
+Auto-tune uses the saved server configuration as its probe baseline and changes
+only the candidate axes for each transient probe. When available, local GGUF
+metadata and the current hardware profile inform the probe envelope. Tuning
+does not silently overwrite the saved runtime configuration; review and save
+any desired values explicitly.
+
 Factual capability badges such as **MoE**, **MTP**, **Draft**, and
 **Vision / Projector** describe model metadata only. They do not mean that a
 feature is configured, available, or active. A primary generation card owns
@@ -565,5 +571,9 @@ and Privacy Audit before using sensitive material.
 Use Settings' backup flow for Data Root. Back up AI Assets separately only if
 avoiding large re-downloads matters; those files are replaceable, while Data
 Root contains the user-created state that is not. Credentials and fallback
-secret material are not included in Data Root backups. Re-enter credentials
-after restoring on another machine.
+secret material are not included in Data Root backups. Restore preflights all
+file entries for safe paths, duplicate targets, and size budgets of 10,000 file
+entries, 128 MiB per entry, and 512 MiB total by default. Each file is written
+to a temporary file beside its target and atomically replaced only after the
+readback checks pass. Existing files still require the explicit overwrite
+choice. Re-enter credentials after restoring on another machine.

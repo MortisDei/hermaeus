@@ -64,7 +64,8 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.DoesNotContain("$PACKAGE_DIR/install-desktop.sh", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("$PACKAGE_DIR/uninstall-desktop.sh", buildScript, StringComparison.Ordinal);
         Assert.Contains("INTERNAL_EXEC=\"$SOURCE_DIR/app/hermaeus-app\"", buildScript, StringComparison.Ordinal);
-        Assert.Contains("Exec=$INSTALL_DIR/Hermaeus", buildScript, StringComparison.Ordinal);
+        Assert.Contains("DESKTOP_EXEC=\"$(desktop_exec_escape \"$INSTALL_DIR/Hermaeus\")\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Exec=$DESKTOP_EXEC", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("cat > \"$PACKAGE_DIR/Hermaeus\"", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("$PACKAGE_DIR/hermaeus.desktop", buildScript, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(buildScript, "Icon=hermaeus"));

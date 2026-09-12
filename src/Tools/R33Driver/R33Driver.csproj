@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>R33Driver</AssemblyName>
+    <RootNamespace>R33Driver</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Hermaeus.Agent/Hermaeus.Agent.csproj" />
+    <ProjectReference Include="../../Hermaeus.Composition/Hermaeus.Composition.csproj" />
+    <ProjectReference Include="../../Hermaeus.Core/Hermaeus.Core.csproj" />
+    <ProjectReference Include="../../Hermaeus.Services/Hermaeus.Services.csproj" />
+  </ItemGroup>
+
+</Project>

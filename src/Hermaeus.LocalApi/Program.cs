@@ -17,13 +17,23 @@ var app = builder.Build();
 
 var settingsService = app.Services.GetRequiredService<ISettingsService>();
 await settingsService.LoadAsync();
-await app.Services.GetRequiredService<IMemoryStore>().InitializeAsync();
-await app.Services.GetRequiredService<SqliteRagStore>().InitializeAsync();
+var lifecycle = app.Services.GetRequiredService<IApplicationLifecycleCoordinator>();
+var startup = await lifecycle.StartAsync();
+if (!startup.Ready)
+{
+    Console.Error.WriteLine("Hermaeus.LocalApi: shared application startup was incomplete.");
+    foreach (var phase in startup.Phases.Where(phase => !phase.Succeeded))
+        Console.Error.WriteLine($"  {phase.Name}: {phase.Error}");
+    await lifecycle.ShutdownAsync(TimeSpan.FromSeconds(10));
+    Environment.Exit(1);
+    return;
+}
 
 var localApiSettings = settingsService.Settings.LocalApi;
 if (!localApiSettings.Enabled)
 {
     Console.Error.WriteLine("Hermaeus.LocalApi: LocalApi.Enabled is false in settings. Refusing to serve. Enable it in Settings > Local API first.");
+    await lifecycle.ShutdownAsync(TimeSpan.FromSeconds(10));
     Environment.Exit(1);
     return;
 }
@@ -35,7 +45,16 @@ app.Urls.Add($"http://127.0.0.1:{port}");
 app.UseLocalApiTokenAuth();
 app.MapLocalApiEndpoints();
 
-await app.RunAsync();
+try
+{
+    await app.RunAsync();
+}
+finally
+{
+    var shutdown = await lifecycle.ShutdownAsync(TimeSpan.FromSeconds(10));
+    if (!shutdown.Clean)
+        Console.Error.WriteLine("Hermaeus.LocalApi: shared application shutdown was incomplete; lifecycle evidence was retained.");
+}
 
 static string? ReadSettingsPath(string[] args)
 {

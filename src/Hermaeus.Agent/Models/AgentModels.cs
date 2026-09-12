@@ -79,7 +79,36 @@ public enum AgentDraftPatchStatus
     Approved,
     Rejected,
     Blocked,
-    Reverted
+    Reverted,
+    AlreadySatisfied
+}
+
+/// <summary>Deterministic operation class for a prepared Agent mutation.</summary>
+public enum AgentMutationKind
+{
+    Create,
+    Edit,
+    Replace,
+    ApplyDraftPatch,
+    Command,
+    SubTaskPlan
+}
+
+/// <summary>
+/// Authoritative outcome of a prepared mutation attempt. The model's prose is
+/// never allowed to upgrade one of these outcomes to Verified.
+/// </summary>
+public enum AgentMutationOutcome
+{
+    Pending,
+    Applied,
+    AlreadySatisfied,
+    Blocked,
+    Unavailable,
+    Failed,
+    Cancelled,
+    Conflict,
+    Unknown
 }
 
 /// <summary>Lifecycle of one entry in a parent task's <see cref="AgentTaskState.SubTaskPlan"/>.</summary>
@@ -150,6 +179,12 @@ public sealed class AgentTaskState
     /// </summary>
     public List<AgentSteeringNote> PendingInstructions { get; set; } = [];
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
+    /// <summary>
+    /// Durable mutation attempts. Older task files have an empty list and are
+    /// treated as legacy evidence rather than being given fabricated
+    /// post-images.
+    /// </summary>
+    public List<AgentMutationReceipt> MutationReceipts { get; set; } = [];
     public AgentPendingToolAction? PendingToolAction { get; set; }
     public string Summary { get; set; } = string.Empty;
 
@@ -501,6 +536,25 @@ public sealed class AgentDraftPatch
     /// restoring the pre-image, so a later edit is never silently clobbered.
     /// </summary>
     public string AppliedContent { get; set; } = string.Empty;
+    /// <summary>Receipt that proved this patch's post-image, when available.</summary>
+    public string? MutationReceiptId { get; set; }
+
+    /// <summary>
+    /// Prepared proposal facts captured when this patch entered the review
+    /// queue. Empty on older manually queued patches, which retain the legacy
+    /// apply path but are rechecked immediately before writing.
+    /// </summary>
+    public string ProposalId { get; set; } = string.Empty;
+    public int ProposalRevision { get; set; }
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    public string ExpectedPreImageSha256 { get; set; } = string.Empty;
+    public bool ExpectedPreImageExisted { get; set; }
+    public string ProposedContentSha256 { get; set; } = string.Empty;
+    public string PolicyFingerprint { get; set; } = string.Empty;
+    public DateTime PreparedAt { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsPrepared => ProposalId.Length > 0 && ProposalRevision > 0 && PreparedAt != default;
 
     public DateTime? RevertedAt { get; set; }
     public string? RevertedBy { get; set; }
@@ -531,12 +585,46 @@ public sealed record AgentTaskRevertResult(IReadOnlyList<AgentTaskRevertFileOutc
 }
 
 /// <summary>
-/// Outcome of an approval decision (AgentService.AppendApprovalAsync).
-/// <see cref="Applied"/> is false only when the approval fingerprint did not
-/// match the currently pending action (r23 4.1); the pending action stays
-/// pending and nothing executed.
+/// One durable attempt to carry a prepared proposal through approval,
+/// execution, observation and verification. Additive fields keep older task
+/// state readable without inventing receipts for historic writes.
 /// </summary>
-public sealed record AgentApprovalResult(bool Applied, string Message);
+public sealed class AgentMutationReceipt
+{
+    public string ReceiptId { get; set; } = Guid.NewGuid().ToString("N");
+    public string AttemptId { get; set; } = Guid.NewGuid().ToString("N");
+    public string ProposalId { get; set; } = string.Empty;
+    public int ProposalRevision { get; set; }
+    public string TaskId { get; set; } = string.Empty;
+    public string ToolName { get; set; } = string.Empty;
+    public AgentMutationKind MutationKind { get; set; }
+    public string RelativePath { get; set; } = string.Empty;
+    public string ExpectedPreImageSha256 { get; set; } = string.Empty;
+    public bool ExpectedPreImageExisted { get; set; }
+    public string ProposedContentSha256 { get; set; } = string.Empty;
+    public string ObservedPostImageSha256 { get; set; } = string.Empty;
+    public bool ObservedPostImageExisted { get; set; }
+    public bool Changed { get; set; }
+    public bool ApprovalRecorded { get; set; }
+    public bool Verified { get; set; }
+    public AgentMutationOutcome Outcome { get; set; } = AgentMutationOutcome.Pending;
+    public string CompletionReason { get; set; } = string.Empty;
+    public string EvidenceId { get; set; } = string.Empty;
+    public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+    public DateTime FinishedAt { get; set; }
+}
+
+/// <summary>
+/// Outcome of an approval decision (AgentService.AppendApprovalAsync).
+/// <see cref="Applied"/> means the approved proposal produced a verified
+/// filesystem change. A refusal, conflict, failed attempt or no-effect result
+/// is not an applied mutation.
+/// </summary>
+public sealed record AgentApprovalResult(bool Applied, string Message)
+{
+    public AgentMutationOutcome Outcome { get; init; } = AgentMutationOutcome.Unknown;
+    public string ReceiptId { get; init; } = string.Empty;
+}
 
 public enum AgentLedgerFileKind { Created, Edited }
 
@@ -711,6 +799,27 @@ public sealed class AgentPendingToolAction
     /// approval path recomputes from ToolName/Arguments in that case.
     /// </summary>
     public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>Immutable proposal identity and prepared execution facts.</summary>
+    public string ProposalId { get; set; } = string.Empty;
+    public int ProposalRevision { get; set; }
+    public int SchemaVersion { get; set; }
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    public AgentMutationKind MutationKind { get; set; }
+    public string RelativePath { get; set; } = string.Empty;
+    public string ExpectedPreImageSha256 { get; set; } = string.Empty;
+    public bool ExpectedPreImageExisted { get; set; }
+    public string ProposedContent { get; set; } = string.Empty;
+    public string ProposedContentSha256 { get; set; } = string.Empty;
+    public string PolicyFingerprint { get; set; } = string.Empty;
+    public DateTime PreparedAt { get; set; }
+
+    /// <summary>
+    /// True only when the action passed typed, containment, policy and
+    /// capability preparation. Empty on pre-R33 task state.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsPrepared => ProposalId.Length > 0 && SchemaVersion >= 1 && PreparedAt != default;
 }
 
 public sealed class AgentNextAction

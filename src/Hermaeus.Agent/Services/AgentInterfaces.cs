@@ -2,6 +2,18 @@ using Hermaeus.Agent.Models;
 
 namespace Hermaeus.Agent.Services;
 
+/// <summary>
+/// Owns Agent command execution. A task is serialized independently, while a
+/// physical workspace target gets a short additional lock so two tasks cannot
+/// prepare and write the same file concurrently.
+/// </summary>
+public interface IAgentTaskCommandOwner
+{
+    Task ExecuteTaskAsync(string taskId, Func<CancellationToken, Task> action, CancellationToken ct = default);
+    Task<T> ExecuteTaskAsync<T>(string taskId, Func<CancellationToken, Task<T>> action, CancellationToken ct = default);
+    Task<T> ExecuteTargetAsync<T>(string workspaceRoot, string relativePath, Func<CancellationToken, Task<T>> action, CancellationToken ct = default);
+}
+
 public interface IAgentTaskStateStore
 {
     Task InitializeAsync(CancellationToken ct = default);
@@ -110,6 +122,12 @@ public interface IAgentService
     /// that the exact visible model is currently available. This is a user
     /// review action, never automatic fallback.</summary>
     Task<AgentTaskState> ChangeTaskModelAsync(string taskId, string modelId, CancellationToken ct = default);
+    /// <summary>Updates the model selections in a pending sub-task proposal as a new prepared revision.</summary>
+    Task<string> UpdatePendingPlanModelsAsync(
+        string taskId,
+        string expectedFingerprint,
+        IReadOnlyDictionary<int, string> modelIds,
+        CancellationToken ct = default);
     /// <summary>
     /// Approves or rejects the task's currently pending tool action.
     /// <paramref name="expectedFingerprint"/> must match the pending

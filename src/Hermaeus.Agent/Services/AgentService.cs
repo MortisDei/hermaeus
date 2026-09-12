@@ -193,6 +193,7 @@ public sealed class AgentService : IAgentService
     private readonly IAgentWorkspaceTools? _workspaceTools;
     private readonly IEmpiricalExperienceStore? _experiences;
     private readonly IRuntimeLogService? _logs;
+    private readonly IAgentTaskCommandOwner _commandOwner;
 
     /// <summary>
     /// r29 doc 03 3.4: one interrupt source per running task, held for the
@@ -229,7 +230,8 @@ public sealed class AgentService : IAgentService
         ILessonStore? lessons = null,
         IAgentWorkspaceTools? workspaceTools = null,
         IEmpiricalExperienceStore? experiences = null,
-        IRuntimeLogService? logs = null)
+        IRuntimeLogService? logs = null,
+        IAgentTaskCommandOwner? commandOwner = null)
     {
         _store = store;
         _contextBuilder = contextBuilder;
@@ -240,9 +242,10 @@ public sealed class AgentService : IAgentService
         _manifests = manifests;
         _lessons = lessons;
         _settings = settings;
-        _workspaceTools = workspaceTools;
+        _workspaceTools = workspaceTools ?? new AgentWorkspaceTools();
         _experiences = experiences;
         _logs = logs;
+        _commandOwner = commandOwner ?? new AgentTaskCommandOwner();
     }
 
     private static readonly IReadOnlyList<string> BaseTaskConstraints =
@@ -324,6 +327,16 @@ public sealed class AgentService : IAgentService
         string? operationId = null)
     {
         operationId ??= OperationCorrelation.NewId();
+        return await _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => RunStepOwnedAsync(taskId, options, ownerToken, operationId), ct);
+    }
+
+    private async Task<AgentStepResult> RunStepOwnedAsync(
+        string taskId,
+        AgentWorkspaceOptions options,
+        CancellationToken ct,
+        string operationId)
+    {
         var timer = Stopwatch.StartNew();
         try
         {
@@ -356,6 +369,8 @@ public sealed class AgentService : IAgentService
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+        if (state.WorkspaceRoot is { Length: > 0 })
+            options = options with { WorkspaceRoot = state.WorkspaceRoot };
         var firstNewToolResult = state.ToolResults.Count;
         if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted)
             throw new InvalidOperationException("Agent task is already finished.");
@@ -528,6 +543,8 @@ public sealed class AgentService : IAgentService
             };
 
             AgentToolPolicyDecision decision;
+            AgentMutationPreparationResult? preparation = null;
+            AgentPendingToolAction? preparedPlan = null;
             if (string.Equals(nextTool, "plan_subtasks", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(state.ParentTaskId))
             {
                 // Depth limit enforced in code, not prompt text (r15
@@ -549,31 +566,68 @@ public sealed class AgentService : IAgentService
             }
             else if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
             {
-                var requestedCommand = AgentToolExecutor.Arg(response.NextAction.Arguments, "command");
-                decision = _safetyGate.EvaluateCommand(requestedCommand, manifest?.AllowedCommands ?? []);
-                if (decision.Disposition == AgentToolDisposition.RequiresApproval
-                    && state.RememberedCommandApprovals.Any(c => string.Equals(c, requestedCommand.Trim(), StringComparison.OrdinalIgnoreCase)))
+                preparation = await AgentMutationPreparation.PrepareAsync(
+                    nextTool, response.NextAction.Arguments, options, manifest?.Policy, _workspaceTools, ct);
+                if (!preparation.IsValid)
                 {
-                    // Same exact command string was approved earlier in this
-                    // task; skip asking again. A different command, even in
-                    // the same template family, still requires a fresh
-                    // approval - this never widens to "the family is now
-                    // trusted".
-                    decision = decision with { Disposition = AgentToolDisposition.Allowed, Reason = "Command was already approved once in this task." };
+                    decision = new AgentToolPolicyDecision(
+                        AgentToolDisposition.Blocked,
+                        AgentRiskLevel.High,
+                        $"mutation proposal refused before review: {preparation.Error}");
+                }
+                else
+                {
+                    response.NextAction.Arguments = preparation.Pending!.Arguments;
+                    var requestedCommand = (string)preparation.Pending.Arguments["command"]!;
+                    decision = _safetyGate.EvaluateCommand(requestedCommand, manifest?.AllowedCommands ?? []);
+                    if (decision.Disposition == AgentToolDisposition.RequiresApproval
+                        && state.RememberedCommandApprovals.Any(c => string.Equals(c, requestedCommand.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    {
+                        // Same exact command string was approved earlier in this
+                        // task; skip asking again. A different command, even in
+                        // the same template family, still requires a fresh
+                        // approval - this never widens to "the family is now
+                        // trusted".
+                        decision = decision with { Disposition = AgentToolDisposition.Allowed, Reason = "Command was already approved once in this task." };
+                    }
                 }
             }
             else if (nextTool is "edit_file" or "create_file" or "apply_draft_patch")
             {
-                // A policy-denied write is classified Blocked before it ever
-                // becomes an approvable pending action (r23 3.2); the same
-                // rule is re-checked at actual execution time inside
-                // AgentWorkspaceTools, for the draft-patch queue and Rewind
-                // paths that do not go through this classification step.
-                var targetPath = AgentToolExecutor.Arg(response.NextAction.Arguments, "relative_path", "path");
-                var writeVerdict = WorkspacePolicyEvaluator.EvaluateWrite(manifest?.Policy, targetPath);
-                decision = writeVerdict.Allowed
+                preparation = await AgentMutationPreparation.PrepareAsync(
+                    nextTool, response.NextAction.Arguments, options, manifest?.Policy, _workspaceTools, ct);
+                decision = preparation.IsValid
                     ? _safetyGate.Evaluate(nextTool, response.NextAction.RequiresApproval)
-                    : new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, $"write blocked by workspace policy: {writeVerdict.Reason}");
+                    : new AgentToolPolicyDecision(
+                        AgentToolDisposition.Blocked,
+                        AgentRiskLevel.High,
+                        $"mutation proposal refused before review: {preparation.Error}");
+                if (preparation.IsValid)
+                    response.NextAction.Arguments = preparation.Pending!.Arguments;
+            }
+            else if (string.Equals(nextTool, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryParsePlanSubtasks(response.NextAction.Arguments, out var specs, out var planError))
+                {
+                    decision = new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High,
+                        $"mutation proposal refused before review: {planError}");
+                }
+                else
+                {
+                    var unavailable = specs.Select(s => s.ModelId).FirstOrDefault(modelId =>
+                        !string.IsNullOrWhiteSpace(modelId)
+                        && !visibleModels.Any(model => string.Equals(model.Id, modelId, StringComparison.Ordinal)));
+                    if (unavailable is not null)
+                    {
+                        decision = new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High,
+                            $"mutation proposal refused before review: proposed sub-task model '{unavailable}' is not visible and available.");
+                    }
+                    else
+                    {
+                        preparedPlan = BuildPreparedPlanPending(response.NextAction.Arguments, options, manifest?.Policy);
+                        decision = _safetyGate.Evaluate(nextTool, response.NextAction.RequiresApproval);
+                    }
+                }
             }
             else
             {
@@ -586,14 +640,17 @@ public sealed class AgentService : IAgentService
                 if (_toolExecutor.CanExecute(nextTool))
                 {
                     state.Status = AgentTaskStatus.WaitingForUser;
-                    state.PendingToolAction = new AgentPendingToolAction
+                    state.PendingToolAction = preparation?.Pending ?? preparedPlan ?? new AgentPendingToolAction
                     {
                         ToolName = nextTool,
-                        Arguments = response.NextAction.Arguments,
+                        Arguments = AgentMutationPreparation.CloneArguments(response.NextAction.Arguments),
                         RiskLevel = decision.RiskLevel,
                         Reason = decision.Reason,
                         Fingerprint = AgentApprovalFingerprint.Compute(nextTool, response.NextAction.Arguments)
                     };
+                    state.PendingToolAction.RiskLevel = decision.RiskLevel;
+                    state.PendingToolAction.Reason = decision.Reason;
+                    state.PendingToolAction.Fingerprint = AgentApprovalFingerprint.Resolve(state.PendingToolAction);
                 }
                 else
                 {
@@ -907,6 +964,17 @@ public sealed class AgentService : IAgentService
         CancellationToken ct = default)
     {
         var operationId = OperationCorrelation.NewId();
+        return await _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => RunOwnedAsync(taskId, options, onStep, ownerToken, operationId), ct);
+    }
+
+    private async Task<AgentStepResult> RunOwnedAsync(
+        string taskId,
+        AgentWorkspaceOptions options,
+        Action<AgentStepResult>? onStep,
+        CancellationToken ct,
+        string operationId)
+    {
         var timer = Stopwatch.StartNew();
         _logs?.Add(new RuntimeLogEntry(
             DateTime.UtcNow,
@@ -954,7 +1022,7 @@ public sealed class AgentService : IAgentService
         do
         {
             ct.ThrowIfCancellationRequested();
-            result = await RunStepAsync(taskId, options, ct, operationId);
+            result = await RunStepOwnedAsync(taskId, options, ct, operationId);
             steps++;
             onStep?.Invoke(result);
         }
@@ -1051,11 +1119,12 @@ public sealed class AgentService : IAgentService
                 ?? throw new InvalidOperationException($"Sub-task '{childTaskId}' was not found.");
             var childOptions = options with { ModelId = persistedChild.ModelId };
             var childStepsUsed = 0;
-            var childResult = await RunCoreAsync(childTaskId, childOptions, onStep: r =>
-            {
-                childStepsUsed++;
-                onStep?.Invoke(r);
-            }, ct, operationId);
+            var childResult = await _commandOwner.ExecuteTaskAsync(childTaskId,
+                childToken => RunCoreAsync(childTaskId, childOptions, onStep: r =>
+                {
+                    childStepsUsed++;
+                    onStep?.Invoke(r);
+                }, childToken, operationId), ct);
 
             parent = await _store.LoadAsync(parent.TaskId, ct) ?? parent;
             parent.OrchestrationStepsUsed += childStepsUsed;
@@ -1142,7 +1211,7 @@ public sealed class AgentService : IAgentService
         AgentStepResult? stepResult;
         try
         {
-            stepResult = await RunStepAsync(parent.TaskId, options, ct, operationId);
+            stepResult = await RunStepOwnedAsync(parent.TaskId, options, ct, operationId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1233,9 +1302,84 @@ public sealed class AgentService : IAgentService
         _store.ListRecentAsync(25, ct);
 
     public Task DeleteTaskAsync(string taskId, CancellationToken ct = default) =>
-        _store.DeleteAsync(taskId, ct);
+        _commandOwner.ExecuteTaskAsync(taskId, ownerToken => _store.DeleteAsync(taskId, ownerToken), ct);
 
-    public async Task<AgentTaskState> ChangeTaskModelAsync(string taskId, string modelId, CancellationToken ct = default)
+    public Task<string> UpdatePendingPlanModelsAsync(
+        string taskId,
+        string expectedFingerprint,
+        IReadOnlyDictionary<int, string> modelIds,
+        CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => UpdatePendingPlanModelsCoreAsync(taskId, expectedFingerprint, modelIds, ownerToken), ct);
+
+    private async Task<string> UpdatePendingPlanModelsCoreAsync(
+        string taskId,
+        string expectedFingerprint,
+        IReadOnlyDictionary<int, string> modelIds,
+        CancellationToken ct)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+        var pending = state.PendingToolAction;
+        if (pending is null || !pending.ToolName.Equals("plan_subtasks", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("This task has no pending sub-task plan to edit.");
+        if (!string.Equals(AgentApprovalFingerprint.Resolve(pending), expectedFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException("The pending sub-task plan changed since it was displayed. Review it again.");
+        if (!pending.IsPrepared)
+            throw new InvalidOperationException("The pending sub-task plan predates the prepared proposal contract and must be proposed again.");
+
+        var raw = pending.Arguments.TryGetValue("subtasks", out var rawSubtasks)
+            ? rawSubtasks
+            : null;
+        if (raw is not JsonElement { ValueKind: JsonValueKind.Array } array)
+            throw new InvalidOperationException("The pending sub-task plan has no editable sub-task list.");
+
+        var nodes = System.Text.Json.Nodes.JsonNode.Parse(array.GetRawText())?.AsArray()
+            ?? throw new InvalidOperationException("The pending sub-task plan could not be read.");
+        foreach (var selection in modelIds)
+        {
+            if (selection.Key < 0 || selection.Key >= nodes.Count)
+                throw new InvalidOperationException($"Sub-task model selection index {selection.Key} is outside the pending plan.");
+            if (nodes[selection.Key] is not System.Text.Json.Nodes.JsonObject node)
+                throw new InvalidOperationException($"Sub-task {selection.Key + 1} is not an editable object.");
+            if (string.IsNullOrWhiteSpace(selection.Value))
+                node.Remove("model_id");
+            else
+                node["model_id"] = selection.Value.Trim();
+        }
+
+        var arguments = AgentMutationPreparation.CloneArguments(pending.Arguments);
+        arguments["subtasks"] = JsonSerializer.SerializeToElement(nodes);
+        if (!TryParsePlanSubtasks(arguments, out var specs, out var parseError))
+            throw new InvalidOperationException(parseError);
+
+        var visibleModels = await GetVisibleModelsAsync(ct);
+        var unavailable = specs.Select(s => s.ModelId).FirstOrDefault(modelId =>
+            !string.IsNullOrWhiteSpace(modelId)
+            && !visibleModels.Any(model => string.Equals(model.Id, modelId, StringComparison.Ordinal)));
+        if (unavailable is not null)
+            throw new InvalidOperationException($"The selected sub-task model '{unavailable}' is not visible and available.");
+
+        var root = state.WorkspaceRoot.Length > 0
+            ? AgentWorkspaceTools.ResolveWorkspaceRoot(state.WorkspaceRoot)
+            : pending.WorkspaceRoot;
+        WorkspacePolicy? policy = null;
+        if (_manifests is not null)
+            policy = (await _manifests.LoadAsync(root, ct))?.Policy;
+        var updated = BuildPreparedPlanPending(arguments, new AgentWorkspaceOptions(root), policy);
+        updated.ProposalId = pending.ProposalId;
+        updated.ProposalRevision = pending.ProposalRevision + 1;
+        updated.Fingerprint = AgentApprovalFingerprint.Compute(updated);
+        state.PendingToolAction = updated;
+        await _store.SaveAsync(state, ct);
+        return AgentApprovalFingerprint.Resolve(updated);
+    }
+
+    public Task<AgentTaskState> ChangeTaskModelAsync(string taskId, string modelId, CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => ChangeTaskModelCoreAsync(taskId, modelId, ownerToken), ct);
+
+    private async Task<AgentTaskState> ChangeTaskModelCoreAsync(string taskId, string modelId, CancellationToken ct)
     {
         var state = await _store.LoadAsync(taskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
         if (state.Status == AgentTaskStatus.Running)
@@ -1269,6 +1413,19 @@ public sealed class AgentService : IAgentService
     public async Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
     {
         var operationId = OperationCorrelation.NewId();
+        return await _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => AppendApprovalCoreAsync(taskId, action, approved, expectedFingerprint, options, ownerToken, operationId), ct);
+    }
+
+    private async Task<AgentApprovalResult> AppendApprovalCoreAsync(
+        string taskId,
+        string action,
+        bool approved,
+        string expectedFingerprint,
+        AgentWorkspaceOptions? options,
+        CancellationToken ct,
+        string operationId)
+    {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
         var firstNewToolResult = state.ToolResults.Count;
@@ -1323,96 +1480,43 @@ public sealed class AgentService : IAgentService
 
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
         state.ToolResults.Add(BuildApprovalToolResult(state.PendingToolAction!.ToolName, approved, fingerprintBlocked: false));
+        AgentApprovalResult? executionOutcome = null;
         if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
         {
-            await ApplyPlanSubtasksApprovalAsync(state, state.PendingToolAction, options, ct);
-        }
-        else if (approved && state.PendingToolAction is not null)
-        {
-            // Executes against the task's OWN stored workspace root, not
-            // whatever workspace the workbench currently has active - the
-            // review queue lists tasks across every workspace, so the
-            // caller-supplied options can point somewhere else entirely
-            // (r16 01-orchestration-hardening.md 1.4). A pre-r16 state with
-            // no stored root falls back to the caller's options exactly as
-            // before; if neither is available there is nothing safe to
-            // execute against (1.5), so this throws instead of silently
-            // stranding the task Running with a stale pending action.
-            var effectiveOptions = state.WorkspaceRoot is { Length: > 0 }
-                ? options is not null ? options with { WorkspaceRoot = state.WorkspaceRoot } : new AgentWorkspaceOptions(state.WorkspaceRoot)
-                : options ?? throw new InvalidOperationException("Workspace options are required to execute the pending action.");
-            var pending = state.PendingToolAction;
-
-            // Mutating tools get a pre-image captured before they run, so a
-            // later revert can restore exactly what was there
-            // (r6 01-first-five-minutes.md 1.8). apply_draft_patch's own
-            // manual review flow (AgentPatchReviewService.ApplyAsync)
-            // already does this for the draft-patch queue; this covers the
-            // direct-approval path for edit_file/create_file/apply_draft_patch.
-            var mutatesFile = pending.ToolName is "edit_file" or "create_file" or "apply_draft_patch";
-            var relativePath = mutatesFile ? AgentToolExecutor.Arg(pending.Arguments, "relative_path", "path") : string.Empty;
-            string? preImage = null;
-            if (mutatesFile && _workspaceTools is not null && !string.IsNullOrWhiteSpace(relativePath))
+            var planError = await ValidatePreparedPlanAsync(state, state.PendingToolAction, options, ct);
+            if (planError is not null)
             {
-                try { preImage = await _workspaceTools.ReadFileForRevertAsync(effectiveOptions, relativePath, ct); }
-                catch { mutatesFile = false; /* best effort; skip the revert record, still execute the tool */ }
+                state.Status = AgentTaskStatus.Blocked;
+                state.ToolResults.Add(BuildMutationRefusalResult(state.PendingToolAction, planError));
+                executionOutcome = new AgentApprovalResult(false, planError)
+                {
+                    Outcome = AgentMutationOutcome.Conflict
+                };
             }
             else
             {
-                mutatesFile = false;
-            }
-
-            AgentToolResult result;
-            try
-            {
-                result = await _toolExecutor.ExecuteAsync(pending.ToolName, pending.Arguments, effectiveOptions, ct, operationId);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments, ex.Message, success: false, ct);
-                throw;
-            }
-
-            state.ToolResults.Add(result);
-            if (result.NormalizedOutcome.Outcome == NormalizedOutcome.Cancelled && ct.IsCancellationRequested)
-            {
-                state.Status = AgentTaskStatus.WaitingForUser;
-                await _store.AppendTranscriptEntryAsync(taskId,
-                    AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow) with { ModelId = state.ModelId }, CancellationToken.None);
-                await _store.SaveAsync(state, CancellationToken.None);
-                await RecordExperiencesAsync(state, effectiveOptions, firstNewToolResult, CancellationToken.None);
-                ct.ThrowIfCancellationRequested();
-            }
-            RememberCommandApprovalIfApplicable(state, pending);
-            await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments,
-                result.ResultSummary, IsSuccessfulOutcome(result), ct, result.ExitCode, result.TimedOut);
-            await RecordApprovalApprovedCounterEvidenceAsync(state, effectiveOptions, pending.ToolName, ct);
-            // The approved tool's result is what the model most needs to see
-            // next (it is why the step paused), so it belongs in the
-            // transcript alongside every other executed tool result, not
-            // just in ToolResults' last-five window.
-            await _store.AppendTranscriptEntryAsync(taskId,
-                AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
-
-            if (mutatesFile && _workspaceTools is not null)
-            {
-                var postContent = await _workspaceTools.ReadFileForRevertAsync(effectiveOptions, relativePath, ct) ?? string.Empty;
-                state.DraftPatches.Add(new AgentDraftPatch
+                await ApplyPlanSubtasksApprovalAsync(state, state.PendingToolAction, options, ct);
+                executionOutcome = new AgentApprovalResult(
+                    state.SubTaskPlan.Count > 0,
+                    state.SubTaskPlan.Count > 0 ? string.Empty : "The proposed sub-task plan was not applied.")
                 {
-                    RelativePath = relativePath,
-                    Rationale = $"Applied via {pending.ToolName}.",
-                    ProposedContent = postContent,
-                    Status = AgentDraftPatchStatus.Applied,
-                    ApprovedAt = DateTime.UtcNow,
-                    ApprovedBy = "User",
-                    PreImageContent = preImage,
-                    PreImageExisted = preImage is not null,
-                    AppliedContent = postContent
-                });
+                    Outcome = state.SubTaskPlan.Count > 0 ? AgentMutationOutcome.Applied : AgentMutationOutcome.Blocked
+                };
             }
-
-            state.PendingToolAction = null;
-            state.Status = AgentTaskStatus.Running;
+        }
+        else if (approved && state.PendingToolAction is not null)
+        {
+            var effectiveOptions = state.WorkspaceRoot is { Length: > 0 }
+                ? options is not null ? options with { WorkspaceRoot = state.WorkspaceRoot } : new AgentWorkspaceOptions(state.WorkspaceRoot)
+                : options ?? throw new InvalidOperationException("Workspace options are required to execute the pending action.");
+            if (_manifests is not null)
+            {
+                var manifest = await _manifests.LoadAsync(effectiveOptions.WorkspaceRoot, ct);
+                effectiveOptions = effectiveOptions with { Policy = manifest?.Policy };
+            }
+            executionOutcome = IsPreparedMutationTool(state.PendingToolAction.ToolName)
+                ? await ExecutePreparedMutationAsync(state, state.PendingToolAction, effectiveOptions, operationId, ct)
+                : await ExecuteApprovedNonMutationAsync(state, state.PendingToolAction, effectiveOptions, operationId, ct);
         }
         else
         {
@@ -1431,10 +1535,420 @@ public sealed class AgentService : IAgentService
             RuntimeLogCategory.Agent,
             $"Agent approval recorded: task={taskId}, action={action}, approved={approved}.",
             operationId));
-        return new AgentApprovalResult(true, string.Empty);
+        return executionOutcome ?? new AgentApprovalResult(true, string.Empty)
+        {
+            Outcome = approved ? AgentMutationOutcome.Applied : AgentMutationOutcome.Blocked
+        };
     }
 
-    public async Task<AgentApprovalResult> DismissTaskAsync(string taskId, CancellationToken ct = default)
+    private async Task<AgentApprovalResult> ExecuteApprovedNonMutationAsync(
+        AgentTaskState state,
+        AgentPendingToolAction pending,
+        AgentWorkspaceOptions options,
+        string operationId,
+        CancellationToken ct)
+    {
+        AgentToolResult result;
+        try
+        {
+            result = await _toolExecutor.ExecuteAsync(pending.ToolName, pending.Arguments, options, ct, operationId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await RecordLessonEvidenceForToolAsync(state, options, pending.ToolName, pending.Arguments, ex.Message, success: false, ct);
+            throw;
+        }
+
+        state.ToolResults.Add(result);
+        if (result.NormalizedOutcome.Outcome == NormalizedOutcome.Cancelled && ct.IsCancellationRequested)
+        {
+            state.Status = AgentTaskStatus.WaitingForUser;
+            await _store.AppendTranscriptEntryAsync(state.TaskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow) with { ModelId = state.ModelId }, CancellationToken.None);
+            await _store.SaveAsync(state, CancellationToken.None);
+            await RecordExperiencesAsync(state, options, state.ToolResults.Count - 1, CancellationToken.None);
+            ct.ThrowIfCancellationRequested();
+        }
+
+        await RecordLessonEvidenceForToolAsync(state, options, pending.ToolName, pending.Arguments,
+            result.ResultSummary, IsSuccessfulOutcome(result), ct, result.ExitCode, result.TimedOut);
+        await RecordApprovalApprovedCounterEvidenceAsync(state, options, pending.ToolName, ct);
+        await _store.AppendTranscriptEntryAsync(state.TaskId,
+            AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
+
+        state.PendingToolAction = null;
+        state.Status = AgentTaskStatus.Running;
+        var outcome = result.NormalizedOutcome.Outcome == NormalizedOutcome.Succeeded
+            ? AgentMutationOutcome.Applied
+            : MapMutationOutcome(result.NormalizedOutcome.Outcome);
+        return new AgentApprovalResult(outcome == AgentMutationOutcome.Applied,
+            outcome == AgentMutationOutcome.Applied ? string.Empty : result.ResultSummary)
+        {
+            Outcome = outcome
+        };
+    }
+
+    private static bool IsPreparedMutationTool(string toolName) =>
+        toolName.Equals("edit_file", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("create_file", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("apply_draft_patch", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("run_command", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string?> ValidatePreparedPlanAsync(
+        AgentTaskState state,
+        AgentPendingToolAction pending,
+        AgentWorkspaceOptions? options,
+        CancellationToken ct)
+    {
+        if (!pending.IsPrepared)
+            return "This pending sub-task plan predates the prepared proposal contract and must be proposed again.";
+
+        var root = state.WorkspaceRoot.Length > 0 ? state.WorkspaceRoot : options?.WorkspaceRoot ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(root))
+            return "The pending sub-task plan has no persisted workspace identity.";
+        try
+        {
+            root = AgentWorkspaceTools.ResolveWorkspaceRoot(root);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException or ArgumentException)
+        {
+            return $"The pending sub-task plan workspace is unavailable: {ex.Message}";
+        }
+
+        var policy = options?.Policy;
+        if (_manifests is not null)
+            policy = (await _manifests.LoadAsync(root, ct))?.Policy;
+        if (!string.Equals(pending.WorkspaceRoot, root, StringComparison.OrdinalIgnoreCase))
+            return "The pending sub-task plan workspace changed since review.";
+        if (!string.Equals(pending.PolicyFingerprint, AgentMutationPreparation.ComputePolicyFingerprint(policy), StringComparison.Ordinal))
+            return "Workspace policy changed since this sub-task plan was reviewed.";
+        if (!TryParsePlanSubtasks(pending.Arguments, out var specs, out var parseError))
+            return parseError;
+
+        var proposed = JsonSerializer.Serialize(pending.Arguments, AgentJson.CompactOptions);
+        if (!string.Equals(pending.ProposedContentSha256, AgentMutationPreparation.ComputeContentSha256(proposed), StringComparison.Ordinal))
+            return "The pending sub-task plan payload changed since it was prepared.";
+
+        var visibleModels = await GetVisibleModelsAsync(ct);
+        var unavailable = specs.Select(s => s.ModelId).FirstOrDefault(modelId =>
+            !string.IsNullOrWhiteSpace(modelId)
+            && !visibleModels.Any(model => string.Equals(model.Id, modelId, StringComparison.Ordinal)));
+        return unavailable is null
+            ? null
+            : $"The pending sub-task plan references model '{unavailable}', which is no longer visible and available.";
+    }
+
+    private async Task<AgentApprovalResult> ExecutePreparedMutationAsync(
+        AgentTaskState state,
+        AgentPendingToolAction pending,
+        AgentWorkspaceOptions options,
+        string operationId,
+        CancellationToken ct)
+    {
+        var targetRoot = pending.WorkspaceRoot.Length > 0 ? pending.WorkspaceRoot : options.WorkspaceRoot;
+        var targetPath = pending.RelativePath;
+        return await _commandOwner.ExecuteTargetAsync(targetRoot, targetPath,
+            async executionToken =>
+            {
+                var effectivePending = pending;
+                var preparationError = await ValidatePreparedMutationAsync(state, effectivePending, options, executionToken);
+                if (preparationError is not null && !effectivePending.IsPrepared)
+                {
+                    var legacyPreparation = await AgentMutationPreparation.PrepareAsync(
+                        effectivePending.ToolName,
+                        effectivePending.Arguments,
+                        options,
+                        options.Policy,
+                        _workspaceTools,
+                        executionToken);
+                    if (legacyPreparation.IsValid)
+                    {
+                        effectivePending = legacyPreparation.Pending!;
+                        preparationError = await ValidatePreparedMutationAsync(state, effectivePending, options, executionToken);
+                    }
+                    else
+                    {
+                        preparationError = legacyPreparation.Error;
+                    }
+                }
+
+                if (preparationError is not null)
+                {
+                    state.Status = AgentTaskStatus.Blocked;
+                    state.ToolResults.Add(BuildMutationRefusalResult(pending, preparationError));
+                    await _store.AppendTraceAsync(state.TaskId, new
+                    {
+                        task_id = state.TaskId,
+                        type = "mutation_refused_after_approval",
+                        proposal_id = pending.ProposalId,
+                        tool = pending.ToolName,
+                        reason = preparationError,
+                        logged_at = DateTime.UtcNow
+                    }, executionToken);
+                    return new AgentApprovalResult(false, preparationError)
+                    {
+                        Outcome = AgentMutationOutcome.Conflict
+                    };
+                }
+
+                if (_workspaceTools is null && effectivePending.MutationKind != AgentMutationKind.Command)
+                {
+                    const string unavailable = "Workspace verification is unavailable, so the approved mutation was not executed.";
+                    state.Status = AgentTaskStatus.Blocked;
+                    state.ToolResults.Add(BuildMutationRefusalResult(effectivePending, unavailable));
+                    return new AgentApprovalResult(false, unavailable)
+                    {
+                        Outcome = AgentMutationOutcome.Unavailable
+                    };
+                }
+
+                var receipt = new AgentMutationReceipt
+                {
+                    TaskId = state.TaskId,
+                    ProposalId = effectivePending.ProposalId,
+                    ProposalRevision = effectivePending.ProposalRevision,
+                    ToolName = effectivePending.ToolName,
+                    MutationKind = effectivePending.MutationKind,
+                    RelativePath = effectivePending.RelativePath,
+                    ExpectedPreImageSha256 = effectivePending.ExpectedPreImageSha256,
+                    ExpectedPreImageExisted = effectivePending.ExpectedPreImageExisted,
+                    ProposedContentSha256 = effectivePending.ProposedContentSha256,
+                    ApprovalRecorded = true,
+                    Outcome = AgentMutationOutcome.Pending,
+                    StartedAt = DateTime.UtcNow
+                };
+                state.MutationReceipts.Add(receipt);
+                await _store.SaveAsync(state, executionToken);
+
+                string? preImage = null;
+                if (effectivePending.MutationKind is AgentMutationKind.Create or AgentMutationKind.Edit or AgentMutationKind.Replace or AgentMutationKind.ApplyDraftPatch)
+                    preImage = await _workspaceTools!.ReadFileForRevertAsync(options, effectivePending.RelativePath, executionToken);
+
+                AgentToolResult result;
+                try
+                {
+                    result = await _toolExecutor.ExecuteAsync(
+                        effectivePending.ToolName,
+                        effectivePending.Arguments,
+                        options,
+                        executionToken,
+                        operationId);
+                }
+                catch (OperationCanceledException)
+                {
+                    receipt.Outcome = AgentMutationOutcome.Unknown;
+                    receipt.CompletionReason = "Execution was cancelled before the outcome could be durably confirmed.";
+                    receipt.FinishedAt = DateTime.UtcNow;
+                    await ObserveReceiptAsync(receipt, effectivePending, options);
+                    await _store.SaveAsync(state, CancellationToken.None);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    result = new AgentToolResult
+                    {
+                        Tool = effectivePending.ToolName,
+                        Arguments = AgentMutationPreparation.CloneArguments(effectivePending.Arguments),
+                        ResultSummary = ex.Message,
+                        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(
+                            effectivePending.ToolName,
+                            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Failed, Detail: "The executor threw while applying the approved proposal."))
+                    };
+                }
+
+                state.ToolResults.Add(result);
+                await _store.AppendTranscriptEntryAsync(state.TaskId,
+                    AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow) with { ModelId = state.ModelId }, executionToken);
+                await ObserveReceiptAsync(receipt, effectivePending, options);
+
+                var normalized = result.NormalizedOutcome.Outcome;
+                if (effectivePending.MutationKind == AgentMutationKind.Command)
+                {
+                    receipt.Changed = normalized == NormalizedOutcome.Succeeded;
+                    receipt.Verified = normalized == NormalizedOutcome.Succeeded;
+                    receipt.Outcome = normalized == NormalizedOutcome.Succeeded
+                        ? AgentMutationOutcome.Applied
+                        : MapMutationOutcome(normalized);
+                    receipt.CompletionReason = normalized == NormalizedOutcome.Succeeded
+                        ? "The approved fixed command returned structured success evidence."
+                        : result.ResultSummary;
+                }
+                else
+                {
+                    var postMatches = receipt.ObservedPostImageExisted
+                        && string.Equals(receipt.ObservedPostImageSha256, effectivePending.ProposedContentSha256, StringComparison.Ordinal);
+                    receipt.Changed = receipt.ObservedPostImageExisted != effectivePending.ExpectedPreImageExisted
+                        || !string.Equals(receipt.ObservedPostImageSha256, effectivePending.ExpectedPreImageSha256, StringComparison.Ordinal);
+                    receipt.Verified = postMatches;
+                    receipt.Outcome = normalized switch
+                    {
+                        NormalizedOutcome.Succeeded when postMatches && receipt.Changed => AgentMutationOutcome.Applied,
+                        NormalizedOutcome.NoEffect when postMatches && !receipt.Changed => AgentMutationOutcome.AlreadySatisfied,
+                        NormalizedOutcome.Succeeded when postMatches => AgentMutationOutcome.AlreadySatisfied,
+                        NormalizedOutcome.Blocked or NormalizedOutcome.Denied => AgentMutationOutcome.Blocked,
+                        NormalizedOutcome.Unavailable => AgentMutationOutcome.Unavailable,
+                        NormalizedOutcome.Failed or NormalizedOutcome.TimedOut => AgentMutationOutcome.Failed,
+                        NormalizedOutcome.Cancelled => AgentMutationOutcome.Cancelled,
+                        _ => AgentMutationOutcome.Unknown
+                    };
+                    receipt.CompletionReason = receipt.Verified
+                        ? receipt.Outcome == AgentMutationOutcome.Applied
+                            ? "The post-image matched the complete prepared output."
+                            : "The complete prepared output was already present and was verified."
+                        : "The executor result did not establish the expected post-image.";
+
+                    if (receipt.Outcome == AgentMutationOutcome.Applied && _workspaceTools is not null)
+                    {
+                        var postContent = await _workspaceTools.ReadFileForRevertAsync(options, effectivePending.RelativePath, executionToken) ?? string.Empty;
+                        state.DraftPatches.Add(new AgentDraftPatch
+                        {
+                            RelativePath = effectivePending.RelativePath,
+                            Rationale = $"Applied via {effectivePending.ToolName}.",
+                            ProposedContent = postContent,
+                            Status = AgentDraftPatchStatus.Applied,
+                            ApprovedAt = DateTime.UtcNow,
+                            ApprovedBy = "User",
+                            PreImageContent = preImage,
+                            PreImageExisted = effectivePending.ExpectedPreImageExisted,
+                            AppliedContent = postContent,
+                            MutationReceiptId = receipt.ReceiptId
+                        });
+                    }
+                }
+
+                receipt.FinishedAt = DateTime.UtcNow;
+                await _store.AppendTraceAsync(state.TaskId, new
+                {
+                    task_id = state.TaskId,
+                    type = "mutation_receipt",
+                    receipt_id = receipt.ReceiptId,
+                    attempt_id = receipt.AttemptId,
+                    proposal_id = receipt.ProposalId,
+                    tool = receipt.ToolName,
+                    outcome = receipt.Outcome.ToString(),
+                    verified = receipt.Verified,
+                    changed = receipt.Changed,
+                    logged_at = DateTime.UtcNow
+                }, executionToken);
+                await RecordLessonEvidenceForToolAsync(state, options, effectivePending.ToolName, effectivePending.Arguments,
+                    result.ResultSummary, IsSuccessfulOutcome(result), executionToken, result.ExitCode, result.TimedOut);
+                await RecordApprovalApprovedCounterEvidenceAsync(state, options, effectivePending.ToolName, executionToken);
+                RememberCommandApprovalIfApplicable(state, effectivePending);
+
+                state.PendingToolAction = null;
+                state.Status = receipt.Outcome is AgentMutationOutcome.Applied or AgentMutationOutcome.AlreadySatisfied
+                    ? AgentTaskStatus.Running
+                    : AgentTaskStatus.Blocked;
+                await _store.SaveAsync(state, executionToken);
+
+                var applied = receipt.Outcome == AgentMutationOutcome.Applied;
+                var message = applied ? string.Empty : receipt.CompletionReason;
+                return new AgentApprovalResult(applied, message)
+                {
+                    Outcome = receipt.Outcome,
+                    ReceiptId = receipt.ReceiptId
+                };
+            }, ct);
+    }
+
+    private async Task<string?> ValidatePreparedMutationAsync(
+        AgentTaskState state,
+        AgentPendingToolAction pending,
+        AgentWorkspaceOptions options,
+        CancellationToken ct)
+    {
+        if (!pending.IsPrepared)
+            return "The pending mutation was not prepared under the current proposal contract.";
+        string? persistedRoot = null;
+        string? optionRoot = null;
+        try
+        {
+            if (state.WorkspaceRoot.Length > 0)
+                persistedRoot = AgentWorkspaceTools.ResolveWorkspaceRoot(state.WorkspaceRoot);
+            optionRoot = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException or ArgumentException)
+        {
+            return $"The pending mutation workspace is unavailable: {ex.Message}";
+        }
+
+        if (persistedRoot is not null
+            && !string.Equals(pending.WorkspaceRoot, persistedRoot, StringComparison.OrdinalIgnoreCase))
+            return "The pending mutation workspace changed since review.";
+        if (!string.Equals(pending.WorkspaceRoot, optionRoot, StringComparison.OrdinalIgnoreCase))
+            return "The pending mutation target is not the task's persisted workspace.";
+        if (!string.Equals(pending.PolicyFingerprint, AgentMutationPreparation.ComputePolicyFingerprint(options.Policy), StringComparison.Ordinal))
+            return "Workspace policy changed since this mutation was reviewed.";
+
+        var fresh = await AgentMutationPreparation.PrepareAsync(
+            pending.ToolName,
+            pending.Arguments,
+            options,
+            options.Policy,
+            _workspaceTools,
+            ct);
+        if (!fresh.IsValid)
+            return fresh.Error;
+        var current = fresh.Pending!;
+        if (current.MutationKind != pending.MutationKind
+            || !string.Equals(current.RelativePath, pending.RelativePath, StringComparison.Ordinal)
+            || current.ExpectedPreImageExisted != pending.ExpectedPreImageExisted
+            || !string.Equals(current.ExpectedPreImageSha256, pending.ExpectedPreImageSha256, StringComparison.Ordinal)
+            || (pending.MutationKind != AgentMutationKind.Command
+                && !string.Equals(pending.ProposedContentSha256, AgentMutationPreparation.ComputeContentSha256(pending.ProposedContent), StringComparison.Ordinal))
+            || !string.Equals(current.ProposedContentSha256, pending.ProposedContentSha256, StringComparison.Ordinal))
+            return "The workspace target, pre-image or proposed output changed since review.";
+
+        return null;
+    }
+
+    private async Task ObserveReceiptAsync(
+        AgentMutationReceipt receipt,
+        AgentPendingToolAction pending,
+        AgentWorkspaceOptions options)
+    {
+        if (_workspaceTools is null || pending.MutationKind == AgentMutationKind.Command)
+            return;
+
+        try
+        {
+            var post = await _workspaceTools.ReadFileForRevertAsync(options, pending.RelativePath, CancellationToken.None);
+            receipt.ObservedPostImageExisted = post is not null;
+            receipt.ObservedPostImageSha256 = post is null ? string.Empty : AgentMutationPreparation.ComputeContentSha256(post);
+        }
+        catch (Exception ex)
+        {
+            receipt.CompletionReason = $"The post-image could not be read safely: {ex.Message}";
+            receipt.Outcome = AgentMutationOutcome.Unknown;
+        }
+    }
+
+    private static AgentToolResult BuildMutationRefusalResult(AgentPendingToolAction pending, string reason) => new()
+    {
+        Tool = pending.ToolName,
+        Arguments = AgentMutationPreparation.CloneArguments(pending.Arguments),
+        ResultSummary = reason,
+        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(pending.ToolName,
+            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                Detail: "The prepared mutation was refused before execution."))
+    };
+
+    private static AgentMutationOutcome MapMutationOutcome(NormalizedOutcome outcome) => outcome switch
+    {
+        NormalizedOutcome.Succeeded => AgentMutationOutcome.Applied,
+        NormalizedOutcome.NoEffect => AgentMutationOutcome.AlreadySatisfied,
+        NormalizedOutcome.Blocked or NormalizedOutcome.Denied => AgentMutationOutcome.Blocked,
+        NormalizedOutcome.Unavailable => AgentMutationOutcome.Unavailable,
+        NormalizedOutcome.Failed or NormalizedOutcome.TimedOut => AgentMutationOutcome.Failed,
+        NormalizedOutcome.Cancelled => AgentMutationOutcome.Cancelled,
+        _ => AgentMutationOutcome.Unknown
+    };
+
+    public Task<AgentApprovalResult> DismissTaskAsync(string taskId, CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => DismissTaskCoreAsync(taskId, ownerToken), ct);
+
+    private async Task<AgentApprovalResult> DismissTaskCoreAsync(string taskId, CancellationToken ct)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
@@ -1475,7 +1989,11 @@ public sealed class AgentService : IAgentService
         return new AgentApprovalResult(true, string.Empty);
     }
 
-    public async Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default)
+    public Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => AppendUserReplyCoreAsync(taskId, reply, ownerToken), ct);
+
+    private async Task AppendUserReplyCoreAsync(string taskId, string reply, CancellationToken ct)
     {
         var trimmed = reply?.Trim() ?? string.Empty;
         if (trimmed.Length == 0)
@@ -1687,7 +2205,11 @@ public sealed class AgentService : IAgentService
         await _store.SaveAsync(state, ct);
     }
 
-    public async Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default)
+    public Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => ContinueTaskCoreAsync(taskId, instruction, options, ownerToken), ct);
+
+    private async Task<AgentTaskState> ContinueTaskCoreAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
@@ -1706,7 +2228,11 @@ public sealed class AgentService : IAgentService
         return await ContinueLoadedTaskAsync(state, trimmedInstruction, AgentTaskTransitionKind.ContinueWithInstruction, ct);
     }
 
-    public async Task<AgentTaskState> ContinuePlannedTaskAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default)
+    public Task<AgentTaskState> ContinuePlannedTaskAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => ContinuePlannedTaskCoreAsync(taskId, options, ownerToken), ct);
+
+    private async Task<AgentTaskState> ContinuePlannedTaskCoreAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
@@ -1758,7 +2284,11 @@ public sealed class AgentService : IAgentService
         return state;
     }
 
-    public async Task<AgentTaskState> FinishTaskAsync(string taskId, CancellationToken ct = default)
+    public Task<AgentTaskState> FinishTaskAsync(string taskId, CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => FinishTaskCoreAsync(taskId, ownerToken), ct);
+
+    private async Task<AgentTaskState> FinishTaskCoreAsync(string taskId, CancellationToken ct)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
@@ -1789,7 +2319,11 @@ public sealed class AgentService : IAgentService
         return state;
     }
 
-    public async Task<AgentTaskState> StopTaskAsync(string taskId, CancellationToken ct = default)
+    public Task<AgentTaskState> StopTaskAsync(string taskId, CancellationToken ct = default) =>
+        _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => StopTaskCoreAsync(taskId, ownerToken), ct);
+
+    private async Task<AgentTaskState> StopTaskCoreAsync(string taskId, CancellationToken ct)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
@@ -2675,6 +3209,32 @@ public sealed class AgentService : IAgentService
             AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
     }
 
+    private static AgentPendingToolAction BuildPreparedPlanPending(
+        Dictionary<string, object?> arguments,
+        AgentWorkspaceOptions options,
+        WorkspacePolicy? policy)
+    {
+        var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var preparedArguments = AgentMutationPreparation.CloneArguments(arguments);
+        var proposed = JsonSerializer.Serialize(preparedArguments, AgentJson.CompactOptions);
+        var pending = new AgentPendingToolAction
+        {
+            ToolName = "plan_subtasks",
+            Arguments = preparedArguments,
+            ProposalId = Guid.NewGuid().ToString("N"),
+            ProposalRevision = 1,
+            SchemaVersion = 1,
+            WorkspaceRoot = root,
+            MutationKind = AgentMutationKind.SubTaskPlan,
+            ProposedContent = proposed,
+            ProposedContentSha256 = AgentMutationPreparation.ComputeContentSha256(proposed),
+            PolicyFingerprint = AgentMutationPreparation.ComputePolicyFingerprint(policy),
+            PreparedAt = DateTime.UtcNow
+        };
+        pending.Fingerprint = AgentApprovalFingerprint.Compute(pending);
+        return pending;
+    }
+
     /// <summary>
     /// Parses and validates a plan_subtasks action's "subtasks" argument:
     /// 2 to 6 entries, each with a non-empty goal and a known specialist
@@ -2688,15 +3248,37 @@ public sealed class AgentService : IAgentService
         specs = [];
         error = string.Empty;
 
-        if (!arguments.TryGetValue("subtasks", out var raw) || raw is not JsonElement { ValueKind: JsonValueKind.Array } array)
+        if (arguments.Count != 1 || !arguments.TryGetValue("subtasks", out var raw)
+            || raw is not JsonElement { ValueKind: JsonValueKind.Array } array)
         {
             error = "Could not parse the proposed sub-task plan: \"subtasks\" was missing or not an array.";
             return false;
         }
 
+        var index = 0;
         foreach (var item in array.EnumerateArray())
         {
-            if (item.ValueKind != JsonValueKind.Object) continue;
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                error = $"Proposed sub-task plan entry {index + 1} is not an object.";
+                return false;
+            }
+
+            var allowed = new HashSet<string>(["goal", "profile", "success_criteria", "model_id"], StringComparer.Ordinal);
+            foreach (var property in item.EnumerateObject())
+            {
+                if (!allowed.Contains(property.Name))
+                {
+                    error = $"Proposed sub-task plan entry {index + 1} contains unknown field '{property.Name}'.";
+                    return false;
+                }
+                if (property.Value.ValueKind != JsonValueKind.String)
+                {
+                    error = $"Proposed sub-task plan field '{property.Name}' in entry {index + 1} must be a string.";
+                    return false;
+                }
+            }
+
             var goal = item.TryGetProperty("goal", out var g) ? g.GetString() ?? string.Empty : string.Empty;
             var profile = item.TryGetProperty("profile", out var p) ? p.GetString() ?? string.Empty : string.Empty;
             var successCriteria = item.TryGetProperty("success_criteria", out var s) ? s.GetString() ?? string.Empty : string.Empty;
@@ -2705,6 +3287,7 @@ public sealed class AgentService : IAgentService
             {
                 Goal = goal.Trim(), ProfileName = profile.Trim(), SuccessCriteria = successCriteria.Trim(), ModelId = modelId.Trim()
             });
+            index++;
         }
 
         if (specs.Count is < 2 or > 6)

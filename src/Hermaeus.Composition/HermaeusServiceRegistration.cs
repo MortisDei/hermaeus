@@ -30,6 +30,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<RedactionService>();
         s.AddSingleton<IRuntimeLogService, RuntimeLogService>();
         s.AddSingleton<AppLifecycleJournalService>();
+        s.AddSingleton<IApplicationLifecycleCoordinator, ApplicationLifecycleCoordinator>();
         s.AddSingleton<IStartupTimingService, StartupTimingService>();
         s.AddSingleton<ITrayIntegrationState, TrayIntegrationState>();
         s.AddSingleton<PythonHealthValidator>();
@@ -56,6 +57,20 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
         s.AddSingleton<IRecommendationStore, SqliteRecommendationStore>();
+        s.AddSingleton<IApplicationLifecycleParticipant>(sp => new ApplicationLifecycleParticipant(
+            "conversations", _ => sp.GetRequiredService<IConversationStore>().InitializeAsync()));
+        s.AddSingleton<IApplicationLifecycleParticipant>(sp => new ApplicationLifecycleParticipant(
+            "memory", token => sp.GetRequiredService<IMemoryStore>().InitializeAsync(token)));
+        s.AddSingleton<IApplicationLifecycleParticipant>(sp => new ApplicationLifecycleParticipant(
+            "rag", _ => sp.GetRequiredService<SqliteRagStore>().InitializeAsync()));
+        s.AddSingleton<IApplicationLifecycleParticipant>(sp => new ApplicationLifecycleParticipant(
+            "agent tasks", token => sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(token)));
+        s.AddSingleton<IApplicationLifecycleParticipant>(sp => new ApplicationLifecycleParticipant(
+            "benchmarks", token => sp.GetRequiredService<BenchmarkService>().InitializeAsync(token)));
+        s.AddSingleton<IApplicationLifecycleParticipant>(sp => new ApplicationLifecycleParticipant(
+            "evaluations", token => sp.GetRequiredService<IEvalStore>().InitializeAsync(token)));
+        s.AddSingleton<IApplicationLifecycleParticipant>(sp => new ApplicationLifecycleParticipant(
+            "recommendations", token => sp.GetRequiredService<IRecommendationStore>().InitializeAsync(token)));
         s.AddSingleton<RecommendationRuleRegistry>();
         s.AddSingleton<RecommendationDerivationService>();
         s.AddSingleton<RecommendationApplicationService>();
@@ -123,6 +138,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IAgentRetrievalService, AgentRetrievalService>();
         s.AddSingleton<RagEvalService>();
         s.AddSingleton<IAgentTaskStateStore, FileAgentTaskStateStore>();
+        s.AddSingleton<IAgentTaskCommandOwner, AgentTaskCommandOwner>();
         s.AddSingleton<ILessonStore, SqliteLessonStore>();
         s.AddSingleton<IAgentWorkspaceMemoryStore, WorkspaceMemoryStore>();
         s.AddSingleton<IAgentWorkspaceTools, AgentWorkspaceTools>();

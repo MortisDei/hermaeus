@@ -361,21 +361,11 @@ public sealed class ServerProcessManager : IDisposable
         GgufModelInfo? ggufInfo = null,
         HardwareProfile? hardware = null)
     {
-        var baseConfig = NormalizeConfig(new ServerConfig
-        {
-            Name           = cfg.Name,
-            ExecutablePath = cfg.ExecutablePath,
-            ModelPath      = cfg.ModelPath,
-            Port           = cfg.Port,
-            ContextSize    = cfg.ContextSize,
-            GpuLayers      = cfg.GpuLayers,
-            GpuPlacement   = cfg.GpuPlacement,
-            Threads        = cfg.Threads,
-            Slots          = cfg.Slots,
-            EmbeddingsMode = cfg.EmbeddingsMode,
-            AutoStart      = false,
-            ExtraArgs      = cfg.ExtraArgs
-        });
+        // NormalizeConfig already returns an isolated, fully populated copy.
+        // Rebuilding a reduced config here silently dropped prompt threads,
+        // KV precision, projector, adaptive bounds, speculative companions,
+        // and runtime capability facts from every probe.
+        var baseConfig = NormalizeConfig(cfg);
 
         // r11 1.5: probes started processes and waited for /health on
         // cfg.Port without the port preflight StartAsync performs. If
@@ -414,21 +404,7 @@ public sealed class ServerProcessManager : IDisposable
         if (suggestedContext is int tunedContext)
         {
             progress?.Report($"[hermaeus] Auto-tune: configured context {baseConfig.ContextSize:N0} does not fit this GPU with this model; probing {tunedContext:N0} context with all layers first.");
-            var contextProbe = new ServerConfig
-            {
-                Name           = baseConfig.Name,
-                ExecutablePath = baseConfig.ExecutablePath,
-                ModelPath      = baseConfig.ModelPath,
-                Port           = baseConfig.Port,
-                ContextSize    = tunedContext,
-                GpuLayers      = -1,
-                GpuPlacement   = GpuPlacementIntent.All(),
-                Threads        = threads,
-                Slots          = baseConfig.Slots,
-                EmbeddingsMode = baseConfig.EmbeddingsMode,
-                AutoStart      = false,
-                ExtraArgs      = baseConfig.ExtraArgs
-            };
+            var contextProbe = BuildAutoTuneProbe(baseConfig, tunedContext, threads, GpuPlacementIntent.All());
 
             var contextResult = await TryProbeAsync(contextProbe, 999, progress, ct);
             if (contextResult.Success)
@@ -445,23 +421,10 @@ public sealed class ServerProcessManager : IDisposable
         foreach (var candidate in candidates)
         {
             ct.ThrowIfCancellationRequested();
-            var probe = new ServerConfig
-            {
-                Name           = baseConfig.Name,
-                ExecutablePath = baseConfig.ExecutablePath,
-                ModelPath      = baseConfig.ModelPath,
-                Port           = baseConfig.Port,
-                ContextSize    = baseConfig.ContextSize,
-                GpuLayers      = candidate,
-                GpuPlacement   = GpuPlacementIntent.TryFromLegacy(candidate, out var candidatePlacement, out _)
-                    ? candidatePlacement
-                    : null,
-                Threads        = threads,
-                Slots          = baseConfig.Slots,
-                EmbeddingsMode = baseConfig.EmbeddingsMode,
-                AutoStart      = false,
-                ExtraArgs      = baseConfig.ExtraArgs
-            };
+            var placement = GpuPlacementIntent.TryFromLegacy(candidate, out var candidatePlacement, out _)
+                ? candidatePlacement
+                : GpuPlacementIntent.Cpu();
+            var probe = BuildAutoTuneProbe(baseConfig, baseConfig.ContextSize, threads, placement!);
 
             var result = await TryProbeAsync(probe, candidate, progress, ct);
             if (result.Success)
@@ -471,6 +434,21 @@ public sealed class ServerProcessManager : IDisposable
         }
 
         throw new InvalidOperationException($"No llama.cpp auto-tune candidate started successfully.\n\n{string.Join("\n\n", failures)}");
+    }
+
+    private static ServerConfig BuildAutoTuneProbe(
+        ServerConfig baseConfig,
+        int contextSize,
+        int threads,
+        GpuPlacementIntent placement)
+    {
+        var probe = NormalizeConfig(baseConfig);
+        probe.ContextSize = contextSize;
+        probe.Threads = threads;
+        probe.GpuPlacement = placement;
+        probe.GpuLayers = placement.LegacyGpuLayers ?? baseConfig.GpuLayers;
+        probe.AutoStart = false;
+        return probe;
     }
 
     private static async Task<ProbeResult> TryProbeAsync(

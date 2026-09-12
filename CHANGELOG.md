@@ -9,6 +9,39 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.41.0-beta] - 2026-09-12
+
+### Changed
+
+- Shared application lifecycle now owns startup, recovery, and bounded shutdown
+  across Desktop, Local API, and the R33 headless driver. Partial startup can
+  retry, and shutdown records an incomplete phase when an owner exceeds its
+  deadline instead of pretending it stopped cleanly.
+- Agent task commands and prepared workspace mutations now use one task and
+  target ownership boundary. Mutating proposals carry typed arguments,
+  workspace policy, target identity, preimage, and proposed output before
+  review. Approval revalidates those facts, persists a durable receipt before
+  execution, and reports readback-verified `Applied`, distinct
+  `AlreadySatisfied`, or a blocked outcome. Queued workspace patches use the
+  same path, and stale task views no longer overwrite the active task.
+- The repository includes an isolated whole-product R33 driver that uses the
+  production composition graph to create, approve, execute, and verify a real
+  Agent file mutation without using owner settings, data, or workspace paths.
+- Backup restore now preflights every archive file with duplicate-target,
+  per-entry, and total uncompressed-size limits, then extracts each file to a
+  same-directory temporary file before an atomic replacement. Cancellation and
+  reparse-point checks remain part of the restore boundary.
+- AutoTune probes clone the complete managed-server configuration and preserve
+  configured runtime fields while applying only the candidate axes. Local GGUF
+  metadata and the current hardware profile are used when available, and
+  transient probe settings are not saved.
+- Benchmark preparation and execution now persist operation evidence before
+  work begins, retain a truthful cancelled or partial result, and make final
+  evidence persistence independent of caller cancellation. The Linux desktop
+  installer also safely escapes package paths containing spaces.
+- R33 development is prepared as `v0.41.0-beta`. This local implementation
+  creates no tag, release, push, pull request, merge, or other publication.
+
 ## [0.40.0-beta] - 2026-09-05
 
 ### Changed

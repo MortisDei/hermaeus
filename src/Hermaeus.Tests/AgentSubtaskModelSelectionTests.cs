@@ -91,9 +91,11 @@ public sealed class AgentSubtaskModelSelectionTests
     {
         const string plan = """[{"goal":"A","profile":"general","success_criteria":"A","model_id":"missing"},{"goal":"B","profile":"tests","success_criteria":"B"}]""";
         using var temp = new TempDir(); var rig = await NewRigAsync(temp, plan);
-        var state = await ApproveAsync(rig, await ProposeAsync(rig));
+        var state = await ProposeAsync(rig);
+        Assert.Null(state.PendingToolAction);
+        Assert.Equal(AgentTaskStatus.Blocked, state.Status);
         Assert.Empty(state.SubTaskPlan);
-        Assert.Contains("unavailable model", state.ToolResults.Last().ResultSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("visible and available", state.ToolResults.Last().ResultSummary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -101,7 +103,9 @@ public sealed class AgentSubtaskModelSelectionTests
     {
         const string plan = """[{"goal":"A","profile":"general","success_criteria":"A","model_id":"hidden"},{"goal":"B","profile":"tests","success_criteria":"B"}]""";
         using var temp = new TempDir(); var rig = await NewRigAsync(temp, plan);
-        var state = await ApproveAsync(rig, await ProposeAsync(rig));
+        var state = await ProposeAsync(rig);
+        Assert.Null(state.PendingToolAction);
+        Assert.Equal(AgentTaskStatus.Blocked, state.Status);
         Assert.Empty(state.SubTaskPlan);
         Assert.Contains("hidden", state.ToolResults.Last().ResultSummary, StringComparison.OrdinalIgnoreCase);
     }

@@ -36,6 +36,7 @@ public sealed class BenchmarkCase
 public sealed class BenchmarkRun
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string OperationId { get; set; } = string.Empty;
     public string SuiteId { get; set; } = string.Empty;
     public string SuiteName { get; set; } = string.Empty;
     public string SuiteVersion { get; set; } = string.Empty;
@@ -56,7 +57,9 @@ public sealed class BenchmarkRun
     public string JudgeModelId { get; set; } = string.Empty;
     public List<BenchmarkResult> Results { get; set; } = [];
     public string Status { get; set; } = "Pending";
+    public string CurrentPhase { get; set; } = string.Empty;
     public string Error { get; set; } = string.Empty;
+    public string EvidenceSaveError { get; set; } = string.Empty;
 
     public int Total => Results.Count;
     public int Passed => Results.Count(r => r.Passed);

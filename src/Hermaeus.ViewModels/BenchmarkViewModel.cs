@@ -199,7 +199,6 @@ public partial class BenchmarkViewModel : ObservableObject
         _runCts = new CancellationTokenSource();
         try
         {
-            await PrepareSelectedModelAsync(_runCts.Token);
             var suites = RunAllSuites ? Suites.ToList() : [SelectedSuite];
             BenchmarkRun? run = null;
             for (var i = 0; i < suites.Count; i++)
@@ -210,14 +209,28 @@ public partial class BenchmarkViewModel : ObservableObject
                     suite,
                     SelectedModel,
                     new Progress<string>(s => Status = $"{suite.Name}: {s}"),
-                    _runCts.Token);
+                    _runCts.Token,
+                    preparation: PrepareSelectedModelAsync);
+                if (run.Status == "Cancelled")
+                    break;
             }
 
             await ReloadRunsAsync();
             await RefreshInsightsIfLoadedAsync();
             if (run is not null)
                 SelectedRun = Runs.FirstOrDefault(r => r.Id == run.Id);
-            _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
+            if (run?.Status == "Completed")
+            {
+                _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
+            }
+            else if (run?.Status == "Cancelled")
+            {
+                _toasts.Show("Benchmark cancelled", "The partial run was saved.", ToastKind.Info, 7000);
+            }
+            else if (run?.Status == "Failed")
+            {
+                _toasts.Show("Benchmark failed", run.Error, ToastKind.Error, 7000);
+            }
             NarrateCompletion(run, SelectedModel.Name);
         }
         finally

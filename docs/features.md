@@ -132,6 +132,10 @@ for Knowledge behavior in Chat.
   when its exact runtime, model, hardware, base configuration, workload, and
   bounded evidence age match; it never skips fresh admission. Unsupported fit,
   cache, and multi-device behavior remains Unavailable or Unknown.
+- AutoTune probes preserve the complete managed-server configuration and
+  change only the candidate axes for each probe. Local GGUF metadata and the
+  current hardware profile are supplied when available; transient probe
+  values are never written back to saved settings.
 - Model cards use the detailed versioned prediction when local GGUF shape
   metadata is available. Remote or pre-download cards retain a clearly labelled
   rough pre-download estimate until that metadata exists.
@@ -237,6 +241,13 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
 - Read-only inspection can run within the selected workspace. Writes,
   commands, MCP calls, and sub-task planning remain approval-gated and are
   classified deterministically by the safety gate.
+- Mutating Agent proposals are prepared before review with typed arguments,
+  workspace policy, target identity, preimage, and proposed output where
+  applicable. Approval revalidates the exact proposal, persists a receipt
+  before execution, and records readback verification. `Applied` means the
+  target changed and matches the proposed post-image; `AlreadySatisfied` is a
+  separate no-write outcome. Workspace-browser patch queues use the same
+  preparation and ownership path.
 - The workbench exposes the current decision, live progress, plan, response,
   changes, approvals, reservations, commands, and unfinished work. Responses
   are selectable Markdown with an explicit copy action. Continue planned work,
@@ -382,6 +393,10 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 - Activity records observed outcomes for operations such as model downloads,
   server lifecycle, ingest, backups, restores, memory sweeps, and voice.
   Artifact-specific rows open their artifact; rows without one stay inert.
+- Data Root restore preflights all file entries for safe paths, duplicate
+  targets, and bounded per-entry and total uncompressed sizes before writing.
+  Each file is copied to a same-directory temporary file and atomically
+  replaced only after its declared size and destination safety checks pass.
 - Runtime Logs apply redaction before display and persistence, omit repetitive
   low-level llama slot scheduler chatter from the normal persistent sink, and
   rotate with bounded file-count, age, and total-size retention. Settings holds

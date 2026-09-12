@@ -95,6 +95,15 @@ to that model (restarted if a different model is currently loaded, started if
 stopped) only when **Run** is actually clicked, so browsing the dropdown never
 triggers a 1-2 minute restart on its own.
 
+### Cancellation and evidence
+
+Each run receives an operation id and is persisted before model preparation or
+case execution begins. Cancelling a run records `Cancelled`, the last known
+phase, the cancellation error, and any completed case results. The terminal
+evidence save is attempted without the cancelled caller token so the result is
+not silently left as `Running`. If that final save itself fails, the run keeps
+an explicit evidence-save error and the service log records the failure.
+
 ### Reproducibility in Benchmarks
 
 Benchmarks are designed for repeatable, practical comparison across models,

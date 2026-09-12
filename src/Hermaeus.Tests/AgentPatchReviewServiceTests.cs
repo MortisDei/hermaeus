@@ -36,6 +36,46 @@ public sealed class AgentPatchReviewServiceTests
     }
 
     [Fact]
+    public async Task QueueAsync_prepares_and_persists_the_patch_without_viewmodel_state_writes()
+    {
+        using var temp = new TempDir();
+        var (service, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "queue a patch", WorkspaceRoot = workspace };
+        await store.SaveAsync(task);
+
+        var patch = await service.QueueAsync(
+            task.TaskId, "notes.md", "update the note", "queued content",
+            new AgentWorkspaceOptions(workspace));
+        var reloaded = await store.LoadAsync(task.TaskId);
+
+        Assert.True(patch.IsPrepared);
+        Assert.Equal("queued content", patch.ProposedContent);
+        Assert.Equal(patch.ProposalId, reloaded?.DraftPatches.Single().ProposalId);
+        Assert.Equal(AgentDraftPatchStatus.Pending, reloaded?.DraftPatches.Single().Status);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_refuses_a_prepared_patch_after_the_target_changes()
+    {
+        using var temp = new TempDir();
+        var (service, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "queue a patch", WorkspaceRoot = workspace };
+        await store.SaveAsync(task);
+        var patch = await service.QueueAsync(
+            task.TaskId, "notes.md", "update the note", "queued content",
+            new AgentWorkspaceOptions(workspace));
+        await File.WriteAllTextAsync(Path.Combine(workspace, "notes.md"), "changed after review");
+        var current = await store.LoadAsync(task.TaskId);
+        Assert.NotNull(current);
+
+        var outcome = await service.ApplyAsync(current!, patch, new AgentWorkspaceOptions(workspace));
+
+        Assert.Equal(AgentMutationOutcome.Conflict, outcome);
+        Assert.Equal(AgentDraftPatchStatus.Blocked, patch.Status);
+        Assert.Equal("changed after review", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));
+    }
+
+    [Fact]
     public async Task Patch_review_decisions_preserve_an_unrelated_pending_tool_action()
     {
         using var temp = new TempDir();

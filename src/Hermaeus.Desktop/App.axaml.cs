@@ -75,6 +75,8 @@ public partial class App : Application
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
+            var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
+            lifecycle.RegisterShutdownOwner("desktop view models", _ => vm.ShutdownAsync());
             window.Opened += async (_, _) =>
             {
                 if (Interlocked.Exchange(ref _initialized, 1) != 0) return;
@@ -84,9 +86,10 @@ public partial class App : Application
             {
                 try
                 {
-                    sp.GetRequiredService<AppLifecycleJournalService>().RecordCleanExit();
                     _desktopIntegration?.Dispose();
-                    vm.ShutdownAsync().GetAwaiter().GetResult();
+                    var shutdown = lifecycle.ShutdownAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+                    if (!shutdown.Clean)
+                        Console.Error.WriteLine("Hermaeus shutdown did not complete cleanly; lifecycle evidence was retained as incomplete.");
                 }
                 catch (Exception ex)
                 {
@@ -129,48 +132,23 @@ public partial class App : Application
             var ui = settingsService.Settings.Ui;
             AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
             AppThemeService.Apply(ui.Theme);
-            sp.GetRequiredService<AppLifecycleJournalService>().RecordStartup();
             // Constructed purely for its side effect: subscribes to toasts and
             // forwards Warning/Error ones onto the Notification voice channel.
             sp.GetRequiredService<VoiceNotificationBridge>();
             phases.Add(new StartupPhase("settings", phaseTimer.ElapsedMilliseconds));
 
             phaseTimer.Restart();
-            await Task.WhenAll(
-                sp.GetRequiredService<IConversationStore>().InitializeAsync(),
-                sp.GetRequiredService<IMemoryStore>().InitializeAsync(),
-                sp.GetRequiredService<SqliteRagStore>().InitializeAsync(),
-                sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
-                sp.GetRequiredService<BenchmarkService>().InitializeAsync(),
-                sp.GetRequiredService<IEvalStore>().InitializeAsync(),
-                sp.GetRequiredService<IRecommendationStore>().InitializeAsync());
-            phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
-
-            phaseTimer.Restart();
-            try
-            {
-                await sp.GetRequiredService<RecommendationApplicationService>().ReconcileAsync();
-            }
-            catch (Exception ex)
-            {
+            var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
+            var startup = await lifecycle.StartAsync();
+            foreach (var failed in startup.Phases.Where(phase => !phase.Succeeded))
                 logs.Add(new RuntimeLogEntry(
                     DateTime.UtcNow,
                     RuntimeLogLevel.Warning,
-                    RuntimeLogCategory.Service,
-                    $"Recommendation startup reconciliation failed: {ex.Message}"));
-            }
-            phases.Add(new StartupPhase("recommendation reconciliation", phaseTimer.ElapsedMilliseconds));
-
-            phaseTimer.Restart();
-            foreach (var result in await sp.GetRequiredService<ILabRuntimeHost>().RecoverOwnedProcessesAsync())
-            {
-                logs.Add(new RuntimeLogEntry(
-                    DateTime.UtcNow,
-                    result.Contains("Unknown", StringComparison.Ordinal) ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info,
-                    RuntimeLogCategory.Service,
-                    result));
-            }
-            phases.Add(new StartupPhase("lab-recovery", phaseTimer.ElapsedMilliseconds));
+                    RuntimeLogCategory.Startup,
+                    $"Application startup phase failed: {failed.Name}: {failed.Error}"));
+            if (!startup.Ready)
+                throw new InvalidOperationException("Shared application startup was incomplete.");
+            phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
 
             // Probe active voice provider health at startup to detect externally-running services
             phaseTimer.Restart();

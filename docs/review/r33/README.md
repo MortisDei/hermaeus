@@ -1,12 +1,14 @@
 # Review round 33: Hermaeus beyond the desktop
 
-Status: **planning only, awaiting owner review**. Nothing in this pack is an
-implementation claim or authorization to implement, commit, push, open a PR,
-merge, tag, release, change settings, or publish.
+Status: **implemented locally on `r33/planning`**. The pack is the authoritative
+R33 implementation record for the `v0.41.0-beta` target. Local commits are
+authorized; push, PR, merge, tag, release, settings, and other publication
+actions remain owner-only.
 
 Baseline: `c944febf8e7eda96dcf8f6461a02e870b40b8465`, verified against remote
-`main` on 2026-09-07. Local branch: `r33/planning`. All pack files remain
-uncommitted. No production, test, dependency, workflow, or owner-data edits.
+`main` on 2026-09-07. The review pack was anchored locally before implementation.
+Production and regression-test changes are scoped to the batches below. No
+dependency, workflow, or owner-data publication changes are included.
 
 ## Recommendation
 
@@ -21,6 +23,40 @@ driver exercising the same production workflows, with trustworthy Agent
 mutation outcomes, bounded runtime recovery, and useful evidence/navigation.
 Agent HTTP execution and Monaco remain conditional branches with explicit
 exit gates. Neither may hold correctness repairs hostage.
+
+## Implementation status
+
+The mandatory R33 scope is implemented locally:
+
+- B0: shared lifecycle authority, startup recovery, retryable partial startup,
+  and bounded shutdown evidence.
+- B1: benchmark operation identity, phase reporting, cancellation persistence,
+  terminal evidence save, and Linux installer path escaping.
+- B2: task and target command ownership across direct and queued operations.
+- B3: typed prepared mutation proposals with exact policy, target, preimage,
+  and post-image facts.
+- B4: durable mutation receipts, readback verification, `AlreadySatisfied`,
+  child-task ownership, and fresh-task view isolation.
+- B5: canonical AutoTune configuration and recommendation save-failure
+  reconciliation.
+- B6: full-config transient tuning probes with GGUF and hardware context.
+- B7: isolated whole-product driver using the production composition graph.
+- B8: restore budgets, duplicate-target checks, atomic extraction, and release
+  documentation updates.
+- B9: integrated sequential verification, package validation, and this
+  implementation ledger. Owner platform and publication gates remain open.
+- S: the restore and lifecycle safety boundaries remain bounded and explicit.
+
+The conditional Monaco spike and Agent HTTP execution remain deferred because
+their R33 exit gates were not earned. JSONL/runtime experiments remain deferred
+pending installed-runtime evidence. No new dependency was added.
+
+Automated closure evidence includes sequential Debug and Release solution builds
+and test harnesses, focused lifecycle/restore/Agent regression tests, the
+isolated driver mutation receipt, Linux package creation, package checksum
+verification, and an installed-path test with spaces. Native Windows, live
+managed-runtime/GPU behavior, and GUI pixel acceptance remain owner validation
+gates.
 
 ## Read order
 
@@ -72,7 +108,7 @@ exit gates. Neither may hold correctness repairs hostage.
    eventual PR-context gate remains future owner work. CodeQL analysis success
    is verified; CodeQL merge enforcement is not present in the inspected rules.
 
-## Verification performed during planning
+## Verification performed during planning (historical baseline)
 
 - `dotnet build Hermaeus.sln -m:1`: passed, 0 warnings, 0 errors.
 - Full sequential `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj
@@ -87,7 +123,25 @@ exit gates. Neither may hold correctness repairs hostage.
   changes no executable behavior; retain the mandatory final precommit coverage
   gate for subsequent authorized implementation.
 
-Authoritative user-facing behavior docs and CHANGELOG remain unchanged because
-no behavior changed. Documentation drift discovered here is recorded for its
-owning implementation batch. Archived R32 evidence and the central deferred
-ledger remain intact; doc 10 records the proposed R33 reconciliation.
+## Verification performed during implementation
+
+- Debug and Release solution builds passed with zero warnings and zero errors.
+- The complete sequential Debug and Release harnesses each passed 2,683 tests,
+  skipped 17 platform-gated tests, and reported 0 failures out of 2,700.
+- Focused lifecycle, restore-safety, Agent patch, steering, and sub-task tests
+  passed 53 of 53.
+- The isolated R33 driver completed a real prepared file mutation and emitted
+  an `Applied`, changed, readback-verified receipt. An unknown-argument run was
+  rejected before startup.
+- The Linux `v0.41.0-beta` package was created, its SHA256 sidecar verified,
+  and its installer was exercised from a path containing spaces against an
+  isolated XDG data directory. The desktop entry passed validation apart from
+  the existing category hint.
+- Coverage is the final automated gate immediately before the authorized local
+  commit. Native Windows, live managed-runtime/GPU behavior, GUI pixel
+  acceptance, and the owner PR/check gate remain outside this local proof.
+
+Authoritative user-facing behavior docs and CHANGELOG now describe the
+implemented R33 behavior and `v0.41.0-beta` target. Archived R32 evidence and
+the central deferred ledger remain intact; conditional Monaco, JSONL/runtime
+experiments, and Agent HTTP execution remain deferred.

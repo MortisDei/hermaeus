@@ -500,7 +500,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         }
     }
 
-    private static bool IsSafeTextFile(FileInfo info, int maxFileBytes)
+    internal static bool IsSafeTextFile(FileInfo info, int maxFileBytes)
     {
         if (!info.Exists || info.Length > maxFileBytes) return false;
         if (info.DirectoryName?.Split(Path.DirectorySeparatorChar).Any(part => IgnoredDirectories.Contains(part)) == true)

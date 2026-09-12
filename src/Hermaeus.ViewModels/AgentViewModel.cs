@@ -421,7 +421,7 @@ public sealed class AgentDraftPatchViewModel
     public string? RevertedBy { get; }
     public string StatusLabel => Status.ToString();
     public string CreatedLabel => $"Created {LocalTimeFormat.DateTimeMinutes(CreatedAt)}";
-    public bool CanReview => Status != AgentDraftPatchStatus.Applied && Status != AgentDraftPatchStatus.Reverted;
+    public bool CanReview => Status is not (AgentDraftPatchStatus.Applied or AgentDraftPatchStatus.Reverted or AgentDraftPatchStatus.AlreadySatisfied);
     /// <summary>Only an applied patch that came with a captured pre-image can be reverted (r6 1.8); pre-r6 applied patches have none.</summary>
     public bool CanRevert => Status == AgentDraftPatchStatus.Applied;
     public string OutcomeLabel => Status switch
@@ -429,6 +429,7 @@ public sealed class AgentDraftPatchViewModel
         AgentDraftPatchStatus.Pending => "Pending review",
         AgentDraftPatchStatus.Applied => $"Applied {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
         AgentDraftPatchStatus.Approved => $"Approved {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
+        AgentDraftPatchStatus.AlreadySatisfied => $"Already satisfied {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
         AgentDraftPatchStatus.Rejected => $"Rejected {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}",
         AgentDraftPatchStatus.Blocked => string.IsNullOrWhiteSpace(BlockReason)
             ? $"Blocked {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}"
@@ -579,6 +580,7 @@ public partial class AgentViewModel : ViewModelBase
     private Task? _loadTask;
     private CancellationTokenSource? _workspaceFileQueryCts;
     private int _workspaceFileSelectionGeneration;
+    private int _taskViewGeneration;
 
     public UiBoundCollection<LlmModel> AvailableModels { get; } = [];
     public UiBoundCollection<RagDataset> Datasets { get; } = [];
@@ -921,7 +923,8 @@ public partial class AgentViewModel : ViewModelBase
         IVoiceOrchestrator? voice = null,
         AgentScenarioSuiteViewModel? scenarioSuite = null,
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
-        IToastService? toasts = null)
+        IToastService? toasts = null,
+        IAgentTaskCommandOwner? commandOwner = null)
     {
         _toasts = toasts;
         _agent = agent;
@@ -939,7 +942,7 @@ public partial class AgentViewModel : ViewModelBase
         _lessons = lessons;
         _voice = voice;
         ScenarioSuite = scenarioSuite;
-        _patchReview = new AgentPatchReviewService(workspaceTools, store, workspaceManifests);
+        _patchReview = new AgentPatchReviewService(workspaceTools, store, workspaceManifests, commandOwner);
         // r12 03-runtime-vm-correctness.md 3.5: defaulting to the whole user
         // profile meant every startup (and every Agent panel navigation)
         // silently enumerated and analyzed it, writing a "Workspace profile"
@@ -1133,6 +1136,7 @@ public partial class AgentViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanStart))]
     private async Task StartAsync()
     {
+        var viewGeneration = ++_taskViewGeneration;
         IsRunning = true;
         _stopRequested = false;
         _activeRunTaskId = null;
@@ -1143,7 +1147,10 @@ public partial class AgentViewModel : ViewModelBase
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
                 $"Agent started: {GoalText}"));
-            CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token, ActiveProjectId);
+            var created = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token, ActiveProjectId);
+            if (viewGeneration != _taskViewGeneration)
+                return;
+            CurrentTask = created;
             _openedTaskId = CurrentTask.TaskId;
             _activeRunTaskId = CurrentTask.TaskId;
             _currentTaskParentGoal = string.Empty;
@@ -1254,6 +1261,7 @@ public partial class AgentViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanNewTask))]
     private void NewTask()
     {
+        ++_taskViewGeneration;
         CurrentTask = null;
         _openedTaskId = null;
         _currentTaskParentGoal = string.Empty;
@@ -1261,6 +1269,18 @@ public partial class AgentViewModel : ViewModelBase
         ReplyText = string.Empty;
         StatusMessage = string.Empty;
         IsError = false;
+        RetrievedContext.Clear();
+        ContextReceipt.Clear();
+        NewLessons.Clear();
+        QueuedPatches.Clear();
+        LedgerFiles.Clear();
+        LedgerCommands.Clear();
+        LedgerApprovals.Clear();
+        SelectedLedgerFile = null;
+        NextActionPreview = string.Empty;
+        LogPreview = string.Empty;
+        RunOutcome = AgentRunOutcomeSummary.None;
+        ClearSelectedWorkspaceFile();
         RefreshTaskPreview();
     }
 
@@ -1298,7 +1318,12 @@ public partial class AgentViewModel : ViewModelBase
     private async Task LoadTaskAsync(string? taskId)
     {
         if (string.IsNullOrWhiteSpace(taskId)) return;
-        CurrentTask = await _store.LoadAsync(taskId);
+        var viewGeneration = ++_taskViewGeneration;
+        ClearSelectedWorkspaceFile();
+        var loaded = await _store.LoadAsync(taskId);
+        if (viewGeneration != _taskViewGeneration)
+            return;
+        CurrentTask = loaded;
         _openedTaskId = CurrentTask?.TaskId;
         SelectedTabIndex = RunTabIndex;
 
@@ -1319,9 +1344,12 @@ public partial class AgentViewModel : ViewModelBase
             ? (await _store.LoadAsync(parentId))?.Goal ?? string.Empty
             : string.Empty;
 
+        if (viewGeneration != _taskViewGeneration || CurrentTask?.TaskId != taskId)
+            return;
+
         RefreshTaskPreview();
-        await RefreshQueuedPatchesAsync();
-        await RefreshNewLessonsAsync();
+        await RefreshQueuedPatchesCoreAsync(viewGeneration, taskId);
+        await RefreshNewLessonsAsync(viewGeneration, taskId);
         RunStepCommand.NotifyCanExecuteChanged();
     }
 
@@ -1428,27 +1456,10 @@ public partial class AgentViewModel : ViewModelBase
     private async Task<string?> PersistSubTaskModelChoicesAsync(AgentReviewQueueItemViewModel item)
     {
         if (!item.HasSubTaskModelChoices) return null;
-        var state = await _store.LoadAsync(item.TaskId);
-        var pending = state?.PendingToolAction;
-        if (state is null || pending is null
-            || !string.Equals(AgentApprovalFingerprint.Resolve(pending), item.PendingFingerprint, StringComparison.Ordinal)
-            || !pending.Arguments.TryGetValue("subtasks", out var raw)
-            || raw is not JsonElement { ValueKind: JsonValueKind.Array } array)
-            return item.PendingFingerprint;
-
-        var nodes = System.Text.Json.Nodes.JsonNode.Parse(array.GetRawText())?.AsArray();
-        if (nodes is null) return item.PendingFingerprint;
-        foreach (var choice in item.SubTaskModelChoices)
-        {
-            if (choice.Index >= nodes.Count || nodes[choice.Index] is not System.Text.Json.Nodes.JsonObject node) continue;
-            var modelId = choice.SelectedOption?.ModelId ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(modelId)) node.Remove("model_id");
-            else node["model_id"] = modelId;
-        }
-        pending.Arguments["subtasks"] = JsonSerializer.SerializeToElement(nodes);
-        pending.Fingerprint = AgentApprovalFingerprint.Compute(pending.ToolName, pending.Arguments);
-        await _store.SaveAsync(state);
-        return pending.Fingerprint;
+        var modelIds = item.SubTaskModelChoices.ToDictionary(
+            choice => choice.Index,
+            choice => choice.SelectedOption?.ModelId ?? string.Empty);
+        return await _agent.UpdatePendingPlanModelsAsync(item.TaskId, item.PendingFingerprint, modelIds);
     }
 
     /// <summary>
@@ -1742,14 +1753,22 @@ public partial class AgentViewModel : ViewModelBase
     /// Independent of <see cref="Lessons"/>'s workspace-scoped list: a
     /// direct id lookup, not a scope filter.
     /// </summary>
-    private async Task RefreshNewLessonsAsync()
+    private async Task RefreshNewLessonsAsync(int? viewGeneration = null, string? taskId = null)
     {
-        NewLessons.Clear();
-        if (_lessons is null || CurrentTask is null) return;
+        var generation = viewGeneration ?? _taskViewGeneration;
+        var expectedTaskId = taskId ?? CurrentTask?.TaskId;
+        if (!IsTaskViewCurrent(generation, expectedTaskId))
+            return;
 
-        foreach (var id in CurrentTask.NewLessonIds)
+        NewLessons.Clear();
+        var task = CurrentTask;
+        if (_lessons is null || task is null) return;
+
+        foreach (var id in task.NewLessonIds)
         {
             var lesson = await _lessons.GetByIdAsync(id);
+            if (!IsTaskViewCurrent(generation, expectedTaskId))
+                return;
             if (lesson is not null && lesson.Status != AgentLessonStatus.Retired)
                 NewLessons.Add(new AgentLessonViewModel(lesson));
         }
@@ -1797,8 +1816,15 @@ public partial class AgentViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private Task RefreshQueuedPatchesAsync()
+    private Task RefreshQueuedPatchesAsync() => RefreshQueuedPatchesCoreAsync();
+
+    private Task RefreshQueuedPatchesCoreAsync(int? viewGeneration = null, string? taskId = null)
     {
+        var generation = viewGeneration ?? _taskViewGeneration;
+        var expectedTaskId = taskId ?? CurrentTask?.TaskId;
+        if (!IsTaskViewCurrent(generation, expectedTaskId))
+            return Task.CompletedTask;
+
         QueuedPatches.Clear();
         if (CurrentTask is null)
             return Task.CompletedTask;
@@ -1819,8 +1845,15 @@ public partial class AgentViewModel : ViewModelBase
     /// has workspace access.
     /// </summary>
     [RelayCommand]
-    private async Task RefreshRunLedgerAsync()
+    private Task RefreshRunLedgerAsync() => RefreshRunLedgerCoreAsync();
+
+    private async Task RefreshRunLedgerCoreAsync(int? viewGeneration = null, string? taskId = null)
     {
+        var generation = viewGeneration ?? _taskViewGeneration;
+        var expectedTaskId = taskId ?? CurrentTask?.TaskId;
+        if (!IsTaskViewCurrent(generation, expectedTaskId))
+            return;
+
         LedgerFiles.Clear();
         LedgerCommands.Clear();
         LedgerApprovals.Clear();
@@ -1840,6 +1873,8 @@ public partial class AgentViewModel : ViewModelBase
             if (string.IsNullOrEmpty(spec.TaskId))
                 continue;
             var child = await _store.LoadAsync(spec.TaskId);
+            if (!IsTaskViewCurrent(generation, expectedTaskId))
+                return;
             if (child is not null)
                 children.Add(child);
         }
@@ -1855,6 +1890,8 @@ public partial class AgentViewModel : ViewModelBase
         var ledger = AgentRunLedgerBuilder.Build(CurrentTask, children);
         foreach (var file in ledger.Files)
         {
+            if (!IsTaskViewCurrent(generation, expectedTaskId))
+                return;
             var conflicted = false;
             if (file.Status == AgentLedgerFileStatus.Applied)
             {
@@ -2028,20 +2065,18 @@ public partial class AgentViewModel : ViewModelBase
         if (CurrentTask is null || SelectedWorkspaceFile is null) return;
         try
         {
-            var patch = new AgentDraftPatch
-            {
-                RelativePath = SelectedWorkspaceFile.RelativePath,
-                Rationale = DraftRationale ?? string.Empty,
-                ProposedContent = DraftProposedContent ?? WorkspaceFilePreview
-            };
-            CurrentTask.DraftPatches.Add(patch);
-            await _store.SaveAsync(CurrentTask);
-            QueuedPatches.Add(new AgentDraftPatchViewModel(patch));
+            var taskId = CurrentTask.TaskId;
+            await _patchReview.QueueAsync(
+                taskId,
+                SelectedWorkspaceFile.RelativePath,
+                DraftRationale ?? string.Empty,
+                DraftProposedContent ?? WorkspaceFilePreview,
+                BuildOptions());
             DraftRationale = string.Empty;
             DraftProposedContent = string.Empty;
             DraftPreview = string.Empty;
             StatusMessage = $"Patch for {SelectedWorkspaceFile.RelativePath} queued for review.";
-            RefreshTaskPreview();
+            await LoadTaskIfOpenAsync(taskId);
         }
         catch (Exception ex)
         {
@@ -2083,8 +2118,13 @@ public partial class AgentViewModel : ViewModelBase
         try
         {
             var selectedPath = SelectedWorkspaceFile?.RelativePath;
-            await _patchReview.ApplyAsync(CurrentTask, found, BuildOptions());
-            StatusMessage = $"Patch for {found.RelativePath} applied.";
+            var outcome = await _patchReview.ApplyAsync(CurrentTask, found, BuildOptions());
+            StatusMessage = outcome switch
+            {
+                AgentMutationOutcome.Applied => $"Patch for {found.RelativePath} applied and verified.",
+                AgentMutationOutcome.AlreadySatisfied => $"Patch for {found.RelativePath} was already satisfied and verified.",
+                _ => $"Patch for {found.RelativePath} was not applied: {found.BlockReason}"
+            };
             await RefreshWorkspaceFilesAsync();
             if (!string.IsNullOrWhiteSpace(selectedPath))
                 SelectedWorkspaceFile = WorkspaceFiles.FirstOrDefault(file => file.RelativePath == selectedPath);
@@ -2388,15 +2428,23 @@ public partial class AgentViewModel : ViewModelBase
         if (CurrentTask?.TaskId != taskId)
             return;
 
-        CurrentTask = await _store.LoadAsync(taskId);
+        var generation = _taskViewGeneration;
+        var loaded = await _store.LoadAsync(taskId);
+        if (!IsTaskViewCurrent(generation, taskId))
+            return;
+        CurrentTask = loaded;
+        if (!IsTaskViewCurrent(generation, taskId))
+            return;
         RefreshTaskPreview();
         await RefreshRecentAsync();
-        await RefreshNewLessonsAsync();
+        await RefreshNewLessonsAsync(generation, taskId);
     }
 
     private async Task RunCurrentStepAsync()
     {
         if (CurrentTask is null) return;
+        var generation = _taskViewGeneration;
+        var taskId = CurrentTask.TaskId;
 
         // A parent with unfinished sub-tasks can never take a bare parent
         // model step - AgentService.RunStepAsync throws for it (r16
@@ -2410,11 +2458,13 @@ public partial class AgentViewModel : ViewModelBase
         }
 
         StatusMessage = "Building context and asking the agent...";
-        var result = await _agent.RunStepAsync(CurrentTask.TaskId, BuildOptions(), _cts?.Token ?? CancellationToken.None);
+        var result = await _agent.RunStepAsync(taskId, BuildOptions(), _cts?.Token ?? CancellationToken.None);
+        if (!IsTaskViewCurrent(generation, taskId))
+            return;
         ApplyStepResult(result);
-        await RefreshLogAsync();
+        await RefreshLogAsync(generation, taskId);
         await RefreshLessonsAsync();
-        await RefreshNewLessonsAsync();
+        await RefreshNewLessonsAsync(generation, taskId);
         _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
             $"Agent step complete: {result.State.ActiveStep}"));
     }
@@ -2443,6 +2493,7 @@ public partial class AgentViewModel : ViewModelBase
     /// </summary>
     private async Task RunAgentLoopAsync(string taskId, AgentWorkspaceOptions options)
     {
+        var generation = _taskViewGeneration;
         var openedTaskId = _openedTaskId = taskId;
         var viewedTaskId = CurrentTask?.TaskId;
         _stepsThisRun = 0;
@@ -2450,8 +2501,15 @@ public partial class AgentViewModel : ViewModelBase
         var result = await _agent.RunAsync(
             openedTaskId,
             options,
-            onStep: ApplyStepResult,
+            onStep: step =>
+            {
+                if (generation == _taskViewGeneration)
+                    ApplyStepResult(step);
+            },
             ct: _cts?.Token ?? CancellationToken.None);
+
+        if (generation != _taskViewGeneration)
+            return;
 
         // The returned result can describe a paused CHILD task rather than
         // the parent that was resumed, and even the parent's own final
@@ -2464,13 +2522,16 @@ public partial class AgentViewModel : ViewModelBase
         // call; otherwise the view stays on whatever the user had open.
         if (viewedTaskId == openedTaskId || viewedTaskId is null)
         {
-            CurrentTask = await _store.LoadAsync(openedTaskId) ?? result.State;
+            var refreshed = await _store.LoadAsync(openedTaskId) ?? result.State;
+            if (!IsTaskViewCurrent(generation, openedTaskId))
+                return;
+            CurrentTask = refreshed;
             RefreshTaskPreview();
         }
 
-        await RefreshLogAsync();
+        await RefreshLogAsync(generation, openedTaskId);
         await RefreshLessonsAsync();
-        await RefreshNewLessonsAsync();
+        await RefreshNewLessonsAsync(generation, openedTaskId);
         _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
             $"Agent run paused: {result.State.ActiveStep} (status {result.State.Status})"));
     }
@@ -2632,9 +2693,32 @@ public partial class AgentViewModel : ViewModelBase
 
     private async Task RefreshLogAsync()
     {
-        if (CurrentTask is null) return;
-        var path = Path.Combine(_store.GetTaskDirectory(CurrentTask.TaskId), "agent.log");
-        LogPreview = File.Exists(path) ? await File.ReadAllTextAsync(path) : string.Empty;
+        await RefreshLogAsync(_taskViewGeneration, CurrentTask?.TaskId);
+    }
+
+    private async Task RefreshLogAsync(int generation, string? taskId)
+    {
+        if (!IsTaskViewCurrent(generation, taskId) || taskId is null)
+            return;
+
+        var path = Path.Combine(_store.GetTaskDirectory(taskId), "agent.log");
+        var content = File.Exists(path) ? await File.ReadAllTextAsync(path) : string.Empty;
+        if (IsTaskViewCurrent(generation, taskId))
+            LogPreview = content;
+    }
+
+    private bool IsTaskViewCurrent(int generation, string? taskId) =>
+        generation == _taskViewGeneration
+        && string.Equals(CurrentTask?.TaskId, taskId, StringComparison.Ordinal);
+
+    private void ClearSelectedWorkspaceFile()
+    {
+        ++_workspaceFileSelectionGeneration;
+        SelectedWorkspaceFile = null;
+        WorkspaceFilePreview = string.Empty;
+        WorkspaceFileSummary = string.Empty;
+        DraftProposedContent = string.Empty;
+        DraftPreview = string.Empty;
     }
 
     private void RefreshTaskPreview()

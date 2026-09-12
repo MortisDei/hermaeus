@@ -199,6 +199,44 @@ file immediately and refreshes the preview. Queued patches expose explicit
 pending, applied, rejected, and blocked states so review decisions are visible
 at a glance.
 
+### Prepared mutations and receipts
+
+Before a mutating Agent action reaches the review queue, Hermaeus prepares an
+immutable proposal. The proposal records the typed action arguments, selected
+workspace and policy identity, target path, current preimage hash, proposed
+content or command recipe, and the proposal revision. The plan model must be
+visible and available before the proposal can become pending. Malformed or
+unsafe actions are rejected without creating an approval item.
+
+Approval is bound to that exact proposal and is revalidated against the current
+workspace policy and target before execution. A durable mutation receipt is
+written before the executor runs, then the target is read back and checked
+against the proposed post-image. `Applied` means a changed target was verified;
+`AlreadySatisfied` means the target already matched and no write occurred.
+Changed preimages, policy drift, failed readback, and other incomplete outcomes
+remain visible as blocked or failed evidence. Direct Agent mutations and
+workspace-browser queued patches use the same task and target ownership
+boundary, so concurrent paths cannot silently overwrite one another. No model
+response, steering instruction, or repeated fingerprint grants approval.
+
+### Whole-product headless verification
+
+The isolated R33 driver exercises the production composition graph through task
+creation, planning, explicit approval, mutation execution, receipt persistence,
+readback, and shared startup and shutdown. It requires separate scratch paths
+for settings, Data Root, and workspace, and refuses unknown arguments or
+workspace-overlapping paths. For a local run:
+
+```bash
+dotnet run --project src/Tools/R33Driver/R33Driver.csproj -- \
+  --settings-path /tmp/hermaeus-r33/settings/settings.json \
+  --data-root /tmp/hermaeus-r33/data \
+  --workspace /tmp/hermaeus-r33/workspace
+```
+
+The driver does not use the owner's settings, Data Root, or workspace. Its JSON
+result is a compact verification receipt, not a GUI or native-runtime proof.
+
 ## Autonomous Runs
 
 Clicking Start (or approving a gated action while a run was in progress) does

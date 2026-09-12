@@ -119,15 +119,12 @@ public sealed class BenchmarkService
         BenchmarkSuite suite,
         LlmModel model,
         IProgress<string>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<CancellationToken, Task>? preparation = null)
     {
-        await EnsureInitializedAsync(ct);
-        var cases = suite.Cases.Where(c => !string.IsNullOrWhiteSpace(c.Prompt)).ToList();
-        if (suite.MaxCases > 0)
-            cases = cases.Take(suite.MaxCases).ToList();
-
         var run = new BenchmarkRun
         {
+            OperationId = OperationCorrelation.NewId(),
             SuiteId = suite.Id,
             SuiteName = suite.Name,
             SuiteVersion = suite.SuiteVersion,
@@ -152,22 +149,44 @@ public sealed class BenchmarkService
             TimeoutSeconds = suite.TimeoutSeconds <= 0 ? 120 : suite.TimeoutSeconds,
             StartedAt = DateTime.UtcNow,
             Status = "Running",
-            HardwareSnapshot = await _system.CaptureAsync(ct)
+            CurrentPhase = "Preparing"
         };
-        run.Metadata = CreateMetadata(suite, model, run.HardwareSnapshot);
-        run.Metadata.ProfileFingerprint = EmpiricalProfileFingerprint.From(run.Metadata, model.Id);
-        run.Metadata.ProfileFingerprintV2 = await CreateProfileFingerprintV2Async(
-            run.Metadata, run.HardwareSnapshot, model, ct);
-        run.Metadata.ObservationSource = new SourceReference(
-            ProvenanceKind.Benchmark,
-            suite.Name,
-            Locator: run.Id,
-            Snippet: "Local benchmark observation",
-            Timestamp: run.StartedAt,
-            EvidenceOrigin: EvidenceOrigin.DirectObservation);
 
         try
         {
+            await EnsureInitializedAsync(ct);
+            var cases = suite.Cases.Where(c => !string.IsNullOrWhiteSpace(c.Prompt)).ToList();
+            if (suite.MaxCases > 0)
+                cases = cases.Take(suite.MaxCases).ToList();
+
+            // The run identity exists before model preparation and the first
+            // durable save happens before hardware, binary, or profile capture.
+            // A cancellation at any later preparation boundary therefore has a
+            // record that can honestly say it never reached a case.
+            await SaveRunAsync(run, ct);
+
+            if (preparation is not null)
+            {
+                SetPhase(run, "Preparing model", progress);
+                await preparation(ct);
+            }
+
+            SetPhase(run, "Capturing hardware", progress);
+            run.HardwareSnapshot = await _system.CaptureAsync(ct);
+            run.Metadata = CreateMetadata(suite, model, run.HardwareSnapshot);
+            run.Metadata.ProfileFingerprint = EmpiricalProfileFingerprint.From(run.Metadata, model.Id);
+            run.Metadata.ProfileFingerprintV2 = await CreateProfileFingerprintV2Async(
+                run.Metadata, run.HardwareSnapshot, model, ct);
+            run.Metadata.ObservationSource = new SourceReference(
+                ProvenanceKind.Benchmark,
+                suite.Name,
+                Locator: run.Id,
+                Snippet: "Local benchmark observation",
+                Timestamp: run.StartedAt,
+                EvidenceOrigin: EvidenceOrigin.DirectObservation);
+            await SaveRunAsync(run, ct);
+
+            SetPhase(run, "Running cases", progress);
             for (var i = 0; i < cases.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -176,6 +195,7 @@ public sealed class BenchmarkService
                 {
                     ct.ThrowIfCancellationRequested();
                     var phase = iteration == 0 ? BenchmarkPhase.Cold : BenchmarkPhase.Warm;
+                    run.CurrentPhase = $"Case {i + 1}/{cases.Count}, {phase}";
                     progress?.Report($"{i + 1}/{cases.Count} {phase}: {test.Name} ({iteration + 1}/{run.IterationsPerCase})");
                     run.Results.Add(await RunCaseAsync(suite, test, model, run.TimeoutSeconds, iteration, phase, ct));
                     await SaveRunAsync(run, ct);
@@ -183,24 +203,46 @@ public sealed class BenchmarkService
             }
 
             run.Status = "Completed";
+            run.CurrentPhase = "Completed";
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             run.Status = "Cancelled";
+            run.CurrentPhase = "Cancelled";
             run.Error = "Benchmark cancelled.";
         }
         catch (Exception ex)
         {
             run.Status = "Failed";
+            run.CurrentPhase = "Failed";
             run.Error = ex.Message;
         }
         finally
         {
             run.FinishedAt = DateTime.UtcNow;
-            await SaveRunAsync(run, CancellationToken.None);
+            try
+            {
+                await SaveRunAsync(run, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                run.EvidenceSaveError = ex.Message;
+                _logs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Error,
+                    RuntimeLogCategory.Service,
+                    $"Benchmark terminal evidence save failed: exception={ex.GetType().Name}.",
+                    run.OperationId));
+            }
         }
 
         return run;
+    }
+
+    private static void SetPhase(BenchmarkRun run, string phase, IProgress<string>? progress)
+    {
+        run.CurrentPhase = phase;
+        progress?.Report($"Benchmark {phase.ToLowerInvariant()}...");
     }
 
     public async Task<BenchmarkRun> RerunAsync(string runId, IProgress<string>? progress = null, CancellationToken ct = default)

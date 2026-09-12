@@ -102,17 +102,19 @@ Owner Linux/Windows observations follow the completed automated work. Do not
 claim Windows, real inference, speech graphs, native editor rendering or actual
 installed application launch from source inspection/mocks.
 
-No commit, push, PR, merge, tag, release or repository-settings operation is
-performed by this planning pack. All documents remain uncommitted. The owner
-reviews the complete pack before implementation begins.
+No push, PR, merge, tag, release or repository-settings operation is performed
+by this implementation. Local commits are authorized by the owner.
 
-## 11.5 Implementation progress (future owner-approved work)
+## 11.5 Implementation progress
 
 | Batch | State | Required evidence |
 | --- | --- | --- |
-| B0-B9 and S | Planned, not implemented | Batch source/tests/results and owner gates when authorized |
-| C1-C3 | Conditional, not selected for unconditional delivery | Individual exit-gate decision plus evidence |
+| B0-B9 and S | Implemented locally | Source, regression tests, sequential build/test, package, and coverage evidence; owner platform gates remain explicit |
+| C1 Monaco | Deferred | No editor dependency or spike shipped without the required offline, native, and cross-platform evidence |
+| C2 JSONL/runtime experiments | Deferred | Installed exact-binary and selected-pair evidence was not sufficient for an unconditional feature |
+| C3 Agent HTTP execution | Deferred | Desktop and Local API remain separate processes without one shared execution host and approval surface |
 | Actual R33 PR/CodeQL enforcement | Future owner action | Exact PR/check/rules evidence, no synthetic planning PR |
 
-Do not infer progress from document existence. Update this table only after
-actual implementation/evidence, and keep unresolved or descope decisions clear.
+Do not infer progress from document existence. Keep unresolved or descope
+decisions clear and do not turn local verification into owner platform or
+publication evidence.

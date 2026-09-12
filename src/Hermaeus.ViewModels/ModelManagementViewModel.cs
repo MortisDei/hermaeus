@@ -31,6 +31,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly List<ModelProfileItemViewModel> _allModels = [];
     private readonly HashSet<string> _reportedArtworkOutcomes = new(StringComparer.Ordinal);
     private readonly object _artworkReportLock = new();
+    private HardwareProfile? _hardwareProfile;
     private CancellationTokenSource? _hfSelectionCts;
     private long _hfSelectionGeneration;
 
@@ -926,6 +927,27 @@ public partial class ModelManagementViewModel : ObservableObject
             ? existing.ContextSize
             : item.DefaultContextSize ?? (_settings.Settings.ManagedServers.FirstOrDefault()?.ContextSize ?? 4096);
 
+    private async Task<HardwareProfile> GetHardwareProfileAsync(CancellationToken ct)
+    {
+        _hardwareProfile ??= await _system.GetHardwareProfileAsync(ct);
+        return _hardwareProfile;
+    }
+
+    private ServerConfig BuildModelTuneProbe(
+        ModelProfileItemViewModel item,
+        string executable,
+        int contextSize)
+    {
+        var probe = _services.ChatServer?.BuildConfig() ?? new ServerConfig();
+        probe.ExecutablePath = executable;
+        probe.ModelPath = item.ModelId;
+        probe.Port = GetFreePort();
+        probe.ContextSize = contextSize;
+        probe.EmbeddingsMode = false;
+        probe.AutoStart = false;
+        return probe;
+    }
+
     [RelayCommand]
     private async Task AutoTuneModelAsync(ModelProfileItemViewModel? item)
     {
@@ -957,17 +979,15 @@ public partial class ModelManagementViewModel : ObservableObject
         {
             var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
             var contextSize = ResolveProbeContextSize(item, existing);
-            var probe = new ServerConfig
-            {
-                ExecutablePath = executable,
-                ModelPath = item.ModelId,
-                Port = GetFreePort(),
-                ContextSize = contextSize,
-                AutoStart = false
-            };
+            var probe = BuildModelTuneProbe(item, executable, contextSize);
+            var ggufInfo = File.Exists(item.ModelId)
+                ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), CancellationToken.None)
+                : null;
+            var hardware = await GetHardwareProfileAsync(CancellationToken.None);
 
-            var result = await ServerProcessManager.AutoTuneAsync(probe);
-            LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, contextSize, string.Empty, result.GpuLayers, result.Threads, result);
+            var result = await ServerProcessManager.AutoTuneAsync(probe, ggufInfo: ggufInfo, hardware: hardware);
+            var effectiveContext = result.TunedContextSize ?? contextSize;
+            LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
             await _settings.SaveAsync();
             RefreshTuneSummary(item);
             item.RetuneRecommended = false;
@@ -1044,17 +1064,15 @@ public partial class ModelManagementViewModel : ObservableObject
                 {
                     var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
                     var contextSize = ResolveProbeContextSize(item, existing);
-                    var probe = new ServerConfig
-                    {
-                        ExecutablePath = executable,
-                        ModelPath = item.ModelId,
-                        Port = GetFreePort(),
-                        ContextSize = contextSize,
-                        AutoStart = false
-                    };
+                    var probe = BuildModelTuneProbe(item, executable, contextSize);
+                    var ggufInfo = File.Exists(item.ModelId)
+                        ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), _autoTuneAllCts.Token)
+                        : null;
+                    var hardware = await GetHardwareProfileAsync(_autoTuneAllCts.Token);
 
-                    var result = await ServerProcessManager.AutoTuneAsync(probe, ct: _autoTuneAllCts.Token);
-                    LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, contextSize, string.Empty, result.GpuLayers, result.Threads, result);
+                    var result = await ServerProcessManager.AutoTuneAsync(probe, ct: _autoTuneAllCts.Token, ggufInfo: ggufInfo, hardware: hardware);
+                    var effectiveContext = result.TunedContextSize ?? contextSize;
+                    LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
                     await _settings.SaveAsync();
                     RefreshTuneSummary(item);
                     tuned++;
