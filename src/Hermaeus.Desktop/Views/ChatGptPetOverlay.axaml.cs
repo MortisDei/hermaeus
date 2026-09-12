@@ -8,6 +8,7 @@ namespace Hermaeus.Desktop.Views;
 
 public partial class ChatGptPetOverlay : UserControl
 {
+    private const double DirectionDeadzone = 4;
     private IPointer? _dragPointer;
     private Point _dragStart;
     private double _positionStartX;
@@ -47,7 +48,7 @@ public partial class ChatGptPetOverlay : UserControl
         var deltaX = current.X - _dragStart.X;
         var deltaY = current.Y - _dragStart.Y;
         pet.SetPosition(_positionStartX + deltaX, _positionStartY + deltaY);
-        if (Math.Abs(deltaX) > 1)
+        if (Math.Abs(deltaX) >= DirectionDeadzone)
             PetSprite.SetDragging(true, deltaX > 0);
         e.Handled = true;
     }

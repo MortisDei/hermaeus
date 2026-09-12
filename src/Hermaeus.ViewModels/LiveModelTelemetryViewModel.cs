@@ -19,6 +19,8 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
     [ObservableProperty] private string _status = "Telemetry is closed.";
     [ObservableProperty] private string _runtimeIdentity = "Unknown";
     [ObservableProperty] private string _modelIdentity = "Unknown";
+    [ObservableProperty] private string _runtimeIdentityStableId = string.Empty;
+    [ObservableProperty] private string _modelIdentityStableId = string.Empty;
     [ObservableProperty] private string _decodeRate = "Unknown";
     [ObservableProperty] private string _processRam = "Unknown";
     [ObservableProperty] private string _processGpuMemory = "Unknown";
@@ -40,6 +42,8 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
     public string UnknownNote => _series is null
         ? "Open telemetry during a local managed Chat request to sample the matching process."
         : "Missing counters remain Unknown and are not treated as zero.";
+    public string RuntimeIdentityTooltip => FormatIdentityTooltip(RuntimeIdentity, RuntimeIdentityStableId);
+    public string ModelIdentityTooltip => FormatIdentityTooltip(ModelIdentity, ModelIdentityStableId);
 
     /// <summary>
     /// Request-level metrics are direct provider evidence and remain available
@@ -82,8 +86,12 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
     {
         IsOpen = true;
         Status = "Sampling the active runtime.";
-        RuntimeIdentity = request.RuntimeIdentity.StableId;
-        ModelIdentity = request.Fingerprint.Model.StableId;
+        RuntimeIdentity = RuntimeTelemetryIdentityText.RuntimeLabel(request.RuntimeIdentity);
+        ModelIdentity = RuntimeTelemetryIdentityText.ModelLabel(request.Fingerprint.Model);
+        RuntimeIdentityStableId = request.RuntimeIdentity.StableId;
+        ModelIdentityStableId = request.Fingerprint.Model.StableId;
+        OnPropertyChanged(nameof(RuntimeIdentityTooltip));
+        OnPropertyChanged(nameof(ModelIdentityTooltip));
         await _sampler.StartAsync(request, ct);
         OnSeriesChanged(_sampler.CurrentSeries);
     }
@@ -94,6 +102,10 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
         Status = "Telemetry is closed.";
         await _sampler.StopAsync();
         _series = null;
+        RuntimeIdentityStableId = string.Empty;
+        ModelIdentityStableId = string.Empty;
+        OnPropertyChanged(nameof(RuntimeIdentityTooltip));
+        OnPropertyChanged(nameof(ModelIdentityTooltip));
         ProcessRam = "Unknown";
         ProcessGpuMemory = "Unknown";
         OnPropertyChanged(nameof(Samples));
@@ -122,5 +134,33 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
     {
         _sampler.SeriesChanged -= OnSeriesChanged;
         await _sampler.DisposeAsync();
+    }
+
+    private static string FormatIdentityTooltip(string label, string stableId) =>
+        stableId.Length == 0 ? label : $"{label}\nStable identity: {stableId}";
+}
+
+internal static class RuntimeTelemetryIdentityText
+{
+    public static string RuntimeLabel(RuntimeIdentityV2 identity)
+    {
+        var label = string.IsNullOrWhiteSpace(identity.Kind) ? "Runtime" : identity.Kind;
+        if (!string.IsNullOrWhiteSpace(identity.Version))
+            label += $" {identity.Version}";
+        if (!string.IsNullOrWhiteSpace(identity.Build))
+            label += $" build {identity.Build}";
+        if (!string.IsNullOrWhiteSpace(identity.Backend))
+            label += $" ({identity.Backend})";
+        return label;
+    }
+
+    public static string ModelLabel(ModelIdentityV2 identity)
+    {
+        var label = string.IsNullOrWhiteSpace(identity.ManifestIdentity)
+            ? "Local model"
+            : identity.ManifestIdentity;
+        var details = string.Join(", ", new[] { identity.Architecture, identity.Quantization }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
+        return details.Length == 0 ? label : $"{label} ({details})";
     }
 }

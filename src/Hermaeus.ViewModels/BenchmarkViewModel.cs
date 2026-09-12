@@ -18,6 +18,7 @@ public partial class BenchmarkViewModel : ObservableObject
     private readonly ServicesViewModel? _services;
     private readonly IBenchmarkInsightsService? _insights;
     private readonly IVoiceOrchestrator? _voice;
+    private readonly IAudioFeedbackService? _audioFeedback;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly RecommendationApplicationService? _recommendationApplication;
     private CancellationTokenSource? _runCts;
@@ -116,7 +117,8 @@ public partial class BenchmarkViewModel : ObservableObject
         IBenchmarkInsightsService? insights = null,
         IVoiceOrchestrator? voice = null,
         RecommendationDerivationService? recommendationDerivation = null,
-        RecommendationApplicationService? recommendationApplication = null)
+        RecommendationApplicationService? recommendationApplication = null,
+        IAudioFeedbackService? audioFeedback = null)
     {
         _benchmarks = benchmarks;
         _llm = llm;
@@ -126,6 +128,7 @@ public partial class BenchmarkViewModel : ObservableObject
         _services = services;
         _insights = insights;
         _voice = voice;
+        _audioFeedback = audioFeedback;
         _recommendationDerivation = recommendationDerivation;
         _recommendationApplication = recommendationApplication;
         InsightsUsage.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasInsightsUsage));
@@ -244,7 +247,13 @@ public partial class BenchmarkViewModel : ObservableObject
 
     private void NarrateCompletion(BenchmarkRun? run, string modelName)
     {
-        if (_voice is null || run is null)
+        if (run is null)
+            return;
+
+        if (_audioFeedback is not null)
+            _ = _audioFeedback.PublishAsync(AudioFeedbackEventKind.LongOperationCompleted);
+
+        if (_voice is null)
             return;
 
         var text = run.Status == "Cancelled"

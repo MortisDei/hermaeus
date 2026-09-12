@@ -22,6 +22,8 @@ public sealed class ChatGptPetSprite : Control
     private const int AtlasRows = 11;
     private const int AtlasWidth = 1536;
     private const int AtlasHeight = 2288;
+    private const int AnimationFrameMilliseconds = 220;
+    private static readonly int[] IdleFrameIndices = [0, 1, 3, 4, 5, 6, 7];
 
     private readonly DispatcherTimer _animationTimer;
     private Bitmap? _spritesheet;
@@ -34,7 +36,7 @@ public sealed class ChatGptPetSprite : Control
     {
         Focusable = false;
         IsTabStop = false;
-        _animationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(125) };
+        _animationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AnimationFrameMilliseconds) };
         _animationTimer.Tick += OnAnimationTick;
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
@@ -57,6 +59,8 @@ public sealed class ChatGptPetSprite : Control
 
     public void SetDragging(bool moving, bool movingRight)
     {
+        if (moving != _moving || (moving && movingRight != _movingRight))
+            _frame = 0;
         _moving = moving;
         _movingRight = movingRight;
         _row = moving ? (movingRight ? 1 : 2) : 0;
@@ -72,7 +76,7 @@ public sealed class ChatGptPetSprite : Control
             return;
 
         var source = new Rect(
-            _frame * AtlasWidth / AtlasColumns,
+            (_moving ? _frame : IdleFrameIndices[_frame % IdleFrameIndices.Length]) * AtlasWidth / AtlasColumns,
             _row * AtlasHeight / AtlasRows,
             AtlasWidth / AtlasColumns,
             AtlasHeight / AtlasRows);
@@ -118,7 +122,9 @@ public sealed class ChatGptPetSprite : Control
     {
         if (_spritesheet is null || !IsVisible)
             return;
-        _frame = (_frame + 1) % AtlasColumns;
+        _frame = _moving
+            ? (_frame + 1) % AtlasColumns
+            : (_frame + 1) % IdleFrameIndices.Length;
         InvalidateVisual();
     }
 

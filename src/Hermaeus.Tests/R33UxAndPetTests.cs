@@ -143,6 +143,9 @@ public sealed class R33UxAndPetTests
         Assert.Contains("DisposeWebViewAsync", source, StringComparison.Ordinal);
         Assert.Contains("ActualThemeVariantChanged", source, StringComparison.Ordinal);
         Assert.Contains("MaxMonacoCharacters", source, StringComparison.Ordinal);
+        Assert.Contains("MonacoReadyTimeout", source, StringComparison.Ordinal);
+        Assert.Contains("FallbackIfMonacoDoesNotBecomeReadyAsync", source, StringComparison.Ordinal);
+        Assert.Contains("3 seconds", source, StringComparison.Ordinal);
         Assert.Contains("new Uri(Path.GetFullPath(indexPath))", source, StringComparison.Ordinal);
         Assert.Contains("layout()", source, StringComparison.Ordinal);
         Assert.Contains("AvaloniaEdit fallback", source, StringComparison.Ordinal);

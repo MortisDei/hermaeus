@@ -2,6 +2,7 @@ using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Highlighting;
@@ -24,8 +25,10 @@ public partial class WorkspaceEditorView : UserControl
         AvaloniaProperty.Register<WorkspaceEditorView, string>(nameof(FilePath), string.Empty);
 
     private const int MaxMonacoCharacters = 2 * 1024 * 1024;
+    private static readonly TimeSpan MonacoReadyTimeout = TimeSpan.FromSeconds(3);
     private TextEditor _fallbackEditor = null!;
     private NativeWebView? _webView;
+    private CancellationTokenSource? _monacoReadyCts;
     private bool _monacoReady;
     private bool _monacoAttempted;
     private bool _suppressTextChanged;
@@ -146,6 +149,10 @@ public partial class WorkspaceEditorView : UserControl
             EditorHost.Children.Add(webView);
             EditorStatusText.Text = "Loading local Monaco...";
             webView.Navigate(new Uri(Path.GetFullPath(indexPath)));
+            _monacoReadyCts?.Cancel();
+            _monacoReadyCts?.Dispose();
+            _monacoReadyCts = new CancellationTokenSource();
+            _ = FallbackIfMonacoDoesNotBecomeReadyAsync(webView, _monacoReadyCts.Token);
         }
         catch (Exception ex) when (ex is InvalidOperationException or DllNotFoundException or TypeInitializationException or IOException or NotSupportedException or ArgumentException or UriFormatException)
         {
@@ -192,6 +199,7 @@ public partial class WorkspaceEditorView : UserControl
             if (type == "ready")
             {
                 _monacoReady = true;
+                _monacoReadyCts?.Cancel();
                 EditorStatusText.Text = "Monaco (local bundle)";
                 await SendDocumentToMonacoAsync(webView);
                 return;
@@ -241,6 +249,34 @@ public partial class WorkspaceEditorView : UserControl
         catch (Exception) when (!_disposed)
         {
             SetFallback("AvaloniaEdit fallback: local Monaco navigation failed.");
+        }
+    }
+
+    private async Task FallbackIfMonacoDoesNotBecomeReadyAsync(NativeWebView webView, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(MonacoReadyTimeout, ct);
+            if (ct.IsCancellationRequested)
+                return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!_disposed && !_monacoReady && ReferenceEquals(webView, _webView))
+                    SetFallback("AvaloniaEdit fallback: local Monaco did not become ready within 3 seconds.");
+            });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            if (_disposed)
+                return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!_disposed && !_monacoReady && ReferenceEquals(webView, _webView))
+                    SetFallback("AvaloniaEdit fallback: local Monaco readiness check failed.");
+            });
         }
     }
 
@@ -300,6 +336,9 @@ public partial class WorkspaceEditorView : UserControl
 
     private void SetFallback(string status)
     {
+        _monacoReadyCts?.Cancel();
+        _monacoReadyCts?.Dispose();
+        _monacoReadyCts = null;
         _monacoReady = false;
         var webView = _webView;
         _webView = null;
@@ -322,6 +361,9 @@ public partial class WorkspaceEditorView : UserControl
         _disposed = true;
         _monacoReady = false;
         _monacoAttempted = false;
+        _monacoReadyCts?.Cancel();
+        _monacoReadyCts?.Dispose();
+        _monacoReadyCts = null;
 
         var webView = _webView;
         _webView = null;
