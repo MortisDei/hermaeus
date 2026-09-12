@@ -8,6 +8,7 @@ public interface ILabRuntimeSession : IAsyncDisposable
     int Port { get; }
     bool IsRunning { get; }
     ManagedProcessReference? Process { get; }
+    EffectiveLaunchObservation? EffectiveLaunch { get; }
     Task StopAsync(CancellationToken ct = default);
 }
 

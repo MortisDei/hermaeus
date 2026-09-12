@@ -1,3 +1,4 @@
+using System.Globalization;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -509,6 +510,37 @@ public sealed class LabRecipeTests
         "run", 1234, LabConfigurationMapper.FromServer(Server(), "baseline", "Baseline"),
         Fingerprint(), "prompt", 1, 16, "case", 0, TimeSpan.FromSeconds(1));
 
+    private static EffectiveLaunchObservation EffectiveLaunch(LabConfiguration configuration)
+    {
+        var placement = configuration.GpuPlacement;
+        if (placement is null)
+            GpuPlacementIntent.TryFromLegacy(configuration.GpuLayers, out placement, out _);
+        var gpuLayers = placement?.Kind switch
+        {
+            GpuPlacementKind.All => "-1",
+            GpuPlacementKind.Exact => placement.ExactLayerCount!.Value.ToString(CultureInfo.InvariantCulture),
+            _ => "0"
+        };
+        var fit = placement?.Kind == GpuPlacementKind.Auto ? "true" : "false";
+        return new EffectiveLaunchObservation(
+            Runtime(), EffectiveLaunchObservationParser.ParserVersion, true,
+            placement?.Kind == GpuPlacementKind.Auto, null, null,
+            [
+                new AdaptiveFieldObservation("context", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), null,
+                    configuration.ContextSize.ToString(CultureInfo.InvariantCulture), configuration.ContextSize.ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "test.props.context"),
+                new AdaptiveFieldObservation("gpu_layers", placement?.CanonicalValue, gpuLayers, gpuLayers, gpuLayers,
+                    AdaptiveEvidenceState.Proven, "test.props.gpu_layers"),
+                new AdaptiveFieldObservation("fit", fit, fit, fit, fit, AdaptiveEvidenceState.Proven, "test.props.fit"),
+                new AdaptiveFieldObservation("slots", Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "test.props.slots")
+            ],
+            ["test.props"], true);
+    }
+
     private sealed class FakeHost : ILabRuntimeHost
     {
         public List<string> StartedConfigurations { get; } = [];
@@ -517,6 +549,7 @@ public sealed class LabRecipeTests
         {
             StartedConfigurations.Add(configuration.Id);
             var session = new FakeSession(50000 + Sessions.Count, 100 + Sessions.Count);
+            session.EffectiveLaunch = EffectiveLaunch(configuration);
             Sessions.Add(session);
             return Task.FromResult<ILabRuntimeSession>(session);
         }
@@ -529,6 +562,7 @@ public sealed class LabRecipeTests
         public int Port { get; } = port;
         public bool IsRunning => StopCount == 0;
         public ManagedProcessReference? Process { get; } = new(processId, DateTime.UnixEpoch.AddSeconds(processId));
+        public EffectiveLaunchObservation? EffectiveLaunch { get; set; }
         public int StopCount { get; private set; }
         public Task StopAsync(CancellationToken ct = default) { if (StopCount == 0) StopCount++; return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

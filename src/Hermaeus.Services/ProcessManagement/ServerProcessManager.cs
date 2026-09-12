@@ -289,7 +289,7 @@ public sealed class ServerProcessManager : IDisposable
     /// model so the previous process cannot still hold model memory while the
     /// next context is being created.
     /// </summary>
-    public async Task StopAsync()
+    public async Task StopAsync(CancellationToken ct = default)
     {
         if (Status == ServerStatus.Stopped && _process is null)
             return;
@@ -305,8 +305,17 @@ public sealed class ServerProcessManager : IDisposable
                 try { process.Kill(entireProcessTree: true); }
                 catch (InvalidOperationException) { }
                 catch (System.ComponentModel.Win32Exception) { }
-                await process.WaitForExitAsync();
+                await process.WaitForExitAsync(ct);
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The lifecycle coordinator owns the deadline. The kill was sent
+            // before waiting, so make a second best-effort kill and surface
+            // cancellation instead of leaving the bounded shutdown waiting on
+            // an uncooperative child.
+            KillProcess();
+            throw;
         }
         finally
         {

@@ -71,7 +71,8 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
             await AddOwnerAsync(owner, ct);
             return new Session(this, owner, manager.Stop, manager.Dispose,
                 () => manager.Status, () => manager.CurrentProcessIdentity,
-                stopManagerAsync: manager.StopAsync);
+                stopManagerAsync: manager.StopAsync,
+                effectiveLaunch: manager.LastEffectiveLaunch);
         }
         catch (Exception ex)
         {
@@ -264,18 +265,20 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         Func<ServerStatus> getStatus,
         Func<ManagedRuntimeProcessIdentity?> getProcess,
         Func<CancellationToken, Task>? removeOwnership = null,
-        Func<Task>? stopManagerAsync = null) : ILabRuntimeSession
+        Func<CancellationToken, Task>? stopManagerAsync = null,
+        EffectiveLaunchObservation? effectiveLaunch = null) : ILabRuntimeSession
     {
         private int _stopped;
         private int _disposed;
         private readonly Func<CancellationToken, Task> _removeOwnership =
             removeOwnership ?? (ct => owner.RemoveOwnerAsync(record.OwnershipId, ct));
-        private readonly Func<Task>? _stopManagerAsync = stopManagerAsync;
+        private readonly Func<CancellationToken, Task>? _stopManagerAsync = stopManagerAsync;
         public string OwnershipId => record.OwnershipId;
         public int Port => record.Port;
         public bool IsRunning => getStatus() == ServerStatus.Running;
         public ManagedProcessReference? Process => getProcess() is { } process
             ? new ManagedProcessReference(process.ProcessId, process.StartedAtUtc) : null;
+        public EffectiveLaunchObservation? EffectiveLaunch { get; } = effectiveLaunch;
 
         public async Task StopAsync(CancellationToken ct = default)
         {
@@ -293,7 +296,7 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
             finally
             {
                 if (_stopManagerAsync is not null)
-                    await _stopManagerAsync();
+                    await _stopManagerAsync(ct);
                 else
                     stopManager();
             }

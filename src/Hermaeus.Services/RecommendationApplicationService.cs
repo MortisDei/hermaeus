@@ -82,6 +82,10 @@ public sealed class RecommendationApplicationService
                 throw;
             }
 
+            await VerifyPersistedProjectionAsync(
+                recommendation, actor, RecommendationDecisionKind.Apply, patch.ServerId,
+                postIdentity, currentIdentity);
+
             await _store.AddDecisionAsync(new RecommendationDecisionRecord(
                 NewId(), recommendation.Id, RecommendationDecisionKind.Apply, actor,
                 currentIdentity, "applied", DateTime.UtcNow), ct);
@@ -176,6 +180,10 @@ public sealed class RecommendationApplicationService
                     currentIdentity, "failed", DateTime.UtcNow), CancellationToken.None);
                 throw;
             }
+
+            await VerifyPersistedProjectionAsync(
+                recommendation, actor, RecommendationDecisionKind.Undo, patch.ServerId,
+                postIdentity, currentIdentity);
 
             await _store.AddDecisionAsync(new RecommendationDecisionRecord(
                 NewId(), recommendation.Id, RecommendationDecisionKind.Undo, actor,
@@ -296,6 +304,26 @@ public sealed class RecommendationApplicationService
         if (status is { } value)
             await _store.SetStatusAsync(recommendation.Id, value, ct);
         return new(recommendation.Id, false, code, message);
+    }
+
+    private async Task VerifyPersistedProjectionAsync(
+        ConfigurationRecommendation recommendation,
+        string actor,
+        RecommendationDecisionKind decision,
+        string serverId,
+        string expectedIdentity,
+        string expectedCurrentIdentity)
+    {
+        var persisted = FindServer(_settings.Settings, serverId);
+        if (persisted is not null
+            && string.Equals(ConfigurationIdentityFactory.Create(persisted).StableId, expectedIdentity, StringComparison.Ordinal))
+            return;
+
+        await _store.AddDecisionAsync(new RecommendationDecisionRecord(
+            NewId(), recommendation.Id, decision, actor,
+            expectedCurrentIdentity, "failed", DateTime.UtcNow), CancellationToken.None);
+        throw new InvalidOperationException(
+            "The reviewed settings were not visible in the live Services projection after save.");
     }
 
     private async Task<ConfigurationRecommendation> GetRequiredAsync(string id, CancellationToken ct) =>

@@ -41,7 +41,7 @@ public static class EffectiveLaunchObservationParser
                     Add(root, effective, "fit", "fit");
                     Add(root, effective, "fit_target", "fit_target");
                     Add(root, effective, "fit_minimum_context", "fit_ctx", "fit_minimum_context");
-                    Add(root, effective, "slots", "parallel", "slots");
+                    Add(root, effective, "slots", "parallel", "n_parallel", "slots");
                     Add(root, effective, "split_mode", "split_mode");
                     Add(root, effective, "tensor_split", "tensor_split");
                     Add(root, effective, "main_gpu", "main_gpu");
@@ -92,9 +92,11 @@ public static class EffectiveLaunchObservationParser
 
         var contextKnown = effective.ContainsKey("context");
         var placementKnown = effective.ContainsKey("gpu_layers");
+        var slotsKnown = effective.ContainsKey("slots");
         var auditable = propsSucceeded
             && contextKnown
             && placementKnown
+            && slotsKnown
             && fields.All(field => field.Field is not ("fit_target" or "fit_minimum_context")
                 || field.EffectiveValue is not null || field.PlannedValue is null);
 

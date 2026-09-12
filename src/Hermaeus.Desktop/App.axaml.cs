@@ -77,7 +77,7 @@ public partial class App : Application
             desktop.MainWindow = window;
             var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
             window.ApplicationLifecycle = lifecycle;
-            lifecycle.RegisterShutdownOwner("desktop view models", _ => vm.ShutdownAsync());
+            lifecycle.RegisterShutdownOwner("desktop view models", ct => vm.ShutdownAsync(ct));
             lifecycle.RegisterShutdownOwner(
                 "voice orchestrator",
                 ct => sp.GetRequiredService<IVoiceOrchestrator>().ShutdownAsync(ct));

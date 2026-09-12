@@ -209,6 +209,8 @@ public sealed record LabRunSnapshot
     public IReadOnlyList<LabObservation> Observations { get; init; } = [];
     public IReadOnlyList<LabOutputEvidence> Outputs { get; init; } = [];
     public IReadOnlyList<LabComparison> Comparisons { get; init; } = [];
+    public IReadOnlyDictionary<string, EffectiveLaunchObservation> EffectiveLaunches { get; init; } =
+        new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal);
     public IReadOnlyList<string> Failures { get; init; } = [];
     public string StartEvidenceId { get; init; } = string.Empty;
     public string CompletionEvidenceId { get; init; } = string.Empty;
@@ -244,7 +246,11 @@ public sealed record LabRunCompletionSummary(
     IReadOnlyList<LabConfiguration>? Configurations = null,
     IReadOnlyList<LabComparison>? DetailedComparisons = null,
     string? ExperimentName = null,
-    string? ModelIdentityLabel = null);
+    string? ModelIdentityLabel = null)
+{
+    public IReadOnlyDictionary<string, EffectiveLaunchObservation> EffectiveLaunches { get; init; } =
+        new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal);
+}
 
 public sealed record LabApplyEvidence(
     string RunId,

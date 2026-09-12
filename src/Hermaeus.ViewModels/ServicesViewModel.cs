@@ -29,6 +29,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly ManagedRuntimeRegistry? _runtimeRegistry;
+    private readonly IAudioFeedbackService? _audioFeedback;
     private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
@@ -817,7 +818,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ManagedRuntimeTuningService? runtimeTuning = null,
         AdaptiveInferenceExperienceService? adaptiveExperience = null,
         RecommendationDerivationService? recommendationDerivation = null,
-        ManagedRuntimeRegistry? runtimeRegistry = null)
+        ManagedRuntimeRegistry? runtimeRegistry = null,
+        IAudioFeedbackService? audioFeedback = null)
     {
         _runtimeRegistry = runtimeRegistry;
         _mgr = runtimeRegistry?.GetOrCreate(config.Id)
@@ -836,6 +838,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _runtimeTuning = runtimeTuning;
         _adaptiveExperience = adaptiveExperience;
         _recommendationDerivation = recommendationDerivation;
+        _audioFeedback = audioFeedback;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -1709,7 +1712,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// workloads such as Lab must not begin loading a second model until the
     /// source process has actually released its model memory.
     /// </summary>
-    public Task StopAndWaitAsync() => _mgr.StopAsync();
+    public Task StopAndWaitAsync(CancellationToken ct = default) => _mgr.StopAsync(ct);
 
     /// <summary>Synchronizes the bound status after a programmatic start has
     /// completed. The manager is authoritative, while its UI event is queued
@@ -2036,6 +2039,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         // way out, so a server that has been starting for two minutes can say so.
         StartingSinceUtc = value == ServerStatus.Starting ? DateTime.UtcNow : null;
         NotifyStatusProps();
+        if (_audioFeedback is not null)
+        {
+            var kind = value switch
+            {
+                ServerStatus.Running => AudioFeedbackEventKind.ManagedRuntimeReady,
+                ServerStatus.Error => AudioFeedbackEventKind.ManagedRuntimeFailed,
+                _ => (AudioFeedbackEventKind?)null
+            };
+            if (kind is { } audioKind)
+                _ = _audioFeedback.PublishAsync(audioKind);
+        }
     }
     partial void OnIsAutoTuningChanged(bool value)
     {
@@ -2471,6 +2485,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly IRecommendationStore? _recommendationStore;
     private readonly RecommendationApplicationService? _recommendationApplication;
     private readonly ManagedRuntimeRegistry? _runtimeRegistry;
+    private readonly IAudioFeedbackService? _audioFeedback;
     private HardwareProfile? _hardwareProfile;
 
     /// <summary>Shared (DI singleton) with <see cref="SettingsViewModel.Tts"/> - voice
@@ -2674,7 +2689,8 @@ public partial class ServicesViewModel : ViewModelBase
         RecommendationDerivationService? recommendationDerivation = null,
         IRecommendationStore? recommendationStore = null,
         RecommendationApplicationService? recommendationApplication = null,
-        ManagedRuntimeRegistry? runtimeRegistry = null)
+        ManagedRuntimeRegistry? runtimeRegistry = null,
+        IAudioFeedbackService? audioFeedback = null)
     {
         _startupTiming = startupTiming;
         _settings = settings;
@@ -2696,6 +2712,7 @@ public partial class ServicesViewModel : ViewModelBase
         _recommendationStore = recommendationStore;
         _recommendationApplication = recommendationApplication;
         _runtimeRegistry = runtimeRegistry;
+        _audioFeedback = audioFeedback;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
         _settings.SettingsChanged += (_, _) =>
@@ -2841,7 +2858,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _runtimeTuning, _adaptiveExperience, _recommendationDerivation, _runtimeRegistry)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _runtimeTuning, _adaptiveExperience, _recommendationDerivation, _runtimeRegistry, _audioFeedback)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };
@@ -3166,10 +3183,10 @@ public partial class ServicesViewModel : ViewModelBase
             srv.StopIfRunning();
     }
 
-    public async Task StopAllAsync()
+    public async Task StopAllAsync(CancellationToken ct = default)
     {
         foreach (var srv in Servers)
-            await srv.StopAndWaitAsync();
+            await srv.StopAndWaitAsync(ct);
     }
 
     public async Task SelectChatModelAndRestartAsync(string modelPath, CancellationToken ct = default)

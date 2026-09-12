@@ -200,7 +200,7 @@ public sealed class RuntimeOwnershipManifestTests
             () => ServerStatus.Running,
             () => null,
             _ => Task.CompletedTask,
-            async () =>
+            async _ =>
             {
                 await Task.Yield();
                 asyncStopCompleted = true;

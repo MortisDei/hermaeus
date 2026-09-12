@@ -513,13 +513,13 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public void Shutdown() => _ = ShutdownAsync();
 
-    public Task ShutdownAsync()
+    public Task ShutdownAsync(CancellationToken ct = default)
     {
         lock (_shutdownGate)
-            return _shutdownTask ??= ShutdownCoreAsync();
+            return _shutdownTask ??= ShutdownCoreAsync(ct);
     }
 
-    private async Task ShutdownCoreAsync()
+    private async Task ShutdownCoreAsync(CancellationToken ct)
     {
         lock (_backgroundTaskGate)
             _isShuttingDown = true;
@@ -530,9 +530,9 @@ public partial class MainWindowViewModel : ViewModelBase
         _watchedRefreshCts?.Cancel();
         _watchedRefreshCts?.Dispose();
         _watchedRefreshCts = null;
-        await Lab.ShutdownAsync();
-        await Services.StopAllAsync();
-        await AwaitBackgroundTasksAsync();
+        await Lab.ShutdownAsync(ct);
+        await Services.StopAllAsync(ct);
+        await AwaitBackgroundTasksAsync(ct);
         await Settings.ShutdownAsync();
     }
 
@@ -561,7 +561,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task AwaitBackgroundTasksAsync()
+    private async Task AwaitBackgroundTasksAsync(CancellationToken ct)
     {
         while (true)
         {
@@ -573,7 +573,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 tasks = _backgroundTasks.ToArray();
             }
 
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(tasks).WaitAsync(ct);
         }
     }
 

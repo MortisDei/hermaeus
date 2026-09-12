@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -395,6 +396,7 @@ internal static class R33Driver
         var run = await experiments.StartAsync(definition, source);
         if (run.Status != LabRunStatus.Running)
             throw new InvalidOperationException("The deterministic Lab runtime did not enter Running.");
+        await experiments.SwitchConfigurationAsync(run.Id, source, candidate.Id);
 
         var observations = new[]
         {
@@ -456,6 +458,37 @@ internal static class R33Driver
             HardwareFingerprint = run.Definition.ProfileFingerprint.Hardware.StableId,
             ConfigurationFingerprint = run.Definition.ConfigurationFingerprints[configurationId]
         };
+
+    private static EffectiveLaunchObservation EffectiveLaunch(LabConfiguration configuration)
+    {
+        var placement = configuration.GpuPlacement;
+        if (placement is null)
+            GpuPlacementIntent.TryFromLegacy(configuration.GpuLayers, out placement, out _);
+        var gpuLayers = placement?.Kind switch
+        {
+            GpuPlacementKind.All => "-1",
+            GpuPlacementKind.Exact => placement.ExactLayerCount!.Value.ToString(CultureInfo.InvariantCulture),
+            _ => "0"
+        };
+        var fit = placement?.Kind == GpuPlacementKind.Auto ? "true" : "false";
+        return new EffectiveLaunchObservation(
+            RuntimeIdentityFactory.Unknown("r33-driver"), EffectiveLaunchObservationParser.ParserVersion, true,
+            placement?.Kind == GpuPlacementKind.Auto, null, null,
+            [
+                new AdaptiveFieldObservation("context", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), null,
+                    configuration.ContextSize.ToString(CultureInfo.InvariantCulture), configuration.ContextSize.ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "r33-driver.props.context"),
+                new AdaptiveFieldObservation("gpu_layers", placement?.CanonicalValue, gpuLayers, gpuLayers, gpuLayers,
+                    AdaptiveEvidenceState.Proven, "r33-driver.props.gpu_layers"),
+                new AdaptiveFieldObservation("fit", fit, fit, fit, fit, AdaptiveEvidenceState.Proven, "r33-driver.props.fit"),
+                new AdaptiveFieldObservation("slots", Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "r33-driver.props.slots")
+            ],
+            ["r33-driver.props"], true);
+    }
 
     private static string RequiredPath(string[] args, string name, bool file)
     {
@@ -536,7 +569,7 @@ internal static class R33Driver
 
     private sealed class DriverLabRuntimeHost : ILabRuntimeHost
     {
-        public DriverLabRuntimeSession Session { get; } = new();
+        public DriverLabRuntimeSession Session { get; private set; } = new();
 
         public Task<ILabRuntimeSession> StartAsync(
             string runId,
@@ -545,6 +578,8 @@ internal static class R33Driver
             CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
+            Session = new DriverLabRuntimeSession();
+            Session.EffectiveLaunch = R33Driver.EffectiveLaunch(configuration);
             return Task.FromResult<ILabRuntimeSession>(Session);
         }
 
@@ -560,6 +595,7 @@ internal static class R33Driver
         public int Port => 49_152;
         public bool IsRunning => Volatile.Read(ref _stopCount) == 0;
         public ManagedProcessReference Process => new(Environment.ProcessId, DateTime.UtcNow);
+        public EffectiveLaunchObservation? EffectiveLaunch { get; set; }
         public int StopCount => Volatile.Read(ref _stopCount);
 
         public Task StopAsync(CancellationToken ct = default)

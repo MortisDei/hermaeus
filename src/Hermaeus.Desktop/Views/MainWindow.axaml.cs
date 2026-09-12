@@ -205,14 +205,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_closeAfterShutdown || DataContext is not MainWindowViewModel vm)
+        if (_closeAfterShutdown || DataContext is not MainWindowViewModel)
             return;
 
         e.Cancel = true;
         _closeAfterShutdown = true;
         try
         {
-            await vm.ShutdownAsync();
+            if (ApplicationLifecycle is null)
+            {
+                Console.Error.WriteLine("Application lifecycle coordinator is unavailable during window close.");
+                return;
+            }
+
+            var shutdown = await ApplicationLifecycle.ShutdownAsync(TimeSpan.FromSeconds(15));
+            if (!shutdown.Clean)
+                Console.Error.WriteLine("Application shutdown was incomplete; the lifecycle journal retained the incomplete result.");
         }
         catch (Exception ex)
         {

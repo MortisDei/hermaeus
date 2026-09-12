@@ -316,7 +316,7 @@ public sealed class AdaptiveInferenceTests
         var observation = EffectiveLaunchObservationParser.Parse(
             config,
             runtime,
-            "{\"ctx_size\":4096,\"n_gpu_layers\":24}");
+            "{\"ctx_size\":4096,\"n_gpu_layers\":24,\"parallel\":1}");
         var result = new ServerLaunchResult(ServerStatus.Running, ServerLaunchFailureKind.None, observation, string.Empty);
 
         await service.RecordAsync(

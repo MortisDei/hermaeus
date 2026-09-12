@@ -241,6 +241,8 @@ public static class LabConfigurationMapper
         var changes = new List<LabApplyChange>();
         Add(nameof(ServerConfig.ContextSize), current.ContextSize, proposed.ContextSize);
         Add(nameof(ServerConfig.GpuLayers), current.GpuLayers, proposed.GpuLayers);
+        Add(nameof(ServerConfig.GpuPlacement), PlacementValue(current.GpuPlacement, current.GpuLayers),
+            PlacementValue(proposed.GpuPlacement, proposed.GpuLayers));
         Add(nameof(ServerConfig.Threads), current.Threads, proposed.Threads);
         Add(nameof(ServerConfig.PromptThreads), current.PromptThreads, proposed.PromptThreads);
         Add(nameof(ServerConfig.Slots), current.Slots, proposed.Slots);
@@ -267,6 +269,7 @@ public static class LabConfigurationMapper
     {
         target.ContextSize = proposed.ContextSize;
         target.GpuLayers = proposed.GpuLayers;
+        target.GpuPlacement = ClonePlacement(proposed.GpuPlacement, proposed.GpuLayers);
         target.Threads = proposed.Threads;
         target.PromptThreads = proposed.PromptThreads;
         target.Slots = proposed.Slots;
@@ -286,6 +289,26 @@ public static class LabConfigurationMapper
 
     private static string EffectiveKv(string specific, string shared) =>
         string.IsNullOrWhiteSpace(specific) ? shared : specific;
+
+    private static string PlacementValue(GpuPlacementIntent? placement, int legacyGpuLayers)
+    {
+        if (placement is not null)
+            return placement.CanonicalValue;
+        return GpuPlacementIntent.TryFromLegacy(legacyGpuLayers, out var legacy, out _)
+            ? legacy!.CanonicalValue : string.Empty;
+    }
+
+    private static GpuPlacementIntent? ClonePlacement(GpuPlacementIntent? placement, int legacyGpuLayers)
+    {
+        placement ??= GpuPlacementIntent.TryFromLegacy(legacyGpuLayers, out var legacy, out _)
+            ? legacy : null;
+        return placement is null ? null : new GpuPlacementIntent
+        {
+            SchemaVersion = placement.SchemaVersion,
+            Kind = placement.Kind,
+            ExactLayerCount = placement.ExactLayerCount
+        };
+    }
 
     private static string CompanionIdentity(string? path)
     {
@@ -347,9 +370,16 @@ public static class LabComparisonEngine
         LabExperimentDefinition definition,
         LabConfiguration candidate,
         IReadOnlyList<LabObservation> observations,
-        IReadOnlyList<LabOutputEvidence> outputs)
+        IReadOnlyList<LabOutputEvidence> outputs,
+        IReadOnlyDictionary<string, EffectiveLaunchObservation>? effectiveLaunches = null)
     {
         var fingerprints = ValidateFingerprints(definition, observations);
+        var effectiveDifferences = effectiveLaunches is null
+            ? []
+            : LabEffectiveConfigurationValidator.FindMismatches(definition, effectiveLaunches,
+                [definition.Baseline.Id, candidate.Id]);
+        var allDifferences = fingerprints.Concat(effectiveDifferences).Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var equivalence = CombineEquivalence(definition.Baseline.Id, candidate.Id, outputs);
         var correctnessPassed = definition.CorrectnessRequirement switch
         {
@@ -363,14 +393,14 @@ public static class LabComparisonEngine
                 || !HasMetric(observations, candidate.Id, metric));
         if (missingCorrectnessMetric is not null)
             correctnessPassed = false;
-        var controlled = fingerprints.Count == 0;
+        var controlled = allDifferences.Length == 0;
         var canHeadline = controlled && correctnessPassed && definition.CorrectnessRequirement != LabCorrectnessRequirement.SpeedOnly;
         return new LabComparison
         {
             BaselineConfigurationId = definition.Baseline.Id,
             CandidateConfigurationId = candidate.Id,
             IsControlled = controlled,
-            FingerprintDifferences = fingerprints,
+            FingerprintDifferences = allDifferences,
             BaselineMetrics = Summarize(observations.Where(item => item.ConfigurationId == definition.Baseline.Id)),
             CandidateMetrics = Summarize(observations.Where(item => item.ConfigurationId == candidate.Id)),
             Equivalence = equivalence,
@@ -379,7 +409,9 @@ public static class LabComparisonEngine
             RefusalReason = controlled
                 ? correctnessPassed ? definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly ? "Speed-only experiments cannot produce an Apply recommendation." : string.Empty
                     : missingCorrectnessMetric is not null ? $"Required correctness evidence {missingCorrectnessMetric} is missing." : "The declared correctness requirement failed."
-                : "Uncontrolled fingerprint differences prevent a headline delta."
+                : effectiveDifferences.Count > 0
+                    ? "Effective runtime configuration evidence is missing or does not match the reviewed Lab configuration."
+                    : "Uncontrolled fingerprint differences prevent a headline delta."
         };
     }
 
@@ -424,6 +456,130 @@ public static class LabComparisonEngine
                 ?? new LabEquivalenceResult(LabEquivalenceState.Unknown, LabEquivalenceLevel.Unknown, string.Empty, string.Empty, "No paired outputs were observed.", string.Empty);
         return results.FirstOrDefault(item => item.State == LabEquivalenceState.Different)
             ?? results[0];
+    }
+}
+
+public static class LabEffectiveConfigurationValidator
+{
+    public static IReadOnlyList<string> FindMismatches(
+        LabExperimentDefinition definition,
+        IReadOnlyDictionary<string, EffectiveLaunchObservation>? effectiveLaunches,
+        IReadOnlyCollection<string>? configurationIds = null)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        var mismatches = new List<string>();
+        foreach (var configuration in definition.Candidates.Prepend(definition.Baseline))
+        {
+            if (configurationIds is not null && !configurationIds.Contains(configuration.Id, StringComparer.Ordinal))
+                continue;
+
+            if (effectiveLaunches is null
+                || !effectiveLaunches.TryGetValue(configuration.Id, out var observation))
+            {
+                mismatches.Add($"effective:{configuration.Id}:unknown");
+                continue;
+            }
+
+            if (!observation.PropsProbeSucceeded || !observation.IsAuditable)
+            {
+                mismatches.Add($"effective:{configuration.Id}:not-auditable");
+                continue;
+            }
+
+            var fields = observation.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.Field))
+                .GroupBy(field => field.Field, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
+            RequireInteger(configuration.Id, fields, "context", configuration.ContextSize, mismatches);
+            RequireInteger(configuration.Id, fields, "slots", Math.Max(1, configuration.Slots), mismatches);
+            RequireGpuPlacement(configuration, fields, mismatches);
+
+            if (ResolvePlacement(configuration)?.Kind == GpuPlacementKind.Auto
+                && !MatchesBoolean(fields, "fit", expected: true))
+                mismatches.Add($"effective:{configuration.Id}:fit");
+        }
+
+        return mismatches;
+    }
+
+    private static void RequireInteger(
+        string configurationId,
+        IReadOnlyDictionary<string, AdaptiveFieldObservation> fields,
+        string fieldName,
+        int expected,
+        ICollection<string> mismatches)
+    {
+        if (!fields.TryGetValue(fieldName, out var field)
+            || field.EvidenceState != AdaptiveEvidenceState.Proven
+            || !int.TryParse(field.EffectiveValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var actual)
+            || actual != expected)
+            mismatches.Add($"effective:{configurationId}:{fieldName}");
+    }
+
+    private static void RequireGpuPlacement(
+        LabConfiguration configuration,
+        IReadOnlyDictionary<string, AdaptiveFieldObservation> fields,
+        ICollection<string> mismatches)
+    {
+        if (!fields.TryGetValue("gpu_layers", out var field)
+            || field.EvidenceState != AdaptiveEvidenceState.Proven
+            || string.IsNullOrWhiteSpace(field.EffectiveValue))
+        {
+            mismatches.Add($"effective:{configuration.Id}:gpu_layers");
+            return;
+        }
+
+        var placement = ResolvePlacement(configuration);
+        if (placement is null)
+        {
+            mismatches.Add($"effective:{configuration.Id}:gpu_layers");
+            return;
+        }
+
+        var value = field.EffectiveValue.Trim();
+        var matches = placement!.Kind switch
+        {
+            GpuPlacementKind.Cpu => IsInteger(value, 0),
+            GpuPlacementKind.All => value.Equals("all", StringComparison.OrdinalIgnoreCase) || IsInteger(value, -1),
+            GpuPlacementKind.Exact => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var actual)
+                && actual == placement.ExactLayerCount,
+            GpuPlacementKind.Auto => value.Equals("all", StringComparison.OrdinalIgnoreCase)
+                || int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _),
+            _ => false
+        };
+        if (!matches)
+            mismatches.Add($"effective:{configuration.Id}:gpu_layers");
+    }
+
+    private static bool MatchesBoolean(
+        IReadOnlyDictionary<string, AdaptiveFieldObservation> fields,
+        string fieldName,
+        bool expected)
+    {
+        if (!fields.TryGetValue(fieldName, out var field)
+            || field.EvidenceState != AdaptiveEvidenceState.Proven
+            || string.IsNullOrWhiteSpace(field.EffectiveValue))
+            return false;
+        var value = field.EffectiveValue.Trim();
+        var actual = value.Equals("on", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("1", StringComparison.OrdinalIgnoreCase);
+        if (value.Equals("off", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("false", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("0", StringComparison.OrdinalIgnoreCase))
+            actual = false;
+        return actual == expected;
+    }
+
+    private static bool IsInteger(string value, int expected) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var actual) && actual == expected;
+
+    private static GpuPlacementIntent? ResolvePlacement(LabConfiguration configuration)
+    {
+        if (configuration.GpuPlacement is not null)
+            return configuration.GpuPlacement;
+        return GpuPlacementIntent.TryFromLegacy(configuration.GpuLayers, out var placement, out _)
+            ? placement : null;
     }
 }
 
@@ -524,7 +680,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
                 TemporaryPort = state.Session.Port,
                 RuntimeOwnershipId = state.Session.OwnershipId,
                 RuntimeProcessId = state.Session.Process?.ProcessId,
-                RuntimeProcessStartedAtUtc = state.Session.Process?.StartedAtUtc
+                RuntimeProcessStartedAtUtc = state.Session.Process?.StartedAtUtc,
+                EffectiveLaunches = WithEffectiveLaunch(snapshot.EffectiveLaunches,
+                    definition.Baseline.Id, state.Session.EffectiveLaunch)
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -588,7 +746,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             TemporaryPort = state.Session.Port,
             RuntimeOwnershipId = state.Session.OwnershipId,
             RuntimeProcessId = state.Session.Process?.ProcessId,
-            RuntimeProcessStartedAtUtc = state.Session.Process?.StartedAtUtc
+            RuntimeProcessStartedAtUtc = state.Session.Process?.StartedAtUtc,
+            EffectiveLaunches = WithEffectiveLaunch(state.Snapshot.EffectiveLaunches,
+                configuration.Id, state.Session.EffectiveLaunch)
         };
         return state.Snapshot;
     }
@@ -606,7 +766,8 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
                 throw new InvalidOperationException("A Lab observation does not belong to this frozen run.");
         }
         var safeOutputs = outputs.Select(item => item with { TokenIds = null, BoundedText = string.Empty }).ToArray();
-        var comparisons = definition.Candidates.Select(candidate => LabComparisonEngine.Compare(definition, candidate, observations, outputs)).ToArray();
+        var comparisons = definition.Candidates.Select(candidate => LabComparisonEngine.Compare(
+            definition, candidate, observations, outputs, state.Snapshot.EffectiveLaunches)).ToArray();
         var boundedFailures = (failures ?? []).Take(32).Select(value => value[..Math.Min(value.Length, 512)]).ToArray();
         var status = boundedFailures.Length == 0 ? LabRunStatus.Succeeded
             : observations.Count > 0 ? LabRunStatus.PartiallySucceeded : LabRunStatus.Failed;
@@ -664,8 +825,17 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             ?? throw new InvalidOperationException("The target Services configuration no longer exists.");
         var comparison = run.Comparisons.FirstOrDefault(item => item.CandidateConfigurationId == candidateId);
         var changes = LabConfigurationMapper.Differences(server, candidate);
+        var effectiveRefusal = LabEffectiveConfigurationValidator.FindMismatches(
+            run.Definition, run.EffectiveLaunches,
+            [run.Definition.Baseline.Id, candidate.Id]).Count > 0
+            ? "Effective runtime configuration evidence is missing or does not match the reviewed Lab configuration."
+            : null;
         var refusal = run.Status is not (LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded)
             ? "Only a completed Lab run can produce an Apply review."
+            : run.Definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly
+                ? "Speed-only experiments cannot produce an Apply recommendation."
+            : effectiveRefusal is not null
+                ? effectiveRefusal
             : comparison is null || !comparison.CanShowHeadlineDelta
                 ? comparison?.RefusalReason ?? "The candidate has no controlled comparison."
                 : changes.Count == 0 ? "The candidate does not change any persisted Services field." : string.Empty;
@@ -698,6 +868,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         var candidate = run.Definition.Candidates.First(item => item.Id == review.CandidateConfigurationId);
         LabConfigurationMapper.ApplyTo(target, candidate);
         await _settings.SaveAsync(clone);
+        var persisted = _settings.Settings.ManagedServers.FirstOrDefault(item => item.Id == review.TargetServerId);
+        if (persisted is null || LabConfigurationMapper.Differences(persisted, candidate).Count != 0)
+            throw new InvalidOperationException("The reviewed Lab configuration was not visible in the live Services projection after save.");
         await PersistApplyAsync(run, review, ct);
     }
 
@@ -792,7 +965,10 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         var summary = new LabRunCompletionSummary(run.Id, run.DefinitionHash, run.Status,
             run.StartedAtUtc, run.CompletedAtUtc, run.Failures, decisions, sliceIds,
             run.Definition.Candidates.Prepend(run.Definition.Baseline).ToArray(), run.Comparisons,
-            run.Definition.Name, DescribeModelIdentity(run.Definition.ProfileFingerprint.Model));
+            run.Definition.Name, DescribeModelIdentity(run.Definition.ProfileFingerprint.Model))
+        {
+            EffectiveLaunches = run.EffectiveLaunches
+        };
         drafts.Add(new EmpiricalExperienceDraft
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -819,6 +995,19 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         var descriptor = string.Join(" · ", new[] { model.Architecture, model.Quantization }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
         return string.IsNullOrWhiteSpace(descriptor) ? null : descriptor;
+    }
+
+    private static IReadOnlyDictionary<string, EffectiveLaunchObservation> WithEffectiveLaunch(
+        IReadOnlyDictionary<string, EffectiveLaunchObservation> existing,
+        string configurationId,
+        EffectiveLaunchObservation? observation)
+    {
+        var result = existing.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+        if (observation is null)
+            result.Remove(configurationId);
+        else
+            result[configurationId] = observation;
+        return result;
     }
 
     private static IEnumerable<LabRunEvidenceSlice> SplitEvidenceSlices(

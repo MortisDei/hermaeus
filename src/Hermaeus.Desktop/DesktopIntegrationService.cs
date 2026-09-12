@@ -242,7 +242,8 @@ public sealed class DesktopIntegrationService : IDisposable
             var failed = false;
             try
             {
-                await _vm.ShutdownAsync();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                await _vm.Services.StopAllAsync(timeout.Token);
             }
             catch (Exception ex)
             {
