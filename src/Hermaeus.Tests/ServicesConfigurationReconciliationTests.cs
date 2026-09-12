@@ -22,7 +22,9 @@ public sealed class ServicesConfigurationReconciliationTests
         external.ManagedServers[0].Threads = 9;
         await settings.SaveAsync(external);
 
-        await WaitForAsync(() => server.Threads == 9,
+        await WaitForAsync(() => server.Threads == 9
+            && !server.DirtyConfigurationFields.Contains("threads")
+            && server.BaseConfigurationRevision != baseRevision,
             "dirty server editor reconciliation");
 
         Assert.Equal(8192, server.ContextSize);
@@ -54,7 +56,10 @@ public sealed class ServicesConfigurationReconciliationTests
         external.ManagedServers[0].GpuLayers = 12;
         await settings.SaveAsync(external);
 
-        await WaitForAsync(() => server.ContextSize == 16384 && server.GpuLayers == 12,
+        await WaitForAsync(() => server.ContextSize == 16384
+            && server.GpuLayers == 12
+            && string.Equals(server.GpuPlacementSelection, "Exact", StringComparison.Ordinal)
+            && !server.HasUnsavedChanges,
             "clean server editor reconciliation");
 
         Assert.Equal(16384, server.ContextSize);

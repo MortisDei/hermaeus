@@ -358,6 +358,7 @@ public partial class App : Application
         s.AddSingleton<TtsSettingsViewModel>();
         s.AddSingleton<SttSettingsViewModel>();
         s.AddSingleton<SettingsViewModel>();
+        s.AddSingleton<ChatGptPetViewModel>();
         s.AddSingleton<ModelInventoryService>();
         s.AddSingleton<ModelManagementViewModel>();
         s.AddSingleton<RagViewModel>();

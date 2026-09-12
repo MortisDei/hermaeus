@@ -131,6 +131,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<KokoroProcessManager>();
         s.AddSingleton<LocalApiProcessManager>();
         s.AddSingleton<IToastService, ToastService>();
+        s.AddSingleton<IChatGptPetPackageCatalog, ChatGptPetPackageCatalog>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService, LlamaCppEmbeddingService>();
         s.AddSingleton<IReranker, OnnxCrossEncoderReranker>();

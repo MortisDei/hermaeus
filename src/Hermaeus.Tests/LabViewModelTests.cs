@@ -15,8 +15,10 @@ public sealed class LabViewModelTests
         using var temp = new TempDir();
         var (_, vm) = Build(temp);
 
-        Assert.True(vm.CanStartRun);
-        Assert.True(vm.CanRunRecipe);
+        Assert.False(vm.CanStartRun);
+        Assert.False(vm.CanRunRecipe);
+        Assert.False(vm.FreezeAndStartCommand.CanExecute(null));
+        Assert.False(vm.RunSelectedRecipeCommand.CanExecute(null));
 
         vm.IsRunActive = true;
 
@@ -72,7 +74,7 @@ public sealed class LabViewModelTests
 
         var row = Assert.Single(vm.Experiences);
         Assert.Equal("Unknown", row.OutcomeLabel);
-        Assert.Equal("ModelInference", row.OriginLabel);
+        Assert.Equal("Model inference", row.OriginLabel);
     }
 
     [Fact]

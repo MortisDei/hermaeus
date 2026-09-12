@@ -10,16 +10,17 @@ actions remain owner-only.
 Baseline: `c944febf8e7eda96dcf8f6461a02e870b40b8465`, verified against remote
 `main` on 2026-09-07. The review pack was anchored locally before implementation.
 Local implementation closeout: `cc494ac`.
-Production and regression-test changes are scoped to the batches below. No
-dependency, workflow, or owner-data publication changes are included.
+Production and regression-test changes are scoped to the batches below. The
+only new runtime dependency is the bounded Desktop WebView used by the local
+workspace editor; no workflow or owner-data publication changes are included.
 
 ## Recommendation
 
 Make the existing product callable and observable through UI-independent
 application operations, then repair the mutation and configuration lifecycles
-using those operations. Do not start with a daemon, new HTTP endpoints, Monaco,
-or more runtime switches. Shared composition already exists; shared application
-lifecycle and mutation authority do not yet follow from it.
+using those operations. Keep the optional editor and pet work bounded by the
+same authority and data-safety rules. Shared composition already exists; shared
+application lifecycle and mutation authority do not yet follow from it.
 
 The mandatory result is a Desktop client and an exclusive headless application
 driver exercising the same production workflows, with trustworthy Agent
@@ -51,15 +52,25 @@ The mandatory R33 scope is implemented locally:
 - B7: baseline-aware Lab availability plus isolated run, failure cleanup,
   Apply, settings reopen, and retained evidence paths.
 - B8: Agent/RAG/Lab hierarchy, save-state visibility, typed Doctor target
-  mapping, missing-entity feedback, and focused control navigation.
+  mapping, missing-entity feedback, and focused control navigation. The
+  continuation also makes Agent outcomes, RAG evidence state, and Lab
+  capability state readable in the views, with narrow-window wrapping and
+  explicit next actions.
 - S: restore budgets, duplicate-target checks, transactional staging, actual
   expanded-byte enforcement, and rollback-safe commit cleanup.
 - B9: integrated sequential verification, package validation, and this
   implementation ledger. Owner platform and publication gates remain open.
+- P1: a local, offline Monaco workspace editor is preferred when the native
+  WebView host is available, with a bounded AvaloniaEdit fallback. The bridge
+  carries only document text, display path, theme, and layout.
+- P2: generic ChatGPT Pet v2 package support is data-only, bounded, disabled
+  by default, and includes the bundled Moss package without granting it
+  filesystem, network, script, or chat-content access.
 
-The conditional Monaco spike and Agent HTTP execution remain deferred because
-their R33 exit gates were not earned. JSONL/runtime experiments remain deferred
-pending installed-runtime evidence. No new dependency was added.
+Agent HTTP execution remains deferred because its R33 ownership gate was not
+earned. JSONL/runtime experiments remain deferred pending installed-runtime
+evidence. Monaco is implemented locally but still requires owner platform and
+native WebView validation before it can be called a fully shipped editor path.
 
 Automated closure evidence includes sequential Debug and Release solution builds
 and test harnesses, focused lifecycle/restore/Agent regression tests, the
@@ -141,6 +152,9 @@ scenario, owner defect, and conditional branch are recorded in
 - Debug and Release solution builds passed with zero warnings and zero errors.
 - The complete sequential Debug and Release harnesses each passed 2,695 tests,
   skipped 17 platform-gated tests, and reported 0 failures out of 2,712.
+- The resumed UX/editor/pet continuation rebuilt and reran both sequential
+  Debug and Release harnesses: each passed 2,703 tests, skipped 17
+  platform-gated tests, and reported 0 failures out of 2,720.
 - Focused lifecycle, restore-safety, Agent patch, steering, sub-task, runtime
   ownership, restart, Doctor, and voice tests passed in their targeted runs.
 - The isolated R33 driver completed a real prepared file mutation and emitted
@@ -150,13 +164,15 @@ scenario, owner defect, and conditional branch are recorded in
   and its installer was exercised from a path containing spaces against an
   isolated XDG data directory. The desktop entry passed validation apart from
   the existing category hint.
-- The direct final coverage command passed at 65.21% line coverage against the
-  60% ratchet, with results kept under `/tmp`. The shell wrapper itself hit a
-  silent host-boundary exit, so its documented inner command was rerun directly
-  on the approved host. Native Windows, live managed-runtime/GPU behavior, GUI
-  pixel acceptance, and the owner PR/check gate remain outside this local proof.
+- The direct final coverage command passed at 64.68% line coverage
+  (`50,267/77,713`) against the 60% ratchet, with results kept under `/tmp`.
+  The initial instrumented run exposed two timing-sensitive reconciliation
+  assertions; the waits were strengthened and the final full run passed.
+  Native Windows, live managed-runtime/GPU behavior, GUI pixel acceptance, and
+  the owner PR/check gate remain outside this local proof.
 
 Authoritative user-facing behavior docs and CHANGELOG now describe the
 implemented R33 behavior and `v0.41.0-beta` target. Archived R32 evidence and
-the central deferred ledger remain intact; conditional Monaco, JSONL/runtime
-experiments, and Agent HTTP execution remain deferred.
+the central deferred ledger remain intact; JSONL/runtime experiments and Agent
+HTTP execution remain deferred, while Monaco and ChatGPT Pet remain subject to
+the explicit owner GUI/platform gates in the completion audit.

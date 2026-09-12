@@ -12,12 +12,11 @@
         <Border Grid.Row="0" Padding="12,6"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
-
-                <TextBlock Grid.Column="0" Text="Dataset"
+            <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="4">
+                <TextBlock Text="Dataset"
                            VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
 
-                <ComboBox Grid.Column="1"
+                <ComboBox
                           ItemsSource="{Binding Datasets}"
                           SelectedItem="{Binding SelectedDataset}"
                           MaxWidth="280" HorizontalAlignment="Left" FontSize="13">
@@ -27,12 +26,14 @@
                                 <TextBlock Text="{Binding Name}" FontSize="13" />
                                 <TextBlock Text="{Binding ChunkCount, StringFormat={}{0} chunks}"
                                            FontSize="11" Opacity="0.4" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ScopeLabel}"
+                                           FontSize="10" Opacity="0.55" VerticalAlignment="Center" />
                             </StackPanel>
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
 
-                <Button Grid.Column="2" Classes="icon-btn"
+                <Button Classes="icon-btn"
                         Command="{Binding WarmCacheCommand}"
                         IsEnabled="{Binding !IsQuerying}"
                         ToolTip.Tip="Warm embedding cache for selected dataset">
@@ -40,14 +41,14 @@
                               Width="16" Height="16" />
                 </Button>
 
-                <CheckBox Grid.Column="3"
+                <CheckBox
                           IsChecked="{Binding UseParentChild}"
                           Content="Parent-child" FontSize="12"
                           VerticalAlignment="Center"
                           ToolTip.Tip="Retrieve child chunks together with their parent context when this dataset was indexed with parent-child structure." />
 
                 <!-- Grounding score pill -->
-                <Border Grid.Column="4"
+                <Border
                         IsVisible="{Binding HasAnswer}"
                         CornerRadius="10"
                         Padding="8,3"
@@ -59,13 +60,13 @@
                                    FontSize="12" FontWeight="SemiBold" />
                     </StackPanel>
                 </Border>
-            </Grid>
+            </WrapPanel>
         </Border>
 
         <Border Grid.Row="1" Padding="12,7"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="4">
                 <TextBlock Text="RAG workspace" VerticalAlignment="Center" FontSize="11" Opacity="0.55" Margin="0,0,8,0" />
                 <Button Content="Ask" Command="{Binding ShowQuerySubviewCommand}" Padding="10,4" CornerRadius="6"
                         ToolTip.Tip="Return to the primary question and answer workflow." />
@@ -78,7 +79,7 @@
                 <Button Content="Manage" Command="{Binding ShowDatasetManagerSubviewCommand}" Padding="10,4" CornerRadius="6"
                         IsEnabled="{Binding HasDatasets}"
                         ToolTip.Tip="Manage datasets, source folders, ingestion, and reindexing." />
-            </StackPanel>
+            </WrapPanel>
         </Border>
 
         <!-- ── Main content ───────────────────────────────────────────────── -->
@@ -139,6 +140,7 @@
                                         <StackPanel Orientation="Horizontal" Spacing="5">
                                             <TextBlock Text="{Binding Name}" />
                                             <TextBlock Text="{Binding ChunkLabel}" FontSize="10" Opacity="0.55" />
+                                            <TextBlock Text="{Binding ScopeLabel}" FontSize="10" Opacity="0.55" />
                                         </StackPanel>
                                     </CheckBox>
                                 </DataTemplate>
@@ -149,6 +151,25 @@
                                    Opacity="0.7"
                                    TextWrapping="Wrap" />
                     </StackPanel>
+                </Border>
+
+                <Border Classes="settings-card" Padding="14">
+                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="14" RowSpacing="4">
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="{Binding QueryStateLabel}" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding QueryNextActionLabel}" FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="6" HorizontalAlignment="Right">
+                            <Button Content="Inspect sources" Command="{Binding ShowSourcesSubviewCommand}"
+                                    IsEnabled="{Binding HasAnswer}" Padding="9,4" CornerRadius="6"
+                                    ToolTip.Tip="Open the retrieved evidence for the current answer." />
+                            <Button Content="Inspect trace" Command="{Binding ShowDiagnosticsSubviewCommand}"
+                                    IsEnabled="{Binding HasDatasets}" Padding="9,4" CornerRadius="6"
+                                    ToolTip.Tip="Open query timing, rewriting, refusal, and context-packing evidence." />
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Text="{Binding QueryEvidenceSummary}" FontSize="11" Opacity="0.6" />
+                        <TextBlock Grid.Row="2" Text="{Binding QueryDatasetSelectionLabel}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                    </Grid>
                 </Border>
 
                 <!-- Answer area -->
@@ -299,7 +320,7 @@
                                              FontSize="13"
                                              LineHeight="20"
                                              Opacity="0.86" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
+                        <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="4">
                             <Button Content="Copy Source"
                                     Command="{Binding CopySourceCommand}" />
                             <Button Content="Copy Path"
@@ -312,7 +333,7 @@
                                        FontSize="11"
                                        Classes="faint"
                                        VerticalAlignment="Center" />
-                        </StackPanel>
+                        </WrapPanel>
                     </StackPanel>
                 </Border>
 
@@ -323,10 +344,19 @@
                            FontSize="13" Opacity="0.8" />
 
                 <!-- Ingest panel -->
-                <Expander Header="Ingest Documents" Margin="0,8,0,0" HorizontalAlignment="Stretch">
+                <Expander Header="Add or update sources" Margin="0,8,0,0" HorizontalAlignment="Stretch">
                     <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                            BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
                         <StackPanel Spacing="12">
+
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="{Binding IngestSourceKindLabel}" FontSize="14" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding IngestNextActionLabel}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{Binding SelectedDatasetScopeLabel}" FontSize="11" Opacity="0.55"
+                                           VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </Grid>
 
                             <Grid ColumnDefinitions="90,*" ColumnSpacing="12"
                                   RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
@@ -492,36 +522,35 @@
                                        FontSize="12"
                                        Opacity="0.5"
                                        TextWrapping="Wrap" />
-                            <Grid ColumnDefinitions="90,*,Auto,Auto,Auto" ColumnSpacing="8">
-                                <TextBlock Grid.Column="0"
+                            <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Grid.Column="0"
                                            Text="Eval file"
                                            VerticalAlignment="Center"
                                            Opacity="0.6"
                                            FontSize="13" />
-                                <TextBox Grid.Column="1"
+                                <TextBox Grid.Row="0" Grid.Column="1"
                                          Text="{Binding EvalPath}"
                                          PlaceholderText="/path/to/gold.json"
                                          CornerRadius="6"
                                          Padding="10,6"
                                          IsEnabled="{Binding !IsEvaluating}" />
-                                <Button Grid.Column="2"
-                                        Command="{Binding RunRetrievalEvalCommand}"
-                                        IsEnabled="{Binding !IsEvaluating}"
-                                        Content="Retrieval Eval"
-                                        Padding="12,7"
-                                        CornerRadius="6" />
-                                <Button Grid.Column="3"
-                                        Command="{Binding RunFullEvalCommand}"
-                                        IsEnabled="{Binding !IsEvaluating}"
-                                        Content="Full Eval"
-                                        Padding="12,7"
-                                        CornerRadius="6" />
-                                <Button Grid.Column="4"
-                                        Command="{Binding StopEvalCommand}"
-                                        IsVisible="{Binding IsEvaluating}"
-                                        Content="Stop"
-                                        Padding="12,7"
-                                        CornerRadius="6" />
+                                <WrapPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" ItemSpacing="8" LineSpacing="4">
+                                    <Button Command="{Binding RunRetrievalEvalCommand}"
+                                            IsEnabled="{Binding !IsEvaluating}"
+                                            Content="Retrieval Eval"
+                                            Padding="12,7"
+                                            CornerRadius="6" />
+                                    <Button Command="{Binding RunFullEvalCommand}"
+                                            IsEnabled="{Binding !IsEvaluating}"
+                                            Content="Full Eval"
+                                            Padding="12,7"
+                                            CornerRadius="6" />
+                                    <Button Command="{Binding StopEvalCommand}"
+                                            IsVisible="{Binding IsEvaluating}"
+                                            Content="Stop"
+                                            Padding="12,7"
+                                            CornerRadius="6" />
+                                </WrapPanel>
                             </Grid>
 
                             <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10">
@@ -624,10 +653,9 @@
                     <Button Grid.Column="1" Content="Back to Ask" Command="{Binding ShowQuerySubviewCommand}"
                             Padding="10,5" CornerRadius="6" ToolTip.Tip="Return to the primary RAG question workflow." />
                 </Grid>
-                <Border Classes="settings-card" Padding="14"
-                        IsVisible="{Binding Sources.Count, Converter={x:Static views:RagView.IsZero}}">
-                    <TextBlock Text="No sources are available until a query returns retrieved evidence." FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
-                </Border>
+                <controls:MossEmptyState IsVisible="{Binding Sources.Count, Converter={x:Static views:RagView.IsZero}}"
+                                         Title="No retrieved evidence yet"
+                                         Hint="Ask a question from the Ask view. Sources appear here only after retrieval returns them." />
                 <ItemsControl ItemsSource="{Binding Sources}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="vm:RagSourceViewModel">
@@ -712,10 +740,9 @@
                         <TextBlock Text="{Binding RefusalReason}" IsVisible="{Binding TraceRefused}" FontSize="12" Opacity="0.8" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
-                <Border Classes="settings-card" Padding="14"
-                        IsVisible="{Binding LastTraceId, Converter={x:Static views:RagView.IsZero}}">
-                    <TextBlock Text="No query trace is available yet. Ask a question to populate diagnostics." FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
-                </Border>
+                <controls:MossEmptyState IsVisible="{Binding LastTraceId, Converter={x:Static views:RagView.IsZero}}"
+                                         Title="No query trace yet"
+                                         Hint="Ask a question from the Ask view to capture retrieval, generation, and refusal evidence." />
             </StackPanel>
         </ScrollViewer>
 
@@ -723,7 +750,8 @@
         <Border Grid.Row="3"
                 Padding="16,10"
                 BorderThickness="0,1,0,0"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                IsVisible="{Binding IsQuerySubview}">
             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                 <TextBox Grid.Column="0"
                          x:Name="QuestionBox"

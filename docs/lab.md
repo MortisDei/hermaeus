@@ -15,6 +15,15 @@ to start a useful experiment. Only one manual or guided run can be active at a
 time. The UI disables the other start path, and the experiment service enforces
 the same boundary for non-UI callers.
 
+The view names capability state in user terms. A recipe can be **Available**,
+**Unavailable**, or **Unknown**, with a reason tied to the current model and
+runtime; an unavailable recipe cannot be run. With no configured server, start
+and recipe inspection actions are disabled and the next action explains what
+must be configured. Run, cancellation, source restore, Apply, and recovery
+messages remain separate, so a recommendation is not presented as the
+effective loaded runtime state. Recipe prompt detail and evidence filters are
+secondary disclosures, and action groups wrap when the window is narrow.
+
 The Experiment tab freezes one immutable definition before it starts anything.
 The definition names the protocol, exact v2 runtime/model/hardware/configuration
 fingerprint, target Services server, baseline, bounded candidates, workload,

@@ -45,6 +45,31 @@
             <CheckBox IsChecked="{Binding StartMinimized}" Content="Start minimized" FontSize="13"
                       ToolTip.Tip="Launch Hermaeus directly to the tray instead of showing the window." />
             <TextBlock Text="{Binding GlobalHotkeyStatus}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+
+            <Separator Margin="0,4" />
+            <TextBlock Text="Companion" FontSize="14" FontWeight="SemiBold" />
+            <TextBlock Text="Optional ChatGPT Pet v2 packages are local data only. They do not run scripts or receive chat content."
+                       FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+            <CheckBox IsChecked="{Binding PetEnabled}" Content="Show the companion overlay" FontSize="13"
+                      ToolTip.Tip="Show the selected companion as a small draggable overlay. Off by default." />
+            <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="12">
+                <TextBlock Grid.Column="0" Text="Pet" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding PetChoices}" SelectedItem="{Binding SelectedPet}"
+                          IsEnabled="{Binding HasPetChoices}" FontSize="13">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ChatGptPetOptionViewModel}">
+                            <TextBlock Text="{Binding Display}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Grid.Column="2" Content="Import pet"
+                        Command="{Binding ImportPetCommand}" Padding="10,5" CornerRadius="6"
+                        ToolTip.Tip="Import a local pet.json package after Hermaeus validates its manifest, assets, paths, and resource limits." />
+            </Grid>
+            <TextBlock Text="{Binding SelectedPet.Description}" FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                       IsVisible="{Binding HasSelectedPet}" />
+            <TextBlock Text="{Binding PetStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+                       IsVisible="{Binding HasPetStatus}" />
         </StackPanel>
     </Border>
 </UserControl>

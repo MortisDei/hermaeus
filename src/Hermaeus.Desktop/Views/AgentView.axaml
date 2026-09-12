@@ -9,6 +9,8 @@
     <UserControl.Resources>
         <views:AgentScenarioStatusColorConverter x:Key="AgentScenarioStatusColor" />
         <views:AgentSubTaskStatusColorConverter x:Key="AgentSubTaskStatusColor" />
+        <views:AgentSubTaskStatusLabelConverter x:Key="AgentSubTaskStatusLabel" />
+        <views:AgentPlanStepStatusLabelConverter x:Key="AgentPlanStepStatusLabel" />
         <views:AgentTaskStatusColorConverter x:Key="AgentTaskStatusColor" />
         <views:BoolToIndentMarginConverter x:Key="BoolToIndentMargin" />
     </UserControl.Resources>
@@ -25,17 +27,16 @@
          is waiting on is never behind a tab. -->
     <Grid RowDefinitions="Auto,Auto,*">
 
-        <!-- Status line. One row, fixed height, nothing here can grow. -->
-        <Border Grid.Row="0" Padding="12,8" MaxHeight="64"
+        <!-- Compact status strip. It wraps when the workbench is narrow; its content stays scalar. -->
+        <Border Grid.Row="0" Padding="12,8"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="10">
-                <TextBlock Grid.Column="0"
-                           Text="Agent"
+            <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="4">
+                <TextBlock Text="Agent"
                            FontSize="14"
                            FontWeight="SemiBold"
                            VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <!-- The one genuinely moving thing on the panel while a step
                          is in flight. Without it a long model call left every
                          label frozen and the workbench read as hung. -->
@@ -49,7 +50,7 @@
                                MaxWidth="220" TextTrimming="CharacterEllipsis"
                                ToolTip.Tip="The model frozen for this task. Changing the picker does not change an in-flight task." />
                 </StackPanel>
-                <StackPanel Grid.Column="2" Spacing="1" VerticalAlignment="Center">
+                <StackPanel Width="220" Spacing="1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding CurrentTaskGoalLabel}" FontSize="12" Opacity="0.75"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                     <TextBlock Text="{Binding ActivityStatus}" FontSize="11" Opacity="0.85"
@@ -63,25 +64,22 @@
                 </StackPanel>
                 <!-- r19 3.2: once a task is loaded the workbench reads as owned by it;
                      this makes "you can just type a new goal" explicit instead of implied. -->
-                <Button Grid.Column="3"
-                        Command="{Binding NewTaskCommand}"
+                <Button Command="{Binding NewTaskCommand}"
                         IsVisible="{Binding CanShowNewTaskButton}"
                         Content="New task"
                         Padding="12,6"
                         CornerRadius="6" />
-                <Button Grid.Column="4"
-                        Command="{Binding RunStepCommand}"
+                <Button Command="{Binding RunStepCommand}"
                         IsVisible="{Binding ShowRunStep}"
                         Content="Run Step"
                         Padding="12,6"
                         CornerRadius="6" />
-                <Button Grid.Column="5"
-                        Command="{Binding StopCommand}"
+                <Button Command="{Binding StopCommand}"
                         IsVisible="{Binding IsRunning}"
                         Content="Stop"
                         Padding="12,6"
                         CornerRadius="6" />
-            </Grid>
+            </WrapPanel>
         </Border>
 
         <!-- Decision strip. Approval cards stay visible here; reply and continue
@@ -365,16 +363,21 @@
                                     </ItemsControl>
                                 </StackPanel>
 
-                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="4" Margin="0,4,0,0">
                                     <Button Content="See the changes"
                                             ToolTip.Tip="Opens the Changes tab: every file this run touched, every command it ran, and every approval you gave."
                                             Command="{Binding ShowChangesTabCommand}"
+                                            Padding="12,6" CornerRadius="6" />
+                                    <Button Content="Open run artifacts"
+                                            ToolTip.Tip="Opens the persisted folder for this run, including task state, transcript, trace, and log files."
+                                            Command="{Binding OpenTaskArtifactsCommand}"
+                                            IsVisible="{Binding HasTaskArtifacts}"
                                             Padding="12,6" CornerRadius="6" />
                                     <Button Content="Save this run as a workspace note"
                                             ToolTip.Tip="Saves the goal and this run's summary to workspace memory, so a later task in this workspace starts knowing it."
                                             Command="{Binding SaveWorkspaceMemoryCommand}"
                                             Padding="12,6" CornerRadius="6" />
-                                </StackPanel>
+                                </WrapPanel>
                             </StackPanel>
                         </Border>
 
@@ -454,7 +457,7 @@
                                         Padding="14,8"
                                         CornerRadius="6" />
                             </Grid>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
+                            <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="4">
                                 <Button Content="Continue planned work"
                                         Command="{Binding ContinuePlannedTaskCommand}"
                                         IsVisible="{Binding HasPendingPlan}"
@@ -467,7 +470,7 @@
                                         Padding="14,8"
                                         CornerRadius="6"
                                         ToolTip.Tip="Accept the current result and end the run while preserving its history and evidence." />
-                            </StackPanel>
+                            </WrapPanel>
                         </StackPanel>
 
                         <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
@@ -486,7 +489,7 @@
                                             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,2">
                                                 <Border CornerRadius="4" Padding="6,1" MinWidth="70"
                                                         Background="{Binding Status, Converter={StaticResource AgentSubTaskStatusColor}}">
-                                                    <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Status, Converter={StaticResource AgentSubTaskStatusLabel}}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
                                                 </Border>
                                                 <TextBlock Text="{Binding ProfileName}" FontSize="11" Opacity="0.55" Width="80" />
                                                 <TextBlock Text="{Binding ModelLabel}" FontSize="11" Opacity="0.65" Width="170"
@@ -510,7 +513,7 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <TextBlock Text="{Binding Status}" FontSize="11" Opacity="0.55" Width="80" />
+                                                <TextBlock Text="{Binding Status, Converter={StaticResource AgentPlanStepStatusLabel}}" FontSize="11" Opacity="0.55" Width="80" />
                                                 <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" />
                                             </StackPanel>
                                         </DataTemplate>
@@ -1056,7 +1059,7 @@
 
                                     <TextBlock Text="{Binding WorkspaceFileCount, StringFormat={}{0} files available}" FontSize="11" Opacity="0.55" />
 
-                                    <Grid ColumnDefinitions="320,*" ColumnSpacing="12" MinHeight="220">
+                                    <Grid ColumnDefinitions="220,2*" ColumnSpacing="12" MinHeight="220">
                                         <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="6">
@@ -1077,36 +1080,35 @@
                                         </Border>
 
                                         <StackPanel Grid.Column="1" Spacing="8">
-                                            <TextBlock Text="{Binding SelectedWorkspaceFile.RelativePath, TargetNullValue=Select a file to preview}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding SelectedWorkspaceFile.RelativePath, TargetNullValue=Select a file to edit}" FontWeight="SemiBold" />
                                             <TextBlock Text="{Binding WorkspaceFileSummary, StringFormat=Summary: {0}}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6"
-                                                    Padding="10"
-                                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
-                                                <SelectableTextBlock Text="{Binding WorkspaceFilePreview}"
-                                                                     FontFamily="{DynamicResource AppMonoFont}"
-                                                                     FontSize="11"
-                                                                     TextWrapping="Wrap"
-                                                                     MinHeight="180" />
-                                            </Border>
+                                            <views:WorkspaceEditorView Text="{Binding DraftProposedContent, Mode=TwoWay}"
+                                                                       FilePath="{Binding SelectedWorkspaceFile.RelativePath}"
+                                                                       IsVisible="{Binding HasSelectedWorkspaceFile}" />
+                                            <controls:MossEmptyState Title="Select a file to edit"
+                                                                     Hint="Choose a workspace file to inspect it and prepare a reviewable patch."
+                                                                     IconSize="24"
+                                                                     IsVisible="{Binding !HasSelectedWorkspaceFile}" />
                                             <!-- The composer stays with the file list it is bound to
                                                  (SelectedWorkspaceFile), not with the patch queue it feeds. -->
                                             <Expander Header="Draft Patch" IsExpanded="False" Margin="0,8,0,0">
                                                 <StackPanel Spacing="8">
+                                                    <TextBlock Text="Edit proposed content in the workspace editor above, then explain the change before queuing it for review."
+                                                               FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
                                                     <TextBox Text="{Binding DraftRationale}"
                                                              PlaceholderText="Rationale for this patch..."
                                                              AcceptsReturn="True"
                                                              MinHeight="56"
                                                              TextWrapping="Wrap" />
-                                                    <TextBox Text="{Binding DraftProposedContent}"
-                                                             PlaceholderText="Proposed file content..."
-                                                             AcceptsReturn="True"
-                                                             MinHeight="120"
-                                                             TextWrapping="Wrap"
-                                                             FontFamily="{DynamicResource AppMonoFont}"
-                                                             FontSize="11" />
-                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Expander Header="Original file" IsExpanded="False">
+                                                        <SelectableTextBlock Text="{Binding WorkspaceFilePreview}"
+                                                                             FontFamily="{DynamicResource AppMonoFont}"
+                                                                             FontSize="11"
+                                                                             TextWrapping="Wrap"
+                                                                             MinHeight="120"
+                                                                             Margin="0,8,0,0" />
+                                                    </Expander>
+                                                    <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="4">
                                                         <Button Content="Generate Draft Patch"
                                                                 Command="{Binding GenerateDraftPatchCommand}"
                                                                 Padding="10,6"
@@ -1115,7 +1117,7 @@
                                                                 Command="{Binding QueueDraftPatchCommand}"
                                                                 Padding="10,6"
                                                                 CornerRadius="6" />
-                                                    </StackPanel>
+                                                    </WrapPanel>
                                                     <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                                             BorderThickness="1"
                                                             CornerRadius="6"

@@ -66,6 +66,31 @@ explicit user approval before it executes.
   steps or Stop, keeps the model response separate from the pause explanation,
   and records the budget decision in task state and transcript.
 
+### Working the Agent surface
+
+The workbench keeps the primary path in **Run**, with **Changes** for prepared
+patch decisions and the run ledger, **Workspace** for capability notes and
+file inspection, and **History** for prior tasks, lessons, scenarios, and logs.
+The decision strip stays above those tabs when an answer or approval is waiting,
+so the required action is not hidden behind navigation.
+
+Run state is written in plain language: **Waiting for your answer** is an
+`ask_user` response, **Approval needed** is a gated action, and **Recovered
+after interruption**, **Blocked**, **Failed**, **Cancelled**, and **Complete
+with reservations** identify terminal or resumable outcomes. A finished run
+offers **See the changes** and, when its folder exists, **Open run artifacts**
+for the persisted state, transcript, trace, and log files. New Task clears the
+current composer, response, draft, selection, and evidence projections while
+leaving the persisted task available in Recent Tasks.
+
+Workspace file inspection uses the bounded editor host. A local Monaco bundle is
+preferred when the native WebView adapter can initialize; AvaloniaEdit remains
+the functional fallback. The editor receives document data only. It cannot read
+or write files, run commands, approve actions, navigate arbitrary pages, or
+access chat content. Editing proposed content still creates a normal reviewable
+Agent patch, and the Changes view remains the source for applied, verified, and
+conflicted outcomes.
+
 ### Context & Retrieval
 
 - Searches and reads bounded text files under a selected workspace root, with

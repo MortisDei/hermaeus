@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline';">
+    <style>
+        html, body, #editor {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        body {
+            background: transparent;
+        }
+    </style>
+</head>
+<body>
+    <div id="editor" aria-label="Workspace editor"></div>
+    <script src="./vs/loader.js"></script>
+    <script>
+        (function () {
+            "use strict";
+
+            var monacoApi = null;
+            var editor = null;
+            var model = null;
+            var pendingPath = "document.txt";
+            var pendingText = "";
+
+            function notify(payload) {
+                try {
+                    if (typeof invokeCSharpAction === "function") {
+                        invokeCSharpAction(JSON.stringify(payload));
+                    }
+                } catch (_) {
+                    // The native host may be going away during window close.
+                }
+            }
+
+            function languageFor(path) {
+                var extension = (path || "").toLowerCase().split(".").pop();
+                var languages = {
+                    cs: "csharp", csx: "csharp", json: "json", jsonc: "json",
+                    js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript",
+                    html: "html", htm: "html", css: "css", scss: "scss", less: "less",
+                    md: "markdown", yaml: "yaml", yml: "yaml", xml: "xml",
+                    py: "python", rs: "rust", java: "java", go: "go", cpp: "cpp",
+                    c: "c", h: "cpp", hpp: "cpp", sh: "shell", bash: "shell",
+                    ps1: "powershell", sql: "sql", toml: "ini", ini: "ini"
+                };
+                return languages[extension] || "plaintext";
+            }
+
+            function setDocument(path, text) {
+                pendingPath = path || "document.txt";
+                pendingText = text || "";
+                if (!monacoApi || !editor) {
+                    return;
+                }
+
+                var language = languageFor(pendingPath);
+                var uri = monacoApi.Uri.parse("inmemory:///hermaeus/" + encodeURIComponent(pendingPath));
+                if (model) {
+                    model.dispose();
+                }
+                model = monacoApi.editor.createModel(pendingText, language, uri);
+                editor.setModel(model);
+                editor.layout();
+            }
+
+            window.hermaeusEditorApi = {
+                setDocument: setDocument,
+                getText: function () { return editor ? editor.getValue() : pendingText; },
+                setTheme: function (theme) {
+                    if (monacoApi) {
+                        monacoApi.editor.setTheme(theme === "light" ? "vs" : "vs-dark");
+                    }
+                },
+                focus: function () { if (editor) editor.focus(); },
+                layout: function () { if (editor) editor.layout(); },
+                dispose: function () {
+                    if (editor) editor.dispose();
+                    if (model) model.dispose();
+                    editor = null;
+                    model = null;
+                }
+            };
+
+            require.config({ paths: { vs: "./vs" } });
+            require(["vs/editor/editor.main"], function (loadedMonaco) {
+                monacoApi = loadedMonaco;
+                editor = monacoApi.editor.create(document.getElementById("editor"), {
+                    automaticLayout: true,
+                    minimap: { enabled: false },
+                    lineNumbers: "on",
+                    scrollBeyondLastLine: false,
+                    wordWrap: "off",
+                    fontSize: 12,
+                    padding: { top: 8, bottom: 8 },
+                    theme: "vs-dark"
+                });
+                editor.onDidChangeModelContent(function () {
+                    notify({ type: "changed", length: editor.getValue().length });
+                });
+                setDocument(pendingPath, pendingText);
+                notify({ type: "ready" });
+            }, function (error) {
+                notify({ type: "error", message: "Monaco failed to load." });
+            });
+        }());
+    </script>
+</body>
+</html>

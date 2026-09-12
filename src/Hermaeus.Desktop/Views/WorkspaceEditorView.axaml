@@ -1,0 +1,16 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Hermaeus.Desktop.Views.WorkspaceEditorView">
+    <Grid RowDefinitions="Auto,*" RowSpacing="6">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <TextBlock Text="Workspace editor" FontSize="12" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="1" x:Name="EditorStatusText" FontSize="10" Opacity="0.6"
+                       TextTrimming="CharacterEllipsis" ToolTip.Tip="The editor host and its fallback status." />
+        </Grid>
+        <Border Grid.Row="1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="6"
+                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+            <Grid x:Name="EditorHost" MinHeight="260" />
+        </Border>
+    </Grid>
+</UserControl>

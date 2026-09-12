@@ -50,13 +50,15 @@ public partial class ExperienceRowViewModel : ViewModelBase
     public bool IsLabCompletionSummary => ResultDetails is not null;
     public bool IsLabEvidenceSlice => Experience.Domain == EmpiricalExperienceDomains.LabRun
         && !IsLabCompletionSummary && LabRunId is not null;
-    public string OutcomeLabel => Experience.Outcome.Outcome.ToString();
+    public string OutcomeLabel => LabPresentationText.Outcome(Experience.Outcome.Outcome);
     public string OriginLabel => Experience.Provenance.Count == 0
         ? "Unknown"
-        : string.Join(", ", Experience.Provenance.Select(p => p.Source.EvidenceOrigin).Distinct());
+        : string.Join(", ", Experience.Provenance
+            .Select(p => LabPresentationText.EvidenceOrigin(p.Source.EvidenceOrigin))
+            .Distinct(StringComparer.Ordinal));
     public string ScopeLabel => Experience.ProjectId ?? Experience.WorkspaceFingerprint ?? "Unscoped";
     public string CreatedLabel => Experience.CreatedAtUtc.ToLocalTime().ToString("g");
-    public string StatusLabel => Experience.Status.ToString();
+    public string StatusLabel => LabPresentationText.EvidenceStatus(Experience.Status);
     public string ContextSummary => SummarizeJson(Experience.ContextJson);
     public string ActionSummary => SummarizeJson(Experience.ActionJson);
     public string ResultSummary => SummarizeLabCompletion(Experience.ActionJson);
@@ -501,7 +503,8 @@ public sealed class LabRecipeRowViewModel
     public LabRecipeRowViewModel(LabRecipePlan plan) => Plan = plan;
     public LabRecipePlan Plan { get; }
     public string Label => Plan.Label;
-    public string AvailabilityLabel => Plan.Availability.ToString();
+    public string AvailabilityLabel => LabPresentationText.CapabilityState(Plan.Availability);
+    public string AvailabilityHint => LabPresentationText.CapabilityHint(Plan.Availability);
     public string Detail => Plan.AvailabilityDetail;
     public string CandidateLabel => $"Baseline + {Plan.Candidates.Count} candidate(s), max {Plan.MaximumRunCount} runs";
     public string BaselineLabel => $"Baseline: context {Plan.Baseline.ContextSize:N0}, {Plan.Baseline.Threads} thread(s), {Plan.Baseline.Slots} slot(s)";
@@ -609,6 +612,46 @@ public partial class LabViewModel : ViewModelBase
     public string EvidenceEmptyHint => HasAnyEvidence
         ? "Clear or broaden the filters to inspect the evidence already captured."
         : "Run an isolated experiment or guided recipe to capture the first evidence record.";
+    public bool HasConfiguredServers => ConfiguredServers.Count > 0;
+    public bool HasRecipeOptions => RecipeOptions.Count > 0;
+    public bool HasSelectedRecipe => SelectedRecipe is not null;
+    public string RunStatusLabel => LabPresentationText.RunStatus(RunStatus);
+    public string RunNextActionLabel
+    {
+        get
+        {
+            if (IsRunActive)
+                return "Finish the run to capture the comparison, or cancel it to retain the cancellation evidence.";
+            if (IsRecipeRunning)
+                return "The guided recipe is running. Cancel it if needed; captured evidence is retained.";
+            if (RunStatus == "Failed")
+                return "Inspect the failure detail and correct the runtime or model before trying again.";
+            if (RunStatus == "Cancelled")
+                return "The run was cancelled. Review retained evidence or start a new isolated run.";
+            if (CanReviewCurrentRun)
+                return "A correctness-eligible candidate is ready. Review its exact fields before any Apply.";
+            if (RunStatus is "Succeeded" or "PartiallySucceeded")
+                return "Inspect the Evidence tab for the recorded comparisons and any refusal reasons.";
+            if (!HasConfiguredServers)
+                return "Save a configured non-embedding Chat server on Services before starting Lab.";
+            return "Choose a configured Chat server, set the candidate, then start an isolated run.";
+        }
+    }
+    public string ApplyStateLabel
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(AppliedRecommendationId))
+                return "Applied through Services";
+            if (CanConfirmApply)
+                return "Ready to confirm reviewed settings";
+            if (!string.IsNullOrWhiteSpace(_reviewRecommendationId))
+                return "Recommendation ready for review";
+            return CanReviewCurrentRun
+                ? "Candidate available for review"
+                : "No candidate ready to apply";
+        }
+    }
     private readonly UiBoundCollection<ServerConfig> _configuredServers = [];
     public IReadOnlyList<ServerConfig> ConfiguredServers => _configuredServers;
     public string ConfiguredServerHint => ConfiguredServers.Count switch
@@ -622,8 +665,10 @@ public partial class LabViewModel : ViewModelBase
     public Func<EmpiricalExperience, Task<bool>>? ConfirmRemoval { get; set; }
     public Func<LabApplyReview, Task<bool>>? ConfirmApply { get; set; }
     public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
-    public bool CanStartRun => !IsRunActive && !IsRecipeRunning && !IsBusy;
-    public bool CanRunRecipe => !IsRunActive && !IsRecipeRunning && !IsBusy;
+    public bool CanStartRun => _experiments is not null && SelectedServer is not null
+        && !IsRunActive && !IsRecipeRunning && !IsBusy;
+    public bool CanRunRecipe => _recipes is not null && SelectedServer is not null
+        && SelectedRecipe?.CanRun == true && !IsRunActive && !IsRecipeRunning && !IsBusy;
     public bool CanReviewCurrentRun => GetReviewRun() is
         { Status: LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded } run
         && run.Comparisons.Any(comparison => comparison.CanShowHeadlineDelta);
@@ -635,11 +680,25 @@ public partial class LabViewModel : ViewModelBase
     {
         if (value is not null) CandidateContextSize = value.ContextSize;
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));
+        NotifyRunCommands();
+    }
+
+    partial void OnSelectedRecipeChanged(LabRecipeRowViewModel? value)
+    {
+        OnPropertyChanged(nameof(HasSelectedRecipe));
+        NotifyRunCommands();
     }
 
     partial void OnIsRunActiveChanged(bool value) => NotifyRunCommands();
     partial void OnIsRecipeRunningChanged(bool value) => NotifyRunCommands();
     partial void OnIsBusyChanged(bool value) => NotifyRunCommands();
+    partial void OnRunStatusChanged(string value)
+    {
+        OnPropertyChanged(nameof(RunStatusLabel));
+        OnPropertyChanged(nameof(RunNextActionLabel));
+    }
+    partial void OnRestoreStatusChanged(string value) => OnPropertyChanged(nameof(RunNextActionLabel));
+    partial void OnAppliedRecommendationIdChanged(string value) => OnPropertyChanged(nameof(ApplyStateLabel));
 
     private void NotifyRunCommands()
     {
@@ -647,6 +706,8 @@ public partial class LabViewModel : ViewModelBase
         RunSelectedRecipeCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanStartRun));
         OnPropertyChanged(nameof(CanRunRecipe));
+        OnPropertyChanged(nameof(RunNextActionLabel));
+        OnPropertyChanged(nameof(ApplyStateLabel));
     }
 
     private void OnServicesAvailabilityChanged(object? sender, EventArgs e) => RunOnUi(RefreshConfiguredServers);
@@ -668,7 +729,9 @@ public partial class LabViewModel : ViewModelBase
         SelectedServer = _configuredServers.FirstOrDefault(server => string.Equals(server.Id, selectedId, StringComparison.Ordinal))
             ?? _configuredServers.FirstOrDefault();
         OnPropertyChanged(nameof(ConfiguredServerHint));
+        OnPropertyChanged(nameof(HasConfiguredServers));
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));
+        OnPropertyChanged(nameof(RunNextActionLabel));
     }
 
     partial void OnSelectedExperienceChanged(ExperienceRowViewModel? value)
@@ -678,6 +741,7 @@ public partial class LabViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(CanReviewCurrentRun));
         OnPropertyChanged(nameof(CanConfirmApply));
+        OnPropertyChanged(nameof(ApplyStateLabel));
         if (value is null) return;
         CorrectionOutcome = value.Experience.Outcome.Outcome.ToString();
         CorrectionDetail = value.Experience.Outcome.Detail;
@@ -811,6 +875,7 @@ public partial class LabViewModel : ViewModelBase
             RecipeOptions.Clear();
             foreach (var plan in plans) RecipeOptions.Add(new LabRecipeRowViewModel(plan));
             SelectedRecipe = RecipeOptions.FirstOrDefault(row => row.CanRun) ?? RecipeOptions.FirstOrDefault();
+            OnPropertyChanged(nameof(HasRecipeOptions));
             StatusMessage = RecipeOptions.Count == 0 ? "No recipes are available for this runtime." : $"{RecipeOptions.Count} recipe(s) inspected.";
         }
         catch (Exception ex) { _toasts.Show("Could not inspect Lab recipes", ex.Message, ToastKind.Error, 5000); }
@@ -1072,6 +1137,7 @@ public partial class LabViewModel : ViewModelBase
         {
             ApplyReviewSummary = "This historical evidence is read-only. Review the current in-memory run before applying settings.";
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
             return;
         }
         try
@@ -1083,6 +1149,7 @@ public partial class LabViewModel : ViewModelBase
             {
                 ApplyReviewSummary = "The completed Lab run has no candidate to review.";
                 OnPropertyChanged(nameof(CanConfirmApply));
+                OnPropertyChanged(nameof(ApplyStateLabel));
                 return;
             }
 
@@ -1145,11 +1212,13 @@ public partial class LabViewModel : ViewModelBase
                     + (_reviewRecommendationId is null ? string.Empty : Environment.NewLine + $"Recommendation {_reviewRecommendationId} is ready for explicit Apply.")
                 : _applyReview.RefusalReason;
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
         }
         catch (Exception ex)
         {
             _applyReview = null;
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
             _toasts.Show("Could not review Lab result", ex.Message, ToastKind.Error, 5000);
         }
     }
@@ -1167,6 +1236,7 @@ public partial class LabViewModel : ViewModelBase
         {
             ApplyReviewSummary = "The selected evidence changed while Apply was being confirmed. Review the current selection again.";
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
             return;
         }
 
@@ -1188,6 +1258,7 @@ public partial class LabViewModel : ViewModelBase
             _reviewRecommendationId = null;
             OnPropertyChanged(nameof(CanConfirmApply));
             OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
+            OnPropertyChanged(nameof(ApplyStateLabel));
         }
         catch (Exception ex) { _toasts.Show("Could not apply Lab result", ex.Message, ToastKind.Error, 5000); }
     }
@@ -1205,6 +1276,7 @@ public partial class LabViewModel : ViewModelBase
             AppliedRecommendationId = string.Empty;
             ApplyReviewSummary = "The reviewed settings were restored. Any running server remains unchanged.";
             OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
+            OnPropertyChanged(nameof(ApplyStateLabel));
         }
         catch (Exception ex) { _toasts.Show("Could not undo Lab result", ex.Message, ToastKind.Error, 5000); }
     }

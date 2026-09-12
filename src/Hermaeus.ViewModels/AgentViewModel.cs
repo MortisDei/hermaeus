@@ -108,7 +108,7 @@ public sealed class AgentReviewQueueItemViewModel
     public string LastApprovalAction { get; }
     public bool? LastApprovalApproved { get; }
     public DateTime? LastApprovalAt { get; }
-    public string StatusLabel => Status.ToString();
+    public string StatusLabel => AgentPresentationText.TaskStatus(Status);
     public string ApprovalLabel => ApprovalCount == 0
         ? "No approvals"
         : $"{ApprovalCount} approval(s), last {LastApprovalAction}={(LastApprovalApproved == true ? "yes" : "no")}";
@@ -120,7 +120,13 @@ public sealed class AgentReviewQueueItemViewModel
     /// <summary>Name of the gated tool waiting on approval, e.g. "run_command"; empty if this queue entry has none (r6 1.7).</summary>
     public string PendingToolName { get; }
     public AgentRiskLevel? PendingRiskLevel { get; }
-    public string PendingRiskLabel => PendingRiskLevel?.ToString() ?? string.Empty;
+    public string PendingRiskLabel => PendingRiskLevel switch
+    {
+        AgentRiskLevel.Low => "Low risk",
+        AgentRiskLevel.Medium => "Medium risk",
+        AgentRiskLevel.High => "High risk",
+        _ => string.Empty
+    };
     /// <summary>Why the safety gate gated this action (AgentToolPolicyDecision.Reason).</summary>
     public string PendingReason { get; }
     /// <summary>The pending action's fingerprint as rendered here; passed back to AppendApprovalAsync so approval executes only what was actually shown (r23 4.1).</summary>
@@ -225,7 +231,9 @@ public sealed class AgentTaskListItemViewModel
     public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentTaskId);
     public bool CanDelete => !IsSubTask && Status != AgentTaskStatus.Running;
     /// <summary>r23 2.3: presentation only - status stays Complete; a non-empty Reservations list just changes what this label says.</summary>
-    public string StatusLabel => Status == AgentTaskStatus.Complete && HasReservations ? "Completed with reservations" : Status.ToString();
+    public string StatusLabel => Status == AgentTaskStatus.Complete && HasReservations
+        ? "Complete with reservations"
+        : AgentPresentationText.TaskStatus(Status);
 
     /// <summary>r19 3.3: a terminal task (Complete/Failed/Blocked) whose own plan still lists
     /// pending steps declared victory prematurely; flag it at a glance in the recent-tasks list.</summary>
@@ -419,17 +427,17 @@ public sealed class AgentDraftPatchViewModel
     public string BlockReason { get; }
     public DateTime? RevertedAt { get; }
     public string? RevertedBy { get; }
-    public string StatusLabel => Status.ToString();
+    public string StatusLabel => AgentPresentationText.PatchStatus(Status);
     public string CreatedLabel => $"Created {LocalTimeFormat.DateTimeMinutes(CreatedAt)}";
     public bool CanReview => Status is not (AgentDraftPatchStatus.Applied or AgentDraftPatchStatus.Reverted or AgentDraftPatchStatus.AlreadySatisfied);
     /// <summary>Only an applied patch that came with a captured pre-image can be reverted (r6 1.8); pre-r6 applied patches have none.</summary>
     public bool CanRevert => Status == AgentDraftPatchStatus.Applied;
     public string OutcomeLabel => Status switch
     {
-        AgentDraftPatchStatus.Pending => "Pending review",
-        AgentDraftPatchStatus.Applied => $"Applied {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
-        AgentDraftPatchStatus.Approved => $"Approved {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
-        AgentDraftPatchStatus.AlreadySatisfied => $"Already satisfied {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
+        AgentDraftPatchStatus.Pending => "Needs review",
+        AgentDraftPatchStatus.Applied => $"Applied and verified {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
+        AgentDraftPatchStatus.Approved => $"Approved, not applied {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
+        AgentDraftPatchStatus.AlreadySatisfied => $"Already satisfied and verified {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
         AgentDraftPatchStatus.Rejected => $"Rejected {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}",
         AgentDraftPatchStatus.Blocked => string.IsNullOrWhiteSpace(BlockReason)
             ? $"Blocked {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}"
@@ -473,9 +481,9 @@ public sealed class AgentLedgerFileEntryViewModel
     public string KindLabel => Kind == AgentLedgerFileKind.Created ? "created" : "edited";
     public string StatusLabel => Status switch
     {
-        AgentLedgerFileStatus.Applied => "applied",
+        AgentLedgerFileStatus.Applied => "applied and verified",
         AgentLedgerFileStatus.Reverted => "reverted",
-        AgentLedgerFileStatus.Conflicted => "conflicted",
+        AgentLedgerFileStatus.Conflicted => "changed after apply, review needed",
         _ => Status.ToString()
     };
     public string LineDeltaLabel => LineDelta > 0 ? $"+{LineDelta}" : LineDelta.ToString();
@@ -670,6 +678,14 @@ public partial class AgentViewModel : ViewModelBase
     public bool HasReport => CurrentTask is { SubTaskPlan.Count: > 0 } && File.Exists(ReportPath);
     private string ReportPath => CurrentTask is null ? string.Empty : Path.Combine(_store.GetTaskDirectory(CurrentTask.TaskId), "report.md");
 
+    /// <summary>Whether the persisted state, transcript, trace and log folder for the open run is available to inspect.</summary>
+    public bool HasTaskArtifacts => CurrentTask is not null
+        && CurrentTask.TaskId.Length > 0
+        && Directory.Exists(TaskArtifactDirectory);
+    private string TaskArtifactDirectory => CurrentTask is null
+        ? string.Empty
+        : _store.GetTaskDirectory(CurrentTask.TaskId);
+
     /// <summary>
     /// Null-safe replacement for the Sub-tasks border's old
     /// <c>!!CurrentTask.SubTaskPlan.Count</c> binding (r16
@@ -685,6 +701,19 @@ public partial class AgentViewModel : ViewModelBase
     {
         if (HasReport)
             RequestOpenFolder?.Invoke(ReportPath);
+    }
+
+    [RelayCommand]
+    private void OpenTaskArtifacts()
+    {
+        if (!HasTaskArtifacts)
+        {
+            StatusMessage = "Run artifacts are not available for this task.";
+            return;
+        }
+
+        RequestOpenFolder?.Invoke(TaskArtifactDirectory);
+        StatusMessage = "Opened the run artifacts. The folder contains persisted state, transcript, trace, and log files.";
     }
 
     [ObservableProperty] private string _goalText = string.Empty;
@@ -740,10 +769,12 @@ public partial class AgentViewModel : ViewModelBase
     {
         null => "No active task",
         { StepBudgetExhausted: true } => "Paused at step budget",
-        { Status: AgentTaskStatus.Complete, Reservations.Count: > 0 } => "Completed with reservations",
+        { Status: AgentTaskStatus.Complete, Reservations.Count: > 0 } => "Complete with reservations",
         { Status: AgentTaskStatus.Blocked, UserTransitions: var transitions } when transitions.LastOrDefault()?.Kind == AgentTaskTransitionKind.StopRun => "Stopped",
-        { Status: AgentTaskStatus.Interrupted } => "Interrupted during startup recovery",
-        _ => CurrentTask.Status.ToString()
+        { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: not null } => "Approval needed",
+        { Status: AgentTaskStatus.WaitingForUser } => "Waiting for your answer",
+        { Status: AgentTaskStatus.Interrupted } => "Recovered after interruption",
+        _ => AgentPresentationText.TaskStatus(CurrentTask.Status)
     };
     public bool HasReservations => CurrentTask is { Reservations.Count: > 0 };
     /// <summary>
@@ -906,6 +937,8 @@ public partial class AgentViewModel : ViewModelBase
     [ObservableProperty] private AgentLedgerFileEntryViewModel? _selectedLedgerFile;
     public bool HasSelectedLedgerFile => SelectedLedgerFile is not null;
     partial void OnSelectedLedgerFileChanged(AgentLedgerFileEntryViewModel? value) => OnPropertyChanged(nameof(HasSelectedLedgerFile));
+
+    public bool HasSelectedWorkspaceFile => SelectedWorkspaceFile is not null;
 
     public AgentViewModel(
         IAgentService agent,
@@ -1267,7 +1300,12 @@ public partial class AgentViewModel : ViewModelBase
         _currentTaskParentGoal = string.Empty;
         GoalText = string.Empty;
         ReplyText = string.Empty;
-        StatusMessage = string.Empty;
+        ContinueInstructionText = string.Empty;
+        DraftRationale = string.Empty;
+        DraftProposedContent = string.Empty;
+        DraftPreview = string.Empty;
+        SelectedTabIndex = RunTabIndex;
+        StatusMessage = "New task ready. Describe a goal, choose a workspace and model, then start the agent.";
         IsError = false;
         RetrievedContext.Clear();
         ContextReceipt.Clear();
@@ -2738,6 +2776,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(BlockedPatchCount));
         OnPropertyChanged(nameof(HasQueuedPatches));
         OnPropertyChanged(nameof(HasReport));
+        OnPropertyChanged(nameof(HasTaskArtifacts));
         OnPropertyChanged(nameof(HasSubTaskPlan));
         OnPropertyChanged(nameof(CurrentTaskParentGoalLabel));
         OnPropertyChanged(nameof(HasCurrentTaskParentGoal));
@@ -2802,6 +2841,7 @@ public partial class AgentViewModel : ViewModelBase
 
     partial void OnSelectedWorkspaceFileChanged(AgentWorkspaceFileViewModel? value)
     {
+        OnPropertyChanged(nameof(HasSelectedWorkspaceFile));
         var generation = ++_workspaceFileSelectionGeneration;
         _ = LoadSelectedWorkspaceFileAsync(value, generation);
     }
@@ -2825,6 +2865,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
         OnPropertyChanged(nameof(NextUserActionLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
+        OnPropertyChanged(nameof(HasTaskArtifacts));
         OnPropertyChanged(nameof(HasPendingPlan));
         OnPropertyChanged(nameof(ShowFinishRun));
         OnPropertyChanged(nameof(IsWaitingForReply));

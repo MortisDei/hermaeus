@@ -176,6 +176,12 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
   dataset; later selections are persisted. Ask, Manage, Sources, and Diagnostics
   are explicit workspace views, keeping persistent dataset administration
   separate from per-question context selection and evidence inspection.
+- The Ask surface states whether a question is ready, searching/generating,
+  answered, refused for weak retrieval, failed, cancelled, or blocked by a
+  missing knowledge base, and names the next action. Dataset scope labels make
+  Local files and Remote web sources distinct. Retrieved citations and query
+  traces remain one click away through secondary inspection views rather than
+  dominating the normal answer.
 - RAG has a native evaluation harness with retrieval metrics, refusal handling,
   cancellation, and export. The separate [eval harness plan](rag-eval-harness.md)
   describes proposed expansion beyond the shipped surface.
@@ -254,6 +260,15 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   continue with an instruction, Finish run, and Stop are distinct persisted
   lifecycle transitions. A run ledger supports per-file Rewind with staleness
   checks.
+- Agent's Run surface states the current lifecycle and next action in user
+  terms, including answer waits, approvals, blocked/failed/cancelled runs,
+  interruption recovery, and complete runs with reservations. Changes
+  distinguishes pending review from applied/readback-verified and conflicted
+  files. Workspace includes a bounded local Monaco editor when its native host
+  is available, with AvaloniaEdit fallback, and terminal runs can open their
+  persisted state/transcript/trace/log folder. New Task clears task-scoped
+  composer, response, draft, selection, and evidence projections without
+  deleting the persisted task.
 - Scenario Evals supports both suite execution and an individual row Run
   action. Those actions are disabled while definitions are loading or when no
   model or scenario set is ready. Persisted evidence restoration runs after
@@ -277,6 +292,21 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   are not mapped until Desktop and Local API share one serialized task owner.
 
 See [Agent Workbench](agent.md) and the [Agent Local API contract](agent-api.md).
+
+## Optional ChatGPT Pet companion
+
+- Hermaeus can import generic ChatGPT Pet v2 data packages after validating the
+  manifest, sprite version, relative paths, file types, reparse points, and
+  resource limits. Packages contain data only and do not run scripts or receive
+  chat content.
+- The bundled Moss package is selected as the compatibility default but the
+  overlay is disabled by default. Enabling it shows a small draggable animated
+  sprite, persists the selected package and position through normal UI
+  settings, clamps the entire sprite inside the window, and reverses walking
+  direction from the current pointer movement.
+- Moss asset provenance and its unresolved external redistribution/licensing
+  question are recorded beside the bundled package. The feature does not add a
+  marketplace, pet editor, or voice subsystem.
 
 ## Projects
 
@@ -313,6 +343,13 @@ The Evidence surface stores typed Agent, GPU Fit, Lab, and adaptive-launch recor
 links, fingerprints, corrections, redacted export, and confirmed removal.
 Experience is descriptive evidence only. It never grants approval, changes a
 safety decision, or rewrites the analytical GPU Fit prediction.
+
+Lab's Experiment surface describes capability and recipe availability for the
+selected server/model, disables runs that are unavailable or have no eligible
+target, and keeps run, cancellation, source-restore, Apply, and recovery next
+actions visible. Recipe prompt detail and evidence filters are disclosed until
+needed, and action groups wrap on narrow windows. The selected runtime's
+effective state remains distinct from a recommendation or saved configuration.
 
 Successful auditable adaptive changes and correctness-gated Lab winners can
 produce a shared review card. The card shows current and proposed fields,

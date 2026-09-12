@@ -91,6 +91,22 @@ public class UiSettings
     public string MonoFontFamily { get; set; } = string.Empty;
 
     /// <summary>
+    /// Show the optional ChatGPT Pet overlay. It is deliberately disabled by
+    /// default so a new install never adds an unexpected always-on surface.
+    /// </summary>
+    public bool PetEnabled { get; set; } = false;
+
+    /// <summary>Selected validated ChatGPT Pet v2 package id.</summary>
+    public string SelectedPetId { get; set; } = "moss";
+
+    /// <summary>
+    /// Persisted overlay position in client coordinates. Negative values mean
+    /// the overlay has not been positioned yet and should use its default.
+    /// </summary>
+    public double PetPositionX { get; set; } = -1;
+    public double PetPositionY { get; set; } = -1;
+
+    /// <summary>
     /// r24 doc 01: the currently active project, or empty for "No project".
     /// Switching never rewrites any existing record; it only changes what
     /// new conversations, tasks, datasets and memories default to.

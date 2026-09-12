@@ -27,7 +27,7 @@ B0: baseline + failure fixtures + ownership/identity contract
         |         ^        ^          ^
         |         B4       B5         B7
         |
-        +--> C1: Monaco comparison/adoption (requires B3/B4/B8 target contract)
+        +--> C1: bounded Monaco path + owner validation (requires B3/B4/B8 target contract)
         +--> C2: JSONL / selected runtime experiment (requires B6/B7)
         +--> C3: Agent API execution (requires B2-B4 + actual single host)
 
@@ -56,7 +56,7 @@ application extraction. Its regression then participates in the shared driver.
 | B7 | L1/L2: understandable existing Lab and retained decisions | Baseline-aware recipe availability, run/restore/evidence/review flow, no duplicate catalogue or optimizer | B5; B6 for recovery experiments | V07/V08; exact-current model/runtime eligibility, restore outcomes and retained details |
 | B8 | UX/P2: primary jobs, outputs and remediation destinations | Focused Agent/RAG/Lab hierarchy; typed Doctor/details navigation; touched semantic resources and save-state visibility | B2/B4/B5/B7 as each view needs | Doc 08 walkthroughs, V05/V10/V12 and owner keyboard/DPI/resize; no broad redesign |
 | S | S1: bounded restore expansion without losing containment | Entry/size/actual-byte budgets, cancellation and destination-alias preflight; exact failure cleanup; relevant documentation drift | B0 | Doc 09 hostile/large scratch archives plus existing containment tests and CodeQL; no owner restore |
-| C1 | Rich source/diff editing must justify dependencies | Dedicated Monaco versus AvaloniaEdit spike, narrow bridge and local asset packaging | B3/B4 and B8 artifact contract | Doc 04 full cross-platform/offline/security/resource gate; fallback is a complete acceptable result |
+| C1 | Rich source/diff editing must justify dependencies | Bounded local Monaco host, narrow bridge, local asset packaging, and AvaloniaEdit fallback | B3/B4 and B8 artifact contract | Doc 04 full cross-platform/offline/security/resource gate; fallback remains a complete acceptable result |
 | C2 | Useful current upstream evidence without permanent speculative knobs | Supplementary JSONL adapter; at most selected dense-FFN and DFlash/DSpark experiments through existing Lab | B6/B7; supported exact binary/pair | Doc 05 adapter regressions and real evidence; unsupported is explicit, not a fake implementation pass |
 | C3 | Local Agent clients need one actual authority | Chosen single-host topology, authenticated local transport, scope editor and guarded endpoint mapping | B2-B4, explicit topology review, no competing authority | V13 with two real processes, revocation/recovery/approval races; otherwise endpoints stay unmapped |
 | B9 | Integrated owner workflows and truthful release evidence | Full automated verification, authoritative behavior/security docs, CHANGELOG, ledger update, process audit and owner matrix | All retained mandatory/conditional batches | Build/tests/package/coverage as applicable; unresolved hardware/UI gates remain explicit; owner controls commit/PR/release |
@@ -76,7 +76,7 @@ not cloud backup, and C3 is not a multi-user service.
 | Auto-tune crash not yet reproduced | Stack/process/OS evidence from isolated failure, including callbacks and siblings | Cannot close via another broad catch |
 | Shutdown blocking UI versus async drain | One awaitable host shutdown with bounded result; UI closing adapter awaits safely | Clean marker follows actual completion |
 | Optional dependency constructors omit production owners | Driver resolves real graph and lists substituted boundaries | Green isolated tests cannot stand for production |
-| WebView 12.1.0 docs/backend differences | Test exact package on actual Pop!_OS and Windows; record fallback | Monaco is conditional, no runtime install assumption |
+| WebView 12.1.0 docs/backend differences | Test exact package on actual Pop!_OS and Windows; record fallback | Local Monaco path is implemented, but no runtime install assumption or full ship claim |
 | 6 GB versus 8 GB/runtime/driver differences | Real selected hardware evidence, process versus device attribution | No mocked GPU pass or universal preset |
 | Existing CodeQL analyzes but lacks inspected enforcement | Owner-controlled merge-policy decision, re-read at actual PR | Keep external gate visible; never alter settings autonomously |
 | R33 too broad | Apply doc 10 descope order, keep safety/correctness tests | Optional editor/API/recipes do not block the mandatory spine |
@@ -121,7 +121,7 @@ by this implementation. Local commits are authorized by the owner.
 | B8 | Owner validation required | Typed Doctor destination and touched UX projections are locally verified; owner keyboard/DPI/focus/resize walkthrough remains open |
 | S | Implemented and verified | Restore budgets, actual-byte staging, duplicate-target and cancellation cleanup tests pass; no owner restore is required |
 | B9 | Owner validation required | Local build/test/package/coverage/docs closeout is complete; owner platform, PR/check, CodeQL enforcement and publication remain open |
-| C1 Monaco | conditionally rejected/not earned with evidence | No cross-platform offline/native/resource spike gate was earned; AvaloniaEdit remains the fallback |
+| C1 Monaco | owner validation required | Local bundle, bounded bridge, and AvaloniaEdit fallback are implemented; native worker/rendering/offline/resource gates remain open |
 | C2 JSONL/runtime experiments | conditionally rejected/not earned with evidence | Installed b10821 lacks `--log-jsonl`; no exact compatible pair/benefit evidence was earned |
 | C3 Agent HTTP execution | conditionally rejected/not earned with evidence | `AgentApiContract.ExecutionRoutesAvailable=false`; no single cross-process execution owner is proven |
 | Actual R33 PR/CodeQL enforcement | owner validation required | Exact PR/check/rules evidence remains an owner action; no synthetic planning PR or settings change was made |

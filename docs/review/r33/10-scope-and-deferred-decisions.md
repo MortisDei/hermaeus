@@ -9,11 +9,13 @@ Doctor target navigation, restore budgets and targeted product UX/verification.
 These are bounded repairs/maturation anchored in current evidence, not a mandate
 to replace every subsystem.
 
-Conditional scope is Monaco, new runtime experiments/JSONL consumers where the
-selected binary supports them, and Agent Local API execution after actual
-cross-process ownership is proven. Unsupported capabilities can ship as explicit
-unavailable/Unknown outcomes. No endpoint or editor is mandatory merely because
-it is interesting. Their contract work cannot weaken mandatory authority.
+Conditional scope is the Monaco/native-WebView path, new runtime
+experiments/JSONL consumers where the selected binary supports them, and Agent
+Local API execution after actual cross-process ownership is proven. The Monaco
+path now has a bounded local implementation and AvaloniaEdit fallback, but its
+native platform/worker ship gate remains open. Unsupported capabilities can
+ship as explicit unavailable/Unknown outcomes. No endpoint or editor may
+weaken mandatory authority.
 
 The central `docs/review/deferred.md` is unchanged in this planning pass. The
 following table is the complete disposition of its currently open selected,
@@ -57,6 +59,10 @@ not evidence that new owner observations can be dismissed.
 - Runtime artwork and owner-passed Agent tabs/Doctor action presentation remain
   implemented. R33 targets output hierarchy and actual remediation destinations,
   not another tab/artwork/tooltip rewrite.
+- The optional ChatGPT Pet overlay is a data-only ambient surface. Its generic
+  v2 package boundary, bundled Moss asset, disabled-by-default setting, and
+  position persistence are in scope; marketplace, scripting, voice coupling,
+  and a pet editor are not.
 - The R32 owner data migration passed. Do not require another destructive owner
   migration as a routine round gate. Test lifecycle changes with scratch roots.
 
@@ -93,7 +99,7 @@ with the owning future batch; do not claim it was fixed during this pass.
 ## 10.6 Descope order
 
 If implementation grows beyond a credible single round, first drop new runtime
-recipes, then Monaco adoption, then API execution endpoints. Keep the shared
+recipes, then further Monaco/native-WebView adoption, then API execution endpoints. Keep the shared
 owner/driver, mutation correctness, task isolation, configuration/recommendation
 reconciliation, cancellation and demonstrated platform defects. Reduce UX scope
 to these changed workflows before expanding to secondary pages. Do not descope

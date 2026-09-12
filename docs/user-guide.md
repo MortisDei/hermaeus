@@ -350,12 +350,33 @@ versioned JSON containing the visible memories' revision, source, effective-time
 and decision structure. The older CSV action remains a current-projection-only
 export, and files exported before deletion remain user-owned copies.
 
+In RAG, the Ask view makes the current knowledge state explicit. It says when
+the question is ready, searching/generating, answered, refused because
+retrieval was not trustworthy, failed, cancelled, or blocked because no
+knowledge base exists. The next-action line points to dataset selection,
+retry, evidence inspection, or dataset creation. Dataset scope labels identify
+Local files and Remote web sources. Sources and Diagnostics are secondary
+views for citation and trace inspection, while the normal answer remains
+compact. Chat's Knowledge attachment continues to use the existing bounded
+retrieval and citation path.
+
 ## Agent workspaces
 
 The **Agent** is separate from normal Chat. Select a workspace root, review its
 scope and proposed actions, and approve gated operations explicitly. Task state
 and patch queues remain inspectable. Workspace authority does not carry into
 another workspace or into ordinary Chat.
+
+The Agent workbench keeps the job flow in **Run**, **Changes**, **Workspace**,
+and **History**. A decision strip remains visible above the tabs when the Agent
+needs an answer or approval. Run shows plain-language lifecycle state and next
+action. When a run ends, **See the changes** opens the verified file ledger and
+**Open run artifacts** opens the persisted task state, transcript, trace, and
+log folder when it exists. **New task** clears the current composer, response,
+draft, selected file, and task-scoped evidence without deleting the old task.
+Workspace editing uses a local Monaco host when available and a native
+AvaloniaEdit fallback; both remain presentation only and all writes still use
+the normal prepared mutation and approval path.
 
 When a proposed plan contains sub-tasks, its review card has one model selector
 per child. Choose a configured visible model or **Inherit parent** before
@@ -412,6 +433,14 @@ candidate comparison. **Cancel** stops only the runtime owned by that run and
 records the cancelled or partial result. A second manual or recipe run is
 disabled while one is active, and the service rejects concurrent callers at the
 backend boundary as well.
+
+**Inspect runtime recipes** explains whether each recipe is Available,
+Unavailable, or Unknown for the selected model and runtime. Unavailable recipes
+cannot be run, and no configured server disables the start/inspection actions
+with an explanation of what to configure. The run card keeps execution,
+cancellation, source restore, recommendation, and effective runtime state
+separate. Recipe prompt detail and evidence filters are tucked behind secondary
+disclosures so the next action stays visible on a narrow window.
 
 The run state names isolation and comparison refusals. Missing counters remain
 missing. A comparison cannot show a headline delta when runtime, model,
@@ -581,3 +610,15 @@ expanded beneath a temporary staging root, with actual expanded bytes checked
 while copying. Commit moves are rollback-safe and existing files still require
 the explicit overwrite choice. Re-enter credentials after restoring on another
 machine.
+
+### Optional ChatGPT Pet companion
+
+Settings > Interface > Companion can import a generic ChatGPT Pet v2 package.
+Hermaeus accepts only bounded data files with a valid manifest, supported sprite
+version, safe relative paths, and no scripts or reparse points. The bundled
+Moss package is available as a choice, but the overlay is off by default. When
+enabled it is a small draggable animated overlay; its package selection and
+position are saved through normal UI settings and the whole sprite is clamped
+inside the window. The package never receives chat content or filesystem
+authority. Moss provenance is recorded beside the asset, and its external
+redistribution/licensing status still needs owner confirmation.

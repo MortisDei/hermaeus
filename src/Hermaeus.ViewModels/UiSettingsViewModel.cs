@@ -26,8 +26,28 @@ public partial class UiSettingsViewModel : ObservableObject
     [ObservableProperty] private string _headingFontFamily = string.Empty;
     [ObservableProperty] private string _bodyFontFamily = string.Empty;
     [ObservableProperty] private string _monoFontFamily = string.Empty;
+    [ObservableProperty] private bool _petEnabled;
+    [ObservableProperty] private string _selectedPetId = "moss";
+    [ObservableProperty] private double _petPositionX = -1;
+    [ObservableProperty] private double _petPositionY = -1;
+    [ObservableProperty] private ChatGptPetOptionViewModel? _selectedPet;
+
+    private readonly IChatGptPetPackageCatalog? _petCatalog;
+
+    public UiBoundCollection<ChatGptPetOptionViewModel> PetChoices { get; } = [];
+    public string PetStatus { get; private set; } = string.Empty;
+    public Func<Task<string?>>? RequestPetManifestPicker { get; set; }
+    public bool HasPetChoices => PetChoices.Count > 0;
+    public bool HasSelectedPet => SelectedPet is not null;
+    public bool HasPetStatus => PetStatus.Length > 0;
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
+
+    public UiSettingsViewModel(IChatGptPetPackageCatalog? petCatalog = null)
+    {
+        _petCatalog = petCatalog;
+        RefreshPetChoices();
+    }
 
     public void ReloadFrom(AppSettings settings)
     {
@@ -45,6 +65,11 @@ public partial class UiSettingsViewModel : ObservableObject
         HeadingFontFamily = settings.Ui.HeadingFontFamily;
         BodyFontFamily = settings.Ui.BodyFontFamily;
         MonoFontFamily = settings.Ui.MonoFontFamily;
+        PetEnabled = settings.Ui.PetEnabled;
+        SelectedPetId = settings.Ui.SelectedPetId;
+        PetPositionX = settings.Ui.PetPositionX;
+        PetPositionY = settings.Ui.PetPositionY;
+        RefreshPetChoices();
     }
 
     public void ApplyTo(AppSettings settings)
@@ -63,5 +88,84 @@ public partial class UiSettingsViewModel : ObservableObject
         settings.Ui.HeadingFontFamily = HeadingFontFamily;
         settings.Ui.BodyFontFamily = BodyFontFamily;
         settings.Ui.MonoFontFamily = MonoFontFamily;
+        settings.Ui.PetEnabled = PetEnabled;
+        settings.Ui.SelectedPetId = SelectedPetId;
+        settings.Ui.PetPositionX = PetPositionX;
+        settings.Ui.PetPositionY = PetPositionY;
+    }
+
+    [RelayCommand]
+    private async Task ImportPetAsync()
+    {
+        if (_petCatalog is null || RequestPetManifestPicker is null)
+        {
+            PetStatus = "Pet import is unavailable in this host.";
+            OnPropertyChanged(nameof(PetStatus));
+            OnPropertyChanged(nameof(HasPetStatus));
+            return;
+        }
+
+        var manifestPath = await RequestPetManifestPicker();
+        if (string.IsNullOrWhiteSpace(manifestPath))
+            return;
+
+        try
+        {
+            var result = await _petCatalog.ImportAsync(manifestPath);
+            if (!result.Succeeded || result.Package is null)
+            {
+                PetStatus = result.Error;
+                OnPropertyChanged(nameof(PetStatus));
+                OnPropertyChanged(nameof(HasPetStatus));
+                return;
+            }
+
+            RefreshPetChoices();
+            SelectedPetId = result.Package.Manifest.Id;
+            PetStatus = $"Imported {result.Package.Manifest.DisplayName}. Enable the companion when you want it visible.";
+            OnPropertyChanged(nameof(PetStatus));
+            OnPropertyChanged(nameof(HasPetStatus));
+        }
+        catch (OperationCanceledException)
+        {
+            PetStatus = "Pet import cancelled.";
+            OnPropertyChanged(nameof(PetStatus));
+            OnPropertyChanged(nameof(HasPetStatus));
+        }
+        catch (Exception ex)
+        {
+            PetStatus = $"Pet import failed: {ex.Message}";
+            OnPropertyChanged(nameof(PetStatus));
+            OnPropertyChanged(nameof(HasPetStatus));
+        }
+    }
+
+    private void RefreshPetChoices()
+    {
+        PetChoices.Clear();
+        if (_petCatalog is null)
+            return;
+
+        foreach (var package in _petCatalog.GetAvailablePackages())
+            PetChoices.Add(new ChatGptPetOptionViewModel(package));
+
+        SelectedPet = PetChoices.FirstOrDefault(option =>
+            string.Equals(option.Id, SelectedPetId, StringComparison.OrdinalIgnoreCase));
+        OnPropertyChanged(nameof(HasPetChoices));
+    }
+
+    partial void OnSelectedPetChanged(ChatGptPetOptionViewModel? value)
+    {
+        if (value is not null && !string.Equals(SelectedPetId, value.Id, StringComparison.Ordinal))
+            SelectedPetId = value.Id;
+        OnPropertyChanged(nameof(HasSelectedPet));
+    }
+
+    partial void OnSelectedPetIdChanged(string value)
+    {
+        var selected = PetChoices.FirstOrDefault(option =>
+            string.Equals(option.Id, value, StringComparison.OrdinalIgnoreCase));
+        if (!ReferenceEquals(SelectedPet, selected))
+            SelectedPet = selected;
     }
 }

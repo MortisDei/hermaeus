@@ -3,9 +3,9 @@
 ## 4.1 Decision and evidence
 
 **P:** investigate Monaco first for a dedicated Workspace editor/diff surface,
-but retain AvaloniaEdit as the default implementation fallback. Run one bounded
-comparison spike after the authority/receipt contract is fixed. Do not make
-Monaco a prerequisite for Agent correctness or an excuse for an IDE project.
+but retain AvaloniaEdit as the functional fallback. Run one bounded comparison
+after the authority/receipt contract is fixed. Do not make Monaco a prerequisite
+for Agent correctness or an excuse for an IDE project.
 
 **RF:** Desktop already references `Avalonia.AvaloniaEdit` 12.0.0 alongside
 Avalonia 12.1.2. Agent Workspace currently presents a file preview and proposed
@@ -130,3 +130,28 @@ or alter the owner's display configuration during planning.
 **Non-goals:** debugger, terminal, package manager, Git client, compiler/LSP
 platform, VS Code extension host, executable artifact preview, broad WebView
 abstraction serving unrelated views.
+
+## 4.5 R33 continuation implementation reconciliation
+
+On 2026-09-12 the bounded editor path was implemented in
+`src/Hermaeus.Desktop/Views/WorkspaceEditorView.axaml.cs`:
+
+- `Avalonia.Controls.WebView` 12.1.0 is the only new Desktop dependency and
+  Monaco 0.56.0's minified `vs` bundle is copied into the application output.
+- The view tries a local `file`-based Monaco page first and keeps a native
+  AvaloniaEdit editor available as the fallback when the bundle, adapter,
+  navigation, bridge, theme update, or character limit fails.
+- The host sends serialized document data and receives only `ready`, `changed`,
+  and `error` messages. The exposed editor operations are `setDocument`,
+  `getText`, `setTheme`, `focus`, `layout`, and `dispose`; the page has no
+  filesystem, process, navigation, or application command surface.
+- The bundle and bridge contract are covered by `R33UxAndPetTests`, and the
+  solution build verifies that the local assets are present in Desktop output.
+
+This earns a local implementation boundary, not the full Monaco ship gate.
+The owner must still test WebView2 on Windows and the selected WebKitGTK/WPE
+path on Pop!_OS, including worker startup, offline resource requests, keyboard
+and IME input, copy, accessibility, focus, resize, DPI, large artifacts,
+teardown, and fallback. No claim is made that a source build or static bundle
+inspection proves those observations. If the native adapter or worker contract
+fails, the visible editor must remain the functional AvaloniaEdit path.

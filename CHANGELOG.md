@@ -46,6 +46,22 @@ limit.
   and exact executable identity before offering a run. Doctor actions carry
   typed panel, section, entity, and control targets, with an explicit missing
   entity explanation and focus request.
+- Agent, RAG, and Lab views now project lifecycle, evidence, capability, and
+  next-action state in user-facing terms. Agent's New Task clears task-scoped
+  projections without deleting history, Changes distinguishes verified and
+  conflicted outcomes, run artifacts can be opened directly, and narrow action
+  groups wrap. RAG labels Local files versus Remote web, clears stale query
+  evidence, and keeps citation/trace inspection secondary. Lab explains
+  unavailable recipes and keeps run, restore, Apply, and recovery state
+  separate.
+- Workspace file editing now prefers a pinned local Monaco bundle hosted by
+  Avalonia's native WebView and falls back to AvaloniaEdit on bundle, adapter,
+  bridge, or resource failure. The bridge carries document data only and does
+  not change Agent approval authority.
+- Generic ChatGPT Pet v2 data packages can be validated and imported from
+  Settings. The bundled Moss asset is disabled by default; enabled overlays
+  use persisted, clamped positions and current-pointer walking direction, with
+  no scripts, filesystem access, network access, or chat-content access.
 - Benchmark preparation and execution now persist operation evidence before
   work begins, retain a truthful cancelled or partial result, and make final
   evidence persistence independent of caller cancellation. The Linux desktop

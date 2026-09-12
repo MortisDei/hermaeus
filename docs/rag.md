@@ -25,6 +25,20 @@ traces, versioned SQLite schema migrations, and native eval support.
   variants, context packing summaries, and the last ingest report.
 6. Run eval sets from the Eval Harness panel.
 
+The Ask surface keeps the question and answer as the primary workflow. Its
+status names **Ready to ask**, **Searching and generating**, **Answer ready**,
+**No answer: retrieval refused**, **Question failed**, **Question cancelled**,
+or **No knowledge base**, and the adjacent next-action text tells you whether
+to select a dataset, retry, inspect evidence, or create a dataset. Dataset
+chips identify **Local files** versus **Remote web**. **Inspect sources** and
+**Inspect trace** open citation/evidence and diagnostics only when wanted, so
+scores, planner notes, and implementation timing do not crowd normal use.
+Starting a new question clears the prior answer's grounding, variants,
+planner notes, context summary, and trace identifiers before the new state is
+shown. Empty, loading, degraded BM25-only, failed, cancelled, and successful
+states retain distinct copy; cancellation does not remove the last published
+dataset generation.
+
 ### Embedding Model Setup
 
 - Hermaeus requires an embedding model to run the embedding server. If none is found, the

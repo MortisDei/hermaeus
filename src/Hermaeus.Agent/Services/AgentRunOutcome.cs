@@ -21,12 +21,14 @@ public static class AgentRunOutcome
 
         var created = ledger.Files.Count(f => f.Kind == AgentLedgerFileKind.Created);
         var edited = ledger.Files.Count - created;
+        var conflicted = ledger.Files.Count(f => f.Status == AgentLedgerFileStatus.Conflicted);
         var added = ledger.Files.Where(f => f.LineDelta > 0).Sum(f => f.LineDelta);
         var removed = ledger.Files.Where(f => f.LineDelta < 0).Sum(f => -f.LineDelta);
 
         var filesLine = ledger.Files.Count == 0
             ? "Changed no files."
-            : $"Changed {Plural(ledger.Files.Count, "file")} ({edited} edited, {created} created), +{added} -{removed}.";
+            : $"Changed {Plural(ledger.Files.Count, "file")} ({edited} edited, {created} created), +{added} -{removed}."
+                + (conflicted == 0 ? string.Empty : $" {Plural(conflicted, "file")} changed after apply and need review.");
 
         var failedCommands = ledger.Commands.Count(c => c.TimedOut || (c.ExitCode is { } code && code != 0));
         var commandsLine = ledger.Commands.Count == 0
@@ -52,6 +54,10 @@ public static class AgentRunOutcome
                 ? changedNothing
                     ? "This run was interrupted during startup recovery. It did not resume and changed no files or ran no commands."
                     : "This run was interrupted during startup recovery. What it had already done is below."
+                : state.Status == AgentTaskStatus.Failed
+                    ? "This run failed before completing. Review the response and Changes for the exact outcome."
+                    : state.Status == AgentTaskStatus.Blocked
+                        ? "This run is blocked. Review the required action and continue when ready."
                 : changedNothing
                     ? "This run changed no files and ran no commands."
                     : failedCommands > 0

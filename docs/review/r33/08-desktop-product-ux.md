@@ -130,3 +130,35 @@ A bounded cleanup belongs only to touched views; no color-system rewrite.
 Source tests enforce bindings/tooltips and structural invariants. Owner checks
 must cover focus, keyboard, screen/DPI scaling, scroll, empty/failed/running/
 completed states, light/dark contrast and whether the workflow is understandable.
+
+## 8.7 R33 continuation reconciliation
+
+The current implementation applies the bounded findings above rather than
+repeating the old surface audit:
+
+- Agent keeps the four-tab direction and decision strip, but now leads with
+  readable lifecycle labels, approval context, explicit prepared/applied/
+  verified/conflicted outcomes, a clean New Task message, child and plan
+  labels, run-artifact navigation, and a primary Workspace editor. Action
+  groups wrap at narrow widths. The editor prefers local Monaco and falls back
+  to AvaloniaEdit without changing Agent authority.
+- RAG keeps the existing atomic ingest, retrieval, citation, trace, and Chat
+  Knowledge architecture. Ask now says whether it is ready, searching,
+  successful, refused, failed, cancelled, or missing a knowledge base, and
+  names the next action. Local files versus Remote web is shown at dataset
+  scope. Sources and Diagnostics remain secondary inspection destinations, and
+  their controls plus evaluation actions wrap on narrow layouts.
+- Lab keeps its existing isolated run, recipe, evidence, and Apply lifecycle.
+  Capability and recipe availability are described in user terms, actions are
+  disabled when the current server/model cannot support them, filters and raw
+  recipe detail are disclosed, and run/restore/Apply next actions remain
+  visible. Narrow action groups wrap.
+- The optional ChatGPT Pet v2 support is a data-only, disabled-by-default
+  ambient overlay. Generic package validation, clamped persistent position,
+  and a bundled Moss package are implemented without adding chat, voice,
+  filesystem, or script authority.
+
+Automated tests and source inspection cover these projections and safety
+boundaries. No native Desktop surface was available for this continuation, so
+focus, keyboard/IME, resize, DPI, contrast, WebView/worker startup, pet drag,
+and complete Agent/RAG/Lab owner walkthroughs remain explicitly open.

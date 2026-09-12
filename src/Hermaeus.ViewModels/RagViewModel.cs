@@ -72,9 +72,9 @@ public sealed class RagIngestReportItemViewModel
     public string StatusLabel => Status switch
     {
         DocumentIngestStatus.Added => "Added",
-        DocumentIngestStatus.Replaced => "Replace",
-        DocumentIngestStatus.SkippedUnchanged => "Skipped",
-        DocumentIngestStatus.ReportOnly => "Report",
+        DocumentIngestStatus.Replaced => "Replaced",
+        DocumentIngestStatus.SkippedUnchanged => "Unchanged",
+        DocumentIngestStatus.ReportOnly => "Info",
         DocumentIngestStatus.Error => "Error",
         _ => Status.ToString()
     };
@@ -197,6 +197,7 @@ public sealed class RagDatasetQueryOptionViewModel : ObservableObject
     public string Name => Dataset.Name;
     public int ChunkCount => Dataset.ChunkCount;
     public string ChunkLabel => $"{ChunkCount} chunk{(ChunkCount == 1 ? "" : "s")}";
+    public string ScopeLabel => Dataset.Config.EnableWebLoader ? "Remote web" : "Local files";
 
     public bool IsIncluded
     {
@@ -312,6 +313,73 @@ public partial class RagViewModel : ObservableObject
                 : $"Using {selected.Count} dataset{(selected.Count == 1 ? "" : "s")}: {string.Join(", ", selected)}";
         }
     }
+
+    public string QueryStateLabel
+    {
+        get
+        {
+            if (IsQuerying)
+                return "Searching and generating";
+            if (IsError)
+                return "Question failed";
+            if (TraceRefused)
+                return "No answer: retrieval refused";
+            if (HasAnswer)
+                return "Answer ready";
+            return HasDatasets ? "Ready to ask" : "No knowledge base";
+        }
+    }
+
+    public string QueryNextActionLabel
+    {
+        get
+        {
+            if (IsQuerying)
+                return "The answer is streaming. Stop if you need to cancel this question.";
+            if (IsError)
+                return "Edit the question below and ask again. The failed question stays available for retry.";
+            if (!HasDatasets)
+                return "Create Hermaeus Help or add a local folder below to make this workspace searchable.";
+            if (TraceRefused)
+                return "Open Diagnostics for the refusal reason, then adjust the question or indexed sources.";
+            if (!HasAnswer)
+                return "Ask a question below. Retrieved evidence and citations will appear with the answer.";
+            return Sources.Count > 0
+                ? "Select a citation when you want to inspect the supporting passage and source revision."
+                : "The answer returned without citations. Open Diagnostics to inspect the query trace.";
+        }
+    }
+
+    public string QueryEvidenceSummary => Sources.Count switch
+    {
+        0 when HasAnswer => "No citations returned",
+        0 => "No citations yet",
+        1 => "1 citation available",
+        var count => $"{count} citations available"
+    };
+
+    public string SelectedDatasetScopeLabel => SelectedDataset is null
+        ? "No dataset selected"
+        : SelectedDataset.Config.EnableWebLoader ? "Remote web sources" : "Local folder sources";
+
+    public string IngestSourceKindLabel => EnableWebLoader ? "Remote web pages" : "Local files";
+
+    public string IngestNextActionLabel
+    {
+        get
+        {
+            if (IsIngesting)
+                return string.IsNullOrWhiteSpace(IngestStage) ? "Building the search index..." : IngestStage;
+            if (EnableWebLoader)
+                return string.IsNullOrWhiteSpace(WebUrlList)
+                    ? "Add one or more HTTP(S) URLs, then build the index."
+                    : "Build the index from the listed pages.";
+            return string.IsNullOrWhiteSpace(IngestPath)
+                ? "Choose a local folder, then build the index."
+                : "Build the index from this local folder.";
+        }
+    }
+
     [ObservableProperty] private string      _answerText      = string.Empty;
 
     /// <summary>
@@ -435,6 +503,7 @@ public partial class RagViewModel : ObservableObject
                 QueryDatasetOptions.Add(option);
             }
             OnPropertyChanged(nameof(QueryDatasetSelectionLabel));
+            RefreshQueryPresentation();
             QueryCommand.NotifyCanExecuteChanged();
             await RefreshDatasetManagerAsync();
         }
@@ -476,6 +545,17 @@ public partial class RagViewModel : ObservableObject
         AnswerText = string.Empty;
         Sources.Clear();
         HasAnswer = false;
+        GroundingScore = 0;
+        ExpandedQuery = string.Empty;
+        QueryVariants = string.Empty;
+        PlannerNotes = string.Empty;
+        ContextPackingSummary = string.Empty;
+        TraceRefused = false;
+        RefusalReason = string.Empty;
+        LastTraceId = string.Empty;
+        LastRetrievalLatencyMs = 0;
+        LastTotalLatencyMs = 0;
+        RefreshQueryPresentation();
         IsError = false;
         StatusMessage = string.Empty;
 
@@ -523,7 +603,11 @@ public partial class RagViewModel : ObservableObject
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG query completed for dataset(s) {string.Join(", ", datasetNames)}"));
         }
-        catch (OperationCanceledException) { RestoreQuestion(question); }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Question cancelled. Edit it and ask again.";
+            RestoreQuestion(question);
+        }
         catch (Exception ex) { SetError(ex.Message); RestoreQuestion(question); }
         finally { IsQuerying = false; _cts?.Dispose(); _cts = null; }
     }
@@ -1339,6 +1423,7 @@ public partial class RagViewModel : ObservableObject
         if (SelectedSource is not null)
             SelectedSource.IsSelected = true;
         RefreshCitationOverflow();
+        RefreshQueryPresentation();
     }
 
     private void ApplyTrace(RagTraceSummary trace)
@@ -1359,9 +1444,25 @@ public partial class RagViewModel : ObservableObject
             TraceRefused = trace.Refused.Value;
         if (trace.RefusalReason is not null)
             RefusalReason = trace.RefusalReason;
+        RefreshQueryPresentation();
     }
 
-    private void SetError(string msg) { StatusMessage = msg; IsError = true; }
+    private void SetError(string msg)
+    {
+        StatusMessage = msg;
+        IsError = true;
+        RefreshQueryPresentation();
+    }
+
+    private void RefreshQueryPresentation()
+    {
+        OnPropertyChanged(nameof(QueryStateLabel));
+        OnPropertyChanged(nameof(QueryNextActionLabel));
+        OnPropertyChanged(nameof(QueryEvidenceSummary));
+        OnPropertyChanged(nameof(SelectedDatasetScopeLabel));
+        OnPropertyChanged(nameof(IngestSourceKindLabel));
+        OnPropertyChanged(nameof(IngestNextActionLabel));
+    }
 
     [RelayCommand]
     private void SelectSource(RagSourceViewModel? source)
@@ -1394,14 +1495,27 @@ public partial class RagViewModel : ObservableObject
         SourceOverflowLabel = overflow > 0 ? $"+{overflow}" : string.Empty;
     }
 
-    partial void OnQuestionTextChanged(string value) => QueryCommand.NotifyCanExecuteChanged();
+    partial void OnQuestionTextChanged(string value)
+    {
+        QueryCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(QueryNextActionLabel));
+    }
     partial void OnSelectedDatasetChanged(RagDataset? value)
     {
         QueryCommand.NotifyCanExecuteChanged();
         RunRetrievalEvalCommand.NotifyCanExecuteChanged();
         RunFullEvalCommand.NotifyCanExecuteChanged();
+        RefreshQueryPresentation();
     }
-    partial void OnIsQueryingChanged(bool value) => QueryCommand.NotifyCanExecuteChanged();
+    partial void OnIsQueryingChanged(bool value)
+    {
+        QueryCommand.NotifyCanExecuteChanged();
+        RefreshQueryPresentation();
+    }
+
+    partial void OnHasAnswerChanged(bool value) => RefreshQueryPresentation();
+    partial void OnIsErrorChanged(bool value) => RefreshQueryPresentation();
+    partial void OnTraceRefusedChanged(bool value) => RefreshQueryPresentation();
 
     private void SetQueryDatasetIncluded(string datasetId, bool included)
     {
@@ -1453,13 +1567,23 @@ public partial class RagViewModel : ObservableObject
         IngestCommand.NotifyCanExecuteChanged();
         QueryCommand.NotifyCanExecuteChanged();
         CreateBundledHelpDatasetCommand.NotifyCanExecuteChanged();
+        RefreshQueryPresentation();
     }
-    partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
-    partial void OnWebUrlListChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
+    partial void OnIngestPathChanged(string value)
+    {
+        IngestCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(IngestNextActionLabel));
+    }
+    partial void OnWebUrlListChanged(string value)
+    {
+        IngestCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(IngestNextActionLabel));
+    }
     partial void OnEnableWebLoaderChanged(bool value)
     {
         OnPropertyChanged(nameof(IsLocalIngest));
         IngestCommand.NotifyCanExecuteChanged();
+        RefreshQueryPresentation();
     }
     partial void OnEvalPathChanged(string value)
     {

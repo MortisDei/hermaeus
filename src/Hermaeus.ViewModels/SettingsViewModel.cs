@@ -174,7 +174,8 @@ public partial class SettingsViewModel : ViewModelBase
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
         IActivityRecorder? activity = null,
         Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null,
-        Action? autoSaveLifecycleCompleted = null)
+        Action? autoSaveLifecycleCompleted = null,
+        IChatGptPetPackageCatalog? petCatalog = null)
     {
         _svc = svc;
         _toasts = toasts;
@@ -188,7 +189,7 @@ public partial class SettingsViewModel : ViewModelBase
         Rag = new RagSettingsViewModel(ResolveDataRoot);
         Data = new DataManagementSettingsViewModel(_svc, backups, _toasts, ResolveDataRoot, activity);
         Data.CommitDataRootMigration = CommitDataRootMigrationAsync;
-        Ui = new UiSettingsViewModel();
+        Ui = new UiSettingsViewModel(petCatalog);
         Memory = new MemorySettingsViewModel(recallIndexing, _toasts);
         Mcp = new McpSettingsViewModel();
         LocalApi = new LocalApiSettingsViewModel(secrets, _svc, EnsureLocalApiRunningStateAsync);
