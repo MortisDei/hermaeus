@@ -504,6 +504,10 @@ public sealed class LabRecipeRowViewModel
     public string AvailabilityLabel => Plan.Availability.ToString();
     public string Detail => Plan.AvailabilityDetail;
     public string CandidateLabel => $"Baseline + {Plan.Candidates.Count} candidate(s), max {Plan.MaximumRunCount} runs";
+    public string BaselineLabel => $"Baseline: context {Plan.Baseline.ContextSize:N0}, {Plan.Baseline.Threads} thread(s), {Plan.Baseline.Slots} slot(s)";
+    public string RequiredCapabilitiesLabel => Plan.RequiredCapabilityIds.Count == 0
+        ? "Required runtime capabilities: none"
+        : $"Required runtime capabilities: {string.Join(", ", Plan.RequiredCapabilityIds)}";
     public bool CanRun => Plan.Availability == CapabilityState.Available;
 }
 

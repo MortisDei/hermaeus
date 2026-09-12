@@ -83,6 +83,8 @@
                     <TextBlock Grid.Column="1" Text="{Binding AvailabilityLabel}" />
                     <StackPanel Grid.Column="2">
                       <TextBlock Text="{Binding CandidateLabel}" />
+                      <TextBlock Text="{Binding BaselineLabel}" Opacity="0.7" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding RequiredCapabilitiesLabel}" Opacity="0.7" TextWrapping="Wrap" />
                       <TextBlock Text="{Binding Detail}" Opacity="0.7" TextWrapping="Wrap" />
                     </StackPanel>
                   </Grid>

@@ -155,6 +155,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // uses, so there is one answer to "where does a task live".
         Activity.RequestNavigate = NavigateToRecallHitAsync;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
+        Doctor.RequestNavigateToTarget = target => ActivePanel = target.Area;
         Doctor.RequestOpenUrl = url =>
         {
             try

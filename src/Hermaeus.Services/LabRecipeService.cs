@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Services.ProcessManagement;
 
 namespace Hermaeus.Services;
 
@@ -59,6 +60,45 @@ public static class LabRecipeCatalog
             if (!plan.TestsInteraction && differences.Except(AllowedFields(plan.Kind), StringComparer.Ordinal).Any())
                 throw new InvalidOperationException("A one-at-a-time Lab recipe changed a field outside its declared dimension.");
         }
+    }
+
+    /// <summary>
+    /// A syntactically valid recipe is not runnable merely because its
+    /// dimension is known. Lab must first prove the selected source model,
+    /// GGUF header, and exact executable identity. This keeps the catalogue
+    /// useful in isolation while making the production inspection truthful.
+    /// </summary>
+    public static LabRecipePlan ReconcileBaselineAvailability(
+        LabRecipePlan plan,
+        ServerConfig source,
+        GgufModelInfo? gguf)
+    {
+        if (plan.Availability != CapabilityState.Available)
+            return plan;
+
+        if (string.IsNullOrWhiteSpace(source.ModelPath) || !File.Exists(source.ModelPath))
+            return plan with
+            {
+                Availability = CapabilityState.Unknown,
+                AvailabilityDetail = "The selected Chat model is missing, so Lab cannot establish a baseline for this recipe."
+            };
+
+        var executable = ExecutableResolver.Resolve(source.ExecutablePath, "llama-server");
+        if (!executable.Success)
+            return plan with
+            {
+                Availability = CapabilityState.Unknown,
+                AvailabilityDetail = "The selected llama-server executable is not resolvable, so Lab cannot establish an exact runtime baseline."
+            };
+
+        if (gguf is null)
+            return plan with
+            {
+                Availability = CapabilityState.Unknown,
+                AvailabilityDetail = "The selected model's GGUF header could not be read, so Lab cannot establish model identity or fit evidence."
+            };
+
+        return plan;
     }
 
     private static LabRecipePlan EngineProfile(LabConfiguration baseline, GgufModelInfo? gguf)
@@ -774,6 +814,7 @@ public sealed class LabRecipeService : ILabRecipeService
         return Enum.GetValues<LabRecipeKind>()
             .Select(kind => LabRecipeCatalog.Build(kind, source, observations, gguf, draftGguf,
                 targetIdentity, draftIdentity))
+            .Select(plan => LabRecipeCatalog.ReconcileBaselineAvailability(plan, source, gguf))
             .ToArray();
     }
 

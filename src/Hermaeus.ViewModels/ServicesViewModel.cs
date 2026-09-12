@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -31,6 +33,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private OrphanServerInfo? _orphanInfo;
     private string? _lastModelPathForDefaults;
     private string? _modelPathForMmproj;
+    private readonly HashSet<string> _dirtyConfigurationFields = new(StringComparer.Ordinal);
+    private IReadOnlyDictionary<string, string> _baseConfigurationValues =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+    private bool _suppressConfigurationTracking;
+    private bool _saveInProgress;
 
     [ObservableProperty] private string       _name;
     [ObservableProperty] private string       _executablePath;
@@ -231,6 +238,18 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public bool IsError    => Status == ServerStatus.Error;
 
     /// <summary>
+    /// Revision of the complete editable server projection from which this
+    /// editor was last merged. Runtime identity is intentionally not used as
+    /// a settings revision because it omits fields such as the display name,
+    /// paths, and start policy.
+    /// </summary>
+    public string BaseConfigurationRevision { get; private set; } = string.Empty;
+
+    /// <summary>Fields changed locally since <see cref="BaseConfigurationRevision"/>.</summary>
+    public IReadOnlyList<string> DirtyConfigurationFields =>
+        _dirtyConfigurationFields.OrderBy(item => item, StringComparer.Ordinal).ToArray();
+
+    /// <summary>
     /// r27 01 1.3: when this server entered <see cref="ServerStatus.Starting"/>,
     /// so Chat can say how long it has been waiting. Null whenever the server is
     /// not starting. Settable so tests can drive an elapsed time without a clock.
@@ -238,6 +257,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public DateTime? StartingSinceUtc { get; set; }
     public bool CanEdit => IsStopped && !IsAutoTuning;
     public bool HasUnsavedChanges =>
+        _dirtyConfigurationFields.Count > 0 ||
         _config.Name != Name ||
         _config.ExecutablePath != ExecutablePath ||
         _config.ModelPath != ModelPath ||
@@ -370,11 +390,238 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// next Start/Save on this row would silently mutate that orphaned object
     /// via SyncToConfig() and then serialize the *live* tree, discarding the
     /// edit with no error. Re-pointing _config at the fresh same-id instance
-    /// (called from Rebuild for every already-known server) fixes that; bound
-    /// display properties are left untouched so an in-progress unsaved edit in
-    /// the form is never clobbered.
+    /// (called from Rebuild for every already-known server) fixes that. Clean
+    /// fields are refreshed from the new object, while dirty fields stay in
+    /// the editor and are merged back only when the owner explicitly saves.
     /// </summary>
-    public void RebindConfig(ServerConfig cfg) => _config = cfg;
+    public void RebindConfig(ServerConfig cfg)
+    {
+        ArgumentNullException.ThrowIfNull(cfg);
+
+        // SaveAsync raises SettingsChanged synchronously while the same live
+        // object is still in the settings service. The row already copied its
+        // editor into that object, so do not treat that event as an external
+        // merge and churn the form before the save has completed.
+        if (_saveInProgress && ReferenceEquals(_config, cfg))
+            return;
+
+        var localValues = EditorConfigurationValues();
+        var externalValues = ConfigurationValues(cfg);
+        var localDirty = _dirtyConfigurationFields.ToHashSet(StringComparer.Ordinal);
+        _config = cfg;
+
+        _suppressConfigurationTracking = true;
+        try
+        {
+            ApplyConfigurationToEditor(cfg, localDirty);
+        }
+        finally
+        {
+            _suppressConfigurationTracking = false;
+        }
+
+        _baseConfigurationValues = externalValues;
+        _dirtyConfigurationFields.Clear();
+        foreach (var field in ConfigurationFieldNames)
+        {
+            if (localDirty.Contains(field)
+                && localValues.TryGetValue(field, out var local)
+                && externalValues.TryGetValue(field, out var external)
+                && !string.Equals(local, external, StringComparison.Ordinal))
+                _dirtyConfigurationFields.Add(field);
+        }
+
+        BaseConfigurationRevision = ComputeConfigurationRevision(_baseConfigurationValues);
+        OnPropertyChanged(nameof(DirtyConfigurationFields));
+        OnPropertyChanged(nameof(BaseConfigurationRevision));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+    }
+
+    private static readonly string[] ConfigurationFieldNames =
+    [
+        "name", "executablePath", "modelPath", "mmprojPath", "useProjector", "port",
+        "contextSize", "gpuPlacement", "threads", "promptThreads", "slots", "embeddingsMode",
+        "autoStart", "preserveReasoning", "extraArgs", "kvCacheTypeK", "kvCacheTypeV",
+        "flashAttention", "contextShift", "memoryLock", "noMemoryMap", "cpuMoeLayers",
+        "speculativeTypes", "draftModelPath", "draftGpuLayers", "speculativeNMax",
+        "speculativeNMin", "speculativePMin", "adaptiveEnvelope"
+    ];
+
+    private void TrackConfigurationPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (_suppressConfigurationTracking)
+            return;
+
+        var field = ConfigurationFieldForProperty(args.PropertyName);
+        if (field is null)
+            return;
+
+        var current = EditorConfigurationValues();
+        var isBaseValue = _baseConfigurationValues.TryGetValue(field, out var baseValue)
+            && current.TryGetValue(field, out var currentValue)
+            && string.Equals(baseValue, currentValue, StringComparison.Ordinal);
+        if (isBaseValue)
+            _dirtyConfigurationFields.Remove(field);
+        else
+            _dirtyConfigurationFields.Add(field);
+
+        OnPropertyChanged(nameof(DirtyConfigurationFields));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+    }
+
+    private static string? ConfigurationFieldForProperty(string? propertyName) => propertyName switch
+    {
+        nameof(Name) => "name",
+        nameof(ExecutablePath) => "executablePath",
+        nameof(ModelPath) => "modelPath",
+        nameof(MmprojPath) => "mmprojPath",
+        nameof(UseProjector) => "useProjector",
+        nameof(Port) => "port",
+        nameof(ContextSize) => "contextSize",
+        nameof(GpuLayers) or nameof(GpuPlacementSelection) => "gpuPlacement",
+        nameof(Threads) => "threads",
+        nameof(PromptThreads) => "promptThreads",
+        nameof(Slots) => "slots",
+        nameof(EmbeddingsMode) => "embeddingsMode",
+        nameof(AutoStart) => "autoStart",
+        nameof(PreserveReasoning) => "preserveReasoning",
+        nameof(ExtraArgs) => "extraArgs",
+        nameof(KvCacheType) or nameof(KvCacheTypeK) => "kvCacheTypeK",
+        nameof(KvCacheTypeV) => "kvCacheTypeV",
+        nameof(FlashAttention) => "flashAttention",
+        nameof(ContextShift) => "contextShift",
+        nameof(MemoryLock) => "memoryLock",
+        nameof(NoMemoryMap) => "noMemoryMap",
+        nameof(CpuMoeLayersText) => "cpuMoeLayers",
+        nameof(SpeculativeTypes) => "speculativeTypes",
+        nameof(DraftModelPath) => "draftModelPath",
+        nameof(DraftGpuLayersText) => "draftGpuLayers",
+        nameof(SpeculativeNMaxText) => "speculativeNMax",
+        nameof(SpeculativeNMinText) => "speculativeNMin",
+        nameof(SpeculativePMinText) => "speculativePMin",
+        nameof(AdaptiveMode) or nameof(AdaptiveMinimumContext)
+            or nameof(AdaptiveMinimumGpuHeadroomBytes)
+            or nameof(AdaptiveAllowGpuLayerReduction)
+            or nameof(AdaptiveAllowContextReduction)
+            or nameof(AdaptiveAllowKvPrecisionChange)
+            or nameof(AdaptiveAllowCpuMoePlacement)
+            or nameof(AdaptiveAllowMultiDevicePlacement)
+            or nameof(AdaptivePreserveAcceleratedBackend)
+            or nameof(AdaptivePreferredEvidenceAgeDays) => "adaptiveEnvelope",
+        _ => null
+    };
+
+    private Dictionary<string, string> EditorConfigurationValues() => ConfigurationValues(BuildConfig());
+
+    private static Dictionary<string, string> ConfigurationValues(ServerConfig config)
+    {
+        var speculative = config.Speculative ?? new SpeculativeDecodingConfig();
+        var adaptive = config.AdaptiveEnvelope ?? new AdaptiveInferenceEnvelope();
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["name"] = config.Name ?? string.Empty,
+            ["executablePath"] = config.ExecutablePath ?? string.Empty,
+            ["modelPath"] = config.ModelPath ?? string.Empty,
+            ["mmprojPath"] = config.MmprojPath ?? string.Empty,
+            ["useProjector"] = config.UseProjector.ToString(),
+            ["port"] = config.Port.ToString(CultureInfo.InvariantCulture),
+            ["contextSize"] = config.ContextSize.ToString(CultureInfo.InvariantCulture),
+            ["gpuPlacement"] = PlacementCanonical(config),
+            ["threads"] = config.Threads.ToString(CultureInfo.InvariantCulture),
+            ["promptThreads"] = config.PromptThreads.ToString(CultureInfo.InvariantCulture),
+            ["slots"] = config.Slots.ToString(CultureInfo.InvariantCulture),
+            ["embeddingsMode"] = config.EmbeddingsMode.ToString(),
+            ["autoStart"] = config.AutoStart.ToString(),
+            ["preserveReasoning"] = config.PreserveReasoning.ToString(),
+            ["extraArgs"] = config.ExtraArgs ?? string.Empty,
+            ["kvCacheTypeK"] = EffectiveKvCacheType(config),
+            ["kvCacheTypeV"] = EffectiveKvCacheType(config),
+            ["flashAttention"] = config.FlashAttention ?? string.Empty,
+            ["contextShift"] = config.ContextShift.ToString(),
+            ["memoryLock"] = config.MemoryLock.ToString(),
+            ["noMemoryMap"] = config.NoMemoryMap.ToString(),
+            ["cpuMoeLayers"] = config.CpuMoeLayers.ToString(CultureInfo.InvariantCulture),
+            ["speculativeTypes"] = string.Join(",", speculative.Types),
+            ["draftModelPath"] = speculative.DraftModelPath ?? string.Empty,
+            ["draftGpuLayers"] = speculative.DraftGpuLayers?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            ["speculativeNMax"] = speculative.NMax?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            ["speculativeNMin"] = speculative.NMin?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            ["speculativePMin"] = speculative.PMin?.ToString("0.###", CultureInfo.InvariantCulture) ?? string.Empty,
+            ["adaptiveEnvelope"] = adaptive.CanonicalValue
+        };
+    }
+
+    private static string ComputeConfigurationRevision(IReadOnlyDictionary<string, string> values)
+    {
+        var canonical = string.Join("\n", values.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => $"{pair.Key}={pair.Value}"));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
+
+    private void ApplyConfigurationToEditor(ServerConfig config, IReadOnlySet<string> dirty)
+    {
+        if (!dirty.Contains("name")) Name = config.Name;
+        if (!dirty.Contains("executablePath")) ExecutablePath = config.ExecutablePath;
+        if (!dirty.Contains("modelPath")) ModelPath = config.ModelPath;
+        if (!dirty.Contains("mmprojPath")) MmprojPath = config.MmprojPath;
+        if (!dirty.Contains("useProjector")) UseProjector = config.UseProjector;
+        if (!dirty.Contains("port")) Port = config.Port;
+        if (!dirty.Contains("contextSize")) ContextSize = config.ContextSize;
+        if (!dirty.Contains("gpuPlacement"))
+        {
+            GpuLayers = config.TryGetGpuPlacement(out var placement, out _)
+                ? placement?.LegacyGpuLayers ?? 0
+                : 0;
+            GpuPlacementSelection = PlacementSelection(config);
+        }
+        if (!dirty.Contains("threads")) Threads = config.Threads;
+        if (!dirty.Contains("promptThreads")) PromptThreads = config.PromptThreads;
+        if (!dirty.Contains("slots")) Slots = config.Slots;
+        if (!dirty.Contains("embeddingsMode")) EmbeddingsMode = config.EmbeddingsMode;
+        if (!dirty.Contains("autoStart")) AutoStart = config.AutoStart;
+        if (!dirty.Contains("preserveReasoning")) PreserveReasoning = config.PreserveReasoning;
+        if (!dirty.Contains("extraArgs")) ExtraArgs = config.ExtraArgs;
+        if (!dirty.Contains("kvCacheTypeK") && !dirty.Contains("kvCacheTypeV"))
+            KvCacheType = EffectiveKvCacheType(config);
+        else
+        {
+            if (!dirty.Contains("kvCacheTypeK")) KvCacheTypeK = EffectiveKvCacheType(config);
+            if (!dirty.Contains("kvCacheTypeV")) KvCacheTypeV = EffectiveKvCacheType(config);
+        }
+        if (!dirty.Contains("flashAttention")) FlashAttention = config.FlashAttention;
+        if (!dirty.Contains("contextShift")) ContextShift = config.ContextShift;
+        if (!dirty.Contains("memoryLock")) MemoryLock = config.MemoryLock;
+        if (!dirty.Contains("noMemoryMap")) NoMemoryMap = config.NoMemoryMap;
+        if (!dirty.Contains("cpuMoeLayers")) CpuMoeLayersText = FormatCpuMoeLayers(config.CpuMoeLayers);
+
+        var speculative = config.Speculative ?? new SpeculativeDecodingConfig();
+        if (!dirty.Contains("speculativeTypes")) SpeculativeTypes = string.Join(",", speculative.Types);
+        if (!dirty.Contains("draftModelPath")) DraftModelPath = speculative.DraftModelPath;
+        if (!dirty.Contains("draftGpuLayers")) DraftGpuLayersText = speculative.DraftGpuLayers?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        if (!dirty.Contains("speculativeNMax")) SpeculativeNMaxText = speculative.NMax?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        if (!dirty.Contains("speculativeNMin")) SpeculativeNMinText = speculative.NMin?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        if (!dirty.Contains("speculativePMin")) SpeculativePMinText = speculative.PMin?.ToString("0.###", CultureInfo.InvariantCulture) ?? string.Empty;
+
+        if (!dirty.Contains("adaptiveEnvelope"))
+        {
+            var adaptive = config.AdaptiveEnvelope ?? new AdaptiveInferenceEnvelope();
+            AdaptiveMode = adaptive.Mode;
+            AdaptiveMinimumContext = adaptive.MinimumContext;
+            AdaptiveMinimumGpuHeadroomBytes = adaptive.MinimumGpuHeadroomBytes;
+            AdaptiveAllowGpuLayerReduction = adaptive.AllowGpuLayerReduction;
+            AdaptiveAllowContextReduction = adaptive.AllowContextReduction;
+            AdaptiveAllowKvPrecisionChange = adaptive.AllowKvPrecisionChange;
+            AdaptiveAllowCpuMoePlacement = adaptive.AllowCpuMoePlacement;
+            AdaptiveAllowMultiDevicePlacement = adaptive.AllowMultiDevicePlacement;
+            AdaptivePreserveAcceleratedBackend = adaptive.PreserveAcceleratedBackend;
+            AdaptivePreferredEvidenceAgeDays = Math.Clamp((int)Math.Round(adaptive.PreferredEvidenceAge.TotalDays), 1, 30);
+        }
+
+        RefreshDetectedModels();
+        RefreshDetectedMmprojPaths(ModelPath);
+        RefreshDetectedDraftModelPaths(ModelPath);
+        ScheduleContextFitRefresh();
+    }
 
     public void RefreshDetectedModels()
     {
@@ -625,6 +872,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _speculativeNMaxText  = speculative.NMax?.ToString() ?? string.Empty;
         _speculativeNMinText  = speculative.NMin?.ToString() ?? string.Empty;
         _speculativePMinText  = speculative.PMin?.ToString("0.###") ?? string.Empty;
+
+        _baseConfigurationValues = ConfigurationValues(config);
+        BaseConfigurationRevision = ComputeConfigurationRevision(_baseConfigurationValues);
+        PropertyChanged += TrackConfigurationPropertyChanged;
 
         _mgr.StatusChanged += s => RunOnUi(() =>
         {
@@ -1220,7 +1471,22 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         SyncToConfig();
         await PersistTuneProfileAsync();
-        await _settings.SaveAsync();
+        _saveInProgress = true;
+        try
+        {
+            await _settings.SaveAsync();
+        }
+        finally
+        {
+            _saveInProgress = false;
+        }
+
+        _baseConfigurationValues = ConfigurationValues(_config);
+        _dirtyConfigurationFields.Clear();
+        BaseConfigurationRevision = ComputeConfigurationRevision(_baseConfigurationValues);
+        OnPropertyChanged(nameof(DirtyConfigurationFields));
+        OnPropertyChanged(nameof(BaseConfigurationRevision));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
         WarnForExtraArgs();
     }
 
@@ -1291,7 +1557,22 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             if (result.TunedContextSize is int tunedContext)
                 ContextSize = tunedContext;
             await PersistTuneProfileAsync(result);
-            await _settings.SaveAsync();
+            _saveInProgress = true;
+            try
+            {
+                await _settings.SaveAsync();
+            }
+            finally
+            {
+                _saveInProgress = false;
+            }
+
+            _baseConfigurationValues = ConfigurationValues(_config);
+            _dirtyConfigurationFields.Clear();
+            BaseConfigurationRevision = ComputeConfigurationRevision(_baseConfigurationValues);
+            OnPropertyChanged(nameof(DirtyConfigurationFields));
+            OnPropertyChanged(nameof(BaseConfigurationRevision));
+            OnPropertyChanged(nameof(HasUnsavedChanges));
             AutoTuneStatus = BuildAutoTuneStatus(result, previousContext);
         }
         catch (Exception ex)
@@ -1491,34 +1772,64 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private void SyncToConfig()
     {
-        _config.Name           = Name;
-        _config.ExecutablePath = ExecutablePath;
-        _config.ModelPath      = ModelPath;
-        _config.MmprojPath     = MmprojPath;
-        _config.UseProjector   = UseProjector;
-        _config.Port           = Port;
-        _config.ContextSize    = ContextSize;
-        var placement = BuildGpuPlacement();
-        _config.GpuPlacement  = placement;
-        _config.GpuLayers      = placement.LegacyGpuLayers ?? 0;
-        _config.Threads        = Threads;
-        _config.PromptThreads  = PromptThreads;
-        _config.Slots          = Slots;
-        _config.EmbeddingsMode = EmbeddingsMode;
-        _config.AutoStart      = AutoStart;
-        _config.PreserveReasoning = PreserveReasoning;
-        _config.ReasoningPreserveSupported = ReasoningPreserveAvailable;
-        _config.ExtraArgs      = ExtraArgs;
-        _config.KvCacheType    = KvCacheType;
-        _config.KvCacheTypeK   = KvCacheType;
-        _config.KvCacheTypeV   = KvCacheType;
-        _config.FlashAttention = FlashAttention;
-        _config.ContextShift   = ContextShift;
-        _config.MemoryLock     = MemoryLock;
-        _config.NoMemoryMap    = NoMemoryMap;
-        _config.CpuMoeLayers   = ParseCpuMoeLayers(CpuMoeLayersText);
-        _config.Speculative    = BuildSpeculative();
-        _config.AdaptiveEnvelope = BuildAdaptiveEnvelope();
+        var edited = BuildConfig();
+        var currentValues = EditorConfigurationValues();
+        var configValues = ConfigurationValues(_config);
+        var fieldsToSync = ConfigurationFieldNames
+            .Where(field => _dirtyConfigurationFields.Contains(field)
+                || !string.Equals(currentValues[field], configValues[field], StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (fieldsToSync.Contains("name")) _config.Name = edited.Name;
+        if (fieldsToSync.Contains("executablePath")) _config.ExecutablePath = edited.ExecutablePath;
+        if (fieldsToSync.Contains("modelPath")) _config.ModelPath = edited.ModelPath;
+        if (fieldsToSync.Contains("mmprojPath")) _config.MmprojPath = edited.MmprojPath;
+        if (fieldsToSync.Contains("useProjector")) _config.UseProjector = edited.UseProjector;
+        if (fieldsToSync.Contains("port")) _config.Port = edited.Port;
+        if (fieldsToSync.Contains("contextSize")) _config.ContextSize = edited.ContextSize;
+        if (fieldsToSync.Contains("gpuPlacement"))
+        {
+            _config.GpuPlacement = edited.GpuPlacement;
+            _config.GpuLayers = edited.GpuLayers;
+        }
+        if (fieldsToSync.Contains("threads")) _config.Threads = edited.Threads;
+        if (fieldsToSync.Contains("promptThreads")) _config.PromptThreads = edited.PromptThreads;
+        if (fieldsToSync.Contains("slots")) _config.Slots = edited.Slots;
+        if (fieldsToSync.Contains("embeddingsMode")) _config.EmbeddingsMode = edited.EmbeddingsMode;
+        if (fieldsToSync.Contains("autoStart")) _config.AutoStart = edited.AutoStart;
+        if (fieldsToSync.Contains("preserveReasoning"))
+        {
+            _config.PreserveReasoning = edited.PreserveReasoning;
+            _config.ReasoningPreserveSupported = ReasoningPreserveAvailable;
+        }
+        if (fieldsToSync.Contains("extraArgs")) _config.ExtraArgs = edited.ExtraArgs;
+        if (fieldsToSync.Contains("kvCacheTypeK") || fieldsToSync.Contains("kvCacheTypeV"))
+        {
+            _config.KvCacheType = edited.KvCacheType;
+            _config.KvCacheTypeK = edited.KvCacheType;
+            _config.KvCacheTypeV = edited.KvCacheType;
+        }
+        if (fieldsToSync.Contains("flashAttention")) _config.FlashAttention = edited.FlashAttention;
+        if (fieldsToSync.Contains("contextShift")) _config.ContextShift = edited.ContextShift;
+        if (fieldsToSync.Contains("memoryLock")) _config.MemoryLock = edited.MemoryLock;
+        if (fieldsToSync.Contains("noMemoryMap")) _config.NoMemoryMap = edited.NoMemoryMap;
+        if (fieldsToSync.Contains("cpuMoeLayers")) _config.CpuMoeLayers = edited.CpuMoeLayers;
+
+        var speculative = edited.Speculative ?? new SpeculativeDecodingConfig();
+        var savedSpeculative = _config.Speculative ?? new SpeculativeDecodingConfig();
+        if (fieldsToSync.Contains("speculativeTypes")) savedSpeculative.Types = speculative.Types.ToList();
+        if (fieldsToSync.Contains("draftModelPath")) savedSpeculative.DraftModelPath = speculative.DraftModelPath;
+        if (fieldsToSync.Contains("draftGpuLayers")) savedSpeculative.DraftGpuLayers = speculative.DraftGpuLayers;
+        if (fieldsToSync.Contains("speculativeNMax")) savedSpeculative.NMax = speculative.NMax;
+        if (fieldsToSync.Contains("speculativeNMin")) savedSpeculative.NMin = speculative.NMin;
+        if (fieldsToSync.Contains("speculativePMin")) savedSpeculative.PMin = speculative.PMin;
+        if (fieldsToSync.Any(field => field is "speculativeTypes" or "draftModelPath" or "draftGpuLayers"
+            or "speculativeNMax" or "speculativeNMin" or "speculativePMin"))
+            _config.Speculative = savedSpeculative;
+
+        if (fieldsToSync.Contains("adaptiveEnvelope"))
+            _config.AdaptiveEnvelope = edited.AdaptiveEnvelope ?? new AdaptiveInferenceEnvelope();
+
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
@@ -1528,20 +1839,23 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         // Llm.LlamaCppBaseUrl / Rag.EmbeddingBaseUrl (what chat/benchmark/RAG actually
         // connect to) pointing at the old port, silently breaking model listing,
         // generation, and embedding health checks.
-        if (EmbeddingsMode)
+        if (fieldsToSync.Contains("port") || fieldsToSync.Contains("embeddingsMode") || fieldsToSync.Contains("modelPath"))
         {
-            _settings.Settings.Rag.EmbeddingBaseUrl = $"http://localhost:{Port}";
+            if (EmbeddingsMode)
+            {
+                _settings.Settings.Rag.EmbeddingBaseUrl = $"http://localhost:{Port}";
 
-            // Settings > RAG used to have its own "Embed model" picker that pushed a
-            // name down to this card's ModelPath; that duplicated this card, so this
-            // card is now the only place the model is chosen and pushes the name the
-            // other direction instead - RagViewModel's dataset/reindex tracking reads
-            // Rag.EmbeddingModel by name, not by file path.
-            if (!string.IsNullOrWhiteSpace(ModelPath))
-                _settings.Settings.Rag.EmbeddingModel = Path.GetFileNameWithoutExtension(ModelPath);
+                // Settings > RAG used to have its own "Embed model" picker that pushed a
+                // name down to this card's ModelPath; that duplicated this card, so this
+                // card is now the only place the model is chosen and pushes the name the
+                // other direction instead - RagViewModel's dataset/reindex tracking reads
+                // Rag.EmbeddingModel by name, not by file path.
+                if (!string.IsNullOrWhiteSpace(ModelPath))
+                    _settings.Settings.Rag.EmbeddingModel = Path.GetFileNameWithoutExtension(ModelPath);
+            }
+            else
+                SyncChatBaseUrlToPort();
         }
-        else
-            SyncChatBaseUrlToPort();
     }
 
     private AdaptiveInferenceEnvelope BuildAdaptiveEnvelope() => new()

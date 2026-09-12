@@ -29,6 +29,9 @@ public sealed partial class RecommendationReviewViewModel : ObservableObject
     public string EvidenceSummary { get; }
     public string TradeoffSummary { get; }
     public string FreshnessSummary { get; }
+    [ObservableProperty] private string _lastDecisionMessage = string.Empty;
+    [ObservableProperty] private string _lastDecisionResultCode = string.Empty;
+    public bool HasDecisionMessage => !string.IsNullOrWhiteSpace(LastDecisionMessage);
     public string TargetArea => Kind switch
     {
         RecommendationKind.DefaultModel => "models",
@@ -79,26 +82,39 @@ public sealed partial class RecommendationReviewViewModel : ObservableObject
     [RelayCommand]
     private async Task ApplyAsync()
     {
-        await _application.ApplyAsync(Id);
+        var result = await _application.ApplyAsync(Id);
+        RecordDecision(result);
         await _refresh();
     }
 
     [RelayCommand]
     private async Task DismissAsync()
     {
-        await _application.DismissAsync(Id);
+        var result = await _application.DismissAsync(Id);
+        RecordDecision(result);
         await _refresh();
     }
 
     [RelayCommand]
     private async Task UndoAsync()
     {
-        await _application.UndoAsync(Id);
+        var result = await _application.UndoAsync(Id);
+        RecordDecision(result);
         await _refresh();
     }
 
     [RelayCommand]
     private void InspectTarget() => _navigate?.Invoke(TargetArea);
+
+    private void RecordDecision(RecommendationTransactionResult result)
+    {
+        LastDecisionResultCode = result.ResultCode;
+        LastDecisionMessage = result.Message;
+        OnPropertyChanged(nameof(HasDecisionMessage));
+        OnPropertyChanged(nameof(CanApply));
+        OnPropertyChanged(nameof(CanDismiss));
+        OnPropertyChanged(nameof(CanUndo));
+    }
 
     private static string FormatChanges(string json, ServerConfig? currentServer, bool useProposed)
     {

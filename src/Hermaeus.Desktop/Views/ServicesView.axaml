@@ -44,6 +44,7 @@
                                         <TextBlock Text="{Binding EvidenceSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding TradeoffSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding FreshnessSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding LastDecisionMessage}" IsVisible="{Binding HasDecisionMessage}" FontSize="12" TextWrapping="Wrap" />
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <Button Content="Apply" Command="{Binding ApplyCommand}" IsVisible="{Binding CanApply}" Padding="12,5" />
                                             <Button Content="Undo" Command="{Binding UndoCommand}" IsVisible="{Binding CanUndo}" Padding="12,5" />

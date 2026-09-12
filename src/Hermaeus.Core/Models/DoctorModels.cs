@@ -19,6 +19,22 @@ public enum DoctorActionKind
     OpenExternal
 }
 
+/// <summary>
+/// Stable remediation destination for a Doctor finding. The area is the
+/// navigable page; section, item, and focus identify the concrete control or
+/// resource when the page can provide one. Empty values mean the finding only
+/// has a page-level destination, never an inferred server or model.
+/// </summary>
+public sealed record DoctorActionTarget(
+    string Area,
+    string Section = "",
+    string ItemId = "",
+    string Focus = "")
+{
+    public string Route => string.Join('/', new[] { Area, Section, ItemId, Focus }
+        .Where(value => !string.IsNullOrWhiteSpace(value)));
+}
+
 public sealed record DoctorCheck(
     string Key,
     string Title,
@@ -32,6 +48,9 @@ public sealed record DoctorCheck(
     DoctorActionKind ActionKind = DoctorActionKind.None,
     string ActionTarget = "")
 {
+    /// <summary>Typed destination for the finding's remediation action.</summary>
+    public DoctorActionTarget? Target { get; init; }
+
     public bool HasAction => CanFix && ActionKind != DoctorActionKind.None;
 
     public string ActionLabel => FixLabel;

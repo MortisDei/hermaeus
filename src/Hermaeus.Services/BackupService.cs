@@ -134,7 +134,7 @@ public sealed class BackupService
         using var zip = ZipFile.OpenRead(backupPath);
         var comparison = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var targets = new HashSet<string>(comparison);
-        var files = new List<(ZipArchiveEntry Entry, string Target)>();
+        var files = new List<(ZipArchiveEntry Entry, string Target, string RelativePath)>();
         long totalUncompressedBytes = 0;
         foreach (var entry in zip.Entries)
         {
@@ -160,73 +160,144 @@ public sealed class BackupService
             if (string.IsNullOrWhiteSpace(targetDirectory))
                 throw new InvalidOperationException("Backup entry target directory could not be resolved.");
 
-            files.Add((entry, target));
+            files.Add((entry, target, Path.GetRelativePath(root, target)));
         }
 
-        foreach (var item in files)
+        var stagingRoot = Path.Combine(root, $".hermaeus-restore-{Guid.NewGuid():N}");
+        var backupRoot = Path.Combine(root, $".hermaeus-restore-backup-{Guid.NewGuid():N}");
+        var committed = new List<(string Target, string? Backup)>();
+        long actualTotalUncompressedBytes = 0;
+        Directory.CreateDirectory(stagingRoot);
+        EnsureNoReparsePoints(stagingRoot);
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            var target = item.Target;
-            var targetDirectory = Path.GetDirectoryName(target);
-            if (string.IsNullOrWhiteSpace(targetDirectory))
-                throw new InvalidOperationException("Backup entry target directory could not be resolved.");
-
-            Directory.CreateDirectory(targetDirectory);
-            EnsureNoReparsePoints(target);
-            if (Directory.Exists(target))
-                throw new IOException($"Restore target '{target}' is a directory.");
-            if (File.Exists(target) && !allowOverwrite)
-                throw new IOException($"Restore refused because '{target}' already exists.");
-
-            var temporary = target + "." + Guid.NewGuid().ToString("N") + ".restore.tmp";
-            try
+            // Extract everything beneath a root-owned staging directory first.
+            // A cancellation, malformed stream, or late budget violation then
+            // leaves the configured data root untouched.
+            foreach (var item in files)
             {
-                await using (var input = item.Entry.Open())
-                await using (var output = new FileStream(
-                    temporary,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None,
-                    bufferSize: 64 * 1024,
-                    options: FileOptions.Asynchronous | FileOptions.SequentialScan))
-                {
-                    var buffer = new byte[64 * 1024];
-                    long written = 0;
-                    while (true)
-                    {
-                        var read = await input.ReadAsync(buffer.AsMemory(), ct);
-                        if (read == 0)
-                            break;
+                ct.ThrowIfCancellationRequested();
+                var staged = Path.GetFullPath(Path.Combine(stagingRoot, item.RelativePath));
+                var stagingDirectory = Path.GetDirectoryName(staged);
+                if (string.IsNullOrWhiteSpace(stagingDirectory))
+                    throw new InvalidOperationException("Backup staging directory could not be resolved.");
 
-                        written += read;
-                        if (written > limits.MaxEntryBytes)
-                            throw new InvalidDataException($"Backup entry '{item.Entry.FullName}' exceeded the per-file restore limit while extracting.");
-                        await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                Directory.CreateDirectory(stagingDirectory);
+                EnsureNoReparsePoints(staged);
+                var temporary = staged + "." + Guid.NewGuid().ToString("N") + ".restore.tmp";
+                try
+                {
+                    await using (var input = item.Entry.Open())
+                    await using (var output = new FileStream(
+                        temporary,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None,
+                        bufferSize: 64 * 1024,
+                        options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+                    {
+                        var buffer = new byte[64 * 1024];
+                        long written = 0;
+                        while (true)
+                        {
+                            var read = await input.ReadAsync(buffer.AsMemory(), ct);
+                            if (read == 0)
+                                break;
+
+                            written += read;
+                            actualTotalUncompressedBytes += read;
+                            if (written > limits.MaxEntryBytes)
+                                throw new InvalidDataException($"Backup entry '{item.Entry.FullName}' exceeded the per-file restore limit while extracting.");
+                            if (actualTotalUncompressedBytes > limits.MaxTotalUncompressedBytes)
+                                throw new InvalidDataException("Backup exceeded the total uncompressed restore limit while extracting.");
+                            await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                        }
+
+                        if (written != item.Entry.Length)
+                            throw new InvalidDataException($"Backup entry '{item.Entry.FullName}' did not extract to its declared size.");
+                        ct.ThrowIfCancellationRequested();
+                        output.Flush(flushToDisk: true);
                     }
 
-                    if (written != item.Entry.Length)
-                        throw new InvalidDataException($"Backup entry '{item.Entry.FullName}' did not extract to its declared size.");
-                    ct.ThrowIfCancellationRequested();
-                    output.Flush(flushToDisk: true);
+                    File.Move(temporary, staged);
                 }
-
-                ct.ThrowIfCancellationRequested();
-                EnsureNoReparsePoints(target);
-                File.Move(temporary, target, allowOverwrite);
-            }
-            finally
-            {
-                try
+                finally
                 {
                     if (File.Exists(temporary))
                         File.Delete(temporary);
                 }
-                catch
+            }
+
+            // Once commit begins, cancellation is no longer observed between
+            // individual moves. This avoids reporting a cancelled restore
+            // after only half the archive reached the data root; cancellation
+            // during extraction remains fully transactional above.
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                foreach (var item in files)
                 {
-                    // A failed cleanup is not allowed to hide the original
-                    // restore error or cancellation.
+                    var target = item.Target;
+                    EnsureNoReparsePoints(target);
+                    if (Directory.Exists(target))
+                        throw new IOException($"Restore target '{target}' is a directory.");
+                    if (File.Exists(target) && !allowOverwrite)
+                        throw new IOException($"Restore refused because '{target}' already exists.");
+
+                    string? backup = null;
+                    if (File.Exists(target))
+                    {
+                        backup = Path.GetFullPath(Path.Combine(backupRoot, item.RelativePath));
+                        var backupDirectory = Path.GetDirectoryName(backup);
+                        if (string.IsNullOrWhiteSpace(backupDirectory))
+                            throw new InvalidOperationException("Backup rollback directory could not be resolved.");
+                        Directory.CreateDirectory(backupDirectory);
+                        EnsureNoReparsePoints(backup);
+                        File.Move(target, backup);
+                    }
+
+                    committed.Add((target, backup));
+                    var staged = Path.GetFullPath(Path.Combine(stagingRoot, item.RelativePath));
+                    EnsureNoReparsePoints(staged);
+                    var targetDirectory = Path.GetDirectoryName(target);
+                    if (string.IsNullOrWhiteSpace(targetDirectory))
+                        throw new InvalidOperationException("Restore target directory could not be resolved.");
+                    Directory.CreateDirectory(targetDirectory);
+                    EnsureNoReparsePoints(target);
+                    File.Move(staged, target);
                 }
             }
+            catch
+            {
+                for (var index = committed.Count - 1; index >= 0; index--)
+                {
+                    var item = committed[index];
+                    try
+                    {
+                        if (File.Exists(item.Target))
+                            File.Delete(item.Target);
+                        if (item.Backup is not null && File.Exists(item.Backup))
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(item.Target)!);
+                            File.Move(item.Backup, item.Target);
+                        }
+                    }
+                    catch
+                    {
+                        // Preserve the original commit exception. The backup
+                        // directory remains inspectable if rollback itself is
+                        // denied by the host filesystem.
+                    }
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(stagingRoot)) Directory.Delete(stagingRoot, recursive: true); }
+            catch { }
+            try { if (Directory.Exists(backupRoot)) Directory.Delete(backupRoot, recursive: true); }
+            catch { }
         }
     }
 

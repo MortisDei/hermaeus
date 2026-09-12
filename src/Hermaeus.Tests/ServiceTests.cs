@@ -66,6 +66,43 @@ namespace Hermaeus.Tests
             True(File.Exists(Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "benchmarks.db")), "benchmark db should be created");
         }
 
+        /// <summary>
+        /// R33 B1/V06: cancellation after the durable run identity exists but
+        /// before model preparation completes must produce a terminal
+        /// Cancelled record, not an unhandled exception or a success-shaped
+        /// run with missing preparation evidence.
+        /// </summary>
+        public static async Task BenchmarkCancellationDuringPreparationPersistsTerminalEvidence()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            using var cancellation = new CancellationTokenSource();
+
+            var run = await service.RunAsync(
+                suite,
+                new LlmModel { Id = "cancelled", Name = "Cancelled", Provider = "Test" },
+                ct: cancellation.Token,
+                preparation: async ct =>
+                {
+                    cancellation.Cancel();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                });
+
+            Equal("Cancelled", run.Status, "preparation cancellation should have a terminal cancelled status");
+            Equal("Cancelled", run.CurrentPhase, "preparation cancellation should record the terminal phase");
+            True(run.FinishedAt is not null, "cancelled runs should record a finish time");
+            Equal(0, run.Results.Count, "cancellation before the case phase should not fabricate results");
+
+            var stored = await service.GetRunAsync(run.Id);
+            True(stored is not null, "the durable run identity should survive preparation cancellation");
+            Equal("Cancelled", stored!.Status, "stored cancellation evidence should be terminal");
+            Equal("Benchmark cancelled.", stored.Error, "stored cancellation evidence should explain the outcome");
+        }
+
         /// <summary>r11 3.7: EnsureInitializedAsync lacked the SemaphoreSlim init gate every other store uses, so concurrent first calls could race the starter-suite seed (read `existing`, then insert) into a double-insert or a PK violation.</summary>
         public static async Task BenchmarkInitializationIsGatedAgainstConcurrentFirstCalls()
         {

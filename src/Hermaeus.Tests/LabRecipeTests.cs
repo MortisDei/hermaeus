@@ -63,6 +63,37 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public void Production_recipe_reconciliation_keeps_missing_baselines_unknown()
+    {
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, Server(), []);
+
+        var reconciled = LabRecipeCatalog.ReconcileBaselineAvailability(plan, Server(), null);
+
+        Assert.Equal(CapabilityState.Unknown, reconciled.Availability);
+        Assert.Contains("model is missing", reconciled.AvailabilityDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Production_recipe_reconciliation_requires_an_exact_runtime_and_readable_model()
+    {
+        using var temp = new TempDir();
+        var model = temp.PathFor("model.gguf");
+        var executable = temp.PathFor("llama-server");
+        File.WriteAllText(model, "fixture");
+        File.WriteAllText(executable, "fixture");
+        var source = Server();
+        source.ModelPath = model;
+        source.ExecutablePath = executable;
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, source, []);
+        var gguf = new GgufModelInfo("llama", "Q4_K_M", 32, 8192, 4096, 32, 8, 128, 128);
+
+        var reconciled = LabRecipeCatalog.ReconcileBaselineAvailability(plan, source, gguf);
+
+        Assert.Equal(CapabilityState.Available, reconciled.Availability);
+        Assert.Equal(plan.AvailabilityDetail, reconciled.AvailabilityDetail);
+    }
+
+    [Fact]
     public void Engine_recipe_changes_only_gpu_layers()
     {
         var plan = LabRecipeCatalog.Build(LabRecipeKind.EngineProfile, Server(), []);

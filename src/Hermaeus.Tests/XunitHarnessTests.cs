@@ -55,6 +55,7 @@ public static class HarnessCases
     [
         [new HarnessCase("redaction hides common secrets and home path", ServiceTests.RedactionHidesSecrets)],
         [new HarnessCase("benchmark db creates starter suites and records runs", ServiceTests.BenchmarkDbCreatesAndRecordsRuns)],
+        [new HarnessCase("benchmark cancellation during preparation persists terminal evidence", ServiceTests.BenchmarkCancellationDuringPreparationPersistsTerminalEvidence)],
         [new HarnessCase("benchmark initialization is gated against concurrent first calls", ServiceTests.BenchmarkInitializationIsGatedAgainstConcurrentFirstCalls)],
         [new HarnessCase("benchmark starter suites include expanded deterministic set", ServiceTests.BenchmarkStarterSuitesIncludeExpandedDeterministicSet)],
         [new HarnessCase("benchmark single iteration exports cold run mode", ServiceTests.BenchmarkSingleIterationRunExportsColdRunMode)],

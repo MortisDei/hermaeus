@@ -87,8 +87,24 @@ public sealed class DoctorAdvisoryTests
         Assert.True(warning.HasAction);
         Assert.Equal(DoctorActionKind.Navigate, warning.ActionKind);
         Assert.Contains("relevant Hermaeus settings", warning.ActionTooltip, StringComparison.Ordinal);
+        Assert.Equal("settings", warning.Target?.Area);
         Assert.Equal(DoctorActionKind.Fix, fix.ActionKind);
         Assert.Equal(DoctorActionKind.OpenExternal, external.ActionKind);
+    }
+
+    [Fact]
+    public void Server_specific_doctor_findings_keep_a_typed_remediation_target()
+    {
+        var check = DoctorService.BuildCheck(
+            "draft-model-chat-server", "Chat draft model", DoctorCheckStatus.Warning,
+            "Missing", "detail", "Open Services", true, "diagnostics", "Runtime");
+
+        Assert.Equal(DoctorActionKind.Navigate, check.ActionKind);
+        Assert.Equal("services", check.Target?.Area);
+        Assert.Equal("managed-server-draft", check.Target?.Section);
+        Assert.Equal("chat-server", check.Target?.ItemId);
+        Assert.Equal("draft-model", check.Target?.Focus);
+        Assert.Equal("services/managed-server-draft/chat-server/draft-model", check.ActionTarget);
     }
 
     /// <summary>
