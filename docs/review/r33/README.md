@@ -9,6 +9,7 @@ actions remain owner-only.
 
 Baseline: `c944febf8e7eda96dcf8f6461a02e870b40b8465`, verified against remote
 `main` on 2026-09-07. The review pack was anchored locally before implementation.
+Local implementation closeout: `cc494ac`.
 Production and regression-test changes are scoped to the batches below. No
 dependency, workflow, or owner-data publication changes are included.
 

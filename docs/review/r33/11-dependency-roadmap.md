@@ -1,9 +1,10 @@
 # 11. Dependency-spined roadmap
 
-This is the implementation proposal for owner review, not an implementation
-instruction already authorized. Local planning branch `r33/planning`, baseline
-`c944feb`. No batch is landed. A future code branch/PR follows
-`docs/pull-requests.md`; one open maintainer PR, no automatic release/version.
+This document was the implementation proposal for owner review. The local
+implementation now follows it on `r33/planning`, baseline `c944feb`, with the
+mandatory local closeout recorded in `cc494ac` and the strict audit in
+`docs/review/r33/12-completion-audit.md`. A future code branch/PR follows
+`docs/pull-requests.md`; no automatic release/version or publication is implied.
 
 ## 11.1 Dependency spine
 
@@ -109,12 +110,24 @@ by this implementation. Local commits are authorized by the owner.
 
 | Batch | State | Required evidence |
 | --- | --- | --- |
-| B0-B9 and S | Implemented locally | Source, regression tests, sequential build/test, package, and coverage evidence; owner platform gates remain explicit |
-| C1 Monaco | Deferred | No editor dependency or spike shipped without the required offline, native, and cross-platform evidence |
-| C2 JSONL/runtime experiments | Deferred | Installed exact-binary and selected-pair evidence was not sufficient for an unconditional feature |
-| C3 Agent HTTP execution | Deferred | Desktop and Local API remain separate processes without one shared execution host and approval surface |
-| Actual R33 PR/CodeQL enforcement | Future owner action | Exact PR/check/rules evidence, no synthetic planning PR |
+| B0 | Implemented and verified | `ApplicationLifecycleCoordinatorTests`, identity/isolation source, and driver evidence; retained Unknown crash/child mechanisms remain explicit |
+| B1 | Owner validation required | Launcher parser/install and preparation cancellation are verified locally; full phase matrix and visible launch remain open |
+| B2 | Owner validation required | Shared lifecycle, runtime registry, restart handoff, and driver are verified locally; live two-process/native startup remains open |
+| B3 | Owner validation required | Prepared mutation/policy boundaries are verified locally; owner selected-model/manual/child/command review remains open |
+| B4 | Owner validation required | Receipt recovery, readback, child/task projections are verified locally; live delayed callbacks and interruption remain open |
+| B5 | Owner validation required | Configuration/recommendation reconciliation is verified locally; owner UI/rapid-save/Details/restart cells remain open |
+| B6 | Owner validation required | Canonical full-config tuning, cancellation, admission and evidence are locally verified; original native crash and fit gate remain open |
+| B7 | Owner validation required | Baseline-aware Lab, cleanup, Apply/reopen are locally verified with deterministic boundaries; real runtime/restore remains open |
+| B8 | Owner validation required | Typed Doctor destination and touched UX projections are locally verified; owner keyboard/DPI/focus/resize walkthrough remains open |
+| S | Implemented and verified | Restore budgets, actual-byte staging, duplicate-target and cancellation cleanup tests pass; no owner restore is required |
+| B9 | Owner validation required | Local build/test/package/coverage/docs closeout is complete; owner platform, PR/check, CodeQL enforcement and publication remain open |
+| C1 Monaco | conditionally rejected/not earned with evidence | No cross-platform offline/native/resource spike gate was earned; AvaloniaEdit remains the fallback |
+| C2 JSONL/runtime experiments | conditionally rejected/not earned with evidence | Installed b10821 lacks `--log-jsonl`; no exact compatible pair/benefit evidence was earned |
+| C3 Agent HTTP execution | conditionally rejected/not earned with evidence | `AgentApiContract.ExecutionRoutesAvailable=false`; no single cross-process execution owner is proven |
+| Actual R33 PR/CodeQL enforcement | owner validation required | Exact PR/check/rules evidence remains an owner action; no synthetic planning PR or settings change was made |
 
-Do not infer progress from document existence. Keep unresolved or descope
-decisions clear and do not turn local verification into owner platform or
-publication evidence.
+Do not infer progress from document existence. The complete row-by-row evidence
+and the V01-V14, owner-defect, named-scope, conditional, and commit-count
+dispositions are in `docs/review/r33/12-completion-audit.md`. Keep unresolved or
+descope decisions clear and do not turn local verification into owner platform
+or publication evidence.
