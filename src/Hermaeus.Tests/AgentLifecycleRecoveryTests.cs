@@ -79,4 +79,129 @@ public sealed class AgentLifecycleRecoveryTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeleteAsync("active-run"));
         Assert.Contains("Stop the run", ex.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Startup_recovery_marks_a_written_pending_receipt_applied_without_replay()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        var target = Path.Combine(workspace, "rewrite.md");
+        await File.WriteAllTextAsync(target, "after");
+
+        var first = new FileAgentTaskStateStore(settings);
+        await first.InitializeAsync();
+        var task = new AgentTaskState
+        {
+            TaskId = "pending-written",
+            Goal = "recover written mutation",
+            Status = AgentTaskStatus.Running,
+            WorkspaceRoot = workspace,
+            PendingToolAction = new AgentPendingToolAction { ToolName = "edit_file" },
+            MutationReceipts =
+            [
+                new AgentMutationReceipt
+                {
+                    TaskId = "pending-written",
+                    ToolName = "edit_file",
+                    MutationKind = AgentMutationKind.Replace,
+                    WorkspaceRoot = workspace,
+                    RelativePath = "rewrite.md",
+                    ExpectedPreImageExisted = true,
+                    ExpectedPreImageSha256 = AgentMutationPreparation.ComputeContentSha256("before"),
+                    ProposedContentSha256 = AgentMutationPreparation.ComputeContentSha256("after"),
+                    Outcome = AgentMutationOutcome.Pending
+                }
+            ]
+        };
+        await first.SaveAsync(task);
+
+        var recoveredStore = new FileAgentTaskStateStore(settings);
+        await recoveredStore.InitializeAsync();
+        var recovered = await recoveredStore.LoadAsync(task.TaskId);
+
+        var receipt = Assert.Single(recovered!.MutationReceipts);
+        Assert.Equal(AgentMutationOutcome.Applied, receipt.Outcome);
+        Assert.True(receipt.Verified);
+        Assert.True(receipt.Changed);
+        Assert.Equal("startup-recovery:" + receipt.ReceiptId, receipt.EvidenceId);
+        Assert.Equal(AgentTaskStatus.Interrupted, recovered.Status);
+        Assert.Null(recovered.PendingToolAction);
+        Assert.Equal("after", await File.ReadAllTextAsync(target));
+    }
+
+    [Fact]
+    public async Task Startup_recovery_does_not_replay_when_only_the_preimage_exists()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "rewrite.md"), "before");
+
+        var first = new FileAgentTaskStateStore(settings);
+        await first.InitializeAsync();
+        var task = PendingReceiptTask("pending-before", workspace, "before", "after");
+        await first.SaveAsync(task);
+
+        var recoveredStore = new FileAgentTaskStateStore(settings);
+        await recoveredStore.InitializeAsync();
+        var recovered = await recoveredStore.LoadAsync(task.TaskId);
+
+        var receipt = Assert.Single(recovered!.MutationReceipts);
+        Assert.Equal(AgentMutationOutcome.Unknown, receipt.Outcome);
+        Assert.False(receipt.Verified);
+        Assert.Contains("No replay", receipt.CompletionReason, StringComparison.Ordinal);
+        Assert.Equal(AgentTaskStatus.Interrupted, recovered.Status);
+        Assert.Equal("before", await File.ReadAllTextAsync(Path.Combine(workspace, "rewrite.md")));
+    }
+
+    [Fact]
+    public async Task Startup_recovery_classifies_unexpected_content_as_conflict()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "rewrite.md"), "someone-else");
+
+        var first = new FileAgentTaskStateStore(settings);
+        await first.InitializeAsync();
+        var task = PendingReceiptTask("pending-conflict", workspace, "before", "after");
+        await first.SaveAsync(task);
+
+        var recoveredStore = new FileAgentTaskStateStore(settings);
+        await recoveredStore.InitializeAsync();
+        var recovered = await recoveredStore.LoadAsync(task.TaskId);
+
+        var receipt = Assert.Single(recovered!.MutationReceipts);
+        Assert.Equal(AgentMutationOutcome.Conflict, receipt.Outcome);
+        Assert.False(receipt.Verified);
+        Assert.Contains("neither", receipt.CompletionReason, StringComparison.Ordinal);
+        Assert.Equal("someone-else", await File.ReadAllTextAsync(Path.Combine(workspace, "rewrite.md")));
+    }
+
+    private static AgentTaskState PendingReceiptTask(string taskId, string workspace, string before, string after) => new()
+    {
+        TaskId = taskId,
+        Goal = "recover pending mutation",
+        Status = AgentTaskStatus.Running,
+        WorkspaceRoot = workspace,
+        MutationReceipts =
+        [
+            new AgentMutationReceipt
+            {
+                TaskId = taskId,
+                ToolName = "apply_draft_patch",
+                MutationKind = AgentMutationKind.Replace,
+                WorkspaceRoot = workspace,
+                RelativePath = "rewrite.md",
+                ExpectedPreImageExisted = true,
+                ExpectedPreImageSha256 = AgentMutationPreparation.ComputeContentSha256(before),
+                ProposedContentSha256 = AgentMutationPreparation.ComputeContentSha256(after),
+                Outcome = AgentMutationOutcome.Pending
+            }
+        ]
+    };
 }

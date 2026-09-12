@@ -446,6 +446,9 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 }
             }
 
+            var receiptRecovery = await ReconcileIncompleteReceiptsAsync(entry.State, ct);
+            stateChanged |= receiptRecovery;
+
             if (stateChanged)
                 changed.Add(entry);
         }
@@ -461,6 +464,114 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         }
 
         return changed.Count(entry => entry.State.Status == AgentTaskStatus.Interrupted);
+    }
+
+    /// <summary>
+    /// Resolves the only ambiguous crash window in a prepared mutation: the
+    /// process may have written the target after the Pending receipt was saved
+    /// but before the terminal outcome was persisted. A matching complete
+    /// post-image is Applied, a matching pre-image remains Unknown, and any
+    /// other content is Conflict. No outcome is replayed and no caller-provided
+    /// workspace is trusted during startup recovery.
+    /// </summary>
+    private async Task<bool> ReconcileIncompleteReceiptsAsync(AgentTaskState state, CancellationToken ct)
+    {
+        var changed = false;
+        foreach (var receipt in state.MutationReceipts.Where(receipt =>
+                     receipt.Outcome == AgentMutationOutcome.Pending && receipt.FinishedAt == default))
+        {
+            ct.ThrowIfCancellationRequested();
+            var root = receipt.WorkspaceRoot.Length > 0 ? receipt.WorkspaceRoot : state.WorkspaceRoot;
+            if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(receipt.RelativePath)
+                || receipt.MutationKind == AgentMutationKind.Command)
+            {
+                CompleteUnknownReceipt(receipt,
+                    "The execution context disappeared before a safe post-image could be observed.");
+                changed = true;
+                continue;
+            }
+
+            string fullPath;
+            try
+            {
+                root = AgentWorkspaceTools.ResolveWorkspaceRoot(root);
+                fullPath = AgentWorkspaceTools.ResolveSafePath(root, receipt.RelativePath);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException or ArgumentException)
+            {
+                CompleteUnknownReceipt(receipt, $"The post-image could not be safely resolved during startup recovery: {ex.Message}");
+                changed = true;
+                continue;
+            }
+
+            string? observed = null;
+            try
+            {
+                if (File.Exists(fullPath))
+                    observed = await File.ReadAllTextAsync(fullPath, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                CompleteUnknownReceipt(receipt, $"The post-image could not be read during startup recovery: {ex.Message}");
+                changed = true;
+                continue;
+            }
+
+            receipt.ObservedPostImageExisted = observed is not null;
+            receipt.ObservedPostImageSha256 = observed is null
+                ? string.Empty
+                : AgentMutationPreparation.ComputeContentSha256(observed);
+            var postMatches = observed is not null
+                && string.Equals(receipt.ObservedPostImageSha256, receipt.ProposedContentSha256, StringComparison.Ordinal);
+            var preMatches = observed is null
+                ? !receipt.ExpectedPreImageExisted
+                : receipt.ExpectedPreImageExisted
+                    && string.Equals(receipt.ObservedPostImageSha256, receipt.ExpectedPreImageSha256, StringComparison.Ordinal);
+            receipt.Changed = receipt.ObservedPostImageExisted != receipt.ExpectedPreImageExisted
+                || !string.Equals(receipt.ObservedPostImageSha256, receipt.ExpectedPreImageSha256, StringComparison.Ordinal);
+            receipt.Verified = postMatches;
+            if (postMatches)
+            {
+                receipt.Outcome = receipt.Changed ? AgentMutationOutcome.Applied : AgentMutationOutcome.AlreadySatisfied;
+                receipt.CompletionReason = receipt.Changed
+                    ? "Startup recovery matched the complete prepared post-image after an interrupted execution."
+                    : "Startup recovery confirmed that the complete prepared output was already present.";
+            }
+            else
+            {
+                receipt.Outcome = preMatches ? AgentMutationOutcome.Unknown : AgentMutationOutcome.Conflict;
+                receipt.CompletionReason = preMatches
+                    ? "Startup recovery found the pre-image, so execution did not establish a post-image. No replay was attempted."
+                    : "Startup recovery found content that matched neither the prepared pre-image nor post-image. No replay was attempted.";
+            }
+
+            receipt.FinishedAt = DateTime.UtcNow;
+            receipt.EvidenceId = $"startup-recovery:{receipt.ReceiptId}";
+            changed = true;
+        }
+
+        if (changed)
+        {
+            var incomplete = state.MutationReceipts.Any(receipt =>
+                receipt.Outcome == AgentMutationOutcome.Pending && receipt.FinishedAt == default);
+            if (!incomplete && state.Status == AgentTaskStatus.Running)
+                MarkInterrupted(state,
+                    "The previous Agent execution was interrupted; its prepared mutation receipt was reconciled without replay.");
+            else if (!incomplete && state.PendingToolAction is not null)
+                state.PendingToolAction = null;
+        }
+
+        return changed;
+    }
+
+    private static void CompleteUnknownReceipt(AgentMutationReceipt receipt, string reason)
+    {
+        receipt.Outcome = AgentMutationOutcome.Unknown;
+        receipt.Verified = false;
+        receipt.Changed = false;
+        receipt.CompletionReason = reason;
+        receipt.EvidenceId = $"startup-recovery:{receipt.ReceiptId}";
+        receipt.FinishedAt = DateTime.UtcNow;
     }
 
     private static void MarkInterrupted(AgentTaskState state, string reason)

@@ -1709,6 +1709,7 @@ public sealed class AgentService : IAgentService
                     ProposalRevision = effectivePending.ProposalRevision,
                     ToolName = effectivePending.ToolName,
                     MutationKind = effectivePending.MutationKind,
+                    WorkspaceRoot = effectivePending.WorkspaceRoot,
                     RelativePath = effectivePending.RelativePath,
                     ExpectedPreImageSha256 = effectivePending.ExpectedPreImageSha256,
                     ExpectedPreImageExisted = effectivePending.ExpectedPreImageExisted,

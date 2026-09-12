@@ -598,6 +598,13 @@ public sealed class AgentMutationReceipt
     public string TaskId { get; set; } = string.Empty;
     public string ToolName { get; set; } = string.Empty;
     public AgentMutationKind MutationKind { get; set; }
+    /// <summary>
+    /// The persisted workspace identity needed to reconcile an attempt after
+    /// the process disappears between the write and its terminal receipt.
+    /// Empty on older receipts, which remain Unknown rather than being
+    /// guessed against a caller-supplied workspace.
+    /// </summary>
+    public string WorkspaceRoot { get; set; } = string.Empty;
     public string RelativePath { get; set; } = string.Empty;
     public string ExpectedPreImageSha256 { get; set; } = string.Empty;
     public bool ExpectedPreImageExisted { get; set; }
