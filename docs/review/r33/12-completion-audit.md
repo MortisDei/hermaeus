@@ -215,17 +215,49 @@ configuration/Lab/Doctor/benchmark cases in `75409f1`, one AutoTune case in
 `15104d1`, and two policy revalidation cases in `1601413`. The earlier E1/E2
 result is therefore `2,695` passed, `17` skipped, `2,712` total, or **twenty
 more passing cases than the planning baseline**, not eight. The resumed
-UX/editor/pet continuation adds seven focused regression cases and the current
-E7 Debug/Release result is `2,703` passed, `17` skipped, `2,720` total.
-`cc494ac` added no new test case; the continuation adds the bounded
-presentation/package cases without changing the earlier count.
+UX/editor/pet continuation added seven focused regression cases; its E7
+Debug/Release checkpoint result was `2,703` passed, `17` skipped, `2,720`
+total. `cc494ac` added no new test case; the continuation adds the bounded
+presentation/package cases without changing the earlier checkpoint count.
 
 The small count relative to the size of the implementation is expected: the
 pack required production-boundary repairs, not one test method per source
 change; many paths are exercised through existing tests and the single
 production-composition driver. V01-V14 are acceptance scenarios, not fourteen
 automatic xUnit methods. The count must nevertheless be reported as the final
-observed count above, not rounded back to the earlier +8 checkpoint.
+observed count above, not rounded back to the earlier checkpoints. The
+acceptance repair pass adds eight regression cases for effective Lab launch
+evidence, saved-projection verification, parent/child lifecycle recovery, and
+open-task isolation. The current Debug and Release harness results are each
+`2,711` passed, `17` skipped, `2,728` total.
+
+## Acceptance continuation
+
+The post-dogfood repair pass closes the two persisted contradictions that
+remained after the earlier implementation closeout. Window close and tray
+service stopping now enter the bounded managed-process shutdown path. Agent
+parents with pending or running children cannot be finished or dismissed, a
+terminal parent with live children is recovered as blocked, and the workbench
+cannot start a second top-level task over an open task. Missing workspace
+`AGENTS.md` suggestions are previewed and queued as normal prepared patches.
+
+Lab stores configuration-scoped effective launch observations from the managed
+runtime properties endpoint. Context, GPU placement, and slots must be
+auditable and match the reviewed baseline/candidate, with effective fit also
+required for `Auto`; unknown evidence remains a refusal. Lab and recommendation
+Apply paths read the live Services projection after save before recording
+success. The workbench now exposes before/after mutation receipt content,
+human-readable runtime/model telemetry identities, a bounded Monaco readiness
+fallback, and semantic audio cues for the repaired terminal transitions. Pet
+idle animation is slowed and avoids the observed blink frame, with a small
+drag direction deadzone.
+
+The isolated R33 driver was rerun on fresh scratch paths and returned
+`ok:true`, with an Applied/readback-verified Agent receipt, benchmark
+cancellation, RAG generation/query, Chat retrieval context, voice completion,
+Lab failure cleanup, Lab Apply/settings reopen, and runtime stop count one.
+This is production-composition evidence, not native runtime, GUI, or pixel
+acceptance evidence.
 
 ## Final owner gate
 

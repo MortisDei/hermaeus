@@ -59,8 +59,10 @@ explicit user approval before it executes.
   is really unfinished work. The typed path requires non-empty instruction
   text and both paths refuse a sub-task, an already-running task, or a pending
   tool approval. **Finish run** accepts the current result and ends the run
-  while preserving its transcript, ledger, and unfinished-plan evidence. A
-  "New Task" button next to Start always starts an actual fresh task.
+  while preserving its transcript and ledger, but it is unavailable while an
+  orchestration child remains pending or running. A second top-level task is
+  also refused while another task is open. A "New Task" button next to Start
+  always starts an actual fresh task.
 - Reaching `Agent.MaxAutoSteps` is persisted as a truthful blocked budget pause,
   not as a semantic question from the user. The Run tab offers Continue/Add
   steps or Stop, keeps the model response separate from the pause explanation,
@@ -90,6 +92,10 @@ or write files, run commands, approve actions, navigate arbitrary pages, or
 access chat content. Editing proposed content still creates a normal reviewable
 Agent patch, and the Changes view remains the source for applied, verified, and
 conflicted outcomes.
+When the selected workspace has no `AGENTS.md`, the workbench can preview a
+suggested file and queue it as a normal prepared mutation. The suggestion is
+not written until the user approves it. Monaco also has a bounded readiness
+timeout, after which AvaloniaEdit remains the usable local editor.
 
 ### Context & Retrieval
 

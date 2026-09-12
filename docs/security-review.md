@@ -105,6 +105,23 @@ penetration-test report.
 | Update check | Doctor makes anonymous, unauthenticated GETs to GitHub's releases API for `MortisDei/hermaeus` and `ggml-org/llama.cpp` to compare the newest published tag against the running/installed version. No request body, no telemetry, no identifying data beyond standard HTTP/TLS metadata. The Hermaeus check uses the release-list endpoint so prereleases are considered, sends an explicit User-Agent and GitHub media type, and distinguishes network timeout, repository 404, rate limiting, GitHub rejection, and invalid response data in the Doctor result. Neither check ever downloads or applies anything; each one's only action opens the corresponding releases page in the default browser for the user to install manually. Both results are cached in memory for one hour (`DoctorService.GetCachedGitHubReleaseAsync`) rather than re-fetched on every scan. | This is an automatic outbound network call with no per-scan opt-out toggle. The hourly cache exists for reliability (GitHub's 60 requests/hour anonymous rate limit was exhausted in practice by repeated scans, which then made a genuine llama.cpp update attempt fail with a 403), not for privacy, so it does not reduce what GitHub can observe (an install exists and checked in) below one request per hour per check while the app is in use. |
 | Local API host | `Hermaeus.LocalApi` is off by default; `LocalApiProcessManager` only launches the child process when a user explicitly enables it in Settings and at least one named token exists, and the host itself independently refuses to serve if launched directly with the setting off. It binds `127.0.0.1` only, never `0.0.0.0`. Each configured caller gets its own named token; every request must present a matching `X-Hermaeus-Token` header, and the host fails closed (503) when no token exists, rather than allowing unauthenticated access. A token can be revoked individually without affecting the others. The surface is deliberately minimal: chat completion (buffered or SSE-streamed), embeddings, memory query, RAG query, and a read-only models list, no Agent execution, benchmark, or settings endpoints. R31's additive per-token Agent scope defaults disabled, and the v1 policy grants no approval authority. Agent routes remain unmapped because Desktop and Local API do not share one serialized task-mutation owner; capabilities reports the reason. Every live call is logged to the shared trace store (`TraceKind.LocalApi`) keyed by the verified token name that authenticated it, and authentication also retains the immutable token id for future ownership checks. Privacy Audit's "Local API activity" item shows which per-app tokens have been calling in, and how often. | Any other local process on a shared machine that learns a token can call the existing non-Agent API for as long as that token stays valid. Revocation removes the live token reference immediately but leaves its now-unreachable secret value in the configured secret backend. The `X-Hermaeus-Client` header remains an unverified display hint, not an access-control guarantee. The Agent contracts are inert until a single owner and Desktop scope editor ship. |
 
+### R33 bounded lifecycle and evidence clarifications
+
+The normal window-close and tray service-stop paths use the shared bounded
+managed-process shutdown boundary. If a child does not stop before the owner
+deadline, the lifecycle journal records an incomplete drain and the UI does not
+claim a clean shutdown. The Agent workbench prevents a second top-level task
+from taking ownership over an open task, while the parent/child lifecycle
+guards prevent an orchestration parent from being closed while a child remains
+active.
+
+Lab does not treat a saved configuration as proof of effective runtime state.
+The isolated process must return auditable context, GPU placement, and slot
+facts from its structured properties endpoint, with effective fit evidence for
+`Auto`. These facts are configuration-scoped and are checked against the
+reviewed comparison before Apply. Apply reads the live Services projection
+after the atomic settings save before it records a successful transaction.
+
 ### Companion lifecycle (R31)
 
 Companion handling prefers the exact `.hermaeus/companions.json` path in the

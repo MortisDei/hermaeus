@@ -61,6 +61,14 @@ Comparisons list uncontrolled fingerprint differences and refuse a headline
 delta when any remain. Timing metrics show median, observed range, repetition
 count, and source. There is no universal score or statistical-significance
 claim.
+Each comparison also carries the isolated runtime's effective launch
+observation from the structured properties endpoint. Context size, GPU
+placement, and slots must be proven and match the reviewed configuration;
+`Auto` additionally needs a proven fit result. Missing, ambiguous, or
+mismatched fields remain `Unknown` and prevent a controlled comparison or
+Apply recommendation. An unreviewed sibling candidate does not invalidate the
+candidate currently being compared, but it cannot receive an Apply review
+until its own run evidence exists.
 
 Correctness compares token ids when both sides expose them and falls back to an
 exact UTF-8 output hash at a weaker declared level. It reports `Equivalent`,
@@ -87,8 +95,9 @@ candidate comparison was measured.
 passing result. It shows every persisted field that would change and captures
 the current server configuration plus runtime/model identity. Confirmation
 rechecks all three, clones `AppSettings`, and uses the normal settings save
-flow. A stale review is refused, and applying never deletes prior configuration
-or experiment evidence.
+flow. The live Services projection is read back after save and a mismatch is
+reported as a failed Apply. A stale review is refused, and applying never
+deletes prior configuration or experiment evidence.
 
 Guided recipes persist valid evidence automatically. Review selects the eligible
 candidate produced by that recipe, so saving each evidence slice manually is not

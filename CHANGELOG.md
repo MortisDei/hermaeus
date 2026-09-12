@@ -19,6 +19,11 @@ limit.
   records an incomplete phase when an owner exceeds its deadline instead of
   pretending it stopped cleanly. Settings-triggered restart now uses the same
   owner drain and a bounded single-instance handoff.
+- Window close and tray service stopping now use the bounded managed-process
+  stop boundary. Agent refuses a second top-level task and refuses to finish
+  or dismiss an orchestration parent with a live child; inconsistent recovered
+  parents are blocked for explicit continuation. Missing workspace `AGENTS.md`
+  suggestions enter the normal prepared-mutation review queue.
 - Agent task commands and prepared workspace mutations now use one task and
   target ownership boundary. Mutating proposals carry typed arguments,
   workspace policy, target identity, preimage, and proposed output before
@@ -45,7 +50,10 @@ limit.
 - Lab recipe availability now reconciles the selected baseline's model, GGUF,
   and exact executable identity before offering a run. Doctor actions carry
   typed panel, section, entity, and control targets, with an explicit missing
-  entity explanation and focus request.
+  entity explanation and focus request. Lab comparisons now retain auditable
+  effective context, GPU placement, and slot evidence from the isolated
+  runtime, and Apply reads back the saved Services projection before reporting
+  success.
 - Agent, RAG, and Lab views now project lifecycle, evidence, capability, and
   next-action state in user-facing terms. Agent's New Task clears task-scoped
   projections without deleting history, Changes distinguishes verified and

@@ -269,6 +269,11 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   persisted state/transcript/trace/log folder. New Task clears task-scoped
   composer, response, draft, selection, and evidence projections without
   deleting the persisted task.
+- A second top-level task cannot start while another task is open. An
+  orchestration parent cannot be finished or dismissed while a child is still
+  pending or running; startup recovery marks that inconsistent terminal state
+  as blocked for explicit continuation. A suggested workspace `AGENTS.md` is
+  previewed and queued through the same approval path as every other write.
 - Scenario Evals supports both suite execution and an individual row Run
   action. Those actions are disabled while definitions are loading or when no
   model or scenario set is ready. Persisted evidence restoration runs after
@@ -350,6 +355,13 @@ target, and keeps run, cancellation, source-restore, Apply, and recovery next
 actions visible. Recipe prompt detail and evidence filters are disclosed until
 needed, and action groups wrap on narrow windows. The selected runtime's
 effective state remains distinct from a recommendation or saved configuration.
+Each baseline-to-candidate comparison also retains the isolated runtime's
+effective launch observation. Context, GPU placement, and slot count must be
+auditable and match the reviewed configuration; Auto additionally requires
+auditable fit evidence. Missing or mismatched effective state remains Unknown
+and blocks a controlled headline or Apply. After Apply, the live Services
+projection is read back to verify that the reviewed fields were actually
+persisted.
 
 Successful auditable adaptive changes and correctness-gated Lab winners can
 produce a shared review card. The card shows current and proposed fields,
@@ -425,6 +437,10 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 - Chat telemetry can sample the currently active managed server process. Its
   process RAM and per-process GPU readings are tied to that process identity;
   missing counters remain Unknown.
+- Telemetry identifies the selected runtime by kind, version, build, and
+  backend, and the model by manifest or local identity plus architecture and
+  quantization. Stable identifiers remain available as secondary diagnostic
+  details rather than replacing the human-readable labels.
 - Chat send traces retain the selected provider tag, separate first-event and
   first-content timing, and count emitted reasoning deltas when available.
 - Activity records observed outcomes for operations such as model downloads,
@@ -438,6 +454,9 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 - Settings-triggered restart drains the shared application owners before it
   starts the replacement. The replacement uses a bounded internal lock
   handoff, while ordinary second launches remain fail-fast.
+- Window close and tray **Stop Services** use the same bounded managed-process
+  stop path. An incomplete drain is journaled as incomplete instead of leaving
+  the interface indefinitely stuck on a quitting state.
 - Runtime Logs apply redaction before display and persistence, omit repetitive
   low-level llama slot scheduler chatter from the normal persistent sink, and
   rotate with bounded file-count, age, and total-size retention. Settings holds

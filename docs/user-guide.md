@@ -377,6 +377,13 @@ draft, selected file, and task-scoped evidence without deleting the old task.
 Workspace editing uses a local Monaco host when available and a native
 AvaloniaEdit fallback; both remain presentation only and all writes still use
 the normal prepared mutation and approval path.
+Starting another top-level task is disabled while one is open. An
+orchestration parent cannot be finished or dismissed while a child is pending
+or running. If startup finds that inconsistent state, it marks the parent
+blocked so **Continue** can reconcile it. When a workspace is missing its
+`AGENTS.md`, **Review and create AGENTS.md** previews the file and places a
+normal prepared mutation in the approval queue; it does not write the file
+directly.
 
 When a proposed plan contains sub-tasks, its review card has one model selector
 per child. Choose a configured visible model or **Inherit parent** before
@@ -404,6 +411,9 @@ delta received from the runtime, rather than a provider reasoning or tool
 event. The same trace line identifies the selected provider tag and reports
 reasoning-event/character counts when the provider emits a reasoning stream,
 so reasoning time is not mistaken for answer content latency.
+The telemetry identity line uses the runtime kind/version/build/backend and a
+manifest or local model label with architecture and quantization. Stable
+identity hashes remain in the tooltip for diagnostics.
 
 Settings > Voice contains supplementary audio feedback controls for the
 explicit task/runtime/recording event list. Volume is retained when muted,
@@ -446,6 +456,13 @@ The run state names isolation and comparison refusals. Missing counters remain
 missing. A comparison cannot show a headline delta when runtime, model,
 hardware, or configuration fingerprints differ, and a deterministic output
 difference fails correctness regardless of speed.
+The isolated runtime also reports effective context, GPU placement, and slots
+from its structured properties endpoint. Those values must be auditable and
+match the reviewed baseline or candidate before that comparison is controlled;
+Auto placement additionally requires effective fit evidence. Unknown effective
+state leaves Apply unavailable. After confirmation, Lab reads the live
+Services projection back after saving so a successful Apply means the reviewed
+fields are visible in settings, not merely that a save call returned.
 
 On **Lab > Evidence**, an empty pane says whether no evidence has been captured
 yet or whether the current filters exclude existing records.
