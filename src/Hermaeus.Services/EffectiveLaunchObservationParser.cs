@@ -15,12 +15,14 @@ public static class EffectiveLaunchObservationParser
     // This identifies the parser and receipt schema, not a product release.
     // Keep it stable across rounds so receipts remain reusable by later
     // adaptive, diagnostics, and benchmark workflows.
-    public const string ParserVersion = "llama-props-scalar-v1";
+    public const string ParserVersion = "llama-effective-runtime-v2";
 
     public static EffectiveLaunchObservation Parse(
         ServerConfig config,
         RuntimeIdentityV2 runtimeIdentity,
-        string? propsJson)
+        string? propsJson,
+        RuntimeLaunchProcessEvidence? process = null,
+        string? runtimeLog = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(runtimeIdentity);
@@ -48,6 +50,16 @@ public static class EffectiveLaunchObservationParser
                     Add(root, effective, "kv_cache_type_k", "cache_type_k", "kv_cache_type_k");
                     Add(root, effective, "kv_cache_type_v", "cache_type_v", "kv_cache_type_v");
                     Add(root, effective, "cpu_moe", "cpu_moe", "n_cpu_moe");
+
+                    if (root.TryGetProperty("default_generation_settings", out var generation)
+                        && generation.ValueKind == JsonValueKind.Object
+                        && generation.TryGetProperty("params", out var parameters)
+                        && parameters.ValueKind == JsonValueKind.Object)
+                    {
+                        Add(parameters, effective, "context", "ctx_size", "n_ctx", "context_size");
+                    }
+
+                    Add(root, effective, "slots", "total_slots");
                 }
                 else
                 {
@@ -63,6 +75,15 @@ public static class EffectiveLaunchObservationParser
         var placement = config.TryGetGpuPlacement(out var intent, out _)
             ? intent
             : null;
+
+        var runtimeGpuLayers = ServerProcessManager.ParseGpuLayerLog(runtimeLog ?? string.Empty);
+        var gpuEvidenceId = "props.gpu_layers";
+        if (runtimeGpuLayers.Used is int usedLayers)
+        {
+            effective["gpu_layers"] = placementValue(usedLayers, runtimeGpuLayers.Total);
+            gpuEvidenceId = "runtime.log.gpu_layers";
+        }
+
         var renderedLayers = placement?.Kind switch
         {
             GpuPlacementKind.Cpu => "0",
@@ -77,7 +98,7 @@ public static class EffectiveLaunchObservationParser
                 config.ContextSize.ToString(CultureInfo.InvariantCulture),
                 effective.GetValueOrDefault("context"), "props.context"),
             Field("gpu_layers", placement?.CanonicalValue, renderedLayers,
-                effective.GetValueOrDefault("gpu_layers"), "props.gpu_layers"),
+                effective.GetValueOrDefault("gpu_layers"), gpuEvidenceId),
             Field("fit", placement?.Kind == GpuPlacementKind.Auto ? "on" : "off",
                 placement?.Kind == GpuPlacementKind.Auto ? "on" : "off",
                 effective.GetValueOrDefault("fit"), "props.fit"),
@@ -97,6 +118,7 @@ public static class EffectiveLaunchObservationParser
             && contextKnown
             && placementKnown
             && slotsKnown
+            && (!config.EnableRuntimePropertiesEndpoint || HasProcessEvidence(process))
             && fields.All(field => field.Field is not ("fit_target" or "fit_minimum_context")
                 || field.EffectiveValue is not null || field.PlannedValue is null);
 
@@ -109,7 +131,10 @@ public static class EffectiveLaunchObservationParser
             config.RuntimeFitMinimumContext,
             fields,
             fields.Select(field => field.EvidenceId).ToArray(),
-            auditable);
+            auditable)
+        {
+            Process = process
+        };
 
         AdaptiveFieldObservation Field(
             string name,
@@ -139,5 +164,17 @@ public static class EffectiveLaunchObservationParser
                 }
             }
         }
+
+        static bool HasProcessEvidence(RuntimeLaunchProcessEvidence? value) =>
+            value is { ProcessId: > 0 }
+            && !string.IsNullOrWhiteSpace(value.ExecutablePath)
+            && value.Arguments is { Count: > 0 };
+
+        string? placementValue(int usedLayers, int? totalLayers) =>
+            placement?.Kind == GpuPlacementKind.All
+                && totalLayers is int total
+                && usedLayers == total
+                ? "all"
+                : usedLayers.ToString(CultureInfo.InvariantCulture);
     }
 }

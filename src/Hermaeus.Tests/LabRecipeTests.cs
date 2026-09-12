@@ -103,6 +103,33 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public void Engine_recipe_rewrites_typed_gpu_placement_for_each_candidate()
+    {
+        var source = Server();
+        source.GpuLayers = 999;
+        source.GpuPlacement = GpuPlacementIntent.Exact(999);
+
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.EngineProfile, source, []);
+        var identities = plan.Candidates
+            .Prepend(plan.Baseline)
+            .Select(ConfigurationIdentityFactory.Create)
+            .Select(identity => identity.StableId)
+            .ToArray();
+
+        Assert.Equal(identities.Length, identities.Distinct(StringComparer.Ordinal).Count());
+        Assert.DoesNotContain(plan.Candidates, candidate => candidate.GpuPlacement?.CanonicalValue == "exact:999");
+        Assert.Contains(plan.Candidates, candidate => candidate.GpuPlacement?.Kind == GpuPlacementKind.Cpu);
+        Assert.Contains(plan.Candidates, candidate => candidate.GpuPlacement?.Kind == GpuPlacementKind.All);
+
+        foreach (var candidate in plan.Candidates)
+        {
+            var isolated = LabConfigurationMapper.Apply(source, candidate, 39202);
+            Assert.True(isolated.EnableRuntimePropertiesEndpoint);
+            Assert.Equal(candidate.GpuPlacement?.LegacyGpuLayers, isolated.GpuLayers);
+        }
+    }
+
+    [Fact]
     public void Isolated_lab_mapping_preserves_launch_capability_facts()
     {
         var source = Server();
@@ -312,6 +339,22 @@ public sealed class LabRecipeTests
         Assert.Equal(plan.Candidates.Count + 1, fixture.Host.StartedConfigurations.Count);
         Assert.Equal(plan.Candidates.Count + 1, fixture.Host.Sessions.Count(session => session.StopCount == 1));
         Assert.Equal((plan.Candidates.Count + 1) * 3, fixture.Workload.CallCount);
+    }
+
+    [Fact]
+    public async Task Missing_effective_launch_evidence_is_inconclusive_and_cannot_be_applied()
+    {
+        using var fixture = new RecipeFixture();
+        fixture.Host.OmitEffectiveLaunch = true;
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, fixture.Source, []);
+
+        var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities([]), "controlled prompt");
+        var review = fixture.Experiments.CreateApplyReview(run.Id, plan.Candidates[0].Id);
+
+        Assert.Equal(LabRunStatus.Inconclusive, run.Status);
+        Assert.All(run.Comparisons, comparison => Assert.False(comparison.CanShowHeadlineDelta));
+        Assert.False(review.CanApply);
+        Assert.Contains("completed Lab run", review.RefusalReason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -538,18 +581,27 @@ public sealed class LabRecipeTests
                     Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
                     AdaptiveEvidenceState.Proven, "test.props.slots")
             ],
-            ["test.props"], true);
+            ["test.props"], true)
+        {
+            Process = new RuntimeLaunchProcessEvidence(
+                string.Equals(configuration.Id, "baseline", StringComparison.Ordinal) ? 1001 : 1002,
+                DateTime.UnixEpoch,
+                "/runtime/llama-server",
+                ["--ctx-size", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), "--n-gpu-layers", gpuLayers])
+        };
     }
 
     private sealed class FakeHost : ILabRuntimeHost
     {
         public List<string> StartedConfigurations { get; } = [];
         public List<FakeSession> Sessions { get; } = [];
+        public bool OmitEffectiveLaunch { get; set; }
         public Task<ILabRuntimeSession> StartAsync(string runId, ServerConfig source, LabConfiguration configuration, CancellationToken ct = default)
         {
             StartedConfigurations.Add(configuration.Id);
             var session = new FakeSession(50000 + Sessions.Count, 100 + Sessions.Count);
-            session.EffectiveLaunch = EffectiveLaunch(configuration);
+            if (!OmitEffectiveLaunch)
+                session.EffectiveLaunch = EffectiveLaunch(configuration);
             Sessions.Add(session);
             return Task.FromResult<ILabRuntimeSession>(session);
         }

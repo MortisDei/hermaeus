@@ -381,9 +381,10 @@ action. When a run ends, **See the changes** opens the verified file ledger and
 **Open run artifacts** opens the persisted task state, transcript, trace, and
 log folder when it exists. **New task** clears the current composer, response,
 draft, selected file, and task-scoped evidence without deleting the old task.
-Workspace editing uses a local Monaco host when available and a native
-AvaloniaEdit fallback; both remain presentation only and all writes still use
-the normal prepared mutation and approval path.
+Workspace editing uses a local Monaco host when available and a bounded,
+functional AvaloniaEdit fallback when Monaco is unavailable or fails to become
+ready. Both remain presentation only and all writes still use the normal
+prepared mutation and approval path.
 Starting another top-level task is disabled while one is open. An
 orchestration parent cannot be finished or dismissed while a child is pending
 or running. If startup finds that inconsistent state, it marks the parent
@@ -463,13 +464,19 @@ The run state names isolation and comparison refusals. Missing counters remain
 missing. A comparison cannot show a headline delta when runtime, model,
 hardware, or configuration fingerprints differ, and a deterministic output
 difference fails correctness regardless of speed.
-The isolated runtime also reports effective context, GPU placement, and slots
-from its structured properties endpoint. Those values must be auditable and
-match the reviewed baseline or candidate before that comparison is controlled;
-Auto placement additionally requires effective fit evidence. Unknown effective
-state leaves Apply unavailable. After confirmation, Lab reads the live
-Services projection back after saving so a successful Apply means the reviewed
-fields are visible in settings, not merely that a save call returned.
+The isolated runtime also reports effective context and slots from its
+structured properties endpoint, including the nested shape used by current
+b10930 runtimes. GPU placement comes from the owned process's startup receipt,
+which explicitly reports the offloaded layer count. Each effective receipt is
+associated with the runtime PID, redacted exact argv, executable path, and
+bounded startup evidence. Those values must be auditable and match the
+reviewed baseline or candidate before that comparison is controlled; Auto
+placement additionally requires effective fit evidence. If effective evidence
+is missing, lacks its process association, or mismatches, the run is
+**Inconclusive**, not successful, and Apply remains unavailable. After
+confirmation, Lab reads the live Services
+projection back after saving so a successful Apply means the reviewed fields
+are visible in settings, not merely that a save call returned.
 
 On **Lab > Evidence**, an empty pane says whether no evidence has been captured
 yet or whether the current filters exclude existing records.

@@ -10,6 +10,7 @@ public enum LabRunStatus
     Running,
     Succeeded,
     PartiallySucceeded,
+    Inconclusive,
     Cancelled,
     Failed
 }

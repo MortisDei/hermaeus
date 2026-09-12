@@ -25,6 +25,14 @@ individual gates pass. Expert prefetch/cache remains a watch. No new recipe is
 required merely to fill a catalogue row. Failed capability or absent hardware
 is a legitimate descope result.
 
+The effective-launch boundary is now explicit in the production path. Lab
+enables a transient local properties endpoint for each owned runtime, retains
+the PID and redacted argv, reads current nested context and slot fields, and
+associates GPU-layer placement with the runtime's bounded startup offload line.
+Missing or invalid process association, or missing or mismatched effective
+fields, finish the workload as `Inconclusive`, which cannot produce a
+recommendation or Apply review.
+
 ## 6.2 Discovery and capability state
 
 **Problem:** the Experiment view presents manual candidate fields, frozen JSON,

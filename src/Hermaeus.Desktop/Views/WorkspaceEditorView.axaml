@@ -10,7 +10,8 @@
         <Border Grid.Row="1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 BorderThickness="1" CornerRadius="6"
                 Background="{DynamicResource SubtleFillColorSecondaryBrush}">
-            <Grid x:Name="EditorHost" MinHeight="260" />
+            <Grid x:Name="EditorHost" MinHeight="260"
+                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
         </Border>
     </Grid>
 </UserControl>

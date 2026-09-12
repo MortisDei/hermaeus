@@ -88,14 +88,15 @@ public partial class WorkspaceEditorView : UserControl
             ShowLineNumbers = true,
             FontSize = 12,
             Background = Brushes.Transparent,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch,
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
             Padding = new Thickness(8),
             MinHeight = 260
         };
         _fallbackEditor.TextChanged += OnFallbackTextChanged;
-        EditorHost.Children.Add(_fallbackEditor);
-        UpdateFallbackHighlighting();
+        AttachFallbackEditor();
     }
 
     private void OnFallbackTextChanged(object? sender, EventArgs e)
@@ -352,7 +353,7 @@ public partial class WorkspaceEditorView : UserControl
         }
 
         EditorHost.Children.Clear();
-        EditorHost.Children.Add(_fallbackEditor);
+        AttachFallbackEditor();
         EditorStatusText.Text = status;
     }
 
@@ -377,8 +378,26 @@ public partial class WorkspaceEditorView : UserControl
         }
 
         EditorHost.Children.Clear();
-        EditorHost.Children.Add(_fallbackEditor);
+        AttachFallbackEditor();
         EditorStatusText.Text = "AvaloniaEdit fallback: editor closed.";
+    }
+
+    private void AttachFallbackEditor()
+    {
+        if (EditorHost.Children.Count != 1 || !ReferenceEquals(EditorHost.Children[0], _fallbackEditor))
+        {
+            EditorHost.Children.Clear();
+            EditorHost.Children.Add(_fallbackEditor);
+        }
+
+        UpdateFallbackHighlighting();
+        var value = Text ?? string.Empty;
+        if (_fallbackEditor.Text == value)
+            return;
+
+        _suppressTextChanged = true;
+        _fallbackEditor.Text = value;
+        _suppressTextChanged = false;
     }
 
     private static async Task DisposeWebViewAsync(NativeWebView webView)

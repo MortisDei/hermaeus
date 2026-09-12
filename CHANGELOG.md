@@ -13,6 +13,14 @@ limit.
 
 ### Changed
 
+- Lab isolated launches now capture a redacted PID and exact argv with bounded
+  startup evidence, parse current b10930 nested `/props` context/slot fields,
+  and parse the runtime's explicit offloaded-layer receipt. Stale typed GPU
+  placement can no longer collapse engine candidates, and missing or mismatched
+  effective evidence, including missing process association, finishes as
+  Inconclusive with no recommendation or Apply.
+  Workspace now bounds the editor host and reattaches a functional AvaloniaEdit
+  fallback with the current document when local Monaco is unavailable.
 - Shared application lifecycle now owns startup, recovery, and bounded shutdown
   across Desktop, Local API, and the R33 headless driver. Partial startup can
   retry, shutdown drains owners in reverse registration order, and shutdown

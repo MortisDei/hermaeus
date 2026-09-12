@@ -147,6 +147,12 @@ On 2026-09-12 the bounded editor path was implemented in
   filesystem, process, navigation, or application command surface.
 - The bundle and bridge contract are covered by `R33UxAndPetTests`, and the
   solution build verifies that the local assets are present in Desktop output.
+- The continuation bounds the editor host inside the Agent stack, reattaches
+  AvaloniaEdit after a Monaco failure or visual-tree detach, reapplies the
+  current document text, and keeps the fallback editor stretched inside the
+  bounded host. This repairs the same unbounded-measure failure class recorded
+  in `MarkdownViewer.cs` without treating static layout proof as native GUI
+  proof.
 
 This earns a local implementation boundary, not the full Monaco ship gate.
 The owner must still test WebView2 on Windows and the selected WebKitGTK/WPE

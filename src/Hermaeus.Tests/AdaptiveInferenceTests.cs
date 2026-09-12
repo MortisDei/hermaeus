@@ -255,6 +255,51 @@ public sealed class AdaptiveInferenceTests
     }
 
     [Fact]
+    public void Effective_parser_reads_b10930_nested_props_and_process_bound_gpu_receipt()
+    {
+        var config = Config(GpuPlacementIntent.Exact(17), new AdaptiveInferenceEnvelope
+        {
+            Mode = AdaptiveInferenceMode.AdaptAtLaunch
+        });
+        var process = new RuntimeLaunchProcessEvidence(
+            17768,
+            DateTime.UnixEpoch,
+            "/runtime/llama-server",
+            ["--n-gpu-layers", "17"])
+        {
+            StartupEvidence = ["load_tensors: offloaded 17/36 layers to GPU"]
+        };
+
+        var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
+            """{"default_generation_settings":{"params":{"n_ctx":4096}},"total_slots":1}""",
+            process,
+            "load_tensors: offloaded 17/36 layers to GPU");
+
+        Assert.True(observation.IsAuditable);
+        Assert.Equal(process, observation.Process);
+        Assert.Equal("4096", Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+        Assert.Equal("17", Assert.Single(observation.Fields, field => field.Field == "gpu_layers").EffectiveValue);
+        Assert.Equal("1", Assert.Single(observation.Fields, field => field.Field == "slots").EffectiveValue);
+        Assert.Contains("runtime.log.gpu_layers", observation.EvidenceIds);
+    }
+
+    [Fact]
+    public void Lab_effective_parser_requires_process_association_for_auditable_receipt()
+    {
+        var config = Config(GpuPlacementIntent.Exact(17), new AdaptiveInferenceEnvelope
+        {
+            Mode = AdaptiveInferenceMode.AdaptAtLaunch
+        });
+        config.EnableRuntimePropertiesEndpoint = true;
+
+        var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
+            "{\"ctx_size\":4096,\"n_gpu_layers\":17,\"fit\":false,\"parallel\":1}");
+
+        Assert.True(observation.PropsProbeSucceeded);
+        Assert.False(observation.IsAuditable);
+    }
+
+    [Fact]
     public void Effective_parser_marks_malformed_or_non_object_props_unknown()
     {
         var config = Config(GpuPlacementIntent.Auto(), new AdaptiveInferenceEnvelope { Mode = AdaptiveInferenceMode.AdaptAtLaunch });

@@ -227,6 +227,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
     private static string FormatStatus(LabRunStatus status) => status switch
     {
         LabRunStatus.PartiallySucceeded => "Partially succeeded",
+        LabRunStatus.Inconclusive => "Inconclusive",
         _ => status.ToString()
     };
 
@@ -266,11 +267,15 @@ public partial class ExperienceRowViewModel : ViewModelBase
             if (!summary.EffectiveLaunches.TryGetValue(configuration.Id, out var observation))
                 return $"{configuration.Id}: Unknown";
             var state = observation.IsAuditable ? "auditable" : "not auditable";
-            return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}";
+            return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
         }));
 
         static string Field(EffectiveLaunchObservation observation, string name) =>
             observation.Fields.FirstOrDefault(field => field.Field == name)?.EffectiveValue ?? "Unknown";
+
+        static string Process(EffectiveLaunchObservation observation) => observation.Process is { } process
+            ? $"PID {process.ProcessId}, argv {string.Join(" ", process.Arguments)}"
+            : "PID Unknown, argv Unknown";
     }
 
     private static string FormatComparison(LabComparison comparison,
@@ -383,11 +388,15 @@ public sealed class LabResultSummaryViewModel
             if (!summary.EffectiveLaunches.TryGetValue(configuration.Id, out var observation))
                 return $"{configuration.Id}: Unknown";
             var state = observation.IsAuditable ? "auditable" : "not auditable";
-            return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}";
+            return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
         }));
 
         static string Field(EffectiveLaunchObservation observation, string name) =>
             observation.Fields.FirstOrDefault(field => field.Field == name)?.EffectiveValue ?? "Unknown";
+
+        static string Process(EffectiveLaunchObservation observation) => observation.Process is { } process
+            ? $"PID {process.ProcessId}, argv {string.Join(" ", process.Arguments)}"
+            : "PID Unknown, argv Unknown";
     }
 
     private static string? ReadModelIdentityLabel(EmpiricalExperience experience)
@@ -438,6 +447,7 @@ public sealed class LabResultSummaryViewModel
     private static string FormatStatus(LabRunStatus status) => status switch
     {
         LabRunStatus.PartiallySucceeded => "Partially succeeded",
+        LabRunStatus.Inconclusive => "Inconclusive",
         _ => status.ToString()
     };
 
@@ -671,6 +681,8 @@ public partial class LabViewModel : ViewModelBase
                 return "Inspect the failure detail and correct the runtime or model before trying again.";
             if (RunStatus == "Cancelled")
                 return "The run was cancelled. Review retained evidence or start a new isolated run.";
+            if (RunStatus == "Inconclusive")
+                return "The run completed, but effective runtime configuration was not verified. Review the evidence and rerun after the runtime exposes an auditable receipt.";
             if (CanReviewCurrentRun)
                 return "A correctness-eligible candidate is ready. Review its exact fields before any Apply.";
             if (RunStatus is "Succeeded" or "PartiallySucceeded")
@@ -959,9 +971,12 @@ public partial class LabViewModel : ViewModelBase
             _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt, _recipeCts.Token);
             ShowCompletedRun(_currentRun);
             TradeoffSummary = BuildTradeoffSummary(_currentRun);
-            var failureMessage = _currentRun.Status == LabRunStatus.Failed
-                ? $"Lab recipe failed: {_currentRun.Failures.FirstOrDefault() ?? "The Lab run failed without a detail."}"
-                : null;
+            var failureMessage = _currentRun.Status switch
+            {
+                LabRunStatus.Failed => $"Lab recipe failed: {_currentRun.Failures.FirstOrDefault() ?? "The Lab run failed without a detail."}",
+                LabRunStatus.Inconclusive => "Lab recipe completed, but effective runtime configuration was not verified. No recommendation or Apply is available.",
+                _ => null
+            };
             await RefreshEvidenceCoreAsync(failureMessage);
             PublishLongOperationCompletion();
         }
@@ -1365,11 +1380,15 @@ public partial class LabViewModel : ViewModelBase
             if (!run.EffectiveLaunches.TryGetValue(configuration.Id, out var observation))
                 return $"{configuration.Id}=Unknown";
             var state = observation.IsAuditable ? "auditable" : "not auditable";
-            return $"{configuration.Id}={state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}";
+            return $"{configuration.Id}={state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
         }));
 
         static string Field(EffectiveLaunchObservation observation, string name) =>
             observation.Fields.FirstOrDefault(field => field.Field == name)?.EffectiveValue ?? "Unknown";
+
+        static string Process(EffectiveLaunchObservation observation) => observation.Process is { } process
+            ? $"PID {process.ProcessId}, argv {string.Join(" ", process.Arguments)}"
+            : "PID Unknown, argv Unknown";
     }
 
     private void PublishLongOperationCompletion()

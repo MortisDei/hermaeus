@@ -270,7 +270,8 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   interruption recovery, and complete runs with reservations. Changes
   distinguishes pending review from applied/readback-verified and conflicted
   files. Workspace includes a bounded local Monaco editor when its native host
-  is available, with AvaloniaEdit fallback, and terminal runs can open their
+  is available, with a functional AvaloniaEdit fallback when Monaco is not
+  ready, and terminal runs can open their
   persisted state/transcript/trace/log folder. New Task clears task-scoped
   composer, response, draft, selection, and evidence projections without
   deleting the persisted task.
@@ -361,10 +362,15 @@ actions visible. Recipe prompt detail and evidence filters are disclosed until
 needed, and action groups wrap on narrow windows. The selected runtime's
 effective state remains distinct from a recommendation or saved configuration.
 Each baseline-to-candidate comparison also retains the isolated runtime's
-effective launch observation. Context, GPU placement, and slot count must be
-auditable and match the reviewed configuration; Auto additionally requires
-auditable fit evidence. Missing or mismatched effective state remains Unknown
-and blocks a controlled headline or Apply. After Apply, the live Services
+effective launch observation. Context and slots come from the structured
+properties receipt, while GPU placement comes from a PID-associated startup
+receipt that reports the offloaded layer count. The effective receipt keeps
+the PID, redacted exact argv, executable path, and bounded startup evidence
+with those fields. Context, GPU placement, and slot count must be auditable and
+match the reviewed configuration; Auto additionally requires auditable fit
+evidence. Missing or invalid process association, or missing or mismatched
+effective state, makes the run Inconclusive and blocks a controlled headline or
+Apply. After Apply, the live Services
 projection is read back to verify that the reviewed fields were actually
 persisted.
 

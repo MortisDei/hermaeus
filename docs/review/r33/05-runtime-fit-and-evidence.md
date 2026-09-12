@@ -145,6 +145,15 @@ is absent; when enabled, unwrap `msg` only through a build-compatible adapter.
 No prompt-logging/debug flag is enabled to obtain evidence. Raw model content
 or secrets must not leak into the supplemental store.
 
+The current b10930 Lab path uses a bounded plain startup receipt in addition to
+`/props`: b10930 reports context under
+`default_generation_settings.params.n_ctx` and slots as `total_slots`, but its
+`/props` response does not expose the effective GPU-layer count. Its startup
+line `offloaded N/M layers to GPU` is therefore parsed only when associated
+with the managed process PID, redacted argv, and executable identity. This is
+runtime-specific evidence for the bounded Lab contract, not a claim that all
+llama.cpp builds expose the same schema.
+
 **Verification:** b10821 unavailable, supported fixture available, mixed/plain
 streams, unknown fields/levels, partial/oversized line, log flooding, parser
 failure, stderr process crash, missing counters, redaction, restart retention,

@@ -227,6 +227,15 @@ public sealed class ServerProcessManager : IDisposable
             if (!_process.Start())
                 throw new InvalidOperationException($"Failed to start '{cfg.ExecutablePath}'");
 
+            var evidenceRedactor = _redactor ?? new RedactionService();
+            var processEvidence = new RuntimeLaunchProcessEvidence(
+                _process.Id,
+                _process.StartTime.ToUniversalTime(),
+                cfg.ExecutablePath,
+                _process.StartInfo.ArgumentList
+                    .Select(evidenceRedactor.Redact)
+                    .ToArray());
+
             if (OperatingSystem.IsWindows() && !_jobObject.TryAssign(_process))
                 Emit("[hermaeus] Warning: could not attach process to the app's job object; it may survive an abnormal app exit.");
 
@@ -244,7 +253,9 @@ public sealed class ServerProcessManager : IDisposable
 
             var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(cfg.ExecutablePath, runtime.VersionOrHelpText, ct);
             var props = await ReadPropsAsync(cfg.Port, ct);
-            var effective = EffectiveLaunchObservationParser.Parse(cfg, runtimeIdentity, props);
+            var evidence = processEvidence with { StartupEvidence = CaptureEffectiveRuntimeEvidence() };
+            var effective = EffectiveLaunchObservationParser.Parse(cfg, runtimeIdentity, props, evidence,
+                string.Join('\n', _logRing));
             SetStatus(ServerStatus.Running);
             Emit($"[hermaeus] Server ready on port {cfg.Port}.");
             SetLaunchResult(ServerLaunchFailureKind.None, effective);
@@ -659,6 +670,13 @@ public sealed class ServerProcessManager : IDisposable
         return (null, null);
     }
 
+    private IReadOnlyList<string> CaptureEffectiveRuntimeEvidence() =>
+        _logRing
+            .Where(line => line.Contains("offloaded ", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("load_model: initializing", StringComparison.OrdinalIgnoreCase))
+            .TakeLast(8)
+            .ToArray();
+
     public static string ParseLlamaBuildLabel(string text)
     {
         var match = Regex.Match(text ?? string.Empty, @"(?:^|[^a-zA-Z0-9])b(?<build>\d{3,6})(?:[^a-zA-Z0-9]|$)", RegexOptions.IgnoreCase);
@@ -741,6 +759,7 @@ public sealed class ServerProcessManager : IDisposable
                 parts.Add(cfg.RuntimeFitMinimumContext.Value.ToString(CultureInfo.InvariantCulture));
             }
         }
+
         else
         {
             parts.Add("--fit");
@@ -754,6 +773,10 @@ public sealed class ServerProcessManager : IDisposable
                 _ => throw new InvalidOperationException("Unknown GPU placement kind.")
             });
         }
+
+        if (cfg.EnableRuntimePropertiesEndpoint
+            && !extraArgs.Any(argument => string.Equals(argument, "--props", StringComparison.OrdinalIgnoreCase)))
+            parts.Add("--props");
 
         // UseProjector is the authoritative launch gate for the configured
         // projector. ExtraArgs is an escape hatch for other runtime flags, but
@@ -1105,6 +1128,7 @@ public sealed class ServerProcessManager : IDisposable
             ContextSize    = cfg.ContextSize,
             GpuLayers      = cfg.GpuLayers,
             GpuPlacement   = cfg.GpuPlacement,
+            EnableRuntimePropertiesEndpoint = cfg.EnableRuntimePropertiesEndpoint,
             Threads        = cfg.Threads,
             PromptThreads  = cfg.PromptThreads,
             Slots          = cfg.Slots,

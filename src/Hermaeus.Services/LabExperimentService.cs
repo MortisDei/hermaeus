@@ -202,6 +202,7 @@ public static class LabConfigurationMapper
         ContextSize = configuration.ContextSize,
         GpuLayers = configuration.GpuLayers,
         GpuPlacement = configuration.GpuPlacement,
+        EnableRuntimePropertiesEndpoint = true,
         Threads = configuration.Threads,
         PromptThreads = configuration.PromptThreads,
         Slots = configuration.Slots,
@@ -486,6 +487,12 @@ public static class LabEffectiveConfigurationValidator
                 continue;
             }
 
+            if (!HasProcessEvidence(observation.Process))
+            {
+                mismatches.Add($"effective:{configuration.Id}:process");
+                continue;
+            }
+
             var fields = observation.Fields
                 .Where(field => !string.IsNullOrWhiteSpace(field.Field))
                 .GroupBy(field => field.Field, StringComparer.Ordinal)
@@ -501,6 +508,11 @@ public static class LabEffectiveConfigurationValidator
 
         return mismatches;
     }
+
+    private static bool HasProcessEvidence(RuntimeLaunchProcessEvidence? value) =>
+        value is { ProcessId: > 0 }
+        && !string.IsNullOrWhiteSpace(value.ExecutablePath)
+        && value.Arguments is { Count: > 0 };
 
     private static void RequireInteger(
         string configurationId,
@@ -769,7 +781,10 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         var comparisons = definition.Candidates.Select(candidate => LabComparisonEngine.Compare(
             definition, candidate, observations, outputs, state.Snapshot.EffectiveLaunches)).ToArray();
         var boundedFailures = (failures ?? []).Take(32).Select(value => value[..Math.Min(value.Length, 512)]).ToArray();
-        var status = boundedFailures.Length == 0 ? LabRunStatus.Succeeded
+        var effectiveMismatches = LabEffectiveConfigurationValidator.FindMismatches(
+            definition, state.Snapshot.EffectiveLaunches);
+        var status = boundedFailures.Length == 0 && effectiveMismatches.Count > 0 ? LabRunStatus.Inconclusive
+            : boundedFailures.Length == 0 ? LabRunStatus.Succeeded
             : observations.Count > 0 ? LabRunStatus.PartiallySucceeded : LabRunStatus.Failed;
         state.Snapshot = state.Snapshot with
         {
@@ -778,8 +793,13 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             Comparisons = comparisons, Failures = boundedFailures
         };
         await DisposeSessionAsync(state, ct);
-        var outcome = status == LabRunStatus.Succeeded ? NormalizedOutcome.Succeeded
-            : status == LabRunStatus.PartiallySucceeded ? NormalizedOutcome.PartiallySucceeded : NormalizedOutcome.Failed;
+        var outcome = status switch
+        {
+            LabRunStatus.Succeeded => NormalizedOutcome.Succeeded,
+            LabRunStatus.PartiallySucceeded => NormalizedOutcome.PartiallySucceeded,
+            LabRunStatus.Inconclusive => NormalizedOutcome.Unknown,
+            _ => NormalizedOutcome.Failed
+        };
         try
         {
             var evidence = await PersistCompletionAsync(state.Snapshot, outcome, ct);
@@ -795,7 +815,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     public async Task<LabRunSnapshot> CancelAsync(string runId, CancellationToken ct = default)
     {
         var state = GetActive(runId);
-        if (state.Snapshot.Status is LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded or LabRunStatus.Cancelled or LabRunStatus.Failed)
+        if (state.Snapshot.Status is LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded or LabRunStatus.Inconclusive or LabRunStatus.Cancelled or LabRunStatus.Failed)
             return state.Snapshot;
         await DisposeSessionAsync(state, ct);
         var status = state.Snapshot.Observations.Count == 0 ? LabRunStatus.Cancelled : LabRunStatus.PartiallySucceeded;
@@ -830,10 +850,10 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             [run.Definition.Baseline.Id, candidate.Id]).Count > 0
             ? "Effective runtime configuration evidence is missing or does not match the reviewed Lab configuration."
             : null;
-        var refusal = run.Status is not (LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded)
-            ? "Only a completed Lab run can produce an Apply review."
-            : run.Definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly
-                ? "Speed-only experiments cannot produce an Apply recommendation."
+        var refusal = run.Definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly
+            ? "Speed-only experiments cannot produce an Apply recommendation."
+            : run.Status is not (LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded)
+                ? "Only a completed Lab run can produce an Apply review."
             : effectiveRefusal is not null
                 ? effectiveRefusal
             : comparison is null || !comparison.CanShowHeadlineDelta

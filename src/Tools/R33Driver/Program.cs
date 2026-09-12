@@ -487,7 +487,14 @@ internal static class R33Driver
                     Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
                     AdaptiveEvidenceState.Proven, "r33-driver.props.slots")
             ],
-            ["r33-driver.props"], true);
+            ["r33-driver.props"], true)
+        {
+            Process = new RuntimeLaunchProcessEvidence(
+                Environment.ProcessId,
+                DateTime.UtcNow,
+                Environment.ProcessPath ?? "r33-driver",
+                ["--ctx-size", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), "--n-gpu-layers", gpuLayers])
+        };
     }
 
     private static string RequiredPath(string[] args, string name, bool file)

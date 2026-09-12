@@ -104,6 +104,24 @@ public sealed record AdaptiveFieldObservation(
     string EvidenceId);
 
 /// <summary>
+/// Process identity and rendered argv captured for one managed runtime launch.
+/// The argv is launch evidence, not proof that the runtime accepted every
+/// option. Effective scalar fields remain separately audited from the runtime.
+/// </summary>
+public sealed record RuntimeLaunchProcessEvidence(
+    int ProcessId,
+    DateTime StartedAtUtc,
+    string ExecutablePath,
+    IReadOnlyList<string> Arguments)
+{
+    /// <summary>
+    /// Bounded startup lines that identify effective runtime state for this
+    /// process. These are evidence, not a replacement for the exact argv.
+    /// </summary>
+    public IReadOnlyList<string> StartupEvidence { get; init; } = [];
+}
+
+/// <summary>
 /// Runtime evidence for a managed launch. A healthy endpoint is not itself
 /// placement evidence, so an unrecognised or absent field remains Unknown.
 /// </summary>
@@ -116,4 +134,7 @@ public sealed record EffectiveLaunchObservation(
     int? FitMinimumContext,
     IReadOnlyList<AdaptiveFieldObservation> Fields,
     IReadOnlyList<string> EvidenceIds,
-    bool IsAuditable);
+    bool IsAuditable)
+{
+    public RuntimeLaunchProcessEvidence? Process { get; init; }
+}

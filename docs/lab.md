@@ -48,11 +48,14 @@ after PID, start time, and executable content all match; otherwise cleanup
 remains `Unknown` and the process is not touched.
 
 The Experiment card reports the execution outcome separately from source
-restore. A run can be `Succeeded`, `PartiallySucceeded`, `Cancelled`, or
-`Failed` while source restoration is still `Pending`, `Restored`,
-`Blocked`, or `Failed`. A failed or blocked restore is surfaced as an
-attention state and leaves the source stopped for owner review; it does not
-rewrite the execution result or silently restart a changed configuration.
+restore. A run can be `Succeeded`, `PartiallySucceeded`, `Inconclusive`,
+`Cancelled`, or `Failed` while source restoration is still `Pending`,
+`Restored`, `Blocked`, or `Failed`. `Inconclusive` means the workload completed
+but one or more owned runtimes did not provide auditable effective launch
+evidence. It cannot produce a recommendation or Apply review. A failed or
+blocked restore is surfaced as an attention state and leaves the source
+stopped for owner review; it does not rewrite the execution result or silently
+restart a changed configuration.
 
 Observations keep value and missing reason separate, so an absent counter never
 becomes zero. Every observation names unit, source, evidence origin, trust,
@@ -62,13 +65,20 @@ delta when any remain. Timing metrics show median, observed range, repetition
 count, and source. There is no universal score or statistical-significance
 claim.
 Each comparison also carries the isolated runtime's effective launch
-observation from the structured properties endpoint. Context size, GPU
-placement, and slots must be proven and match the reviewed configuration;
-`Auto` additionally needs a proven fit result. Missing, ambiguous, or
-mismatched fields remain `Unknown` and prevent a controlled comparison or
-Apply recommendation. An unreviewed sibling candidate does not invalidate the
-candidate currently being compared, but it cannot receive an Apply review
-until its own run evidence exists.
+observation. Lab enables the transient local properties endpoint for the owned
+runtime. Context and slots are read from the structured receipt, including the
+nested `default_generation_settings.params.n_ctx` and `total_slots` shape used
+by current b10930 runtimes. GPU placement is read from the PID-associated
+startup receipt, for example `offloaded 17/36 layers to GPU`; a command-line
+argument or healthy endpoint alone is not placement proof. The receipt keeps
+the PID, redacted exact argv, executable path, and bounded startup evidence
+together with the effective fields. Context size, GPU placement, and slots
+must be proven and match the reviewed configuration; `Auto` additionally needs
+a proven fit result. Missing, invalid, or unassociated process evidence, or
+ambiguous or mismatched fields, make the run `Inconclusive` and prevent a
+controlled comparison or Apply recommendation. An unreviewed sibling candidate
+does not invalidate the candidate currently being compared, but it cannot
+receive an Apply review until its own run evidence exists.
 
 Correctness compares token ids when both sides expose them and falls back to an
 exact UTF-8 output hash at a weaker declared level. It reports `Equivalent`,
@@ -92,7 +102,7 @@ and stops the isolated runtime. It does not invent a workload or pretend that a
 candidate comparison was measured.
 
 **Apply to Services** is a separate review after a controlled, correctness-
-passing result. It shows every persisted field that would change and captures
+passing result with auditable effective launch evidence. It shows every persisted field that would change and captures
 the current server configuration plus runtime/model identity. Confirmation
 rechecks all three, clones `AppSettings`, and uses the normal settings save
 flow. The live Services projection is read back after save and a mismatch is
@@ -111,7 +121,9 @@ server. Every plan keeps the baseline, allows at most eight total launches, and
 changes one declared dimension:
 
 - GPU-layer placement uses CPU, partial where model block count is known, and
-  all-GPU candidates;
+  all-GPU candidates. Each candidate updates both the legacy layer value and
+  typed placement intent, so a stale typed setting cannot make every candidate
+  launch the same runtime configuration;
 - context uses adjacent values from Hermaeus's reviewed 2K to 128K ladder;
 - KV offers only `f16`, `q8_0`, or `q4_0` when the exact runtime advertised
   both the baseline and candidate representation. Any configuration with a

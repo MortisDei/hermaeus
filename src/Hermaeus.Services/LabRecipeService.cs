@@ -105,11 +105,31 @@ public static class LabRecipeCatalog
     {
         var layers = new List<int> { 0, -1 };
         if (gguf?.BlockCount is > 2) layers.Insert(1, gguf.BlockCount.Value / 2);
-        var candidates = layers.Distinct().Where(value => value != baseline.GpuLayers)
-            .Select((value, index) => baseline with { Id = $"gpu-{index + 1}", Label = value switch { 0 => "CPU", -1 => "All GPU layers", _ => $"{value} GPU layers" }, GpuLayers = value })
+        var baselinePlacement = ResolvePlacement(baseline);
+        var candidates = layers.Distinct()
+            .Where(value => !SamePlacement(value, baselinePlacement))
+            .Select((value, index) => baseline with
+            {
+                Id = $"gpu-{index + 1}",
+                Label = value switch { 0 => "CPU", -1 => "All GPU layers", _ => $"{value} GPU layers" },
+                GpuLayers = value,
+                GpuPlacement = GpuPlacementIntent.TryFromLegacy(value, out var placement, out _)
+                    ? placement : null
+            })
             .Take(3).ToArray();
         return Plan("engine-profile-v1", "GPU layer placement", LabRecipeKind.EngineProfile,
             CapabilityState.Available, "GPU layer placement is a first-class managed runtime setting.", baseline, candidates, []);
+
+        static GpuPlacementIntent? ResolvePlacement(LabConfiguration configuration) =>
+            configuration.GpuPlacement
+            ?? (GpuPlacementIntent.TryFromLegacy(configuration.GpuLayers, out var placement, out _)
+                ? placement : null);
+
+        static bool SamePlacement(int legacyValue, GpuPlacementIntent? baselinePlacement) =>
+            GpuPlacementIntent.TryFromLegacy(legacyValue, out var candidatePlacement, out _)
+            && candidatePlacement is not null
+            && baselinePlacement is not null
+            && candidatePlacement.CanonicalValue == baselinePlacement.CanonicalValue;
     }
 
     private static LabRecipePlan Context(LabConfiguration baseline)

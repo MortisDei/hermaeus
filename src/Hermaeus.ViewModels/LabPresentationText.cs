@@ -31,6 +31,7 @@ public static class LabPresentationText
         "Running" => "Running",
         "Succeeded" => "Completed",
         "PartiallySucceeded" => "Completed with reservations",
+        "Inconclusive" => "Completed, effective configuration unverified",
         "Cancelled" => "Cancelled",
         "Failed" => "Failed",
         _ => string.IsNullOrWhiteSpace(value) ? "No run" : value

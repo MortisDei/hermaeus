@@ -26,6 +26,7 @@ public sealed class R33UxAndPetTests
         Assert.Equal("Unavailable", LabPresentationText.CapabilityState(CapabilityState.Unavailable));
         Assert.Contains("current model or runtime", LabPresentationText.CapabilityHint(CapabilityState.Unavailable), StringComparison.Ordinal);
         Assert.Equal("Completed with reservations", LabPresentationText.RunStatus("PartiallySucceeded"));
+        Assert.Equal("Completed, effective configuration unverified", LabPresentationText.RunStatus("Inconclusive"));
 
         var local = new RagDataset { Name = "Notes" };
         var remote = new RagDataset { Name = "Web", Config = new RagDatasetConfig { EnableWebLoader = true } };
@@ -148,6 +149,16 @@ public sealed class R33UxAndPetTests
         Assert.Contains("3 seconds", source, StringComparison.Ordinal);
         Assert.Contains("new Uri(Path.GetFullPath(indexPath))", source, StringComparison.Ordinal);
         Assert.Contains("layout()", source, StringComparison.Ordinal);
+        Assert.Contains("AttachFallbackEditor", source, StringComparison.Ordinal);
         Assert.Contains("AvaloniaEdit fallback", source, StringComparison.Ordinal);
+
+        var editorHost = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "Hermaeus.Desktop",
+            "Views",
+            "AgentView.axaml"));
+        Assert.Contains("Height=\"320\"", editorHost, StringComparison.Ordinal);
+        Assert.Contains("MaxHeight=\"600\"", editorHost, StringComparison.Ordinal);
     }
 }
