@@ -231,6 +231,96 @@ public sealed class ServerProcessManagerTests
         Assert.Contains("4321", ex.Message);
     }
 
+    [Fact]
+    public async Task AutoTuneWithProbe_preserves_the_full_launch_configuration_for_each_candidate()
+    {
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        var projectorPath = temp.PathFor("mmproj.gguf");
+        var draftPath = temp.PathFor("draft.gguf");
+        File.WriteAllText(modelPath, "model");
+        File.WriteAllText(projectorPath, "projector");
+        File.WriteAllText(draftPath, "draft");
+        var envelope = new AdaptiveInferenceEnvelope
+        {
+            Mode = AdaptiveInferenceMode.AdaptAtLaunch,
+            MinimumContext = 2048,
+            MinimumGpuHeadroomBytes = 123456,
+            AllowGpuLayerReduction = true,
+            PreferredEvidenceAge = TimeSpan.FromDays(3)
+        };
+        var config = new ServerConfig
+        {
+            Name = "Test",
+            ExecutablePath = Environment.ProcessPath!,
+            ModelPath = modelPath,
+            Port = GetFreePort(),
+            ContextSize = 8192,
+            GpuLayers = 24,
+            GpuPlacement = GpuPlacementIntent.Exact(24),
+            Threads = 7,
+            PromptThreads = 5,
+            Slots = 2,
+            ExtraArgs = "--alias full-config",
+            MmprojPath = projectorPath,
+            UseProjector = true,
+            KvCacheType = "q8_0",
+            KvCacheTypeK = "q8_0",
+            KvCacheTypeV = "q8_0",
+            FlashAttention = "on",
+            ContextShift = true,
+            MemoryLock = true,
+            NoMemoryMap = true,
+            CpuMoeLayers = 4,
+            Speculative = new SpeculativeDecodingConfig
+            {
+                Types = ["draft-mtp"],
+                DraftModelPath = draftPath,
+                DraftGpuLayers = 3,
+                NMax = 8,
+                NMin = 2,
+                PMin = 0.25
+            },
+            AdaptiveEnvelope = envelope
+        };
+        var candidates = new List<ServerConfig>();
+
+        var result = await ServerProcessManager.AutoTuneWithProbeAsync(
+            config,
+            progress: null,
+            ct: CancellationToken.None,
+            portOwnerLookup: null,
+            ggufInfo: null,
+            hardware: null,
+            probeCandidate: (candidate, requestedLayers, _, _) =>
+            {
+                candidates.Add(candidate);
+                return Task.FromResult(candidates.Count == 1
+                    ? ProbeResult.Failed("controlled first-candidate failure")
+                    : ProbeResult.Ok(new ServerTuneResult(12, 24, candidate.Threads, "b-test", "controlled success")));
+            });
+
+        Assert.Equal(12, result.GpuLayers);
+        Assert.Equal(2, candidates.Count);
+        var probed = candidates[0];
+        Assert.Equal(config.PromptThreads, probed.PromptThreads);
+        Assert.Equal(config.Slots, probed.Slots);
+        Assert.Equal(config.ExtraArgs, probed.ExtraArgs);
+        Assert.Equal(config.MmprojPath, probed.MmprojPath);
+        Assert.True(probed.UseProjector);
+        Assert.Equal(config.KvCacheTypeK, probed.KvCacheTypeK);
+        Assert.Equal(config.KvCacheTypeV, probed.KvCacheTypeV);
+        Assert.Equal(config.FlashAttention, probed.FlashAttention);
+        Assert.True(probed.ContextShift);
+        Assert.True(probed.MemoryLock);
+        Assert.True(probed.NoMemoryMap);
+        Assert.Equal(config.CpuMoeLayers, probed.CpuMoeLayers);
+        Assert.Equal(config.Speculative!.DraftModelPath, probed.Speculative!.DraftModelPath);
+        Assert.Equal(config.Speculative.NMax, probed.Speculative.NMax);
+        Assert.Equal(config.AdaptiveEnvelope!.CanonicalValue, probed.AdaptiveEnvelope!.CanonicalValue);
+        Assert.Equal(8192, probed.ContextSize);
+    }
+
     private static CancellationTokenSource? GetMonitorCts(ServerProcessManager mgr) =>
         (CancellationTokenSource?)typeof(ServerProcessManager)
             .GetField("_monitorCts", BindingFlags.NonPublic | BindingFlags.Instance)!

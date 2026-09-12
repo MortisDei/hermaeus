@@ -717,10 +717,16 @@
                                             Content="Save Config"
                                             Padding="12,5" CornerRadius="6" FontSize="12" />
                                     <Button Command="{Binding AutoTuneCommand}"
+                                            IsVisible="{Binding !IsAutoTuning}"
                                             IsEnabled="{Binding CanEdit}"
                                             Content="Auto Tune"
                                             Padding="12,5" CornerRadius="6" FontSize="12"
                                             ToolTip.Tip="Probe llama.cpp auto-fit for this model/GPU and set the fitted GPU layer count." />
+                                    <Button Command="{Binding CancelAutoTuneCommand}"
+                                            IsVisible="{Binding IsAutoTuning}"
+                                            Content="Cancel Tune"
+                                            Padding="12,5" CornerRadius="6" FontSize="12"
+                                            ToolTip.Tip="Cancel the managed-runtime auto-tune operation and release its probe resources." />
                                 </StackPanel>
 
                                 <TextBlock IsVisible="{Binding HasUnsavedChanges}"

@@ -353,14 +353,49 @@ public sealed class ServerProcessManager : IDisposable
         ReleaseResourceAllocation();
     }
 
-    public static async Task<ServerTuneResult> AutoTuneAsync(
+    public static Task<ServerTuneResult> AutoTuneAsync(
         ServerConfig cfg,
         IProgress<string>? progress = null,
         CancellationToken ct = default,
         IPortOwnerLookup? portOwnerLookup = null,
         GgufModelInfo? ggufInfo = null,
         HardwareProfile? hardware = null)
+        => AutoTuneCoreAsync(
+            cfg,
+            progress,
+            ct,
+            portOwnerLookup,
+            ggufInfo,
+            hardware,
+            static (probe, requestedLayers, report, token) =>
+                TryProbeAsync(probe, requestedLayers, report, token));
+
+    /// <summary>
+    /// Runs the bounded tuner with a caller-owned probe operation. The desktop
+    /// Services operation supplies the admission-backed probe; the static
+    /// overload remains for pure compatibility tests and legacy callers that
+    /// explicitly opt into direct process probing.
+    /// </summary>
+    internal static Task<ServerTuneResult> AutoTuneWithProbeAsync(
+        ServerConfig cfg,
+        IProgress<string>? progress,
+        CancellationToken ct,
+        IPortOwnerLookup? portOwnerLookup,
+        GgufModelInfo? ggufInfo,
+        HardwareProfile? hardware,
+        Func<ServerConfig, int, IProgress<string>?, CancellationToken, Task<ProbeResult>> probeCandidate)
+        => AutoTuneCoreAsync(cfg, progress, ct, portOwnerLookup, ggufInfo, hardware, probeCandidate);
+
+    private static async Task<ServerTuneResult> AutoTuneCoreAsync(
+        ServerConfig cfg,
+        IProgress<string>? progress,
+        CancellationToken ct,
+        IPortOwnerLookup? portOwnerLookup,
+        GgufModelInfo? ggufInfo,
+        HardwareProfile? hardware,
+        Func<ServerConfig, int, IProgress<string>?, CancellationToken, Task<ProbeResult>> probeCandidate)
     {
+        ArgumentNullException.ThrowIfNull(probeCandidate);
         // NormalizeConfig already returns an isolated, fully populated copy.
         // Rebuilding a reduced config here silently dropped prompt threads,
         // KV precision, projector, adaptive bounds, speculative companions,
@@ -406,7 +441,7 @@ public sealed class ServerProcessManager : IDisposable
             progress?.Report($"[hermaeus] Auto-tune: configured context {baseConfig.ContextSize:N0} does not fit this GPU with this model; probing {tunedContext:N0} context with all layers first.");
             var contextProbe = BuildAutoTuneProbe(baseConfig, tunedContext, threads, GpuPlacementIntent.All());
 
-            var contextResult = await TryProbeAsync(contextProbe, 999, progress, ct);
+            var contextResult = await probeCandidate(contextProbe, 999, progress, ct);
             if (contextResult.Success)
                 return contextResult.TuneResult! with { TunedContextSize = tunedContext };
 
@@ -426,7 +461,7 @@ public sealed class ServerProcessManager : IDisposable
                 : GpuPlacementIntent.Cpu();
             var probe = BuildAutoTuneProbe(baseConfig, baseConfig.ContextSize, threads, placement!);
 
-            var result = await TryProbeAsync(probe, candidate, progress, ct);
+            var result = await probeCandidate(probe, candidate, progress, ct);
             if (result.Success)
                 return result.TuneResult!;
 

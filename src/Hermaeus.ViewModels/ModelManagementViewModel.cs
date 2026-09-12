@@ -23,6 +23,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly HuggingFaceArtworkService _artwork;
     private readonly ModelDownloadService _downloader;
     private readonly ModelInventoryService _inventory;
+    private readonly ManagedRuntimeTuningService? _runtimeTuning;
     private readonly IActivityRecorder? _activity;
     private readonly IRuntimeLogService? _runtimeLogs;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
@@ -269,10 +270,12 @@ public partial class ModelManagementViewModel : ObservableObject
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null,
-        ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null, IRuntimeLogService? runtimeLogs = null)
+        ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null,
+        IRuntimeLogService? runtimeLogs = null, ManagedRuntimeTuningService? runtimeTuning = null)
     {
         _activity = activity;
         _runtimeLogs = runtimeLogs;
+        _runtimeTuning = runtimeTuning;
         _llm = llm;
         _profiles = profiles;
         _toasts = toasts;
@@ -985,7 +988,9 @@ public partial class ModelManagementViewModel : ObservableObject
                 : null;
             var hardware = await GetHardwareProfileAsync(CancellationToken.None);
 
-            var result = await ServerProcessManager.AutoTuneAsync(probe, ggufInfo: ggufInfo, hardware: hardware);
+            if (_runtimeTuning is null)
+                throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
+            var result = await _runtimeTuning.RunAsync(probe, ggufInfo: ggufInfo, hardware: hardware);
             var effectiveContext = result.TunedContextSize ?? contextSize;
             LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
             await _settings.SaveAsync();
@@ -1070,7 +1075,9 @@ public partial class ModelManagementViewModel : ObservableObject
                         : null;
                     var hardware = await GetHardwareProfileAsync(_autoTuneAllCts.Token);
 
-                    var result = await ServerProcessManager.AutoTuneAsync(probe, ct: _autoTuneAllCts.Token, ggufInfo: ggufInfo, hardware: hardware);
+                    if (_runtimeTuning is null)
+                        throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
+                    var result = await _runtimeTuning.RunAsync(probe, ct: _autoTuneAllCts.Token, ggufInfo: ggufInfo, hardware: hardware);
                     var effectiveContext = result.TunedContextSize ?? contextSize;
                     LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, result.GpuLayers, result.Threads, result);
                     await _settings.SaveAsync();

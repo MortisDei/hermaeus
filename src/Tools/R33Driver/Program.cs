@@ -5,6 +5,10 @@ using Hermaeus.Agent.Services;
 using Hermaeus.Composition;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Rag;
+using Hermaeus.Rag.Models;
+using Hermaeus.Rag.Retrieval;
+using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -31,6 +35,9 @@ internal static class R33Driver
             await settings.LoadAsync();
             settings.Settings.DataManagement.DataRootDirectory = dataRoot;
             settings.Settings.SetupWizardCompleted = false;
+            settings.Settings.Rag.EmbeddingBaseUrl = "http://127.0.0.1:9";
+            settings.Settings.Rag.EmbeddingModel = string.Empty;
+            settings.Settings.Rag.RerankerEnabled = false;
             await settings.SaveAsync();
 
             var services = new ServiceCollection();
@@ -86,6 +93,10 @@ internal static class R33Driver
                     || !receipt.Changed)
                     throw new InvalidOperationException("The end-to-end task, receipt, or filesystem assertion failed.");
 
+                var benchmark = await RunBenchmarkCancellationAsync(provider);
+                var rag = await RunRagGenerationAndRetrievalAsync(provider, target);
+                var lab = await RunLabFailureLifecycleAsync(provider, dataRoot);
+
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
                     ok = true,
@@ -96,7 +107,10 @@ internal static class R33Driver
                     verified = receipt.Verified,
                     changed = receipt.Changed,
                     file = Path.GetFileName(target),
-                    content
+                    content,
+                    benchmark,
+                    rag,
+                    lab
                 }));
                 return 0;
             }
@@ -117,6 +131,174 @@ internal static class R33Driver
             }));
             return 1;
         }
+    }
+
+    private static async Task<object> RunBenchmarkCancellationAsync(ServiceProvider provider)
+    {
+        var benchmarks = provider.GetRequiredService<BenchmarkService>();
+        await benchmarks.InitializeAsync();
+        var suite = new BenchmarkSuite
+        {
+            Id = "r33-driver-cancel-suite",
+            Name = "R33 driver cancellation",
+            SuiteVersion = "r33-driver",
+            Cases =
+            [
+                new BenchmarkCase
+                {
+                    Id = "r33-driver-case",
+                    Name = "Cancellation must prevent case execution",
+                    Prompt = "This case must not run after preparation cancellation."
+                }
+            ]
+        };
+        var model = new LlmModel
+        {
+            Id = "r33-driver-benchmark-model",
+            Name = "R33 driver benchmark model",
+            Provider = "R33 driver"
+        };
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var run = await benchmarks.RunAsync(
+            suite,
+            model,
+            ct: cancellation.Token,
+            preparation: token =>
+            {
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            });
+        var persisted = await benchmarks.GetRunAsync(run.Id)
+            ?? throw new InvalidOperationException("The cancelled benchmark run was not persisted.");
+        if (!string.Equals(run.Status, "Cancelled", StringComparison.Ordinal)
+            || run.Results.Count != 0
+            || !string.Equals(persisted.Status, "Cancelled", StringComparison.Ordinal)
+            || persisted.Results.Count != 0)
+            throw new InvalidOperationException("Benchmark cancellation did not produce a terminal no-case result.");
+
+        return new
+        {
+            status = run.Status,
+            phase = run.CurrentPhase,
+            result_count = run.Results.Count,
+            persisted = true
+        };
+    }
+
+    private static async Task<object> RunRagGenerationAndRetrievalAsync(
+        ServiceProvider provider,
+        string sourcePath)
+    {
+        var store = provider.GetRequiredService<SqliteRagStore>();
+        var query = provider.GetRequiredService<RagQueryService>();
+        var dataset = new RagDataset
+        {
+            Id = "r33-driver-dataset",
+            Name = "R33 driver dataset",
+            Description = "Scratch-only generation and retrieval evidence.",
+            LastIngestPath = sourcePath,
+            Config = new RagDatasetConfig
+            {
+                EmbeddingModel = string.Empty,
+                EmbeddingDimensions = 1
+            }
+        };
+        const string sourceId = "r33-driver-source";
+        const string revisionId = "r33-driver-revision";
+        const string sourceHash = "r33-driver-content-hash";
+        var chunk = new RagChunk
+        {
+            Id = "r33-driver-chunk",
+            DatasetId = dataset.Id,
+            SourceFile = Path.GetFileName(sourcePath),
+            SourcePath = sourcePath,
+            SourceHash = sourceHash,
+            SourceId = sourceId,
+            SourceRevisionId = revisionId,
+            SourceTitle = "R33 driver",
+            Content = "R33 shared lifecycle evidence is retained in the generation.",
+            ChunkIndex = 0,
+            ChunkTotal = 1,
+            TokenCount = 9,
+            Embedding = [1f],
+            ChunkKind = RagChunkKind.MarkdownSection
+        };
+        var stats = Bm25Scorer.BuildStats([chunk]);
+        var generation = await store.PublishGenerationAsync(
+            dataset,
+            [chunk],
+            stats,
+            [new RagSourceDescriptor(sourceId, dataset.Id, null, Path.GetFileName(sourcePath), RagSourceKind.LocalFile)],
+            [new RagSourceRevision(
+                revisionId,
+                sourceId,
+                sourceHash,
+                "Scratch driver source bytes.",
+                "r33-driver-embedding",
+                RagSourceRevisionState.Current,
+                DateTime.UtcNow)],
+            "r33-driver-embedding",
+            1);
+        var retrieved = await query.RetrieveAsync(dataset.Id, "shared lifecycle evidence", new RagQueryOptions(TopK: 1));
+        var history = await store.GetGenerationHistoryAsync(dataset.Id);
+        if (history.Count != 1
+            || history[0].GenerationId != generation.GenerationId
+            || retrieved.Selected.Count != 1
+            || retrieved.Selected[0].Chunk.Id != chunk.Id)
+            throw new InvalidOperationException("RAG generation publication or retrieval evidence failed.");
+
+        return new
+        {
+            generation_id = generation.GenerationId,
+            generation_count = history.Count,
+            selected_chunk = retrieved.Selected[0].Chunk.Id,
+            planner_notes = retrieved.PlannerNotes
+        };
+    }
+
+    private static async Task<object> RunLabFailureLifecycleAsync(
+        ServiceProvider provider,
+        string dataRoot)
+    {
+        var modelPath = Path.Combine(dataRoot, "r33-driver-model.gguf");
+        await File.WriteAllTextAsync(modelPath, "not a GGUF model");
+        var source = new ServerConfig
+        {
+            Id = "r33-driver-lab-server",
+            Name = "R33 driver Lab source",
+            ExecutablePath = Environment.ProcessPath ?? throw new InvalidOperationException("The driver process path is unavailable."),
+            ModelPath = modelPath,
+            ContextSize = 256,
+            GpuLayers = 0,
+            GpuPlacement = GpuPlacementIntent.Cpu(),
+            Threads = 1,
+            PromptThreads = 1,
+            Slots = 1
+        };
+        var baseline = LabConfigurationMapper.FromServer(source, "baseline", "Baseline");
+        var candidate = baseline with { Id = "candidate", Label = "Candidate", ContextSize = 512 };
+        var experiments = provider.GetRequiredService<ILabExperimentService>();
+        var definition = await experiments.CreateDefinitionAsync(
+            "R33 driver Lab failure cleanup",
+            "r33-driver-lab",
+            source,
+            baseline,
+            [candidate],
+            repetitions: 1,
+            LabCorrectnessRequirement.SpeedOnly);
+        var run = await experiments.StartAsync(definition, source);
+        if (run.Status != LabRunStatus.Failed
+            || string.IsNullOrWhiteSpace(run.CompletionEvidenceId)
+            || experiments.GetRun(run.Id)?.Status != LabRunStatus.Failed)
+            throw new InvalidOperationException("Lab failure cleanup or terminal evidence was not retained.");
+
+        return new
+        {
+            status = run.Status.ToString(),
+            completion_evidence_id = run.CompletionEvidenceId,
+            temporary_port = run.TemporaryPort
+        };
     }
 
     private static string RequiredPath(string[] args, string name, bool file)

@@ -25,6 +25,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly IActivityRecorder?    _activity;
     private readonly LocalModelCapabilityService? _capabilityService;
     private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly ManagedRuntimeTuningService? _runtimeTuning;
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private LocalModelCapabilities? _localCapabilities;
@@ -38,6 +39,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         new Dictionary<string, string>(StringComparer.Ordinal);
     private bool _suppressConfigurationTracking;
     private bool _saveInProgress;
+    private CancellationTokenSource? _autoTuneCts;
 
     [ObservableProperty] private string       _name;
     [ObservableProperty] private string       _executablePath;
@@ -811,6 +813,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         IActivityRecorder? activity = null,
         LocalModelCapabilityService? capabilityService = null,
         IResourceCoordinator? resourceCoordinator = null,
+        ManagedRuntimeTuningService? runtimeTuning = null,
         AdaptiveInferenceExperienceService? adaptiveExperience = null,
         RecommendationDerivationService? recommendationDerivation = null)
     {
@@ -826,6 +829,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _activity = activity;
         _capabilityService = capabilityService;
         _resourceCoordinator = resourceCoordinator;
+        _runtimeTuning = runtimeTuning;
         _adaptiveExperience = adaptiveExperience;
         _recommendationDerivation = recommendationDerivation;
 
@@ -1526,6 +1530,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         if (!CanEdit) return;
 
+        _autoTuneCts = new CancellationTokenSource();
         IsAutoTuning = true;
         LogExpanded = true;
         AutoTuneStatus = "Testing llama.cpp GPU layer candidates...";
@@ -1538,10 +1543,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             // process-lifetime-cached) rather than the field this VM keeps for the context-fit
             // note, so a tune started right after a model-path edit never races that note's
             // own background refresh.
-            var ggufInfo = File.Exists(ModelPath) ? await Task.Run(() => GgufMetadataReader.TryRead(ModelPath)) : null;
+            var cancellationToken = _autoTuneCts.Token;
+            var ggufInfo = File.Exists(ModelPath)
+                ? await Task.Run(() => GgufMetadataReader.TryRead(ModelPath), cancellationToken)
+                : null;
             var previousContext = ContextSize;
 
-            var result = await ServerProcessManager.AutoTuneAsync(
+            if (_runtimeTuning is null)
+                throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
+
+            var result = await _runtimeTuning.RunAsync(
                 BuildConfig(),
                 new Progress<string>(line =>
                 {
@@ -1549,6 +1560,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                         ? line
                         : $"{LogOutput}\n{line}";
                 }),
+                cancellationToken,
                 ggufInfo: ggufInfo,
                 hardware: _hardwareProfile);
 
@@ -1556,6 +1568,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             Threads = result.Threads;
             if (result.TunedContextSize is int tunedContext)
                 ContextSize = tunedContext;
+            SyncToConfig();
             await PersistTuneProfileAsync(result);
             _saveInProgress = true;
             try
@@ -1575,6 +1588,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(HasUnsavedChanges));
             AutoTuneStatus = BuildAutoTuneStatus(result, previousContext);
         }
+        catch (OperationCanceledException) when (_autoTuneCts?.IsCancellationRequested == true)
+        {
+            AutoTuneStatus = "Auto-tune cancelled; no configuration was saved.";
+            ErrorMessage = string.Empty;
+        }
         catch (Exception ex)
         {
             AutoTuneStatus = ex.Message;
@@ -1584,8 +1602,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         finally
         {
             IsAutoTuning = false;
+            _autoTuneCts?.Dispose();
+            _autoTuneCts = null;
         }
     }
+
+    [RelayCommand]
+    private void CancelAutoTune() => _autoTuneCts?.Cancel();
 
     /// <summary>
     /// r18 04-llama-server-engine-options.md 4.3: hardware-tier recommendation for Context Size,
@@ -2435,6 +2458,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly IActivityRecorder? _activity;
     private readonly ModelProfileService _modelProfiles;
     private readonly IResourceCoordinator? _resourceCoordinator;
+    private readonly ManagedRuntimeTuningService? _runtimeTuning;
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly IRecommendationStore? _recommendationStore;
@@ -2604,6 +2628,7 @@ public partial class ServicesViewModel : ViewModelBase
         IStartupTimingService? startupTiming = null,
         LocalModelCapabilityService? capabilityService = null,
         IResourceCoordinator? resourceCoordinator = null,
+        ManagedRuntimeTuningService? runtimeTuning = null,
         AdaptiveInferenceExperienceService? adaptiveExperience = null,
         RecommendationDerivationService? recommendationDerivation = null,
         IRecommendationStore? recommendationStore = null,
@@ -2623,6 +2648,7 @@ public partial class ServicesViewModel : ViewModelBase
         _activity = activity;
         _capabilityService = capabilityService;
         _resourceCoordinator = resourceCoordinator;
+        _runtimeTuning = runtimeTuning;
         _adaptiveExperience = adaptiveExperience;
         _recommendationDerivation = recommendationDerivation;
         _recommendationStore = recommendationStore;
@@ -2769,7 +2795,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _adaptiveExperience, _recommendationDerivation)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _runtimeTuning, _adaptiveExperience, _recommendationDerivation)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };
