@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using Hermaeus.Agent.Models;
 using Hermaeus.Agent.Services;
@@ -6,7 +7,9 @@ using Hermaeus.Composition;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Rag;
+using Hermaeus.Rag.Embeddings;
 using Hermaeus.Rag.Models;
+using Hermaeus.Rag.Pipeline;
 using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
@@ -43,10 +46,16 @@ internal static class R33Driver
             var services = new ServiceCollection();
             services.AddHermaeusCoreServices();
             // The driver uses the production composition graph but replaces
-            // only settings and the model provider with explicit scratch
-            // instances. No owner settings or live provider are touched.
+            // only settings and external model, embedding, voice, and Lab
+            // timing boundaries with explicit scratch instances. No owner
+            // settings or live provider are touched.
             services.AddSingleton<ISettingsService>(settings);
-            services.AddSingleton<ILlmService, ScriptedLlm>();
+            services.AddSingleton<ScriptedLlm>();
+            services.AddSingleton<ILlmService>(sp => sp.GetRequiredService<ScriptedLlm>());
+            services.AddSingleton<IEmbeddingService, DriverEmbeddingService>();
+            services.AddSingleton<DriverVoiceProviderRegistry>();
+            services.AddSingleton<IVoiceProviderRegistry>(sp =>
+                sp.GetRequiredService<DriverVoiceProviderRegistry>());
 
             await using var provider = services.BuildServiceProvider();
             var lifecycle = provider.GetRequiredService<IApplicationLifecycleCoordinator>();
@@ -95,7 +104,10 @@ internal static class R33Driver
 
                 var benchmark = await RunBenchmarkCancellationAsync(provider);
                 var rag = await RunRagGenerationAndRetrievalAsync(provider, target);
+                var chat = await RunChatContextAsync(provider, rag.context);
+                var voice = await RunVoiceBoundaryAsync(provider, settings);
                 var lab = await RunLabFailureLifecycleAsync(provider, dataRoot);
+                var labApply = await RunLabApplyReconcileAndReopenAsync(provider, settings, settingsPath, dataRoot);
 
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
@@ -110,7 +122,10 @@ internal static class R33Driver
                     content,
                     benchmark,
                     rag,
-                    lab
+                    chat,
+                    voice,
+                    lab,
+                    lab_apply = labApply
                 }));
                 return 0;
             }
@@ -186,74 +201,109 @@ internal static class R33Driver
         };
     }
 
-    private static async Task<object> RunRagGenerationAndRetrievalAsync(
+    private static async Task<RagDriverEvidence> RunRagGenerationAndRetrievalAsync(
         ServiceProvider provider,
         string sourcePath)
     {
         var store = provider.GetRequiredService<SqliteRagStore>();
         var query = provider.GetRequiredService<RagQueryService>();
+        var pipeline = provider.GetRequiredService<RagPipeline>();
+        var workspace = Path.GetDirectoryName(sourcePath)
+            ?? throw new InvalidOperationException("The driver source has no workspace directory.");
+        var knowledgePath = Path.Combine(workspace, "r33-driver-knowledge.md");
+        await File.WriteAllTextAsync(
+            knowledgePath,
+            "# R33 driver knowledge\n\nThe shared lifecycle context is retained in the published generation.");
         var dataset = new RagDataset
         {
             Id = "r33-driver-dataset",
             Name = "R33 driver dataset",
             Description = "Scratch-only generation and retrieval evidence.",
-            LastIngestPath = sourcePath,
+            LastIngestPath = workspace,
             Config = new RagDatasetConfig
             {
-                EmbeddingModel = string.Empty,
-                EmbeddingDimensions = 1
+                EmbeddingModel = "r33-driver-embedding",
+                EmbeddingDimensions = 0
             }
         };
-        const string sourceId = "r33-driver-source";
-        const string revisionId = "r33-driver-revision";
-        const string sourceHash = "r33-driver-content-hash";
-        var chunk = new RagChunk
-        {
-            Id = "r33-driver-chunk",
-            DatasetId = dataset.Id,
-            SourceFile = Path.GetFileName(sourcePath),
-            SourcePath = sourcePath,
-            SourceHash = sourceHash,
-            SourceId = sourceId,
-            SourceRevisionId = revisionId,
-            SourceTitle = "R33 driver",
-            Content = "R33 shared lifecycle evidence is retained in the generation.",
-            ChunkIndex = 0,
-            ChunkTotal = 1,
-            TokenCount = 9,
-            Embedding = [1f],
-            ChunkKind = RagChunkKind.MarkdownSection
-        };
-        var stats = Bm25Scorer.BuildStats([chunk]);
-        var generation = await store.PublishGenerationAsync(
+
+        var report = await pipeline.IngestDirectoryAsync(
             dataset,
-            [chunk],
-            stats,
-            [new RagSourceDescriptor(sourceId, dataset.Id, null, Path.GetFileName(sourcePath), RagSourceKind.LocalFile)],
-            [new RagSourceRevision(
-                revisionId,
-                sourceId,
-                sourceHash,
-                "Scratch driver source bytes.",
-                "r33-driver-embedding",
-                RagSourceRevisionState.Current,
-                DateTime.UtcNow)],
-            "r33-driver-embedding",
-            1);
-        var retrieved = await query.RetrieveAsync(dataset.Id, "shared lifecycle evidence", new RagQueryOptions(TopK: 1));
+            workspace,
+            explicitFiles: [knowledgePath]);
+        var stored = await store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true);
+        dataset.ChunkCount = stored.Count(chunk => !chunk.IsParent);
+        dataset.LastIngestUtc = DateTime.UtcNow;
+        await store.SaveDatasetAsync(dataset);
+
         var history = await store.GetGenerationHistoryAsync(dataset.Id);
-        if (history.Count != 1
-            || history[0].GenerationId != generation.GenerationId
+        var retrieved = await query.RetrieveAsync(dataset.Id, "shared lifecycle evidence", new RagQueryOptions(TopK: 1));
+        if (report.Added != 1
+            || history.Count != 1
             || retrieved.Selected.Count != 1
-            || retrieved.Selected[0].Chunk.Id != chunk.Id)
+            || !retrieved.Selected[0].Chunk.Content.Contains("shared lifecycle context", StringComparison.Ordinal))
             throw new InvalidOperationException("RAG generation publication or retrieval evidence failed.");
+
+        return new RagDriverEvidence(
+            history[0].GenerationId,
+            history.Count,
+            retrieved.Selected[0].Chunk.Id,
+            retrieved.PlannerNotes,
+            retrieved.Selected[0].Chunk.Content);
+    }
+
+    private static async Task<object> RunChatContextAsync(ServiceProvider provider, string context)
+    {
+        var scripted = provider.GetRequiredService<ScriptedLlm>();
+        var response = new StringBuilder();
+        var result = await ChatSendOrchestrator.StreamAsync(
+            scripted,
+            "r33-driver-model",
+            [
+                new ChatMessage("system", "Answer from the supplied R33 retrieval context."),
+                new ChatMessage("user", $"Context:\n{context}\n\nQuestion: what was retained?")
+            ],
+            new LlmChatOptions { Temperature = 0 },
+            delta => response.Append(delta),
+            _ => { },
+            CancellationToken.None);
+        if (result.Cancelled || !string.IsNullOrWhiteSpace(result.Error)
+            || !scripted.SawRetrievalContext || response.Length == 0)
+            throw new InvalidOperationException("The scripted Chat context workflow did not complete.");
 
         return new
         {
-            generation_id = generation.GenerationId,
-            generation_count = history.Count,
-            selected_chunk = retrieved.Selected[0].Chunk.Id,
-            planner_notes = retrieved.PlannerNotes
+            cancelled = result.Cancelled,
+            response_length = response.Length,
+            retrieval_context_seen = scripted.SawRetrievalContext
+        };
+    }
+
+    private static async Task<object> RunVoiceBoundaryAsync(
+        ServiceProvider provider,
+        SettingsService settings)
+    {
+        settings.Settings.Tts.Enabled = true;
+        var voice = provider.GetRequiredService<IVoiceOrchestrator>();
+        var completed = new TaskCompletionSource<VoiceChannel>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        voice.UtteranceCompleted += channel => completed.TrySetResult(channel);
+        await voice.EnqueueAsync(new VoiceUtterance(
+            "R33 voice boundary",
+            VoiceChannel.Chat,
+            VoicePriority.Normal,
+            DedupeKey: "r33-driver-voice"));
+        var channel = await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var providerInstance = provider.GetRequiredService<DriverVoiceProviderRegistry>().Provider;
+        if (channel != VoiceChannel.Chat || providerInstance.SynthesisCount != 1)
+            throw new InvalidOperationException("The voice orchestration boundary did not complete through the provider.");
+
+        voice.StopAll();
+        return new
+        {
+            channel = channel.ToString(),
+            synthesis_count = providerInstance.SynthesisCount,
+            completed = true
         };
     }
 
@@ -300,6 +350,112 @@ internal static class R33Driver
             temporary_port = run.TemporaryPort
         };
     }
+
+    private static async Task<object> RunLabApplyReconcileAndReopenAsync(
+        ServiceProvider provider,
+        SettingsService settings,
+        string settingsPath,
+        string dataRoot)
+    {
+        var modelPath = Path.Combine(dataRoot, "r33-driver-apply-model.gguf");
+        await File.WriteAllTextAsync(modelPath, "not a GGUF model");
+        var source = new ServerConfig
+        {
+            Id = "r33-driver-lab-apply-server",
+            Name = "R33 driver Lab apply source",
+            ExecutablePath = Environment.ProcessPath ?? throw new InvalidOperationException("The driver process path is unavailable."),
+            ModelPath = modelPath,
+            ContextSize = 256,
+            GpuLayers = 0,
+            GpuPlacement = GpuPlacementIntent.Cpu(),
+            Threads = 1,
+            PromptThreads = 1,
+            Slots = 1
+        };
+        settings.Settings.ManagedServers = [source];
+        await settings.SaveAsync();
+
+        var baseline = LabConfigurationMapper.FromServer(source, "baseline", "Baseline");
+        var candidate = baseline with { Id = "candidate", Label = "Candidate", ContextSize = 512 };
+        var fakeHost = new DriverLabRuntimeHost();
+        await using var experiments = new LabExperimentService(
+            settings,
+            provider.GetRequiredService<ISystemInfoService>(),
+            provider.GetRequiredService<IEmpiricalExperienceStore>(),
+            fakeHost,
+            provider.GetService<ModelManifestStore>());
+        var definition = await experiments.CreateDefinitionAsync(
+            "R33 driver Lab apply",
+            "r33-driver-lab-apply",
+            source,
+            baseline,
+            [candidate],
+            repetitions: 1,
+            LabCorrectnessRequirement.ExactEquivalence);
+        var run = await experiments.StartAsync(definition, source);
+        if (run.Status != LabRunStatus.Running)
+            throw new InvalidOperationException("The deterministic Lab runtime did not enter Running.");
+
+        var observations = new[]
+        {
+            LabObservation(run, "baseline", "runtime.ready", 1, "bool"),
+            LabObservation(run, "baseline", "process.ram.current", 1, "bytes"),
+            LabObservation(run, "candidate", "runtime.ready", 1, "bool"),
+            LabObservation(run, "candidate", "process.ram.current", 1, "bytes")
+        };
+        var outputs = new[]
+        {
+            LabCorrectnessEvaluator.Capture("baseline", "r33-driver-case", 0, "same output"),
+            LabCorrectnessEvaluator.Capture("candidate", "r33-driver-case", 0, "same output")
+        };
+        var completed = await experiments.CompleteAsync(run.Id, observations, outputs);
+        var review = experiments.CreateApplyReview(run.Id, "candidate");
+        if (completed.Status != LabRunStatus.Succeeded || !review.CanApply)
+            throw new InvalidOperationException($"The Lab Apply review was not earned: {review.RefusalReason}");
+
+        await experiments.ApplyAsync(review);
+        var applied = settings.Settings.ManagedServers.Single(server => server.Id == source.Id);
+        if (applied.ContextSize != candidate.ContextSize || fakeHost.Session.StopCount != 1)
+            throw new InvalidOperationException("Lab Apply did not persist the reviewed candidate or restore the owned runtime.");
+
+        var reopened = new SettingsService(settingsPath);
+        await reopened.LoadAsync();
+        var reopenedServer = reopened.Settings.ManagedServers.Single(server => server.Id == source.Id);
+        if (reopenedServer.ContextSize != candidate.ContextSize)
+            throw new InvalidOperationException("The Lab-applied Services configuration did not survive reopen.");
+
+        return new
+        {
+            status = completed.Status.ToString(),
+            review_id = review.ReviewId,
+            applied_context = applied.ContextSize,
+            reopened_context = reopenedServer.ContextSize,
+            runtime_stop_count = fakeHost.Session.StopCount,
+            evidence_id = completed.CompletionEvidenceId
+        };
+    }
+
+    private static LabObservation LabObservation(
+        LabRunSnapshot run,
+        string configurationId,
+        string metricId,
+        double value,
+        string unit) => new()
+        {
+            RunId = run.Id,
+            ConfigurationId = configurationId,
+            CaseId = "r33-driver-case",
+            Repetition = 0,
+            MetricId = metricId,
+            Value = value,
+            Unit = unit,
+            Source = "r33-driver-runtime",
+            Trust = "DeterministicDriver",
+            RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+            ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+            HardwareFingerprint = run.Definition.ProfileFingerprint.Hardware.StableId,
+            ConfigurationFingerprint = run.Definition.ConfigurationFingerprints[configurationId]
+        };
 
     private static string RequiredPath(string[] args, string name, bool file)
     {
@@ -352,12 +508,154 @@ internal static class R33Driver
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
+    private sealed record RagDriverEvidence(
+        string generation_id,
+        int generation_count,
+        string selected_chunk,
+        string planner_notes,
+        string context);
+
+    private sealed class DriverEmbeddingService : IEmbeddingService
+    {
+        public int Dimensions => 1;
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(new[] { 1f });
+        }
+
+        public Task<List<float[]>> EmbedBatchAsync(
+            IReadOnlyList<string> texts,
+            CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(texts.Select(_ => new[] { 1f }).ToList());
+        }
+    }
+
+    private sealed class DriverLabRuntimeHost : ILabRuntimeHost
+    {
+        public DriverLabRuntimeSession Session { get; } = new();
+
+        public Task<ILabRuntimeSession> StartAsync(
+            string runId,
+            ServerConfig source,
+            LabConfiguration configuration,
+            CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult<ILabRuntimeSession>(Session);
+        }
+
+        public Task<IReadOnlyList<string>> RecoverOwnedProcessesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+    }
+
+    private sealed class DriverLabRuntimeSession : ILabRuntimeSession
+    {
+        private int _stopCount;
+
+        public string OwnershipId { get; } = $"r33-driver-{Guid.NewGuid():N}";
+        public int Port => 49_152;
+        public bool IsRunning => Volatile.Read(ref _stopCount) == 0;
+        public ManagedProcessReference Process => new(Environment.ProcessId, DateTime.UtcNow);
+        public int StopCount => Volatile.Read(ref _stopCount);
+
+        public Task StopAsync(CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _stopCount);
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class DriverVoiceProviderRegistry : IVoiceProviderRegistry
+    {
+        public DriverVoiceProvider Provider { get; } = new();
+        private VoiceProvider _active = VoiceProvider.KokoroNative;
+
+        public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>
+        [
+            new VoiceProviderInfo(
+                VoiceProvider.KokoroNative,
+                "R33 driver voice",
+                "Deterministic driver provider.",
+                VoiceProviderCategory.Recommended,
+                true,
+                VoiceCapability.TextToSpeech | VoiceCapability.Local)
+        ];
+
+        public VoiceProvider GetActiveProvider() => _active;
+
+        public IVoiceProvider GetActiveVoiceProvider() => Provider;
+
+        public IVoiceProvider GetVoiceProvider(VoiceProvider provider) => provider == Provider.Id
+            ? Provider
+            : throw new ArgumentException($"Unknown driver voice provider: {provider}");
+
+        public Task SetActiveProviderAsync(VoiceProvider provider)
+        {
+            if (provider != Provider.Id)
+                throw new ArgumentException($"Unknown driver voice provider: {provider}");
+            _active = provider;
+            return Task.CompletedTask;
+        }
+
+        public VoiceProviderConfig GetProviderConfig(VoiceProvider provider) =>
+            new(provider.ToString());
+
+        public Task SetProviderConfigAsync(VoiceProvider provider, VoiceProviderConfig config) =>
+            Task.CompletedTask;
+
+        public ITtsService GetActiveTtsService() =>
+            throw new NotSupportedException("The R33 driver exercises IVoiceOrchestrator, not the legacy TTS facade.");
+    }
+
+    private sealed class DriverVoiceProvider : IVoiceProvider
+    {
+        public VoiceProvider Id => VoiceProvider.KokoroNative;
+        public string DisplayName => "R33 driver voice";
+        public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
+        public (int Major, int Minor)? RequiredPythonVersion => null;
+        public bool IsInstalled => true;
+        public int SynthesisCount { get; private set; }
+
+        public VoiceProviderDetection Detect() =>
+            new(true, "Deterministic driver voice is available.", "No external voice process is used.");
+
+        public VoiceInstallPlan InstallPlan() =>
+            new("No installation is required.", [], "Driver-only provider.");
+
+        public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<VoiceHealth> HealthCheckAsync(CancellationToken ct = default) =>
+            Task.FromResult(new VoiceHealth(VoiceHealthStatus.Healthy, "Ready", "Driver provider."));
+
+        public Task<IReadOnlyList<VoiceDefinition>> ListVoicesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<VoiceDefinition>>([new("driver", "Driver voice")]);
+
+        public Task<VoiceSynthesisResult> GenerateSpeechAsync(
+            VoiceSynthesisRequest request,
+            CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            SynthesisCount++;
+            return Task.FromResult(new VoiceSynthesisResult(true, "Driver voice captured."));
+        }
+    }
+
     private sealed class ScriptedLlm : ILlmService
     {
         private int _calls;
+        private int _sawRetrievalContext;
 
         public string ProviderName => "R33 driver";
         public bool IsConfigured => true;
+        public bool SawRetrievalContext => Volatile.Read(ref _sawRetrievalContext) != 0;
 
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<LlmModel>
@@ -380,6 +678,11 @@ internal static class R33Driver
             [EnumeratorCancellation] CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
+            if (messages.Any(message => message.Content.Contains(
+                    "shared lifecycle context",
+                    StringComparison.Ordinal)))
+                Interlocked.Exchange(ref _sawRetrievalContext, 1);
+
             var response = Interlocked.Increment(ref _calls) == 1
                 ? """
                   {
