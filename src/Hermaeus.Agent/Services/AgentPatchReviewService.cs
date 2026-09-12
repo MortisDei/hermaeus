@@ -38,7 +38,12 @@ public sealed class AgentPatchReviewService
     {
         if (_manifests is null) return options;
         var manifest = await _manifests.LoadAsync(options.WorkspaceRoot, ct);
-        return manifest?.Policy is null ? options : options with { Policy = manifest.Policy };
+        // The persisted manifest is authoritative when this service has a
+        // manifest store. Clearing the caller's policy when the manifest no
+        // longer contains one is important: removal or corruption of a policy
+        // is a reviewed change, not permission to keep using a stale policy
+        // snapshot from the editor.
+        return options with { Policy = manifest?.Policy };
     }
 
     /// <summary>
