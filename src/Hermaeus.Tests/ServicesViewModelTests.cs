@@ -335,8 +335,12 @@ public sealed class ServicesViewModelTests
     public async Task Rebuild_reuses_the_existing_row_instead_of_replacing_it()
     {
         using var temp = new TempDir();
-        var vm = NewServicesVm(temp, out var settings);
+        using var registry = NewManagedRuntimeRegistry();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var vm = NewServicesViewModel(settings, runtimeRegistry: registry);
         var originalChatRow = vm.Servers.First(s => !s.EmbeddingsMode);
+        var originalManager = registry.GetOrCreate(originalChatRow.Id);
         originalChatRow.LogExpanded = true;
 
         settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("assets");
@@ -345,6 +349,7 @@ public sealed class ServicesViewModelTests
 
         var afterRebuild = vm.Servers.First(s => !s.EmbeddingsMode);
         Assert.Same(originalChatRow, afterRebuild);
+        Assert.Same(originalManager, registry.GetOrCreate(afterRebuild.Id));
         Assert.True(afterRebuild.LogExpanded, "reused rows must keep their UI state (e.g. expanded logs)");
     }
 

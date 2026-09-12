@@ -45,8 +45,19 @@ namespace Hermaeus.Tests
             Action? autoSaveLifecycleCompleted = null) =>
             new(settings, tts ?? NewTtsSettingsViewModel(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService(), autoSaveDelay: autoSaveDelay, autoSaveLifecycleCompleted: autoSaveLifecycleCompleted);
 
-        public static ServicesViewModel NewServicesViewModel(ISettingsService settings, TtsSettingsViewModel? tts = null) =>
-            new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings), tts ?? NewTtsSettingsViewModel(settings));
+        public static ServicesViewModel NewServicesViewModel(
+            ISettingsService settings,
+            TtsSettingsViewModel? tts = null,
+            ManagedRuntimeRegistry? runtimeRegistry = null) =>
+            new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings), tts ?? NewTtsSettingsViewModel(settings), runtimeRegistry: runtimeRegistry);
+
+        public static ManagedRuntimeRegistry NewManagedRuntimeRegistry() =>
+            new(new TestManagedRuntimeProcessFactory());
+
+        private sealed class TestManagedRuntimeProcessFactory : IManagedRuntimeProcessFactory
+        {
+            public ServerProcessManager Create() => new(new RedactionService());
+        }
 
         /// <summary>
         /// Polls until <paramref name="condition"/> holds, then asserts it.

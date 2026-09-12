@@ -28,6 +28,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly ManagedRuntimeTuningService? _runtimeTuning;
     private readonly AdaptiveInferenceExperienceService? _adaptiveExperience;
     private readonly RecommendationDerivationService? _recommendationDerivation;
+    private readonly ManagedRuntimeRegistry? _runtimeRegistry;
     private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
@@ -815,9 +816,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         IResourceCoordinator? resourceCoordinator = null,
         ManagedRuntimeTuningService? runtimeTuning = null,
         AdaptiveInferenceExperienceService? adaptiveExperience = null,
-        RecommendationDerivationService? recommendationDerivation = null)
+        RecommendationDerivationService? recommendationDerivation = null,
+        ManagedRuntimeRegistry? runtimeRegistry = null)
     {
-        _mgr = new ServerProcessManager(redactor, resourceCoordinator: resourceCoordinator);
+        _runtimeRegistry = runtimeRegistry;
+        _mgr = runtimeRegistry?.GetOrCreate(config.Id)
+            ?? new ServerProcessManager(redactor, resourceCoordinator: resourceCoordinator);
         _config   = config;
         _settings = settings;
         _trust = trust;
@@ -2436,7 +2440,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         IsDisposed = true;
-        _mgr.Dispose();
+        if (_runtimeRegistry is not null)
+            _runtimeRegistry.Release(_config.Id, _mgr);
+        else
+            _mgr.Dispose();
     }
 }
 
@@ -2463,6 +2470,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly IRecommendationStore? _recommendationStore;
     private readonly RecommendationApplicationService? _recommendationApplication;
+    private readonly ManagedRuntimeRegistry? _runtimeRegistry;
     private HardwareProfile? _hardwareProfile;
 
     /// <summary>Shared (DI singleton) with <see cref="SettingsViewModel.Tts"/> - voice
@@ -2632,7 +2640,8 @@ public partial class ServicesViewModel : ViewModelBase
         AdaptiveInferenceExperienceService? adaptiveExperience = null,
         RecommendationDerivationService? recommendationDerivation = null,
         IRecommendationStore? recommendationStore = null,
-        RecommendationApplicationService? recommendationApplication = null)
+        RecommendationApplicationService? recommendationApplication = null,
+        ManagedRuntimeRegistry? runtimeRegistry = null)
     {
         _startupTiming = startupTiming;
         _settings = settings;
@@ -2653,6 +2662,7 @@ public partial class ServicesViewModel : ViewModelBase
         _recommendationDerivation = recommendationDerivation;
         _recommendationStore = recommendationStore;
         _recommendationApplication = recommendationApplication;
+        _runtimeRegistry = runtimeRegistry;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
         _settings.SettingsChanged += (_, _) =>
@@ -2795,7 +2805,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _runtimeTuning, _adaptiveExperience, _recommendationDerivation)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService, _resourceCoordinator, _runtimeTuning, _adaptiveExperience, _recommendationDerivation, _runtimeRegistry)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };
