@@ -182,7 +182,9 @@ cue files are deleted after playback.
 ## Audio Data and Privacy Lifecycle
 
 - Voice previews use transient generated audio and delete temporary WAV files
-  after playback when a local player needs a file path. A playback-only
+  after playback, failure, or cancellation when a local player needs a file
+  path. An implicit output path is owned by the provider on every synthesis
+  path; an explicit `OutputPath` remains caller-owned. A playback-only
   failure (a broken or missing OS audio player) no longer masks a synthesis
   that actually succeeded: `GenerateSpeechAsync` now reports success and the
   temp file's path whenever rendering the audio worked, even if playing it

@@ -144,9 +144,10 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
     public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
     {
+        string? outputPath = null;
         try
         {
-            var outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
+            outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
             if (request.PlayAudio)
                 await AudioPlayback.PlayAsync(outputPath, ct);
             return new VoiceSynthesisResult(true, "Kokoro native synthesis complete.", outputPath);
@@ -154,6 +155,16 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
+        }
+        finally
+        {
+            if (string.IsNullOrWhiteSpace(request.OutputPath)
+                && request.PlayAudio
+                && !string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
         }
     }
 
@@ -234,43 +245,57 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
                 throw new InvalidOperationException($"Kokoro native model is unavailable: {_model.LastAdmissionFailure}.");
 
             var speed = Math.Clamp(_settings.Settings.Tts.Speed, 0.5, 2.0);
-            var output = string.IsNullOrWhiteSpace(outputPath)
+            var ownsOutput = string.IsNullOrWhiteSpace(outputPath);
+            var output = ownsOutput
                 ? Path.Combine(Path.GetTempPath(), $"hermaeus-kokoro-native-{Guid.NewGuid():N}.wav")
-                : outputPath;
+                : outputPath!;
 
             // Phonemize/tokenize/inference runs single-threaded ONNX inference
             // (see KokoroOnnxModel's conservative SessionOptions) and can take
             // several seconds for a paragraph; offload it so a caller on the
             // UI thread (SpeakAsync is invoked from ViewModel commands) does
             // not freeze for the duration (docs/review/01-code-audit.md P2-7).
-            await Task.Run(() =>
+            try
             {
-                var lexiconPath = ResolveUserLexiconPath(_settings.Settings);
-                var phonemes = KokoroPhonemizer.ToPhonemes(text, lexiconPath, _runtimeLogs);
-                var chunks = KokoroTokenizer.Encode(phonemes, _runtimeLogs);
-                if (chunks.Count == 0)
-                    throw new InvalidOperationException("Input text produced no phonemes to synthesize.");
-
-                var samples = new List<float>();
-                for (var i = 0; i < chunks.Count; i++)
+                await Task.Run(() =>
                 {
-                    ct.ThrowIfCancellationRequested();
-                    samples.AddRange(_model.Synthesize(chunks[i].Ids, voice, speed));
+                    var lexiconPath = ResolveUserLexiconPath(_settings.Settings);
+                    var phonemes = KokoroPhonemizer.ToPhonemes(text, lexiconPath, _runtimeLogs);
+                    var chunks = KokoroTokenizer.Encode(phonemes, _runtimeLogs);
+                    if (chunks.Count == 0)
+                        throw new InvalidOperationException("Input text produced no phonemes to synthesize.");
 
-                    // r19 4.1: a seam landing exactly at a splice reads as a
-                    // clipped/garbled word; a short silence at natural
-                    // boundaries (sentence/clause/space) reads as a pause
-                    // instead. A forced hard cut (pathological unbroken run)
-                    // gets none - padding a mid-word split would make the
-                    // audible seam worse, not better.
-                    if (i < chunks.Count - 1)
-                        samples.AddRange(SilenceSamples(chunks[i].Boundary));
+                    var samples = new List<float>();
+                    for (var i = 0; i < chunks.Count; i++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        samples.AddRange(_model.Synthesize(chunks[i].Ids, voice, speed));
+
+                        // r19 4.1: a seam landing exactly at a splice reads as a
+                        // clipped/garbled word; a short silence at natural
+                        // boundaries (sentence/clause/space) reads as a pause
+                        // instead. A forced hard cut (pathological unbroken run)
+                        // gets none - padding a mid-word split would make the
+                        // audible seam worse, not better.
+                        if (i < chunks.Count - 1)
+                            samples.AddRange(SilenceSamples(chunks[i].Boundary));
+                    }
+
+                    WavFile.Write(output, samples.ToArray(), KokoroOnnxModel.SampleRate);
+                }, ct);
+
+                return output;
+            }
+            catch
+            {
+                if (ownsOutput)
+                {
+                    try { File.Delete(output); }
+                    catch { }
                 }
 
-                WavFile.Write(output, samples.ToArray(), KokoroOnnxModel.SampleRate);
-            }, ct);
-
-            return output;
+                throw;
+            }
         }
         finally
         {

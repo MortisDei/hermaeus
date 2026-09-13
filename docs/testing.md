@@ -76,6 +76,13 @@ test-host process and the requested TRX outside the repository. This is a
 runner-reporting boundary, not a product failure and not a reason to weaken
 tests.
 
+Test scratch directories are created below one per-process `hermaeus-tests-run-*`
+container. Each test owns its child directory, while process-exit cleanup owns
+the container. A cancelled or externally terminated test host therefore leaves
+at most one bounded run container, and the next test process reclaims stale
+Hermaeus test containers older than one hour. Do not create ad hoc top-level
+`/tmp/hermaeus-*` roots for routine verification.
+
 ## Platform-specific tests report Skipped, not Passed
 
 Use `[WindowsOnlyFact]` (`src/Hermaeus.Tests/WindowsOnlyFactAttribute.cs`) for

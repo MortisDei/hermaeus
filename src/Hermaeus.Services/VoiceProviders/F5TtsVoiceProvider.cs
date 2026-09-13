@@ -116,7 +116,7 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
         }
 
         // r11 4.3: see KokoroVoiceProvider.GenerateSpeechAsync.
-        if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+        if (string.IsNullOrWhiteSpace(request.OutputPath) && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
         {
             try { File.Delete(outputPath); }
             catch { }
@@ -202,33 +202,47 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
         await _synthesisGate.WaitAsync(ct);
         try
         {
-        if (!_settings.Settings.Tts.Enabled)
-            throw new InvalidOperationException("TTS is disabled in settings.");
+            if (!_settings.Settings.Tts.Enabled)
+                throw new InvalidOperationException("TTS is disabled in settings.");
 
-        if (string.IsNullOrWhiteSpace(text))
-            throw new InvalidOperationException("No text supplied for synthesis.");
+            if (string.IsNullOrWhiteSpace(text))
+                throw new InvalidOperationException("No text supplied for synthesis.");
 
-        var python = VoiceProviderProcessRunner.ResolvePythonPath(_settings);
-        var referenceFile = ResolveReferenceAudioFile(speaker);
-        if (referenceFile is null)
-            throw new InvalidOperationException("F5-TTS needs a voice sample. Import one first or choose an existing sample file.");
+            var python = VoiceProviderProcessRunner.ResolvePythonPath(_settings);
+            var referenceFile = ResolveReferenceAudioFile(speaker);
+            if (referenceFile is null)
+                throw new InvalidOperationException("F5-TTS needs a voice sample. Import one first or choose an existing sample file.");
 
-        var output = string.IsNullOrWhiteSpace(outputPath)
-            ? Path.Combine(Path.GetTempPath(), $"hermaeus-f5tts-{Guid.NewGuid():N}.wav")
-            : outputPath;
+            var ownsOutput = string.IsNullOrWhiteSpace(outputPath);
+            var output = ownsOutput
+                ? Path.Combine(Path.GetTempPath(), $"hermaeus-f5tts-{Guid.NewGuid():N}.wav")
+                : outputPath!;
 
-        var script = EmbeddedPythonScriptLoader.Load("f5_tts_renderer.py");
+            try
+            {
+                var script = EmbeddedPythonScriptLoader.Load("f5_tts_renderer.py");
 
-        var run = await VoiceProviderProcessRunner.RunPythonScriptAsync(
-            python,
-            script,
-            ["--text", text, "--ref-audio", referenceFile, "--output", output, "--device", _settings.Settings.Tts.Device.Trim() ?? "cpu", "--model", "F5TTS_v1_Base"],
-            ct);
+                var run = await VoiceProviderProcessRunner.RunPythonScriptAsync(
+                    python,
+                    script,
+                    ["--text", text, "--ref-audio", referenceFile, "--output", output, "--device", _settings.Settings.Tts.Device.Trim() ?? "cpu", "--model", "F5TTS_v1_Base"],
+                    ct);
 
-        if (!run.Success)
-            throw new InvalidOperationException($"F5-TTS synthesis failed.\n{run.Log}");
+                if (!run.Success)
+                    throw new InvalidOperationException($"F5-TTS synthesis failed.\n{run.Log}");
 
-        return output;
+                return output;
+            }
+            catch
+            {
+                if (ownsOutput)
+                {
+                    try { File.Delete(output); }
+                    catch { }
+                }
+
+                throw;
+            }
         }
         finally
         {

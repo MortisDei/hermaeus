@@ -77,6 +77,17 @@ APP_DIR="$PACKAGE_DIR/app"
 ICON_DIR="$PACKAGE_DIR/icons"
 LOCALAPI_DIR="$APP_DIR/LocalApi"
 INTEGRATION_DIR="$APP_DIR/integration"
+BUILD_SUCCEEDED="false"
+
+cleanup_publish_output() {
+  if [[ "$BUILD_SUCCEEDED" != "true" ]]; then
+    rm -rf -- "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$ARCHIVE" "$CHECKSUM"
+  fi
+}
+
+trap cleanup_publish_output EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ "$SKIP_RESTORE" == "false" ]]; then
   echo "Restoring..."
@@ -255,6 +266,8 @@ echo "Writing $CHECKSUM..."
   cd "$DIST_DIR"
   sha256sum "$PACKAGE_NAME.tar.gz" > "$PACKAGE_NAME.tar.gz.sha256"
 )
+
+BUILD_SUCCEEDED="true"
 
 echo "Package ready:"
 echo "  $PACKAGE_DIR"

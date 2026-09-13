@@ -158,7 +158,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         // this synthesized to a %TEMP% file and never deleted it.
         // VoiceOrchestrator.PlayAsync always calls GenerateSpeechAsync with
         // no OutputPath, so every spoken chat reply leaked one wav.
-        if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+        if (string.IsNullOrWhiteSpace(request.OutputPath) && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
         {
             try { File.Delete(outputPath); }
             catch { }
@@ -217,40 +217,54 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         await _synthesisGate.WaitAsync(ct);
         try
         {
-        if (!_settings.Settings.Tts.Enabled)
-            throw new InvalidOperationException("TTS is disabled in settings.");
+            if (!_settings.Settings.Tts.Enabled)
+                throw new InvalidOperationException("TTS is disabled in settings.");
 
-        if (string.IsNullOrWhiteSpace(text))
-            throw new InvalidOperationException("No text supplied for synthesis.");
+            if (string.IsNullOrWhiteSpace(text))
+                throw new InvalidOperationException("No text supplied for synthesis.");
 
-        var voice = NormalizeVoice(speaker);
-        var output = string.IsNullOrWhiteSpace(outputPath)
-            ? Path.Combine(Path.GetTempPath(), $"hermaeus-kokoro-{Guid.NewGuid():N}.wav")
-            : outputPath;
+            var voice = NormalizeVoice(speaker);
+            var ownsOutput = string.IsNullOrWhiteSpace(outputPath);
+            var output = ownsOutput
+                ? Path.Combine(Path.GetTempPath(), $"hermaeus-kokoro-{Guid.NewGuid():N}.wav")
+                : outputPath!;
 
-        await EnsureServiceRunningAsync(ct);
-        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
-        var payload = new
-        {
-            input = text,
-            speaker_wav = voice,
-            speed = Math.Clamp(_settings.Settings.Tts.Speed, 0.5, 2.0)
-        };
+            try
+            {
+                await EnsureServiceRunningAsync(ct);
+                var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
+                var payload = new
+                {
+                    input = text,
+                    speaker_wav = voice,
+                    speed = Math.Clamp(_settings.Settings.Tts.Speed, 0.5, 2.0)
+                };
 
-        using var response = await _http.PostAsJsonAsync($"{baseUrl}/v1/audio/speech", payload, ct);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(body)
-                ? $"Kokoro synthesis failed with {(int)response.StatusCode}."
-                : $"Kokoro synthesis failed: {body}");
-        }
+                using var response = await _http.PostAsJsonAsync($"{baseUrl}/v1/audio/speech", payload, ct);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(ct);
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(body)
+                        ? $"Kokoro synthesis failed with {(int)response.StatusCode}."
+                        : $"Kokoro synthesis failed: {body}");
+                }
 
-        await using var source = await response.Content.ReadAsStreamAsync(ct);
-        await using var file = File.Create(output);
-        await source.CopyToAsync(file, ct);
+                await using var source = await response.Content.ReadAsStreamAsync(ct);
+                await using var file = File.Create(output);
+                await source.CopyToAsync(file, ct);
 
-        return output;
+                return output;
+            }
+            catch
+            {
+                if (ownsOutput)
+                {
+                    try { File.Delete(output); }
+                    catch { }
+                }
+
+                throw;
+            }
         }
         finally
         {

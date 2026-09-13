@@ -370,9 +370,16 @@ public partial class ChatView : UserControl
             if (await clipboard.TryGetBitmapAsync() is { } bitmap)
             {
                 var tempPath = Path.Combine(Path.GetTempPath(), $"hermaeus-paste-{Guid.NewGuid():N}.png");
-                using (bitmap)
-                    bitmap.Save(tempPath, PngBitmapEncoderOptions.Default);
-                await _vm.AddContextFilesAsync([tempPath]);
+                try
+                {
+                    using (bitmap)
+                        bitmap.Save(tempPath, PngBitmapEncoderOptions.Default);
+                    await _vm.AddContextFilesAsync([tempPath]);
+                }
+                finally
+                {
+                    try { File.Delete(tempPath); } catch { }
+                }
                 return;
             }
         }

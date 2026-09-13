@@ -253,18 +253,23 @@ namespace Hermaeus.Tests
 
     sealed class TempDir : IDisposable
     {
-        // r25: temp roots that were still locked when their test finished. Deleted
-        // once at process exit instead of being waited on inside the test, so
-        // cleanup never costs test time and never fails a test.
-        private static readonly System.Collections.Concurrent.ConcurrentBag<string> _deferred = [];
+        private const string RunPrefix = "hermaeus-tests-run-";
+        private static readonly string _runRoot = Path.Combine(
+            TempRoot(), $"{RunPrefix}{Guid.NewGuid():N}");
 
         static TempDir() =>
+            InitializeRunRoot();
+
+        private static void InitializeRunRoot()
+        {
+            CleanupAbandonedRuns();
+            Directory.CreateDirectory(_runRoot);
             AppDomain.CurrentDomain.ProcessExit += (_, _) =>
             {
                 SqliteConnection.ClearAllPools();
-                foreach (var path in _deferred)
-                    TryDelete(path);
+                TryDelete(_runRoot);
             };
+        }
 
         /// <summary>
         /// RUNNER_TEMP when a GitHub Actions runner set it, Path.GetTempPath()
@@ -281,30 +286,19 @@ namespace Hermaeus.Tests
                 : Path.GetTempPath();
         }
 
-        private readonly string _root = Path.Combine(TempRoot(), $"hermaeus-tests-{Guid.NewGuid():N}");
+        private readonly string _root = Path.Combine(_runRoot, Guid.NewGuid().ToString("N"));
 
         public TempDir() => Directory.CreateDirectory(_root);
 
         public string PathFor(string relative) => Path.Combine(_root, relative);
 
         /// <summary>
-        /// Pooled SQLite connections keep file handles open on Windows, and a
-        /// fire-and-forget background task a test never awaited (e.g.
-        /// ChatViewModel's memory-status refresh) can still be mid-query against a
-        /// db under this root when the test method returns. An atomic temp+move
-        /// write to a plain file (Agent's task_state.json) can also still be
-        /// settling, and CI's shared Windows runners hold a freshly-written file
-        /// open a beat longer than a dev machine does (observed in r23/r24 CI).
-        ///
-        /// This used to retry with a growing backoff, up to 10 attempts and 3.4
-        /// SECONDS of Thread.Sleep per temp root, and still rethrew on the last
-        /// attempt. That made cleanup the single largest cost in the suite
-        /// (AgentPatchReviewServiceTests averaged 1.7s per test doing almost no
-        /// work) while leaving the failure mode it was added to prevent.
-        ///
-        /// Deleting a temp directory is housekeeping, not an assertion: a leftover
-        /// directory under %TEMP% harms nothing, and no test result depends on it.
-        /// So try briefly, then hand it to process exit and move on.
+        /// Pooled SQLite connections and short-lived background work can keep a
+        /// child root locked for a beat after a test returns. The child is owned
+        /// by this run root, so a failed delete cannot create one top-level temp
+        /// directory per test. The process-exit cleanup removes the whole run,
+        /// and the next test process reclaims stale runs left by cancellation or
+        /// an externally terminated test host.
         /// </summary>
         public void Dispose()
         {
@@ -312,16 +306,28 @@ namespace Hermaeus.Tests
                 return;
 
             SqliteConnection.ClearAllPools();
-            if (TryDelete(_root))
-                return;
+            TryDelete(_root);
+        }
 
-            // One short breath covers the overwhelmingly common case: a handle
-            // that is already closing as the test returns.
-            Thread.Sleep(25);
-            if (TryDelete(_root))
-                return;
+        private static void CleanupAbandonedRuns()
+        {
+            var root = TempRoot();
+            var cutoff = DateTime.UtcNow - TimeSpan.FromHours(1);
+            try
+            {
+                foreach (var path in Directory.EnumerateDirectories(root, "hermaeus-tests-*", SearchOption.TopDirectoryOnly))
+                {
+                    if (string.Equals(path, _runRoot, OperatingSystem.IsWindows()
+                            ? StringComparison.OrdinalIgnoreCase
+                            : StringComparison.Ordinal)
+                        || Directory.GetLastWriteTimeUtc(path) > cutoff)
+                        continue;
 
-            _deferred.Add(_root);
+                    TryDelete(path);
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         private static bool TryDelete(string path)

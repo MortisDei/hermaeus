@@ -80,10 +80,11 @@ and test harnesses, focused Lab/Benchmark authority regressions, the isolated
 driver mutation receipt, the approved-host b10930 CPU/partial-GPU/all-GPU
 receipt matrix, Linux package creation, package checksum verification, and an
 installed-path test with spaces. The current Debug and Release suites each
-passed `2,731`, skipped `17`, failed `0`, total `2,748`; the current focused
+passed `2,733`, skipped `17`, failed `0`, total `2,750`; the earlier focused
 R33 repair set passed `119/119`, with the broader authority set retained at
-`260/260`. Native Windows, live owner Lab/Benchmark walkthroughs, and GUI
-pixel acceptance remain owner validation gates. The exact dispositions
+`260/260`. The cleanup-focused set and source audit are recorded in the
+completion audit. Native Windows, live owner Lab/Benchmark walkthroughs, and
+GUI pixel acceptance remain owner validation gates. The exact dispositions
 for every batch, acceptance cell, V01-V14
 scenario, owner defect, and conditional branch are recorded in
 [12-completion-audit.md](12-completion-audit.md).

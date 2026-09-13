@@ -91,8 +91,8 @@ if getattr(sys, "prefix", "") == "/install":
 
 try:
     import venv
-    tmp = tempfile.mkdtemp()
-    venv.EnvBuilder(with_pip=False).create(tmp)
+    with tempfile.TemporaryDirectory() as tmp:
+        venv.EnvBuilder(with_pip=False).create(tmp)
 except Exception as exc:
     add("venv_create", f"test venv creation failed: {exc}")
 

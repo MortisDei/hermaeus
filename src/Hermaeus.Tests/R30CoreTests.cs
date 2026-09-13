@@ -85,15 +85,29 @@ public sealed class R30CoreTests
     [Fact]
     public void Model_deletion_planner_rejects_outside_root_and_running_targets()
     {
-        var root = Path.Combine(Path.GetTempPath(), "hermaeus-r30-path-test", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var model = Path.Combine(root, "model.gguf");
-        File.WriteAllText(model, "model");
-        Assert.True(ModelDeletionService.TryPlan(model, root, false, out var plan, out _));
-        Assert.Single(plan!.Files);
-        Assert.False(ModelDeletionService.TryPlan(Path.Combine(root, "..", "outside.gguf"), root, false, out _, out _));
-        Assert.False(ModelDeletionService.TryPlan(model, root, true, out _, out _));
-        File.Delete(model);
-        Directory.Delete(root);
+        var parent = Path.Combine(Path.GetTempPath(), "hermaeus-r30-path-test");
+        var root = Path.Combine(parent, Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var model = Path.Combine(root, "model.gguf");
+            File.WriteAllText(model, "model");
+            Assert.True(ModelDeletionService.TryPlan(model, root, false, out var plan, out _));
+            Assert.Single(plan!.Files);
+            Assert.False(ModelDeletionService.TryPlan(Path.Combine(root, "..", "outside.gguf"), root, false, out _, out _));
+            Assert.False(ModelDeletionService.TryPlan(model, root, true, out _, out _));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch { }
+
+            try
+            {
+                if (Directory.Exists(parent) && !Directory.EnumerateFileSystemEntries(parent).Any())
+                    Directory.Delete(parent, recursive: false);
+            }
+            catch { }
+        }
     }
 }

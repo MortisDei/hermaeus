@@ -267,17 +267,16 @@ readback, benchmark cancellation, RAG generation/query, Chat retrieval
 context, voice orchestration, Lab failure cleanup, Lab Apply/settings reopen,
 and shared startup/shutdown. It requires separate scratch paths for settings,
 Data Root, and workspace, and refuses unknown arguments or workspace-overlapping
-paths. For a local run:
+paths. For a local run, use the repository wrapper so its settings, Data Root,
+and workspace scratch tree are deleted on success, failure, or cancellation:
 
 ```bash
-dotnet run --project src/Tools/R33Driver/R33Driver.csproj -- \
-  --settings-path /tmp/hermaeus-r33/settings/settings.json \
-  --data-root /tmp/hermaeus-r33/data \
-  --workspace /tmp/hermaeus-r33/workspace
+bash scripts/run-r33-driver.sh
 ```
 
-The driver does not use the owner's settings, Data Root, or workspace. Its JSON
-result is a compact verification receipt, not a GUI or native-runtime proof.
+The wrapper streams the compact JSON result and does not create a routine log
+file. The driver does not use the owner's settings, Data Root, or workspace.
+Its result is a verification receipt, not a GUI or native-runtime proof.
 
 ## Autonomous Runs
 

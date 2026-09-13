@@ -137,14 +137,17 @@ native-runtime or GUI proof.
 The rebuilt `v0.41.0-beta` Linux archive passed its SHA256 check, launcher-link
 and executable assertions, layout/no-PDB checks, and Release package assembly.
 The published package apphost was also started from a dedicated `/tmp`
-working directory. Its runtime log recorded production store startup in
-`258 ms`, and the X11 window tree exposed a `1280x820` top-level
-`Hermaeus - WIZARD` window with class `hermaeus-app` / `hermaeus`. A syscall
-trace found no access to `/mnt/Gaming/Hermaeus` or the normal owner
-`/home/cignoli/.local/share/Hermaeus` path. The process was stopped by
-interrupt after the native check because this host's CUA surface exposed only
-state inventory and no app/window interaction methods. Therefore GUI pixels,
-control exercise, and clean window-close telemetry remain owner-live gates.
+working directory. The current approved-host launch instead used the existing
+owner data and configured Gemma/Qwen managed servers. `runtime.log` recorded
+both loopback servers reaching `Running` and embedding warm-up completion, and
+the COSMIC screenshot showed the loaded main shell, model selector, navigation
+bar, conversation list, and Doctor warning banner. The native CUA surface
+exposed only state inventory and no app/window interaction methods, so model
+switching, Lab/Benchmark walkthroughs, editor fallback rendering, approval,
+dialog placement, and clean window-close telemetry remain owner-live gates.
+The fallback console interrupt stopped the app and managed children but left
+the lifecycle journal `CleanExit:false`; the earlier tray-path clean evidence
+is retained separately and is not replaced by this incomplete close attempt.
 
 ## Monaco and AvaloniaEdit fallback boundary
 

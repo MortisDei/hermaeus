@@ -122,7 +122,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
             // r11 4.3: when the caller did not request a persisted OutputPath, this
             // synthesized to a temp file that must not outlive playback, failure, or
             // cancellation.
-            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+            if (string.IsNullOrWhiteSpace(request.OutputPath) && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
             {
                 try { File.Delete(outputPath); }
                 catch { }
@@ -138,10 +138,20 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var outputPath = await RenderToFileAsync(text, _settings.Settings.Tts.Speaker, null, ct);
-        await _playback(outputPath, ct);
-        try { File.Delete(outputPath); }
-        catch { }
+        var outputPath = string.Empty;
+        try
+        {
+            outputPath = await RenderToFileAsync(text, _settings.Settings.Tts.Speaker, null, ct);
+            await _playback(outputPath, ct);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
+        }
     }
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
@@ -152,10 +162,20 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var outputPath = await RenderToFileAsync(text, speaker, null, ct);
-        await _playback(outputPath, ct);
-        try { File.Delete(outputPath); }
-        catch { }
+        var outputPath = string.Empty;
+        try
+        {
+            outputPath = await RenderToFileAsync(text, speaker, null, ct);
+            await _playback(outputPath, ct);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
+        }
     }
 
     public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default)
@@ -201,14 +221,28 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
                 : $"OpenAI returned {(int)resp.StatusCode}: {detail}");
         }
 
-        var path = string.IsNullOrWhiteSpace(outputPath)
+        var ownsOutput = string.IsNullOrWhiteSpace(outputPath);
+        var path = ownsOutput
             ? Path.Combine(Path.GetTempPath(), $"hermaeus-openai-{Guid.NewGuid():N}.wav")
-            : outputPath;
+            : outputPath!;
 
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-        await using var file = File.Create(path);
-        await stream.CopyToAsync(file, ct);
-        return path;
+        try
+        {
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            await using var file = File.Create(path);
+            await stream.CopyToAsync(file, ct);
+            return path;
+        }
+        catch
+        {
+            if (ownsOutput)
+            {
+                try { File.Delete(path); }
+                catch { }
+            }
+
+            throw;
+        }
     }
 
     private static string? TryReadJsonError(string json)

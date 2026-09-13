@@ -47,6 +47,7 @@ The status words have the following precise meaning in this document:
 | E11 | Approved-host native b10930 matrix on 2026-09-13 using the exact owner Gemma GGUF, loopback ports `39413`, `39411`, and `39412`, `--props`, `--metrics`, and bounded SIGINT cleanup; detailed receipts are in `docs/review/r33/13-lab-benchmark-authority-audit.md` | CPU reported `0/36` offloaded, partial GPU `17/36`, and all GPU `36/36`; all three returned HTTP 200, exposed context `4096` and slots `1`, reported timing metrics, exited `0`, and left no server. This proves native placement and cleanup, not semantic equivalence or owner Lab GUI acceptance. |
 | E12 | Final evidence continuation on 2026-09-13: approved-host Debug/Release builds, focused Release authority tests, complete Debug/Release suites, fresh Release R33 driver, and `./scripts/coverage.sh` | Both builds completed with `0` warnings and `0` errors; the focused authority set passed `260/260`; each complete suite passed `2,722`, skipped `17`, failed `0`, total `2,739`; the fresh driver returned `ok:true`; the final coverage gate passed the repository's 60% line ratchet. This remains host-automated evidence, not owner GUI proof. |
 | E13 | Current local repair continuation on 2026-09-13: focused R33 regressions, complete Debug/Release suites, final `./scripts/coverage.sh`, fresh Release driver, rebuilt `v0.41.0-beta` Linux package, and isolated package apphost launch | The focused repair set passed `119/119`; each complete suite passed `2,731`, skipped `17`, failed `0`, total `2,748`; the coverage gate passed the 60% ratchet; the driver returned `ok:true`; package checksum/layout/no-PDB checks passed. The apphost created a native `Hermaeus - WIZARD` `1280x820` window and its syscall trace found no owner-data path, but interruption was used after the native check. No GUI pixel, control-flow, or clean-window-close proof is claimed. |
+| E14 | 2026-09-13 cleanup-source continuation: per-process test scratch ownership, scenario-run outer-finally cleanup, build failure traps, isolated driver wrapper, clipboard/Python/voice/provider cleanup, R30 temp-parent cleanup, and an approved-host packaged launch using existing Linux owner data | The final Debug suite passed `2,733`, skipped `17`, failed `0`, total `2,750`; the Release suite had the same result; the cleanup-focused regression set and driver passed; the package checksum/layout/no-PDB checks passed. The live package loaded the configured Gemma chat and Qwen embedding servers, and a COSMIC screenshot was captured and pixel-inspected. The native CUA surface exposed no app/window controls, so model switching, Lab/Benchmark walkthroughs, editor/approval/dialog checks, and GUI close remain owner validation. The fallback console interrupt stopped the app and children but left the lifecycle journal `CleanExit:false`; no clean-close claim is made for this attempt. |
 
 ## Mandatory batches and roadmap acceptance cells
 
@@ -295,6 +296,35 @@ cancellation, RAG generation/query, Chat retrieval context, voice completion,
 Lab failure cleanup, Lab Apply/settings reopen, and runtime stop count one.
 This is production-composition evidence, not native runtime, GUI, or pixel
 acceptance evidence.
+
+## Cleanup-source continuation
+
+The temporary-artifact audit found that successful paths were not enough to
+establish ownership. Test roots were previously one top-level directory per
+test, scenario cleanup could be bypassed by cancellation or post-processing
+exceptions, the driver required caller-created scratch paths, clipboard images
+and Python health checks had implicit temporary ownership, and several voice
+providers could leave partial or playback-failed WAV files. The bounded repairs
+give each producer an owner and a cleanup boundary:
+
+- `TempDir` uses one per-process run container, reclaims stale Hermaeus test
+  containers on the next process, and deletes the container at process exit.
+- `AgentScenarioRunner` cleans the leaf, run id, and parent roots from an outer
+  `finally`, including cancellation and post-processing failures.
+- `build.sh` removes only its exact publish/package outputs when a build does
+  not reach checksum completion; `scripts/run-r33-driver.sh` owns and removes
+  its isolated settings, data, and workspace root on every exit path.
+- Clipboard image paste, Python health validation, Kokoro bootstrap scripts,
+  and OpenAI, F5, Kokoro, XTTS, and native Kokoro implicit audio outputs now
+  delete owned partial or playback-failed artifacts. Explicit output paths stay
+  caller-owned.
+
+The complete Debug and Release suites both passed `2,733`, skipped `17`, and
+failed `0`. The focused cleanup regressions passed, and the fresh Release
+driver returned `ok:true` with no Hermaeus or R33 roots remaining under `/tmp`
+after completion. This is source and host automation evidence. It does not
+claim that a hard process kill can run managed cleanup; stale-run recovery is
+the bounded fallback for that boundary.
 
 The focused AutoTune regression suite covers a loaded source server and an
 unloaded target model. It observes the order `suspend -> tune -> restore`,

@@ -13,6 +13,10 @@ limit.
 
 ### Changed
 
+- Temporary test, scenario, driver, clipboard-image, Python-health, voice,
+  and failed-package artifacts now have explicit source owners and cleanup
+  boundaries. Implicit generated audio is removed after playback, failure, or
+  cancellation, while explicit output paths remain caller-owned.
 - Lab completion now stores comparison and effective-launch evidence as separate
   bounded records referenced by a compact completion summary. Recipe runs expose
   named candidate progress, preserve truthful completed and remaining counts,
