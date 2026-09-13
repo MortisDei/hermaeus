@@ -552,6 +552,11 @@ public sealed class AgentDraftPatch
     public string ProposedContentSha256 { get; set; } = string.Empty;
     public string PolicyFingerprint { get; set; } = string.Empty;
     public DateTime PreparedAt { get; set; }
+    /// <summary>
+    /// Complete approval binding for the prepared proposal. Empty on older
+    /// manually queued patches that do not have an Agent pending action.
+    /// </summary>
+    public string ApprovalFingerprint { get; set; } = string.Empty;
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsPrepared => ProposalId.Length > 0 && ProposalRevision > 0 && PreparedAt != default;

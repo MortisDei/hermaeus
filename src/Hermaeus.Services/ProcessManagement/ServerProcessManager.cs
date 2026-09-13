@@ -677,8 +677,15 @@ public sealed class ServerProcessManager : IDisposable
     private IReadOnlyList<string> CaptureEffectiveRuntimeEvidence() =>
         _logRing
             .Where(line => line.Contains("offloaded ", StringComparison.OrdinalIgnoreCase)
-                || line.Contains("load_model: initializing", StringComparison.OrdinalIgnoreCase))
-            .TakeLast(8)
+                || line.Contains("load_tensors:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("system_info:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("n_threads =", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("llama_context:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("llama_kv_cache:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Flash Attention", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("load_model: initializing", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("model loaded", StringComparison.OrdinalIgnoreCase))
+            .TakeLast(24)
             .ToArray();
 
     public static string ParseLlamaBuildLabel(string text)

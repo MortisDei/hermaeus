@@ -44,9 +44,6 @@ source behaviour, treat the skill as drift and correct it.
   invariants.
 - `storage-and-data-root`: SQLite, backup, atomic writes, and staged Data Root
   migration lifecycle.
-- `screenshot-verification`: real Linux/COSMIC and Windows screenshot capture,
-  pixel inspection, and the boundary between visual evidence and interaction
-  or runtime acceptance.
 
 ## Build, test, run
 

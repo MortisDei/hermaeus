@@ -29,12 +29,32 @@ public sealed class AgentReviewQueueTests
           "next_action": {
             "type": "tool",
             "tool_name": "draft_patch",
-            "arguments": { "path": "notes.md" },
+            "arguments": {
+              "relative_path": "notes.md",
+              "rationale": "Add the requested notes file.",
+              "proposed_content": "notes"
+            },
             "requires_approval": true,
             "risk_level": "medium"
           },
           "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
           "user_message": "Proposing a patch."
+        }
+        """;
+
+    private const string FalseFinalResponse = """
+        {
+          "thought_summary": "The patch was applied and verified.",
+          "current_step": "Done.",
+          "next_action": {
+            "type": "final",
+            "tool_name": null,
+            "arguments": {},
+            "requires_approval": false,
+            "risk_level": "none"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "The patch was applied and verified."
         }
         """;
 
@@ -129,6 +149,23 @@ public sealed class AgentReviewQueueTests
         var created = await agent.CreateTaskAsync("Change a file", options);
         var stepped = await agent.RunStepAsync(created.TaskId, options);
         Assert.NotNull(stepped.State.PendingToolAction);
+        var prepared = Assert.Single(stepped.State.DraftPatches);
+        Assert.Equal(AgentDraftPatchStatus.Pending, prepared.Status);
+        Assert.Equal("notes.md", prepared.RelativePath);
+        Assert.Equal("notes", prepared.ProposedContent);
+        Assert.True(prepared.IsPrepared);
+        Assert.False(string.IsNullOrWhiteSpace(prepared.ProposalId));
+        Assert.Equal(1, prepared.ProposalRevision);
+        Assert.False(string.IsNullOrWhiteSpace(prepared.ProposedContentSha256));
+        Assert.False(string.IsNullOrWhiteSpace(prepared.ApprovalFingerprint));
+        Assert.Equal(AgentApprovalFingerprint.Resolve(stepped.State.PendingToolAction), prepared.ApprovalFingerprint);
+        Assert.False(File.Exists(Path.Combine(options.WorkspaceRoot, "notes.md")));
+        var draftResult = Assert.Single(stepped.State.ToolResults, result => result.Tool == "draft_patch");
+        Assert.Equal(NormalizedOutcome.Succeeded, draftResult.NormalizedOutcome.Outcome);
+        Assert.Contains(prepared.ProposalId, draftResult.ResultSummary, StringComparison.Ordinal);
+        Assert.Contains("no file was changed", stepped.State.Summary, StringComparison.OrdinalIgnoreCase);
+        var transcript = await store.LoadTranscriptAsync(created.TaskId);
+        Assert.Contains(transcript, entry => entry.Role == "tool" && entry.ToolName == "draft_patch");
         Assert.Contains(await store.ListReviewQueueAsync(), item => item.TaskId == created.TaskId);
 
         var fingerprint = AgentApprovalFingerprint.Resolve(stepped.State.PendingToolAction);
@@ -136,6 +173,89 @@ public sealed class AgentReviewQueueTests
 
         Assert.True(result.Applied);
         Assert.DoesNotContain(await store.ListReviewQueueAsync(), item => item.TaskId == created.TaskId);
+        var applied = Assert.Single((await store.LoadAsync(created.TaskId))!.DraftPatches);
+        Assert.Equal(AgentDraftPatchStatus.Applied, applied.Status);
+        Assert.NotNull(applied.MutationReceiptId);
+        Assert.Contains("applied and verified", (await store.LoadAsync(created.TaskId))!.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("notes", await File.ReadAllTextAsync(Path.Combine(options.WorkspaceRoot, "notes.md")));
+    }
+
+    [Fact]
+    public async Task Approval_refuses_when_the_authoritative_prepared_patch_is_missing()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp);
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        var stepped = await agent.RunStepAsync(created.TaskId, options);
+        var fingerprint = AgentApprovalFingerprint.Resolve(stepped.State.PendingToolAction);
+        var state = await store.LoadAsync(created.TaskId);
+        Assert.NotNull(state);
+        state!.DraftPatches.Clear();
+        await store.SaveAsync(state);
+
+        var result = await agent.AppendApprovalAsync(created.TaskId, "review_queue", approved: true, fingerprint, options);
+
+        Assert.False(result.Applied);
+        Assert.Equal(AgentMutationOutcome.Conflict, result.Outcome);
+        Assert.False(File.Exists(Path.Combine(options.WorkspaceRoot, "notes.md")));
+        var blocked = await store.LoadAsync(created.TaskId);
+        Assert.NotNull(blocked);
+        Assert.Equal(AgentTaskStatus.Blocked, blocked!.Status);
+    }
+
+    [Fact]
+    public async Task Rejected_patch_cannot_be_reported_as_applied_by_final_agent_narrative()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(
+            temp,
+            new FakeSequencedAgentLlm([GatedToolResponse, FalseFinalResponse]));
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        var stepped = await agent.RunStepAsync(created.TaskId, options);
+        var fingerprint = AgentApprovalFingerprint.Resolve(stepped.State.PendingToolAction);
+        await agent.AppendApprovalAsync(created.TaskId, "review_queue", approved: false, fingerprint, options);
+
+        var final = await agent.RunStepAsync(created.TaskId, options);
+        var rejected = Assert.Single((await store.LoadAsync(created.TaskId))!.DraftPatches);
+        Assert.Equal(AgentDraftPatchStatus.Rejected, rejected.Status);
+        Assert.Contains("rejected", final.State.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("applied and verified", final.State.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rejected", final.PlannerResponse.UserMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Direct_draft_and_apply_execution_are_refused_without_prepared_approval()
+    {
+        using var temp = new TempDir();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        var path = Path.Combine(workspace, "notes.md");
+        await File.WriteAllTextAsync(path, "original");
+
+        var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+        var draftResult = await executor.ExecuteAsync(
+            "draft_patch",
+            new Dictionary<string, object?>
+            {
+                ["relative_path"] = "notes.md",
+                ["rationale"] = "must persist first",
+                ["proposed_content"] = "must not apply"
+            },
+            new AgentWorkspaceOptions(workspace));
+        var result = await executor.ExecuteAsync(
+            "apply_draft_patch",
+            new Dictionary<string, object?>
+            {
+                ["relative_path"] = "notes.md",
+                ["proposed_content"] = "must not apply"
+            },
+            new AgentWorkspaceOptions(workspace));
+
+        Assert.Equal(NormalizedOutcome.Blocked, draftResult.NormalizedOutcome.Outcome);
+        Assert.Equal(NormalizedOutcome.Blocked, result.NormalizedOutcome.Outcome);
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
     }
 
     [Fact]
@@ -212,6 +332,7 @@ public sealed class AgentReviewQueueTests
         Assert.Null(reloaded!.PendingToolAction);
         Assert.Equal(AgentTaskStatus.WaitingForUser, reloaded.Status);
         Assert.Single(reloaded.ApprovalHistory);
+        Assert.Equal(AgentDraftPatchStatus.Rejected, Assert.Single(reloaded.DraftPatches).Status);
     }
 
     // ── Dismissing a task the user is done with ──
@@ -235,8 +356,10 @@ public sealed class AgentReviewQueueTests
         Assert.Equal(AgentTaskStatus.Cancelled, reloaded.Status);
         // Dismissing is walking away, not deciding: no approval is recorded.
         Assert.Empty(reloaded.ApprovalHistory);
-        // The draft_patch the pending action would have written never ran.
-        Assert.Empty(reloaded.DraftPatches);
+        // Dismissing leaves the prepared proposal visible as a non-applied
+        // decision, while still proving that no workspace write occurred.
+        Assert.Equal(AgentDraftPatchStatus.Blocked, Assert.Single(reloaded.DraftPatches).Status);
+        Assert.False(File.Exists(Path.Combine(options.WorkspaceRoot, "notes.md")));
     }
 
     [Fact]

@@ -32,7 +32,7 @@ public sealed class AgentService : IAgentService
         existing file over draft_patch/apply_draft_patch, which rewrite the
         whole file; old_string must match the file's current content exactly
         once. Use create_file (relative_path, content) only for new files; it
-        refuses to overwrite an existing one. edit_file, create_file,
+        refuses to overwrite an existing one. draft_patch, edit_file, create_file,
         apply_draft_patch, and run_command always require approval. Use
         set_plan (steps: array of {description, status: pending|in_progress|done})
         to keep a visible checklist for multi-step goals; it replaces the
@@ -529,6 +529,7 @@ public sealed class AgentService : IAgentService
         await RecordStatedLessonsAsync(state, options, response, ct);
         var nextTool = response.NextAction.ToolName ?? string.Empty;
         AgentToolResult? executedToolResult = null;
+        AgentToolResult? preparedToolResult = null;
         if (response.NextAction.Type == AgentActionKind.Tool)
         {
             var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
@@ -545,6 +546,7 @@ public sealed class AgentService : IAgentService
             AgentToolPolicyDecision decision;
             AgentMutationPreparationResult? preparation = null;
             AgentPendingToolAction? preparedPlan = null;
+            AgentDraftPatch? preparedDraftPatch = null;
             if (string.Equals(nextTool, "plan_subtasks", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(state.ParentTaskId))
             {
                 // Depth limit enforced in code, not prompt text (r15
@@ -592,6 +594,32 @@ public sealed class AgentService : IAgentService
                     }
                 }
             }
+            else if (string.Equals(nextTool, "draft_patch", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryNormalizeDraftPatchArguments(response.NextAction.Arguments, out var draftArguments, out var rationale, out var draftError))
+                {
+                    decision = new AgentToolPolicyDecision(
+                        AgentToolDisposition.Blocked,
+                        AgentRiskLevel.High,
+                        $"mutation proposal refused before review: {draftError}");
+                }
+                else
+                {
+                    preparation = await AgentMutationPreparation.PrepareAsync(
+                        nextTool, draftArguments, options, manifest?.Policy, _workspaceTools, ct);
+                    decision = preparation.IsValid
+                        ? _safetyGate.Evaluate(nextTool)
+                        : new AgentToolPolicyDecision(
+                            AgentToolDisposition.Blocked,
+                            AgentRiskLevel.High,
+                            $"mutation proposal refused before review: {preparation.Error}");
+                    if (preparation.IsValid)
+                    {
+                        response.NextAction.Arguments = preparation.Pending!.Arguments;
+                        preparedDraftPatch = BuildPreparedDraftPatch(preparation.Pending, rationale);
+                    }
+                }
+            }
             else if (nextTool is "edit_file" or "create_file" or "apply_draft_patch")
             {
                 preparation = await AgentMutationPreparation.PrepareAsync(
@@ -635,6 +663,18 @@ public sealed class AgentService : IAgentService
             }
             response.NextAction.RiskLevel = decision.RiskLevel;
             response.NextAction.RequiresApproval = decision.Disposition != AgentToolDisposition.Allowed;
+            if (decision.Disposition == AgentToolDisposition.RequiresApproval
+                && preparation?.Pending is { } pendingForNarrative)
+            {
+                response.ThoughtSummary = BuildPendingMutationNarrative(pendingForNarrative);
+                response.UserMessage = response.ThoughtSummary;
+            }
+            else if (decision.Disposition == AgentToolDisposition.Blocked
+                     && IsPreparedMutationTool(nextTool))
+            {
+                response.ThoughtSummary = $"The requested {nextTool} action was blocked before execution: {decision.Reason}";
+                response.UserMessage = response.ThoughtSummary;
+            }
             if (decision.Disposition == AgentToolDisposition.RequiresApproval)
             {
                 if (_toolExecutor.CanExecute(nextTool))
@@ -651,6 +691,13 @@ public sealed class AgentService : IAgentService
                     state.PendingToolAction.RiskLevel = decision.RiskLevel;
                     state.PendingToolAction.Reason = decision.Reason;
                     state.PendingToolAction.Fingerprint = AgentApprovalFingerprint.Resolve(state.PendingToolAction);
+                    if (preparedDraftPatch is not null
+                        && !state.DraftPatches.Any(patch => string.Equals(patch.ProposalId, preparedDraftPatch.ProposalId, StringComparison.Ordinal)))
+                    {
+                        state.DraftPatches.Add(preparedDraftPatch);
+                        preparedToolResult = BuildPreparedDraftPatchResult(preparedDraftPatch);
+                        state.ToolResults.Add(preparedToolResult);
+                    }
                 }
                 else
                 {
@@ -808,6 +855,8 @@ public sealed class AgentService : IAgentService
             if (response.StateUpdate.Blockers.Count > 0 && executedToolResult is null)
             {
                 state.Status = AgentTaskStatus.Blocked;
+                if (state.PendingToolAction is { } blockedPending)
+                    MarkDraftPatchBlocked(state, blockedPending, "The task reported a blocker before the approved mutation could execute.", approved: false);
                 // Blocked never coexists with something pending approval
                 // elsewhere in this loop (the gate-Blocked and 3.2
                 // unexecutable-gated paths above never set one either); a
@@ -825,6 +874,13 @@ public sealed class AgentService : IAgentService
             // r23 2.3: optional, model-provided, never required; an empty
             // list (the common case) means nothing is shown anywhere.
             state.Reservations = response.Reservations?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()).ToList() ?? [];
+        }
+
+        if (response.NextAction.Type == AgentActionKind.Final
+            && FindLatestPreparedDraftPatch(state) is { } finalPatch)
+        {
+            response.ThoughtSummary = BuildAuthoritativeDraftPatchNarrative(finalPatch);
+            response.UserMessage = response.ThoughtSummary;
         }
 
         if (parseFailed && state.ConsecutiveStepErrors < 3)
@@ -918,6 +974,11 @@ public sealed class AgentService : IAgentService
         {
             await _store.AppendTranscriptEntryAsync(taskId,
                 AgentTranscriptCompactor.FromToolResult(state.StepCount, executedToolResult, DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
+        }
+        else if (preparedToolResult is not null)
+        {
+            await _store.AppendTranscriptEntryAsync(taskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, preparedToolResult, DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
         }
 
         await _store.SaveAsync(state, ct);
@@ -1480,6 +1541,8 @@ public sealed class AgentService : IAgentService
 
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
         state.ToolResults.Add(BuildApprovalToolResult(state.PendingToolAction!.ToolName, approved, fingerprintBlocked: false));
+        if (approved)
+            MarkDraftPatchApproved(state, state.PendingToolAction);
         AgentApprovalResult? executionOutcome = null;
         if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
         {
@@ -1522,10 +1585,14 @@ public sealed class AgentService : IAgentService
         {
             // Rejection: the guard above guarantees there is a pending action
             // here, so this branch is only ever the rejected case.
-            await RecordApprovalRejectionLessonAsync(state, options, state.PendingToolAction!.ToolName, ct);
+            var rejected = state.PendingToolAction!;
+            await RecordApprovalRejectionLessonAsync(state, options, rejected.ToolName, ct);
+            MarkDraftPatchRejected(state, rejected);
             state.Status = AgentTaskStatus.WaitingForUser;
             state.PendingToolAction = null;
         }
+        if (FindLatestPreparedDraftPatch(state) is { } updatedPatch)
+            state.Summary = BuildAuthoritativeDraftPatchNarrative(updatedPatch);
         await _store.SaveAsync(state, ct);
         await RecordExperiencesAsync(state, options ?? new AgentWorkspaceOptions(state.WorkspaceRoot), firstNewToolResult, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
@@ -1589,6 +1656,8 @@ public sealed class AgentService : IAgentService
     }
 
     private static bool IsPreparedMutationTool(string toolName) =>
+        toolName.Equals("draft_patch", StringComparison.OrdinalIgnoreCase)
+        ||
         toolName.Equals("edit_file", StringComparison.OrdinalIgnoreCase)
         || toolName.Equals("create_file", StringComparison.OrdinalIgnoreCase)
         || toolName.Equals("apply_draft_patch", StringComparison.OrdinalIgnoreCase)
@@ -1652,7 +1721,9 @@ public sealed class AgentService : IAgentService
             {
                 var effectivePending = pending;
                 var preparationError = await ValidatePreparedMutationAsync(state, effectivePending, options, executionToken);
-                if (preparationError is not null && !effectivePending.IsPrepared)
+                if (preparationError is not null
+                    && !effectivePending.IsPrepared
+                    && !RequiresConcretePreparedProposal(effectivePending.ToolName))
                 {
                     var legacyPreparation = await AgentMutationPreparation.PrepareAsync(
                         effectivePending.ToolName,
@@ -1675,6 +1746,7 @@ public sealed class AgentService : IAgentService
                 if (preparationError is not null)
                 {
                     state.Status = AgentTaskStatus.Blocked;
+                    MarkDraftPatchBlocked(state, pending, preparationError, approved: true);
                     state.ToolResults.Add(BuildMutationRefusalResult(pending, preparationError));
                     await _store.AppendTraceAsync(state.TaskId, new
                     {
@@ -1695,6 +1767,7 @@ public sealed class AgentService : IAgentService
                 {
                     const string unavailable = "Workspace verification is unavailable, so the approved mutation was not executed.";
                     state.Status = AgentTaskStatus.Blocked;
+                    MarkDraftPatchBlocked(state, effectivePending, unavailable, approved: true);
                     state.ToolResults.Add(BuildMutationRefusalResult(effectivePending, unavailable));
                     return new AgentApprovalResult(false, unavailable)
                     {
@@ -1728,12 +1801,19 @@ public sealed class AgentService : IAgentService
                 AgentToolResult result;
                 try
                 {
-                    result = await _toolExecutor.ExecuteAsync(
-                        effectivePending.ToolName,
-                        effectivePending.Arguments,
-                        options,
-                        executionToken,
-                        operationId);
+                    result = effectivePending.IsPrepared
+                        ? await _toolExecutor.ExecuteApprovedPreparedMutationAsync(
+                            effectivePending,
+                            AgentApprovalFingerprint.Resolve(effectivePending),
+                            options,
+                            executionToken,
+                            operationId)
+                        : await _toolExecutor.ExecuteAsync(
+                            effectivePending.ToolName,
+                            effectivePending.Arguments,
+                            options,
+                            executionToken,
+                            operationId);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1798,22 +1878,44 @@ public sealed class AgentService : IAgentService
                             : "The complete prepared output was already present and was verified."
                         : "The executor result did not establish the expected post-image.";
 
-                    if (receipt.Outcome == AgentMutationOutcome.Applied && _workspaceTools is not null)
+                    var queuedDraft = FindPreparedDraftPatch(state, effectivePending);
+                    if (receipt.Outcome is AgentMutationOutcome.Applied or AgentMutationOutcome.AlreadySatisfied
+                        && _workspaceTools is not null)
                     {
                         var postContent = await _workspaceTools.ReadFileForRevertAsync(options, effectivePending.RelativePath, executionToken) ?? string.Empty;
-                        state.DraftPatches.Add(new AgentDraftPatch
+                        if (queuedDraft is not null)
                         {
-                            RelativePath = effectivePending.RelativePath,
-                            Rationale = $"Applied via {effectivePending.ToolName}.",
-                            ProposedContent = postContent,
-                            Status = AgentDraftPatchStatus.Applied,
-                            ApprovedAt = DateTime.UtcNow,
-                            ApprovedBy = "User",
-                            PreImageContent = preImage,
-                            PreImageExisted = effectivePending.ExpectedPreImageExisted,
-                            AppliedContent = postContent,
-                            MutationReceiptId = receipt.ReceiptId
-                        });
+                            UpdateDraftPatchFromReceipt(queuedDraft, effectivePending, receipt, preImage, postContent);
+                        }
+                        else if (receipt.Outcome == AgentMutationOutcome.Applied)
+                        {
+                            state.DraftPatches.Add(new AgentDraftPatch
+                            {
+                                RelativePath = effectivePending.RelativePath,
+                                Rationale = $"Applied via {effectivePending.ToolName}.",
+                                ProposedContent = postContent,
+                                Status = AgentDraftPatchStatus.Applied,
+                                ApprovedAt = DateTime.UtcNow,
+                                ApprovedBy = "User",
+                                PreImageContent = preImage,
+                                PreImageExisted = effectivePending.ExpectedPreImageExisted,
+                                AppliedContent = postContent,
+                                MutationReceiptId = receipt.ReceiptId,
+                                ProposalId = effectivePending.ProposalId,
+                                ProposalRevision = effectivePending.ProposalRevision,
+                                WorkspaceRoot = effectivePending.WorkspaceRoot,
+                                ExpectedPreImageSha256 = effectivePending.ExpectedPreImageSha256,
+                                ExpectedPreImageExisted = effectivePending.ExpectedPreImageExisted,
+                                ProposedContentSha256 = effectivePending.ProposedContentSha256,
+                                PolicyFingerprint = effectivePending.PolicyFingerprint,
+                                PreparedAt = effectivePending.PreparedAt,
+                                ApprovalFingerprint = AgentApprovalFingerprint.Resolve(effectivePending)
+                            });
+                        }
+                    }
+                    else if (queuedDraft is not null)
+                    {
+                        MarkDraftPatchBlocked(state, queuedDraft, receipt.CompletionReason, approved: true);
                     }
                 }
 
@@ -1860,6 +1962,12 @@ public sealed class AgentService : IAgentService
     {
         if (!pending.IsPrepared)
             return "The pending mutation was not prepared under the current proposal contract.";
+        if (pending.ToolName.Equals("draft_patch", StringComparison.OrdinalIgnoreCase))
+        {
+            var draftError = ValidatePreparedDraftPatch(state, pending);
+            if (draftError is not null)
+                return draftError;
+        }
         string? persistedRoot = null;
         string? optionRoot = null;
         try
@@ -1934,6 +2042,245 @@ public sealed class AgentService : IAgentService
                 Detail: "The prepared mutation was refused before execution."))
     };
 
+    private static AgentToolResult BuildPreparedDraftPatchResult(AgentDraftPatch patch) => new()
+    {
+        Tool = "draft_patch",
+        Arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["relative_path"] = patch.RelativePath,
+            ["rationale"] = patch.Rationale,
+            ["proposed_content"] = patch.ProposedContent,
+            ["proposal_id"] = patch.ProposalId,
+            ["proposal_revision"] = patch.ProposalRevision,
+            ["proposed_content_sha256"] = patch.ProposedContentSha256
+        },
+        ResultSummary = BuildPendingMutationNarrative(patch),
+        Source = new SourceReference(ProvenanceKind.Workspace, patch.RelativePath, Locator: patch.RelativePath),
+        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("draft_patch",
+            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Completed,
+                Detail: "A concrete prepared mutation was persisted for review."))
+    };
+
+    private static AgentDraftPatch BuildPreparedDraftPatch(AgentPendingToolAction pending, string rationale) => new()
+    {
+        RelativePath = pending.RelativePath,
+        Rationale = rationale,
+        ProposedContent = pending.ProposedContent,
+        Status = AgentDraftPatchStatus.Pending,
+        CreatedAt = pending.PreparedAt,
+        ProposalId = pending.ProposalId,
+        ProposalRevision = pending.ProposalRevision,
+        WorkspaceRoot = pending.WorkspaceRoot,
+        ExpectedPreImageSha256 = pending.ExpectedPreImageSha256,
+        ExpectedPreImageExisted = pending.ExpectedPreImageExisted,
+        ProposedContentSha256 = pending.ProposedContentSha256,
+        PolicyFingerprint = pending.PolicyFingerprint,
+        PreparedAt = pending.PreparedAt,
+        ApprovalFingerprint = AgentApprovalFingerprint.Resolve(pending)
+    };
+
+    private static string? ValidatePreparedDraftPatch(AgentTaskState state, AgentPendingToolAction pending)
+    {
+        var patch = FindPreparedDraftPatch(state, pending);
+        if (patch is null)
+            return "The prepared draft patch is missing from the authoritative Changes state.";
+        if (patch.Status != AgentDraftPatchStatus.Approved)
+            return $"The prepared draft patch is not approved in the authoritative Changes state (status: {patch.Status}).";
+        if (!patch.IsPrepared
+            || !string.Equals(patch.ApprovalFingerprint, AgentApprovalFingerprint.Resolve(pending), StringComparison.Ordinal)
+            || !string.Equals(patch.WorkspaceRoot, pending.WorkspaceRoot, StringComparison.OrdinalIgnoreCase)
+            || patch.ProposalRevision != pending.ProposalRevision
+            || !string.Equals(patch.RelativePath, pending.RelativePath, StringComparison.Ordinal)
+            || !string.Equals(patch.ProposedContent, pending.ProposedContent, StringComparison.Ordinal)
+            || !string.Equals(patch.ExpectedPreImageSha256, pending.ExpectedPreImageSha256, StringComparison.Ordinal)
+            || patch.ExpectedPreImageExisted != pending.ExpectedPreImageExisted
+            || !string.Equals(patch.ProposedContentSha256, pending.ProposedContentSha256, StringComparison.Ordinal)
+            || !string.Equals(patch.PolicyFingerprint, pending.PolicyFingerprint, StringComparison.Ordinal)
+            || patch.PreparedAt != pending.PreparedAt)
+            return "The prepared draft patch no longer matches the exact approved mutation identity or content.";
+
+        return null;
+    }
+
+    private static AgentDraftPatch? FindPreparedDraftPatch(AgentTaskState state, AgentPendingToolAction pending) =>
+        state.DraftPatches.FirstOrDefault(patch =>
+            string.Equals(patch.ProposalId, pending.ProposalId, StringComparison.Ordinal)
+            && patch.ProposalRevision == pending.ProposalRevision);
+
+    private static AgentDraftPatch? FindLatestPreparedDraftPatch(AgentTaskState state) =>
+        state.DraftPatches
+            .Where(patch => patch.IsPrepared)
+            .OrderByDescending(patch => patch.CreatedAt)
+            .ThenByDescending(patch => patch.ProposalRevision)
+            .FirstOrDefault();
+
+    private static bool RequiresConcretePreparedProposal(string toolName) =>
+        toolName.Equals("draft_patch", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("apply_draft_patch", StringComparison.OrdinalIgnoreCase);
+
+    private static void MarkDraftPatchApproved(AgentTaskState state, AgentPendingToolAction pending)
+    {
+        var patch = FindPreparedDraftPatch(state, pending);
+        if (patch is null)
+            return;
+
+        patch.Status = AgentDraftPatchStatus.Approved;
+        patch.ApprovedAt = DateTime.UtcNow;
+        patch.ApprovedBy = "User";
+        patch.BlockedAt = null;
+        patch.BlockedBy = null;
+        patch.BlockReason = string.Empty;
+    }
+
+    private static void MarkDraftPatchRejected(AgentTaskState state, AgentPendingToolAction pending)
+    {
+        var patch = FindPreparedDraftPatch(state, pending);
+        if (patch is null)
+            return;
+
+        patch.Status = AgentDraftPatchStatus.Rejected;
+        patch.BlockedAt = DateTime.UtcNow;
+        patch.BlockedBy = "User";
+        patch.BlockReason = "Rejected during review.";
+    }
+
+    private static void MarkDraftPatchBlocked(
+        AgentTaskState state,
+        AgentPendingToolAction pending,
+        string reason,
+        bool approved)
+    {
+        var patch = FindPreparedDraftPatch(state, pending);
+        if (patch is not null)
+            MarkDraftPatchBlocked(state, patch, reason, approved);
+    }
+
+    private static void MarkDraftPatchBlocked(
+        AgentTaskState state,
+        AgentDraftPatch patch,
+        string reason,
+        bool approved)
+    {
+        _ = state;
+        patch.Status = AgentDraftPatchStatus.Blocked;
+        if (approved)
+        {
+            patch.ApprovedAt = DateTime.UtcNow;
+            patch.ApprovedBy = "User";
+        }
+        patch.BlockedAt = DateTime.UtcNow;
+        patch.BlockedBy = approved ? "System" : "User";
+        patch.BlockReason = string.IsNullOrWhiteSpace(reason) ? "The patch was not applied." : reason;
+    }
+
+    private static string BuildPendingMutationNarrative(AgentPendingToolAction pending) =>
+        pending.ToolName.Equals("draft_patch", StringComparison.OrdinalIgnoreCase)
+            ? $"Prepared patch {pending.ProposalId} revision {pending.ProposalRevision} for '{pending.RelativePath}' with SHA256 {pending.ProposedContentSha256}. It is awaiting explicit approval; no file was changed."
+            : $"Prepared {pending.ToolName} for '{pending.RelativePath}'. It is awaiting explicit approval; no workspace mutation has been applied.";
+
+    private static string BuildPendingMutationNarrative(AgentDraftPatch patch) =>
+        $"Prepared patch {patch.ProposalId} revision {patch.ProposalRevision} for '{patch.RelativePath}' with SHA256 {patch.ProposedContentSha256}. It is awaiting explicit approval; no file was changed.";
+
+    private static string BuildAuthoritativeDraftPatchNarrative(AgentDraftPatch patch) => patch.Status switch
+    {
+        AgentDraftPatchStatus.Pending => BuildPendingMutationNarrative(patch),
+        AgentDraftPatchStatus.Approved => $"Patch {patch.ProposalId} revision {patch.ProposalRevision} is approved, but no completed execution receipt exists. It is not applied or verified.",
+        AgentDraftPatchStatus.Applied => $"Patch {patch.ProposalId} revision {patch.ProposalRevision} was applied and verified by receipt {patch.MutationReceiptId}.",
+        AgentDraftPatchStatus.AlreadySatisfied => $"Patch {patch.ProposalId} revision {patch.ProposalRevision} was already present and verified by receipt {patch.MutationReceiptId}.",
+        AgentDraftPatchStatus.Rejected => $"Patch {patch.ProposalId} revision {patch.ProposalRevision} was rejected. No file was changed.",
+        AgentDraftPatchStatus.Blocked => $"Patch {patch.ProposalId} revision {patch.ProposalRevision} was blocked before application: {patch.BlockReason}",
+        AgentDraftPatchStatus.Reverted => $"Patch {patch.ProposalId} revision {patch.ProposalRevision} was applied and later reverted. It is not currently applied.",
+        _ => $"Patch {patch.ProposalId} revision {patch.ProposalRevision} has an unclassified execution state. It is not claimed applied or verified."
+    };
+
+    private static void UpdateDraftPatchFromReceipt(
+        AgentDraftPatch patch,
+        AgentPendingToolAction pending,
+        AgentMutationReceipt receipt,
+        string? preImage,
+        string postContent)
+    {
+        patch.ApprovedAt = DateTime.UtcNow;
+        patch.ApprovedBy = "User";
+        patch.BlockedAt = null;
+        patch.BlockedBy = null;
+        patch.BlockReason = string.Empty;
+        patch.PreImageContent = preImage;
+        patch.PreImageExisted = pending.ExpectedPreImageExisted;
+        patch.AppliedContent = postContent;
+        patch.MutationReceiptId = receipt.ReceiptId;
+        patch.Status = receipt.Outcome == AgentMutationOutcome.Applied
+            ? AgentDraftPatchStatus.Applied
+            : AgentDraftPatchStatus.AlreadySatisfied;
+    }
+
+    private static bool TryNormalizeDraftPatchArguments(
+        Dictionary<string, object?> arguments,
+        out Dictionary<string, object?> normalized,
+        out string rationale,
+        out string error)
+    {
+        normalized = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        rationale = string.Empty;
+        error = string.Empty;
+
+        foreach (var key in arguments.Keys)
+        {
+            if (!key.Equals("relative_path", StringComparison.OrdinalIgnoreCase)
+                && !key.Equals("proposed_content", StringComparison.OrdinalIgnoreCase)
+                && !key.Equals("rationale", StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"The draft patch contains unknown argument '{key}'.";
+                return false;
+            }
+        }
+
+        if (!TryReadStringArgument(arguments, "relative_path", allowEmpty: false, out var relativePath, out error)
+            || !TryReadStringArgument(arguments, "proposed_content", allowEmpty: true, out var proposedContent, out error))
+            return false;
+        if (arguments.ContainsKey("rationale")
+            && !TryReadStringArgument(arguments, "rationale", allowEmpty: true, out rationale, out error))
+            return false;
+
+        normalized["relative_path"] = relativePath;
+        normalized["proposed_content"] = proposedContent;
+        return true;
+    }
+
+    private static bool TryReadStringArgument(
+        Dictionary<string, object?> arguments,
+        string name,
+        bool allowEmpty,
+        out string value,
+        out string error)
+    {
+        value = string.Empty;
+        error = string.Empty;
+        if (!arguments.TryGetValue(name, out var raw) || raw is null)
+        {
+            error = $"The draft patch requires string argument '{name}'.";
+            return false;
+        }
+
+        if (raw is string text)
+            value = text;
+        else if (raw is JsonElement { ValueKind: JsonValueKind.String } element)
+            value = element.GetString() ?? string.Empty;
+        else
+        {
+            error = $"Draft patch argument '{name}' must be a JSON string.";
+            return false;
+        }
+
+        if (!allowEmpty && value.Length == 0)
+        {
+            error = $"Draft patch argument '{name}' cannot be empty.";
+            return false;
+        }
+
+        return true;
+    }
+
     private static AgentMutationOutcome MapMutationOutcome(NormalizedOutcome outcome) => outcome switch
     {
         NormalizedOutcome.Succeeded => AgentMutationOutcome.Applied,
@@ -1975,6 +2322,8 @@ public sealed class AgentService : IAgentService
         // user did not approve or reject the action, they walked away from it.
         // The trace records that so the history stays readable.
         var dismissedTool = state.PendingToolAction?.ToolName ?? string.Empty;
+        if (state.PendingToolAction is { } dismissedPending)
+            MarkDraftPatchBlocked(state, dismissedPending, "Task dismissed without approval.", approved: false);
         state.PendingToolAction = null;
         state.PlanApprovalPending = false;
         state.Status = AgentTaskStatus.Cancelled;
@@ -2411,7 +2760,7 @@ public sealed class AgentService : IAgentService
                     AgentLessonScope.Workspace, scopeId, AgentLessonKind.Command, signature, claim, guidance,
                     ok ? AgentLessonOutcome.Worked : AgentLessonOutcome.Failed, state.TaskId), ct);
             }
-            else if (normalized is "apply_draft_patch" or "edit_file" or "create_file")
+            else if (normalized is "draft_patch" or "apply_draft_patch" or "edit_file" or "create_file")
             {
                 var path = AgentToolExecutor.Arg(arguments, "relative_path", "path").Trim();
                 if (path.Length == 0) return;
@@ -3452,6 +3801,9 @@ public sealed class AgentService : IAgentService
 
     private static string BuildSummary(AgentTaskState state, AgentPlannerResponse response)
     {
+        if (FindLatestPreparedDraftPatch(state) is { } patch)
+            return BuildAuthoritativeDraftPatchNarrative(patch);
+
         var bits = new List<string>();
         if (!string.IsNullOrWhiteSpace(response.ThoughtSummary)) bits.Add(response.ThoughtSummary);
         if (state.CompletedSteps.Count > 0) bits.Add($"Completed: {string.Join("; ", state.CompletedSteps.TakeLast(3))}");

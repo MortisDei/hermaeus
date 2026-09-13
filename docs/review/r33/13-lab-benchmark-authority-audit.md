@@ -37,8 +37,11 @@ workload and a verified runtime are intentionally separate outcomes.
 The effective parser accepts the current b10930 nested `/props` shape for
 context and slots, startup offload receipts for GPU placement, and optional
 properties for KV cache, Flash Attention, CPU-MoE, and speculative settings.
-Unknown optional properties remain unknown. The process telemetry source also
-checks the live executable identity before accepting a sample.
+When a runtime omits an effective scalar from `/props`, the parser can use a
+matching line from the bounded startup receipt already associated with the same
+process. Those fallback fields retain `runtime.log.<field>` evidence IDs;
+unknown fields remain unknown. The process telemetry source also checks the
+live executable identity before accepting a sample.
 
 ## Lab recipe matrix
 
@@ -119,10 +122,15 @@ or owner acceptance of the editor fallback.
 
 ## Local continuation evidence, 2026-09-13
 
-The repair continuation passed the Debug and Release solution builds with zero
-warnings and zero errors. Each complete sequential suite passed `2,731`,
-skipped `17` expected platform-gated tests, and failed `0`; the focused R33
-repair set passed `119/119`. The final `scripts/coverage.sh` run passed the
+The correction continuation passed the Debug and Release solution builds with
+zero warnings and zero errors. Each complete sequential suite passed `2,737`,
+skipped `17` expected platform-gated tests, and failed `0`; the focused
+authority, empirical-index, and runtime-evidence set passed `128/128`. The
+Agent path now persists a concrete `draft_patch` proposal with identity,
+revision, content hash, and inspectable content before approval; the Changes
+projection, approval fingerprint, application receipt, and final narrative all
+use that authority. Direct draft/apply executor calls are refused without the
+prepared approved state. The final `scripts/coverage.sh` run passed the
 repository's `60%` line-coverage ratchet, with its temporary report outside
 the checkout.
 
@@ -134,8 +142,11 @@ failure cleanup, Lab Apply/reopen, and driver shutdown. The driver uses named
 scratch substitutions for nondeterministic external boundaries and is not
 native-runtime or GUI proof.
 
-The rebuilt `v0.41.0-beta` Linux archive passed its SHA256 check, launcher-link
-and executable assertions, layout/no-PDB checks, and Release package assembly.
+The fresh `v0.41.0-beta` Linux archive at
+`dist/hermaeus-0.41.0-beta-linux-x64.tar.gz` passed
+its SHA256 check (`2900d63d389f8088188ca9bf87f72677d99c271993c49e64c1315e31acfc1ee7`),
+launcher-link and executable assertions, layout/no-PDB checks, and Release
+package assembly.
 The published package apphost was also started from a dedicated `/tmp`
 working directory. The current approved-host launch instead used the existing
 owner data and configured Gemma/Qwen managed servers. `runtime.log` recorded
@@ -148,11 +159,13 @@ dialog placement, and clean window-close telemetry remain owner-live gates.
 The fallback console interrupt stopped the app and managed children but left
 the lifecycle journal `CleanExit:false`; the earlier tray-path clean evidence
 is retained separately and is not replaced by this incomplete close attempt.
-The follow-up isolated packaged check sent SIGINT directly and observed the
-same incomplete `running` journal, then stopped only that exact test process
-with SIGTERM. Because `Program.Main` has no console interrupt handler and
-SIGINT did not enter the Avalonia close/tray coordinator, this is classified as
-console-interrupt/harness evidence, not a demonstrated product shutdown defect.
+The fresh isolated packaged check `hermaeus-package-shutdown-final.rHXRLK`
+sent SIGINT directly to the exact app PID; the process remained alive and
+the journal stayed `CleanExit:false`, `LastOperation:"running"`. Bounded
+SIGTERM then returned `143` without a clean marker. Because `Program.Main` has
+no console interrupt handler and SIGINT did not enter the Avalonia close/tray
+coordinator, this is classified as console-interrupt/harness evidence, not a
+demonstrated product shutdown defect.
 The original exit-139 event remains `UNRESOLVED`; normal packaged window close
 is still `NEEDS OWNER VALIDATION`.
 

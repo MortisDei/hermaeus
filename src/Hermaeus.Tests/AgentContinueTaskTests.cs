@@ -36,7 +36,11 @@ public sealed class AgentContinueTaskTests
           "next_action": {
             "type": "tool",
             "tool_name": "draft_patch",
-            "arguments": { "path": "notes.md" },
+            "arguments": {
+              "relative_path": "notes.md",
+              "rationale": "Add the requested notes file.",
+              "proposed_content": "notes"
+            },
             "requires_approval": true,
             "risk_level": "medium"
           },

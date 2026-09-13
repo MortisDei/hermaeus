@@ -1537,8 +1537,8 @@ internal static class AgentTests
     await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     var transcript = await store.LoadTranscriptAsync(state.TaskId);
-    True(transcript.Any(e => e.Role == "tool" && e.ToolName == "draft_patch"),
-        "the approved tool's result should reach the transcript, not just ToolResults' last-five window");
+    True(transcript.Any(e => e.Role == "tool" && e.ToolName == "apply_draft_patch"),
+        "the approved patch application result should reach the transcript, not just ToolResults' last-five window");
     }
 
     private const string CreateFileToolResponse = """

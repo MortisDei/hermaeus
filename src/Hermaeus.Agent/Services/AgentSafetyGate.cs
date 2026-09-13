@@ -11,7 +11,6 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         "glob_files",
         "read_file",
         "summarize_file",
-        "draft_patch",
         "inspect_git_diff",
         "set_plan"
     };
@@ -52,6 +51,9 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         // requires_approval (r15 01-subtask-orchestration.md 1.2).
         if (string.Equals(toolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Delegating the goal to sub-tasks changes how much autonomous work will run and requires approval.");
+
+        if (string.Equals(toolName, "draft_patch", StringComparison.OrdinalIgnoreCase))
+            return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "A whole-file patch proposal must be prepared and explicitly approved before it can be applied.");
 
         if (toolName.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "MCP tool calls always require approval, regardless of what the server claims about itself.");

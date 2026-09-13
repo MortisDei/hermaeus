@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Hermaeus.Core.Models;
 using Hermaeus.Services.ProcessManagement;
 
@@ -16,6 +17,19 @@ public static class EffectiveLaunchObservationParser
     // Keep it stable across rounds so receipts remain reusable by later
     // adaptive, diagnostics, and benchmark workflows.
     public const string ParserVersion = "llama-effective-runtime-v2";
+
+    private static readonly Regex ContextLogRegex =
+        new(@"\bn_ctx\s*=\s*(?<value>\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ContextSlotLogRegex =
+        new(@"\bn_ctx_slot\s*=\s*(?<value>\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex ThreadsLogRegex =
+        new(@"\bn_threads\s*=\s*(?<value>\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex SlotsLogRegex =
+        new(@"\bn_slots\s*=\s*(?<value>\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex KvCacheLogRegex =
+        new(@"\b(?<kind>K|V)\s*\((?<type>[^)]+)\)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex FlashAttentionLogRegex =
+        new(@"\bFlash\s+Attention\s+(?<state>enabled|disabled)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public static EffectiveLaunchObservation Parse(
         ServerConfig config,
@@ -82,12 +96,25 @@ public static class EffectiveLaunchObservationParser
             }
         }
 
+        var evidenceIds = effective.Keys.ToDictionary(
+            field => field,
+            field => $"props.{field}",
+            StringComparer.Ordinal);
+        foreach (var (field, value) in ParseRuntimeLog(runtimeLog))
+        {
+            if (effective.ContainsKey(field))
+                continue;
+
+            effective[field] = value;
+            evidenceIds[field] = $"runtime.log.{field}";
+        }
+
         var placement = config.TryGetGpuPlacement(out var intent, out _)
             ? intent
             : null;
 
         var runtimeGpuLayers = ServerProcessManager.ParseGpuLayerLog(runtimeLog ?? string.Empty);
-        var gpuEvidenceId = "props.gpu_layers";
+        var gpuEvidenceId = evidenceIds.GetValueOrDefault("gpu_layers", "props.gpu_layers");
         if (runtimeGpuLayers.Used is int usedLayers)
         {
             effective["gpu_layers"] = placementValue(usedLayers, runtimeGpuLayers.Total);
@@ -106,34 +133,34 @@ public static class EffectiveLaunchObservationParser
         {
             Field("context", config.ContextSize.ToString(CultureInfo.InvariantCulture),
                 config.ContextSize.ToString(CultureInfo.InvariantCulture),
-                effective.GetValueOrDefault("context"), "props.context"),
+                effective.GetValueOrDefault("context"), EvidenceId("context")),
             Field("gpu_layers", placement?.CanonicalValue, renderedLayers,
                 effective.GetValueOrDefault("gpu_layers"), gpuEvidenceId),
             Field("fit", placement?.Kind == GpuPlacementKind.Auto ? "on" : "off",
                 placement?.Kind == GpuPlacementKind.Auto ? "on" : "off",
-                effective.GetValueOrDefault("fit"), "props.fit"),
+                effective.GetValueOrDefault("fit"), EvidenceId("fit")),
             Field("fit_target", null, config.RuntimeFitTargetBytes?.ToString(CultureInfo.InvariantCulture),
-                effective.GetValueOrDefault("fit_target"), "props.fit_target"),
+                effective.GetValueOrDefault("fit_target"), EvidenceId("fit_target")),
             Field("fit_minimum_context", null, config.RuntimeFitMinimumContext?.ToString(CultureInfo.InvariantCulture),
-                effective.GetValueOrDefault("fit_minimum_context"), "props.fit_minimum_context"),
+                effective.GetValueOrDefault("fit_minimum_context"), EvidenceId("fit_minimum_context")),
             Field("slots", config.Slots.ToString(CultureInfo.InvariantCulture),
                 Math.Max(1, config.Slots).ToString(CultureInfo.InvariantCulture),
-                effective.GetValueOrDefault("slots"), "props.slots")
+                effective.GetValueOrDefault("slots"), EvidenceId("slots"))
         };
 
-        AddOptionalField("kv_cache_type_k", config.KvCacheTypeK, "props.kv_cache_type_k");
-        AddOptionalField("kv_cache_type_v", config.KvCacheTypeV, "props.kv_cache_type_v");
-        AddOptionalField("flash_attention", config.FlashAttention, "props.flash_attention");
-        AddOptionalField("cpu_moe_layers", config.CpuMoeLayers.ToString(CultureInfo.InvariantCulture), "props.cpu_moe");
-        AddOptionalField("threads", config.Threads.ToString(CultureInfo.InvariantCulture), "props.threads");
-        AddOptionalField("prompt_threads", config.PromptThreads.ToString(CultureInfo.InvariantCulture), "props.prompt_threads");
-        AddOptionalField("batch_size", null, "props.batch_size");
-        AddOptionalField("ubatch_size", null, "props.ubatch_size");
-        AddOptionalField("speculative_mechanism", string.Empty, "props.speculative_mechanism");
-        AddOptionalField("speculative_nmax", config.Speculative?.NMax?.ToString(CultureInfo.InvariantCulture), "props.speculative_nmax");
-        AddOptionalField("speculative_nmin", config.Speculative?.NMin?.ToString(CultureInfo.InvariantCulture), "props.speculative_nmin");
-        AddOptionalField("speculative_pmin", config.Speculative?.PMin?.ToString(CultureInfo.InvariantCulture), "props.speculative_pmin");
-        AddOptionalField("speculative_draft_gpu_layers", config.Speculative?.DraftGpuLayers?.ToString(CultureInfo.InvariantCulture), "props.speculative_draft_gpu_layers");
+        AddOptionalField("kv_cache_type_k", config.KvCacheTypeK);
+        AddOptionalField("kv_cache_type_v", config.KvCacheTypeV);
+        AddOptionalField("flash_attention", config.FlashAttention);
+        AddOptionalField("cpu_moe_layers", config.CpuMoeLayers.ToString(CultureInfo.InvariantCulture));
+        AddOptionalField("threads", config.Threads.ToString(CultureInfo.InvariantCulture));
+        AddOptionalField("prompt_threads", config.PromptThreads.ToString(CultureInfo.InvariantCulture));
+        AddOptionalField("batch_size", null);
+        AddOptionalField("ubatch_size", null);
+        AddOptionalField("speculative_mechanism", string.Empty);
+        AddOptionalField("speculative_nmax", config.Speculative?.NMax?.ToString(CultureInfo.InvariantCulture));
+        AddOptionalField("speculative_nmin", config.Speculative?.NMin?.ToString(CultureInfo.InvariantCulture));
+        AddOptionalField("speculative_pmin", config.Speculative?.PMin?.ToString(CultureInfo.InvariantCulture));
+        AddOptionalField("speculative_draft_gpu_layers", config.Speculative?.DraftGpuLayers?.ToString(CultureInfo.InvariantCulture));
 
         var contextKnown = effective.ContainsKey("context");
         var placementKnown = effective.ContainsKey("gpu_layers");
@@ -194,11 +221,13 @@ public static class EffectiveLaunchObservationParser
             && !string.IsNullOrWhiteSpace(value.ExecutablePath)
             && value.Arguments is { Count: > 0 };
 
-        void AddOptionalField(string name, string? configured, string evidenceId)
+        string EvidenceId(string field) => evidenceIds.GetValueOrDefault(field, $"props.{field}");
+
+        void AddOptionalField(string name, string? configured)
         {
             if (!effective.ContainsKey(name))
                 return;
-            fields.Add(Field(name, configured, null, effective.GetValueOrDefault(name), evidenceId));
+            fields.Add(Field(name, configured, null, effective.GetValueOrDefault(name), EvidenceId(name)));
         }
 
         string? placementValue(int usedLayers, int? totalLayers) =>
@@ -207,5 +236,53 @@ public static class EffectiveLaunchObservationParser
                 && usedLayers == total
                 ? "all"
                 : usedLayers.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseRuntimeLog(string? runtimeLog)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(runtimeLog))
+            return values;
+
+        foreach (var line in runtimeLog.Split('\n'))
+        {
+            var context = ContextLogRegex.Match(line);
+            if (context.Success)
+                values["context"] = context.Groups["value"].Value;
+            else
+            {
+                var contextSlot = ContextSlotLogRegex.Match(line);
+                if (contextSlot.Success)
+                    values["context"] = contextSlot.Groups["value"].Value;
+            }
+
+            var threads = ThreadsLogRegex.Match(line);
+            if (threads.Success)
+                values["threads"] = threads.Groups["value"].Value;
+
+            var slots = SlotsLogRegex.Match(line);
+            if (slots.Success)
+                values["slots"] = slots.Groups["value"].Value;
+
+            if (line.Contains("llama_kv_cache", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (Match match in KvCacheLogRegex.Matches(line))
+                {
+                    var kind = match.Groups["kind"].Value;
+                    var field = kind.Equals("K", StringComparison.OrdinalIgnoreCase)
+                        ? "kv_cache_type_k"
+                        : "kv_cache_type_v";
+                    values[field] = match.Groups["type"].Value.Trim();
+                }
+            }
+
+            var flash = FlashAttentionLogRegex.Match(line);
+            if (flash.Success)
+                values["flash_attention"] = flash.Groups["state"].Value.Equals("enabled", StringComparison.OrdinalIgnoreCase)
+                    ? "on"
+                    : "off";
+        }
+
+        return values;
     }
 }

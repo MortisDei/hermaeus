@@ -68,7 +68,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             KnownRisks =
             [
                 "Read-only tools may inspect local files under the selected workspace root.",
-                "Writes (edit_file, create_file, apply_draft_patch) and commands (run_command, workspace recipes only) require approval; network access, installs, commits, pushes, and history rewrites remain blocked."
+                "Patch proposals and writes (draft_patch, edit_file, create_file, apply_draft_patch) and commands (run_command, workspace recipes only) require approval; network access, installs, commits, pushes, and history rewrites remain blocked."
             ]
         };
 

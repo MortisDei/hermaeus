@@ -95,6 +95,12 @@ public interface IAgentToolExecutor
 {
     bool CanExecute(string toolName);
     Task<AgentToolResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, AgentWorkspaceOptions options, CancellationToken ct = default, string? operationId = null);
+    Task<AgentToolResult> ExecuteApprovedPreparedMutationAsync(
+        AgentPendingToolAction pending,
+        string approvalFingerprint,
+        AgentWorkspaceOptions options,
+        CancellationToken ct = default,
+        string? operationId = null);
 }
 
 public interface IAgentContextBuilder

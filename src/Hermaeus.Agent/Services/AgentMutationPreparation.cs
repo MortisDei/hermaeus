@@ -42,6 +42,7 @@ public static class AgentMutationPreparation
         {
             "edit_file" => await PrepareEditAsync(arguments, options, policy, workspaceTools, ct),
             "create_file" => await PrepareCreateAsync(arguments, options, policy, workspaceTools, ct),
+            "draft_patch" => await PrepareDraftPatchAsync(arguments, options, policy, workspaceTools, ct),
             "apply_draft_patch" => await PrepareReplacementAsync(arguments, options, policy, workspaceTools, ct),
             "run_command" => PrepareCommand(arguments, options, policy),
             _ => AgentMutationPreparationResult.Reject($"Tool '{toolName}' is not a prepared mutation.")
@@ -151,6 +152,22 @@ public static class AgentMutationPreparation
         return BuildFilePending(
             "apply_draft_patch", AgentMutationKind.ApplyDraftPatch, arguments, target,
             NormalizeReplacementContent(content), policy, options.MaxFileBytes);
+    }
+
+    private static async Task<AgentMutationPreparationResult> PrepareDraftPatchAsync(
+        Dictionary<string, object?> arguments,
+        AgentWorkspaceOptions options,
+        WorkspacePolicy? policy,
+        IAgentWorkspaceTools? workspaceTools,
+        CancellationToken ct)
+    {
+        var prepared = await PrepareReplacementAsync(arguments, options, policy, workspaceTools, ct);
+        if (prepared.Pending is not null)
+        {
+            prepared.Pending.ToolName = "draft_patch";
+            prepared.Pending.Fingerprint = AgentApprovalFingerprint.Compute(prepared.Pending);
+        }
+        return prepared;
     }
 
     private static AgentMutationPreparationResult PrepareCommand(

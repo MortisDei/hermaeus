@@ -175,7 +175,12 @@ public static class RuntimeEvidenceEvaluator
                 "ubatch_size" => configuration.UBatchSize?.ToString(CultureInfo.InvariantCulture),
                 "kv_cache_type_k" => configuration.KvCacheTypeK,
                 "kv_cache_type_v" => configuration.KvCacheTypeV,
-                "flash_attention" => configuration.FlashAttention,
+                // llama.cpp resolves an "auto" request to a runtime-specific
+                // on/off decision. Require the field to be observed, but do
+                // not compare that decision to the literal request value.
+                "flash_attention" => configuration.FlashAttention.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : configuration.FlashAttention,
                 "cpu_moe_layers" => configuration.CpuMoeLayers?.ToString(CultureInfo.InvariantCulture),
                 "speculative_mechanism" => configuration.SpeculativeMechanism,
                 "speculative_nmax" => SpeculativeParameter(configuration.SpeculativeParameters, "nmax"),

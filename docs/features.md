@@ -373,14 +373,15 @@ until needed, and action groups wrap on narrow windows. The selected runtime's
 effective state remains distinct from a recommendation or saved configuration.
 Each baseline-to-candidate comparison also retains the isolated runtime's
 effective launch observation. Context and slots come from the structured
-properties receipt, while GPU placement comes from a PID-associated startup
-receipt that reports the offloaded layer count. The effective receipt keeps
-the PID, redacted exact argv, executable path, and bounded startup evidence
-with those fields. Context, GPU placement, and slot count must be auditable and
-match the reviewed configuration; Auto additionally requires auditable fit
-evidence. Missing or invalid process association, or missing or mismatched
-effective state, makes the run Inconclusive and blocks a controlled headline or
-Apply. After Apply, the live Services
+properties receipt when available, with matching scalar startup lines used only
+from the same PID-associated launch receipt when the runtime omits them. GPU
+placement comes from a startup receipt that reports the offloaded layer count.
+The effective receipt keeps the PID, redacted exact argv, executable path, and
+bounded startup evidence with those fields. Context, GPU placement, and slot
+count must be auditable and match the reviewed configuration; Auto additionally
+requires auditable fit evidence. Missing or invalid process association, or
+missing or mismatched effective state, makes the run Inconclusive and blocks a
+controlled headline or Apply. After Apply, the live Services
 projection is read back to verify that the reviewed fields were actually
 persisted.
 

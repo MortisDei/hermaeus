@@ -284,6 +284,50 @@ public sealed class AdaptiveInferenceTests
     }
 
     [Fact]
+    public void Effective_parser_uses_bounded_native_startup_receipt_for_missing_props_scalars()
+    {
+        var config = Config(GpuPlacementIntent.All(), new AdaptiveInferenceEnvelope
+        {
+            Mode = AdaptiveInferenceMode.AdaptAtLaunch
+        });
+        config.Slots = 4;
+        config.Threads = 4;
+        config.KvCacheTypeK = "f16";
+        config.KvCacheTypeV = "f16";
+        config.FlashAttention = "auto";
+        var process = new RuntimeLaunchProcessEvidence(
+            381677,
+            DateTime.UnixEpoch,
+            "/runtime/llama-server",
+            ["--ctx-size", "4096", "--n-gpu-layers", "all"]);
+
+        var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
+            """{"default_generation_settings":{"params":{"n_ctx":4096}},"total_slots":4}""",
+            process,
+            """
+            system_info: n_threads = 4
+            load_tensors: offloaded 36/36 layers to GPU
+            llama_context: n_ctx = 4096
+            llama_kv_cache: ... K (f16), V (f16)
+            resolve_fused_ops: Flash Attention enabled
+            load_model: initializing n_slots = 4, n_ctx_slot = 4096
+            """);
+
+        Assert.True(observation.IsAuditable);
+        Assert.Equal("4", Assert.Single(observation.Fields, field => field.Field == "threads").EffectiveValue);
+        Assert.Equal("f16", Assert.Single(observation.Fields, field => field.Field == "kv_cache_type_k").EffectiveValue);
+        Assert.Equal("f16", Assert.Single(observation.Fields, field => field.Field == "kv_cache_type_v").EffectiveValue);
+        Assert.Equal("on", Assert.Single(observation.Fields, field => field.Field == "flash_attention").EffectiveValue);
+        Assert.Contains("runtime.log.threads", observation.EvidenceIds);
+        Assert.Contains("runtime.log.flash_attention", observation.EvidenceIds);
+        Assert.DoesNotContain("flash_attention", RuntimeEvidenceEvaluator.ExpectedEffectiveValues(
+            new ConfigurationIdentityV2(4096, null, "gpu-all", 4, 0, 4, null, null,
+                "f16", "f16", "auto", "", "", "", 0,
+                new Dictionary<string, string>(), IdentityCompleteness.Complete),
+            ["flash_attention"]).Keys);
+    }
+
+    [Fact]
     public void Lab_effective_parser_requires_process_association_for_auditable_receipt()
     {
         var config = Config(GpuPlacementIntent.Exact(17), new AdaptiveInferenceEnvelope

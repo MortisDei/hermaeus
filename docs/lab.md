@@ -74,17 +74,20 @@ Each comparison also carries the isolated runtime's effective launch
 observation. Lab enables the transient local properties endpoint for the owned
 runtime. Context and slots are read from the structured receipt, including the
 nested `default_generation_settings.params.n_ctx` and `total_slots` shape used
-by current b10930 runtimes. GPU placement is read from the PID-associated
-startup receipt, for example `offloaded 17/36 layers to GPU`; a command-line
-argument or healthy endpoint alone is not placement proof. The receipt keeps
-the PID, redacted exact argv, executable path, and bounded startup evidence
-together with the effective fields. Context size, GPU placement, and slots
-must be proven and match the reviewed configuration; `Auto` additionally needs
-a proven fit result. Missing, invalid, or unassociated process evidence, or
-ambiguous or mismatched fields, make the run `Inconclusive` and prevent a
-controlled comparison or Apply recommendation. An unreviewed sibling candidate
-does not invalidate the candidate currently being compared, but it cannot
-receive an Apply review until its own run evidence exists.
+by current b10930 runtimes. When a runtime omits a scalar from `/props`, the
+parser may use the matching bounded startup line from that same PID-associated
+launch receipt, including context, thread, slot, KV-cache, and Flash Attention
+observations. GPU placement is read from the startup receipt, for example
+`offloaded 17/36 layers to GPU`; a command-line argument or healthy endpoint
+alone is not placement proof. The receipt keeps the PID, redacted exact argv,
+executable path, and bounded startup evidence together with the effective
+fields. Context size, GPU placement, and slots must be proven and match the
+reviewed configuration; `Auto` additionally needs a proven fit result. Missing,
+invalid, or unassociated process evidence, or ambiguous or mismatched fields,
+make the run `Inconclusive` and prevent a controlled comparison or Apply
+recommendation. An unreviewed sibling candidate does not invalidate the
+candidate currently being compared, but it cannot receive an Apply review
+until its own run evidence exists.
 
 Lab and Benchmarks share the `RuntimeEvidenceEnvelope`. It keeps requested,
 resolved, and launched configuration identities separate from the effective

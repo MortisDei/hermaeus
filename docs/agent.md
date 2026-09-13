@@ -535,7 +535,10 @@ the model sees next step that only the first one ran.
 - Read-only file tools for workspace inspection: `list_files` (optional
   subdirectory and depth), `search_files` (optional regex and context lines),
   `glob_files` (`*`/`**` patterns), `read_file` (optional line range),
-  `summarize_file`, `draft_patch`, and `inspect_git_diff`.
+  `summarize_file`, and `inspect_git_diff`.
+- `draft_patch` prepares a complete whole-file replacement for review. It does
+  not write directly; the prepared proposal is visible in Draft Patch
+  Decisions and requires explicit approval before application.
 - `set_plan`: replaces the task's visible plan checklist. Executes
   immediately; it only touches task state, never files or commands, so it
   never requires approval.
@@ -795,8 +798,8 @@ even when it is running several steps unattended.
 
 | Level | Meaning | Examples | Behaviour |
 |---|---|---|---|
-| Safe | Read-only local inspection, or task-state-only | `list_files`, `search_files`, `glob_files`, `read_file`, `summarize_file`, `draft_patch`, `inspect_git_diff`, `set_plan` | execute directly |
-| Review | Local write, command, sub-task delegation, or MCP call proposed by the agent | edit_file, create_file, apply_draft_patch, `run_command`, `plan_subtasks`, mcp: calls | queue for approval |
+| Safe | Read-only local inspection, or task-state-only | `list_files`, `search_files`, `glob_files`, `read_file`, `summarize_file`, `inspect_git_diff`, `set_plan` | execute directly |
+| Review | Local write, patch proposal, command, sub-task delegation, or MCP call proposed by the agent | `draft_patch`, `edit_file`, `create_file`, `apply_draft_patch`, `run_command`, `plan_subtasks`, mcp: calls | queue for approval |
 | Blocked | Out of scope | `delete_file`, `install_package`, `network_access`, `upload`, `download`, `modify_system_config`, `commit`, `push`, `change_git_history` | do not execute |
 | Dangerous | Destructive or broad operation | delete tree, overwrite many files | block by default |
 

@@ -863,7 +863,11 @@ namespace Hermaeus.Tests
                   "next_action": {
                     "type": "tool",
                     "tool_name": "draft_patch",
-                    "arguments": { "path": "README.md" },
+                    "arguments": {
+                      "relative_path": "notes.md",
+                      "rationale": "Add a reviewed workspace note.",
+                      "proposed_content": "reviewed note"
+                    },
                     "requires_approval": true,
                     "risk_level": "medium"
                   },

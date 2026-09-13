@@ -42,12 +42,45 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         return KnownTools.Contains(Normalize(toolName), StringComparer.Ordinal);
     }
 
-    public async Task<AgentToolResult> ExecuteAsync(
+    public Task<AgentToolResult> ExecuteApprovedPreparedMutationAsync(
+        AgentPendingToolAction pending,
+        string approvalFingerprint,
+        AgentWorkspaceOptions options,
+        CancellationToken ct = default,
+        string? operationId = null)
+    {
+        if (!pending.IsPrepared
+            || !string.Equals(AgentApprovalFingerprint.Resolve(pending), approvalFingerprint, StringComparison.Ordinal)
+            || !IsPreparedMutationTool(pending.ToolName))
+        {
+            return Task.FromResult(Result(
+                pending.ToolName,
+                pending.Arguments,
+                "The mutation was refused because no valid approval is bound to the concrete prepared proposal.",
+                AgentToolOutcomeSignal.PolicyBlocked));
+        }
+
+        var executionTool = pending.ToolName.Equals("draft_patch", StringComparison.OrdinalIgnoreCase)
+            ? "apply_draft_patch"
+            : pending.ToolName;
+        return ExecuteWithAuthorizationAsync(executionTool, pending.Arguments, options, ct, operationId, allowPreparedMutation: true);
+    }
+
+    public Task<AgentToolResult> ExecuteAsync(
         string toolName,
         Dictionary<string, object?> arguments,
         AgentWorkspaceOptions options,
         CancellationToken ct = default,
-        string? operationId = null)
+        string? operationId = null) =>
+        ExecuteWithAuthorizationAsync(toolName, arguments, options, ct, operationId, allowPreparedMutation: false);
+
+    private async Task<AgentToolResult> ExecuteWithAuthorizationAsync(
+        string toolName,
+        Dictionary<string, object?> arguments,
+        AgentWorkspaceOptions options,
+        CancellationToken ct = default,
+        string? operationId = null,
+        bool allowPreparedMutation = false)
     {
         operationId ??= OperationCorrelation.NewId();
         var timer = Stopwatch.StartNew();
@@ -59,7 +92,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             operationId));
         try
         {
-            var result = await ExecuteCoreAsync(toolName, arguments, options, ct);
+            var result = await ExecuteCoreAsync(toolName, arguments, options, ct, allowPreparedMutation);
             _logs?.Add(new RuntimeLogEntry(
                 DateTime.UtcNow,
                 RuntimeLogLevel.Debug,
@@ -94,7 +127,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         string toolName,
         Dictionary<string, object?> arguments,
         AgentWorkspaceOptions options,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool allowPreparedMutation = false)
     {
         var trimmedToolName = toolName.Trim();
         if (ct.IsCancellationRequested)
@@ -200,16 +234,15 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                     ArgIntOrNull(arguments, "line_offset"),
                     ArgIntOrNull(arguments, "line_limit")),
                 "summarize_file" => _workspaceTools.SummarizeFile(options, Arg(arguments, "relative_path", "path")),
-                "draft_patch" => _workspaceTools.DraftPatch(
-                    Arg(arguments, "relative_path", "path"),
-                    Arg(arguments, "rationale"),
-                    Arg(arguments, "proposed_content", "content")),
+                "draft_patch" => RefuseDirectMutation("draft_patch must be prepared and persisted as a reviewable mutation by AgentService."),
                 "inspect_git_diff" => await InspectGitDiffAsync(options, ct),
-                "apply_draft_patch" => await _workspaceTools.ApplyDraftPatchAsync(
-                    options,
-                    Arg(arguments, "relative_path", "path"),
-                    Arg(arguments, "proposed_content", "content"),
-                    ct),
+                "apply_draft_patch" => allowPreparedMutation
+                    ? await _workspaceTools.ApplyDraftPatchAsync(
+                        options,
+                        Arg(arguments, "relative_path", "path"),
+                        Arg(arguments, "proposed_content", "content"),
+                        ct)
+                    : RefuseDirectMutation("apply_draft_patch requires a concrete prepared proposal and approval."),
                 "edit_file" => await _workspaceTools.EditFileAsync(
                     options,
                     Arg(arguments, "relative_path", "path"),
@@ -305,6 +338,16 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                     _ => "The retained executor evidence could not establish a stronger outcome."
                 }))
         };
+
+    private static bool IsPreparedMutationTool(string toolName) =>
+        toolName.Equals("draft_patch", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("apply_draft_patch", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("edit_file", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("create_file", StringComparison.OrdinalIgnoreCase)
+        || toolName.Equals("run_command", StringComparison.OrdinalIgnoreCase);
+
+    private static AgentFileReadResult RefuseDirectMutation(string message) =>
+        throw new InvalidOperationException(message);
 
     private static SourceReference? BuildSource(string normalizedTool, Dictionary<string, object?> arguments)
     {

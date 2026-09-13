@@ -19,10 +19,13 @@ unproven GUI row as `NEEDS OWNER VALIDATION`.
 
 For Linux/COSMIC, record whether the screenshot came from Wayland, XWayland,
 or another session and note other visible windows or overlays that could
-obscure the product. For Windows, capture the packaged app in the target
-desktop session and inspect title/icon identity, navigation, readable status,
-window bounds, scaling, and clipping. A Windows screenshot has the same
-evidence limits as a Linux screenshot.
+obscure the product. On COSMIC, the bounded non-interactive capture command is
+`cosmic-screenshot --interactive=false --save-dir /tmp --notify=false`; identify
+the resulting PNG, inspect it with the image viewer, and remove it after the
+receipt is recorded. For Windows, capture the packaged app in the target
+desktop session with the available native capture tool, then inspect title/icon
+identity, navigation, readable status, window bounds, scaling, and clipping.
+A Windows screenshot has the same evidence limits as a Linux screenshot.
 
 Recorded Hermaeus receipt: the 2026-09-13 approved-host Linux/COSMIC package
 launch produced a real Hermaeus window showing the model selector, navigation
