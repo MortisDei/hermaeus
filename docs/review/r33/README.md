@@ -80,9 +80,10 @@ and test harnesses, focused Lab/Benchmark authority regressions, the isolated
 driver mutation receipt, the approved-host b10930 CPU/partial-GPU/all-GPU
 receipt matrix, Linux package creation, package checksum verification, and an
 installed-path test with spaces. The current Debug and Release suites each
-passed `2,722`, skipped `17`, failed `0`, total `2,739`; the focused authority
-set passed `260/260`. Native Windows, live owner Lab/Benchmark walkthroughs,
-and GUI pixel acceptance remain owner validation gates. The exact dispositions
+passed `2,731`, skipped `17`, failed `0`, total `2,748`; the current focused
+R33 repair set passed `119/119`, with the broader authority set retained at
+`260/260`. Native Windows, live owner Lab/Benchmark walkthroughs, and GUI
+pixel acceptance remain owner validation gates. The exact dispositions
 for every batch, acceptance cell, V01-V14
 scenario, owner defect, and conditional branch are recorded in
 [12-completion-audit.md](12-completion-audit.md).
@@ -175,6 +176,22 @@ scenario, owner defect, and conditional branch are recorded in
   (`50,267/77,713`) against the 60% ratchet, with results kept under `/tmp`.
   The initial instrumented run exposed two timing-sensitive reconciliation
   assertions; the waits were strengthened and the final full run passed.
+- The current continuation rebuilt Debug and Release with zero warnings and
+  zero errors, passed `2,731` tests with `17` expected platform skips in each
+  full suite, passed the focused R33 repair set `119/119`, and passed the final
+  `scripts/coverage.sh` 60% line-coverage ratchet.
+- The current Release R33 driver returned `ok:true` on fresh `/tmp` settings,
+  data, and workspace paths. It produced an Applied, changed,
+  readback-verified mutation receipt, persisted cancelled benchmark evidence,
+  exercised RAG, Chat, voice, Lab failure cleanup, Lab Apply/reopen, and clean
+  driver shutdown.
+- The current Linux package was rebuilt from the Release output and its archive
+  checksum, launcher link, executable bits, package layout, and no-PDB rule
+  passed. An isolated package apphost smoke launch created a native
+  `Hermaeus - WIZARD` window with the expected `hermaeus-app` / `hermaeus`
+  identity and used only `/tmp` data paths. It was stopped by interrupt after
+  the native check; no GUI pixel, click-flow, or clean-window-close proof is
+  claimed.
   Native Windows, live managed-runtime/GPU behavior, GUI pixel acceptance, and
   the owner PR/check gate remain outside this local proof.
 

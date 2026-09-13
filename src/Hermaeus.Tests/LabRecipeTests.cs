@@ -342,6 +342,28 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public async Task Runner_reports_named_candidate_progress_and_a_truthful_terminal_state()
+    {
+        using var fixture = new RecipeFixture();
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, fixture.Source, []);
+        var progress = new CapturingProgress();
+
+        var run = await fixture.Runner.RunAsync(
+            plan, fixture.Source, fixture.Capabilities([]), "controlled prompt", progress: progress);
+
+        Assert.NotEmpty(progress.Values);
+        Assert.Contains(progress.Values, value => value.ExperimentName == plan.Label
+            && value.CandidateLabel == plan.Baseline.Label
+            && value.CandidateIndex == 1
+            && value.CandidateTotal == plan.Candidates.Count + 1
+            && value.Stage == "Repetition complete");
+        var terminal = Assert.Single(progress.Values.Where(value => value.TerminalStatus is not null).TakeLast(1));
+        Assert.Equal(run.Status, terminal.TerminalStatus);
+        Assert.Equal(terminal.Total, terminal.Completed);
+        Assert.Equal(0, terminal.Remaining);
+    }
+
+    [Fact]
     public async Task Missing_effective_launch_evidence_is_inconclusive_and_cannot_be_applied()
     {
         using var fixture = new RecipeFixture();
@@ -549,6 +571,12 @@ public sealed class LabRecipeTests
 
         public void Dispose() => _temp.Dispose();
         private static CapabilityEvidence Unknown() => new(CapabilityState.Unknown, "test", "unknown");
+    }
+
+    private sealed class CapturingProgress : IProgress<LabRunProgress>
+    {
+        public List<LabRunProgress> Values { get; } = [];
+        public void Report(LabRunProgress value) => Values.Add(value);
     }
 
     private static LabWorkloadRequest WorkloadRequest() => new(

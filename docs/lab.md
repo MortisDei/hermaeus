@@ -57,6 +57,12 @@ blocked restore is surfaced as an attention state and leaves the source
 stopped for owner review; it does not rewrite the execution result or silently
 restart a changed configuration.
 
+While a recipe is running, the Experiment card shows the named experiment,
+current candidate and position, stage, completed workload steps, remaining
+steps, and a bounded determinate percentage. Terminal progress carries the
+actual Lab status, so a failed, cancelled, or inconclusive run is not presented
+as an indefinite green bar.
+
 Observations keep value and missing reason separate, so an absent counter never
 becomes zero. Every observation names unit, source, evidence origin, trust,
 timestamp, repetition/case, and all four v2 fingerprint components.
@@ -102,8 +108,10 @@ explicit and can never recommend Apply.
 Start and completion are separate immutable `lab-run` experience records.
 Repeated observations and output hashes are split into bounded immutable
 per-configuration evidence slices linked to the frozen start record. The final
-completion stores only comparison decisions, failures, and links to those raw
-slices, keeping every experience document inside its existing 32 KiB bound.
+completion stores only comparison decisions, failures, and links to raw slices,
+comparison records, and effective-launch records, keeping every experience
+document inside its existing 32 KiB bound. Older completion summaries with
+embedded detail remain readable.
 The Evidence surface projects all records with the same durable run id into one
 top-level execution entry, without duplicating or migrating persisted truth.
 Its drill-down retains every slice, comparison, provenance link, and raw JSON.

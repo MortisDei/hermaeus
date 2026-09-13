@@ -667,7 +667,8 @@ public sealed class LabViewModelTests
         public Task<IReadOnlyList<LabRecipePlan>> InspectAsync(ServerConfig source, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<LabRecipePlan>>([Plan]);
 
-        public Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source, string prompt, CancellationToken ct = default) =>
+        public Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source, string prompt,
+            CancellationToken ct = default, IProgress<LabRunProgress>? progress = null) =>
             returnsFailedSnapshot
                 ? Task.FromResult(new LabRunSnapshot
                 {

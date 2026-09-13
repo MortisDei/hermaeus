@@ -91,11 +91,16 @@ the functional fallback. The editor receives document data only. It cannot read
 or write files, run commands, approve actions, navigate arbitrary pages, or
 access chat content. Editing proposed content still creates a normal reviewable
 Agent patch, and the Changes view remains the source for applied, verified, and
-conflicted outcomes.
+conflicted outcomes. The status tooltip retains bounded lifecycle diagnostics
+including visual-tree attachment, host and fallback dimensions, editable state,
+surface visibility, document size, and selected file path.
 When the selected workspace has no `AGENTS.md`, the workbench can preview a
-suggested file and queue it as a normal prepared mutation. The suggestion is
-not written until the user approves it. Monaco also has a bounded readiness
-timeout, after which AvaloniaEdit remains the usable local editor.
+suggested file and queue it as a normal prepared mutation, even before a normal
+Agent run exists. In that case the workbench creates an explicit `Create
+workspace AGENTS.md` task only after the preview is accepted, then uses the same
+patch review and approval path. The suggestion is never written directly.
+Monaco also has a bounded readiness timeout, after which AvaloniaEdit remains
+the usable local editor.
 
 ### Context & Retrieval
 
@@ -173,6 +178,10 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
   here, next to what they write.
 - **History.** Recent tasks, new lessons from this task, the lesson store,
   scenario evals, and the agent log.
+
+Recent task history uses a compact goal preview in the card and retains the full
+goal as a tooltip and in persisted task state. Long goals therefore do not turn
+the history page into an unreadable wall of text.
 
 The panel opens on Run every time and never switches tabs on its own. A
 finished run lights the Changes badge and says so in the run outcome; it does

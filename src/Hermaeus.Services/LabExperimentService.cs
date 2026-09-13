@@ -1067,6 +1067,8 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     {
         var drafts = new List<EmpiricalExperienceDraft>();
         var sliceIds = new List<string>();
+        var comparisonEvidenceIds = new List<string>();
+        var effectiveLaunchEvidenceIds = new List<string>();
         var configurationIds = run.Definition.Candidates.Select(item => item.Id)
             .Prepend(run.Definition.Baseline.Id).ToArray();
         foreach (var configurationId in configurationIds)
@@ -1101,17 +1103,84 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             }
         }
 
+        foreach (var comparison in run.Comparisons)
+        {
+            var evidenceId = Guid.NewGuid().ToString("N");
+            var payload = new LabRunComparisonEvidence(run.Id, run.DefinitionHash, comparison);
+            drafts.Add(new EmpiricalExperienceDraft
+            {
+                Id = evidenceId,
+                Domain = EmpiricalExperienceDomains.LabRun,
+                ContextJson = LabCanonicalJson.Serialize(new
+                {
+                    runId = run.Id,
+                    run.DefinitionHash,
+                    kind = "comparison",
+                    comparison.BaselineConfigurationId,
+                    comparison.CandidateConfigurationId
+                }),
+                ActionJson = ExperienceJson.Canonicalize(payload),
+                RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+                ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+                Provenance =
+                [
+                    new EmpiricalExperienceProvenance(run.StartEvidenceId,
+                        new SourceReference(ProvenanceKind.Lab, "Frozen Lab definition", run.StartEvidenceId,
+                            EvidenceOrigin: EvidenceOrigin.Extracted))
+                ],
+                Outcome = NormalizedToolOutcome.Create(NormalizedOutcome.Unknown,
+                    "lab-run-comparison-evidence", "One bounded Lab comparison record.")
+            });
+            comparisonEvidenceIds.Add(evidenceId);
+        }
+
+        foreach (var effective in run.EffectiveLaunches)
+        {
+            var evidenceId = Guid.NewGuid().ToString("N");
+            var payload = new LabRunEffectiveLaunchEvidence(
+                run.Id, run.DefinitionHash, effective.Key, effective.Value);
+            drafts.Add(new EmpiricalExperienceDraft
+            {
+                Id = evidenceId,
+                Domain = EmpiricalExperienceDomains.LabRun,
+                ContextJson = LabCanonicalJson.Serialize(new
+                {
+                    runId = run.Id,
+                    run.DefinitionHash,
+                    kind = "effective-launch",
+                    configurationId = effective.Key
+                }),
+                ActionJson = ExperienceJson.Canonicalize(payload),
+                RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+                ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+                Provenance =
+                [
+                    new EmpiricalExperienceProvenance(run.StartEvidenceId,
+                        new SourceReference(ProvenanceKind.Lab, "Frozen Lab definition", run.StartEvidenceId,
+                            EvidenceOrigin: EvidenceOrigin.Extracted))
+                ],
+                Outcome = NormalizedToolOutcome.Create(NormalizedOutcome.Unknown,
+                    "lab-run-effective-launch-evidence", "One bounded effective-launch audit record.")
+            });
+            effectiveLaunchEvidenceIds.Add(evidenceId);
+        }
+
         var decisions = run.Comparisons.Select(comparison => new LabComparisonDecision(
             comparison.BaselineConfigurationId, comparison.CandidateConfigurationId,
             comparison.IsControlled, comparison.FingerprintDifferences, comparison.Equivalence,
             comparison.CorrectnessPassed, comparison.CanShowHeadlineDelta, comparison.RefusalReason)).ToArray();
         var summary = new LabRunCompletionSummary(run.Id, run.DefinitionHash, run.Status,
             run.StartedAtUtc, run.CompletedAtUtc, run.Failures, decisions, sliceIds,
-            run.Definition.Candidates.Prepend(run.Definition.Baseline).ToArray(), run.Comparisons,
+            run.Definition.Candidates.Prepend(run.Definition.Baseline).ToArray(), null,
             run.Definition.Name, DescribeModelIdentity(run.Definition.ProfileFingerprint.Model))
         {
-            EffectiveLaunches = run.EffectiveLaunches
+            ComparisonEvidenceIds = comparisonEvidenceIds,
+            EffectiveLaunchEvidenceIds = effectiveLaunchEvidenceIds
         };
+        var summaryReferences = sliceIds.Concat(comparisonEvidenceIds)
+            .Concat(effectiveLaunchEvidenceIds)
+            .Take(16)
+            .ToArray();
         drafts.Add(new EmpiricalExperienceDraft
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -1120,7 +1189,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             ActionJson = LabCanonicalJson.Serialize(summary),
             RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
             ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
-            Provenance = sliceIds.Select(id => new EmpiricalExperienceProvenance(id,
+            Provenance = (summaryReferences.Length == 0
+                ? [run.StartEvidenceId]
+                : summaryReferences).Select(id => new EmpiricalExperienceProvenance(id,
                 new SourceReference(ProvenanceKind.Lab, "Immutable configuration evidence", id,
                     EvidenceOrigin: EvidenceOrigin.Extracted))).ToArray(),
             Outcome = NormalizedToolOutcome.Create(outcome, "lab-run-completed",

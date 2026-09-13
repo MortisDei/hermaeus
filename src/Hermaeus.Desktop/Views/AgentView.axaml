@@ -1259,7 +1259,8 @@
                                                         <TextBlock Text="sub-task" FontSize="10" Opacity="0.6" />
                                                     </Border>
                                                     <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="1">
-                                                        <TextBlock Text="{Binding Goal}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding GoalPreview}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                                                   ToolTip.Tip="{Binding Goal}" />
                                                         <TextBlock Text="{Binding ModelLabel}" FontSize="10" Opacity="0.55"
                                                                    TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                                                         <!-- r19 3.3: a half-done task should be recognizable at a glance in this list too. -->

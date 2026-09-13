@@ -41,6 +41,44 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         new Dictionary<string, string>(StringComparer.Ordinal);
     private bool _suppressConfigurationTracking;
     private bool _saveInProgress;
+    private readonly Dictionary<string, ModelConfigurationDraft> _modelDrafts =
+        new(ModelPathSafety.LocalPathComparer);
+
+    /// <summary>
+    /// Unsaved runtime settings belong to the selected model. Keeping this
+    /// projection in memory prevents a model switch from carrying a
+    /// companion, context, or llama-server option into a different model,
+    /// while still allowing a deliberate switch back to restore the editor
+    /// state the user was working on.
+    /// </summary>
+    private sealed record ModelConfigurationDraft
+    {
+        public int ContextSize { get; init; }
+        public int GpuLayers { get; init; }
+        public string GpuPlacementSelection { get; init; } = "CPU";
+        public int Threads { get; init; }
+        public int PromptThreads { get; init; }
+        public int Slots { get; init; }
+        public string ExtraArgs { get; init; } = string.Empty;
+        public string MmprojPath { get; init; } = string.Empty;
+        public bool UseProjector { get; init; }
+        public bool PreserveReasoning { get; init; } = true;
+        public string KvCacheTypeK { get; init; } = "f16";
+        public string KvCacheTypeV { get; init; } = "f16";
+        public string FlashAttention { get; init; } = "auto";
+        public bool ContextShift { get; init; }
+        public bool MemoryLock { get; init; }
+        public bool NoMemoryMap { get; init; }
+        public string CpuMoeLayersText { get; init; } = string.Empty;
+        public string SpeculativeTypes { get; init; } = string.Empty;
+        public string DraftModelPath { get; init; } = string.Empty;
+        public string DraftGpuLayersText { get; init; } = string.Empty;
+        public string SpeculativeNMaxText { get; init; } = string.Empty;
+        public string SpeculativeNMinText { get; init; } = string.Empty;
+        public string SpeculativePMinText { get; init; } = string.Empty;
+        public AdaptiveInferenceEnvelope AdaptiveEnvelope { get; init; } = new();
+        public string ContextSourceLabel { get; init; } = string.Empty;
+    }
     private CancellationTokenSource? _autoTuneCts;
 
     [ObservableProperty] private string       _name;
@@ -1934,7 +1972,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         if (!config.TryGetGpuPlacement(out var placement, out _))
             return "CPU";
 
-        return placement!.Kind switch
+        return PlacementSelection(placement!);
+    }
+
+    private static string PlacementSelection(GpuPlacementIntent placement) =>
+        placement.Kind switch
         {
             GpuPlacementKind.Cpu => "CPU",
             GpuPlacementKind.Auto => "Auto",
@@ -1942,7 +1984,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             GpuPlacementKind.Exact => "Exact",
             _ => "CPU"
         };
-    }
 
     /// <summary>
     /// The editor's current state as a <see cref="ServerConfig"/>, without
@@ -2104,38 +2145,168 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             DetectedModelPaths.Insert(0, value);
     }
 
-    /// <summary>
-    /// r32 Batch 1: applies the model-card context default only when the
-    /// selected model actually changes to a different
-    /// file. <see cref="RefreshDetectedModels"/> re-assigns <see cref="ModelPath"/>
-    /// back to its own current value to repair the ComboBox binding after a
-    /// list rebuild; that reassignment must never re-apply defaults on top
-    /// of values the user already edited.
-    /// </summary>
     private void ApplyModelDefaultsIfPathActuallyChanged(string value)
     {
+        if (string.IsNullOrWhiteSpace(value) && string.IsNullOrWhiteSpace(_lastModelPathForDefaults))
+            return;
+
+        if (ModelPathSafety.AreSameLocalPath(value, _lastModelPathForDefaults))
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                _lastModelPathForDefaults = value;
+            return;
+        }
+
+        var previousPath = _lastModelPathForDefaults;
+        if (!string.IsNullOrWhiteSpace(previousPath))
+            _modelDrafts[ModelDraftKey(previousPath)] = CaptureModelDraft();
+
+        _lastModelPathForDefaults = value;
         if (string.IsNullOrWhiteSpace(value))
         {
-            _lastModelPathForDefaults = value;
+            ApplyModelDraft(new ModelConfigurationDraft
+            {
+                ContextSize = 4096,
+                GpuLayers = 0,
+                GpuPlacementSelection = "CPU",
+                Threads = 0,
+                PromptThreads = 0,
+                Slots = 1,
+                ContextSourceLabel = "Context default; no model is selected."
+            }, value);
             return;
         }
-        if (ModelPathSafety.AreSameLocalPath(value, _lastModelPathForDefaults))
-            return;
-        _lastModelPathForDefaults = value;
 
-        var card = _modelProfiles?.Get(value)
-            ?? _modelProfiles?.Profiles.FirstOrDefault(p =>
-                string.Equals(Path.GetFileName(p.ModelId), Path.GetFileName(value), StringComparison.OrdinalIgnoreCase));
-        if (card is { DefaultContextSize: > 0 })
+        if (_modelDrafts.TryGetValue(ModelDraftKey(value), out var draft))
         {
-            ContextSize = card.DefaultContextSize.Value;
-            ContextSourceLabel = "Context from model card";
+            ApplyModelDraft(draft, value);
+            return;
         }
-        else
+
+        var card = FindModelProfile(value);
+        var tune = LlamaTuneProfileStore.Find(_settings.Settings, value);
+        var context = card?.DefaultContextSize is > 0
+            ? card.DefaultContextSize.Value
+            : tune?.ContextSize is > 0
+                ? tune.ContextSize
+                : 4096;
+        var contextSource = card?.DefaultContextSize is > 0
+            ? "Context from model card"
+            : tune?.ContextSize is > 0
+                ? "Context from target tune profile"
+                : "Context default; no target profile";
+        var placement = tune?.GpuPlacement;
+        if (placement is null && tune is not null
+            && GpuPlacementIntent.TryFromLegacy(tune.GpuLayers, out var legacyPlacement, out _))
+            placement = legacyPlacement;
+
+        ApplyModelDraft(new ModelConfigurationDraft
         {
-            ContextSourceLabel = string.Empty;
-        }
+            ContextSize = context,
+            GpuLayers = placement?.LegacyGpuLayers ?? 0,
+            GpuPlacementSelection = placement is null ? "CPU" : PlacementSelection(placement),
+            Threads = tune?.Threads > 0 ? tune.Threads : 0,
+            PromptThreads = 0,
+            Slots = 1,
+            ExtraArgs = tune?.ExtraArgs ?? string.Empty,
+            PreserveReasoning = card?.DefaultPreserveReasoning ?? true,
+            KvCacheTypeK = NormalizeKvCacheType(card?.DefaultKvCacheType),
+            KvCacheTypeV = NormalizeKvCacheType(card?.DefaultKvCacheType),
+            FlashAttention = "auto",
+            ContextSourceLabel = contextSource
+        }, value);
     }
+
+    private ModelProfile? FindModelProfile(string modelPath) =>
+        _modelProfiles?.Get(modelPath)
+        ?? _modelProfiles?.Profiles.FirstOrDefault(profile =>
+            string.Equals(Path.GetFileName(profile.ModelId), Path.GetFileName(modelPath),
+                StringComparison.OrdinalIgnoreCase));
+
+    private static string NormalizeKvCacheType(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "f16" : value.Trim();
+
+    private static string ModelDraftKey(string path)
+    {
+        try { return Path.GetFullPath(path.Trim()); }
+        catch (Exception) { return path.Trim(); }
+    }
+
+    private ModelConfigurationDraft CaptureModelDraft() => new()
+    {
+        ContextSize = ContextSize,
+        GpuLayers = GpuLayers,
+        GpuPlacementSelection = GpuPlacementSelection,
+        Threads = Threads,
+        PromptThreads = PromptThreads,
+        Slots = Slots,
+        ExtraArgs = ExtraArgs,
+        MmprojPath = MmprojPath,
+        UseProjector = UseProjector,
+        PreserveReasoning = PreserveReasoning,
+        KvCacheTypeK = KvCacheTypeK,
+        KvCacheTypeV = KvCacheTypeV,
+        FlashAttention = FlashAttention,
+        ContextShift = ContextShift,
+        MemoryLock = MemoryLock,
+        NoMemoryMap = NoMemoryMap,
+        CpuMoeLayersText = CpuMoeLayersText,
+        SpeculativeTypes = SpeculativeTypes,
+        DraftModelPath = DraftModelPath,
+        DraftGpuLayersText = DraftGpuLayersText,
+        SpeculativeNMaxText = SpeculativeNMaxText,
+        SpeculativeNMinText = SpeculativeNMinText,
+        SpeculativePMinText = SpeculativePMinText,
+        AdaptiveEnvelope = BuildAdaptiveEnvelope().Clone(),
+        ContextSourceLabel = ContextSourceLabel
+    };
+
+    private void ApplyModelDraft(ModelConfigurationDraft draft, string modelPath)
+    {
+        _modelPathForMmproj = string.IsNullOrWhiteSpace(modelPath) ? null : modelPath;
+        MmprojPath = draft.MmprojPath;
+        UseProjector = draft.UseProjector;
+        ContextSize = draft.ContextSize;
+        GpuLayers = draft.GpuLayers;
+        GpuPlacementSelection = draft.GpuPlacementSelection;
+        Threads = draft.Threads;
+        PromptThreads = draft.PromptThreads;
+        Slots = draft.Slots;
+        ExtraArgs = draft.ExtraArgs;
+        PreserveReasoning = draft.PreserveReasoning;
+        KvCacheTypeK = NormalizeKvCacheType(draft.KvCacheTypeK);
+        KvCacheTypeV = NormalizeKvCacheType(draft.KvCacheTypeV);
+        FlashAttention = NormalizeFlashAttention(draft.FlashAttention);
+        ContextShift = draft.ContextShift;
+        MemoryLock = draft.MemoryLock;
+        NoMemoryMap = draft.NoMemoryMap;
+        CpuMoeLayersText = draft.CpuMoeLayersText;
+        SpeculativeTypes = draft.SpeculativeTypes;
+        DraftModelPath = draft.DraftModelPath;
+        DraftGpuLayersText = draft.DraftGpuLayersText;
+        SpeculativeNMaxText = draft.SpeculativeNMaxText;
+        SpeculativeNMinText = draft.SpeculativeNMinText;
+        SpeculativePMinText = draft.SpeculativePMinText;
+        var adaptive = draft.AdaptiveEnvelope;
+        AdaptiveMode = adaptive.Mode;
+        AdaptiveMinimumContext = adaptive.MinimumContext;
+        AdaptiveMinimumGpuHeadroomBytes = adaptive.MinimumGpuHeadroomBytes;
+        AdaptiveAllowGpuLayerReduction = adaptive.AllowGpuLayerReduction;
+        AdaptiveAllowContextReduction = adaptive.AllowContextReduction;
+        AdaptiveAllowKvPrecisionChange = adaptive.AllowKvPrecisionChange;
+        AdaptiveAllowCpuMoePlacement = adaptive.AllowCpuMoePlacement;
+        AdaptiveAllowMultiDevicePlacement = adaptive.AllowMultiDevicePlacement;
+        AdaptivePreserveAcceleratedBackend = adaptive.PreserveAcceleratedBackend;
+        AdaptivePreferredEvidenceAgeDays = Math.Clamp((int)Math.Round(adaptive.PreferredEvidenceAge.TotalDays), 1, 30);
+        ContextSourceLabel = draft.ContextSourceLabel;
+        _autoSelectedMmprojPath = null;
+        _autoSelectedDraftModelPath = null;
+    }
+
+    private static string NormalizeFlashAttention(string? value) =>
+        string.Equals(value, "on", StringComparison.OrdinalIgnoreCase) ? "on"
+        : string.Equals(value, "off", StringComparison.OrdinalIgnoreCase) ? "off"
+        : "auto";
     partial void OnPortChanged(int value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));

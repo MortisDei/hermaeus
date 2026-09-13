@@ -33,6 +33,8 @@ public partial class WorkspaceEditorView : UserControl
     private bool _monacoAttempted;
     private bool _suppressTextChanged;
     private bool _disposed;
+    private bool _attachedToVisualTree;
+    private string _statusText = "AvaloniaEdit fallback: editor is ready.";
 
     public WorkspaceEditorView()
     {
@@ -41,6 +43,8 @@ public partial class WorkspaceEditorView : UserControl
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
         ActualThemeVariantChanged += OnActualThemeVariantChanged;
+        SizeChanged += OnEditorSizeChanged;
+        EditorHost.SizeChanged += OnEditorHostSizeChanged;
     }
 
     public event EventHandler? EditorTextChanged;
@@ -93,7 +97,8 @@ public partial class WorkspaceEditorView : UserControl
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
             Padding = new Thickness(8),
-            MinHeight = 260
+            MinHeight = 260,
+            IsReadOnly = false
         };
         _fallbackEditor.TextChanged += OnFallbackTextChanged;
         AttachFallbackEditor();
@@ -119,6 +124,8 @@ public partial class WorkspaceEditorView : UserControl
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         _disposed = false;
+        _attachedToVisualTree = true;
+        UpdateEditorDiagnostics();
         if (!_monacoAttempted)
             TryCreateMonaco();
     }
@@ -147,8 +154,12 @@ public partial class WorkspaceEditorView : UserControl
             webView.WebMessageReceived += OnWebMessageReceived;
             _webView = webView;
             EditorHost.Children.Clear();
+            EditorHost.Children.Add(_fallbackEditor);
             EditorHost.Children.Add(webView);
-            EditorStatusText.Text = "Loading local Monaco...";
+            webView.ZIndex = 1;
+            webView.IsVisible = false;
+            _fallbackEditor.IsVisible = true;
+            SetEditorStatus("Loading local Monaco...");
             webView.Navigate(new Uri(Path.GetFullPath(indexPath)));
             _monacoReadyCts?.Cancel();
             _monacoReadyCts?.Dispose();
@@ -164,7 +175,7 @@ public partial class WorkspaceEditorView : UserControl
     private void OnAdapterCreated(object? sender, WebViewAdapterEventArgs e)
     {
         if (!_disposed && ReferenceEquals(sender, _webView))
-            EditorStatusText.Text = "Loading local Monaco...";
+            SetEditorStatus("Loading local Monaco...");
     }
 
     private void OnAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
@@ -201,7 +212,9 @@ public partial class WorkspaceEditorView : UserControl
             {
                 _monacoReady = true;
                 _monacoReadyCts?.Cancel();
-                EditorStatusText.Text = "Monaco (local bundle)";
+                webView.IsVisible = true;
+                _fallbackEditor.IsVisible = false;
+                SetEditorStatus("Monaco (local bundle)");
                 await SendDocumentToMonacoAsync(webView);
                 return;
             }
@@ -345,6 +358,7 @@ public partial class WorkspaceEditorView : UserControl
         _webView = null;
         if (webView is not null)
         {
+            webView.IsVisible = false;
             webView.AdapterCreated -= OnAdapterCreated;
             webView.AdapterDestroyed -= OnAdapterDestroyed;
             webView.NavigationCompleted -= OnNavigationCompleted;
@@ -354,12 +368,13 @@ public partial class WorkspaceEditorView : UserControl
 
         EditorHost.Children.Clear();
         AttachFallbackEditor();
-        EditorStatusText.Text = status;
+        SetEditorStatus(status);
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         _disposed = true;
+        _attachedToVisualTree = false;
         _monacoReady = false;
         _monacoAttempted = false;
         _monacoReadyCts?.Cancel();
@@ -379,7 +394,7 @@ public partial class WorkspaceEditorView : UserControl
 
         EditorHost.Children.Clear();
         AttachFallbackEditor();
-        EditorStatusText.Text = "AvaloniaEdit fallback: editor closed.";
+        SetEditorStatus("AvaloniaEdit fallback: editor closed.");
     }
 
     private void AttachFallbackEditor()
@@ -390,6 +405,7 @@ public partial class WorkspaceEditorView : UserControl
             EditorHost.Children.Add(_fallbackEditor);
         }
 
+        _fallbackEditor.IsVisible = true;
         UpdateFallbackHighlighting();
         var value = Text ?? string.Empty;
         if (_fallbackEditor.Text == value)
@@ -398,6 +414,33 @@ public partial class WorkspaceEditorView : UserControl
         _suppressTextChanged = true;
         _fallbackEditor.Text = value;
         _suppressTextChanged = false;
+    }
+
+    private void OnEditorSizeChanged(object? sender, SizeChangedEventArgs e) => UpdateEditorDiagnostics();
+
+    private void OnEditorHostSizeChanged(object? sender, SizeChangedEventArgs e) => UpdateEditorDiagnostics();
+
+    private void SetEditorStatus(string status)
+    {
+        _statusText = status;
+        UpdateEditorDiagnostics();
+    }
+
+    private void UpdateEditorDiagnostics()
+    {
+        if (EditorStatusText is null || EditorHost is null || _fallbackEditor is null)
+            return;
+
+        EditorStatusText.Text = _statusText;
+        var surface = _monacoReady ? "monaco-front" : "fallback-front";
+        var monacoState = _webView is null ? "none" : _webView.IsVisible ? "visible" : "hidden";
+        var diagnostics =
+            $"stage={_statusText}; attached={_attachedToVisualTree}; "
+            + $"host={EditorHost.Bounds.Width:0}x{EditorHost.Bounds.Height:0}; "
+            + $"fallback={_fallbackEditor.Bounds.Width:0}x{_fallbackEditor.Bounds.Height:0}; "
+            + $"fallbackVisible={_fallbackEditor.IsVisible}; editable={!_fallbackEditor.IsReadOnly}; "
+            + $"monaco={monacoState}; surface={surface}; documentChars={Text.Length}; file={FilePath}";
+        ToolTip.SetTip(EditorStatusText, diagnostics);
     }
 
     private static async Task DisposeWebViewAsync(NativeWebView webView)

@@ -10,6 +10,7 @@ public partial class DraftPatchPreviewModalView : Window
     public DraftPatchPreviewModalView()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
         DataContextChanged += OnDataContextChanged;
     }
 

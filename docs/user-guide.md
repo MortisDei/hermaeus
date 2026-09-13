@@ -77,6 +77,12 @@ Extra arguments and live process overrides remain on Services, where their
 trust checks and process state are visible. Runtime process settings still use
 **Save Config** on Services.
 
+Switching the Services model picker starts a new model from that model's card
+and tune profile, or from safe defaults when no profile exists. Unsaved runtime
+fields are kept separately per model and restored when you switch back; a draft
+model, projector, context, placement, cache, speculative, or adaptive setting
+from another model is never inherited.
+
 Services auto-tune uses the saved server configuration as its probe baseline and
 changes only the candidate axes for each transient probe. Models-card
 auto-tune instead builds an isolated target probe from the selected model and
@@ -384,7 +390,9 @@ draft, selected file, and task-scoped evidence without deleting the old task.
 Workspace editing uses a local Monaco host when available and a bounded,
 functional AvaloniaEdit fallback when Monaco is unavailable or fails to become
 ready. Both remain presentation only and all writes still use the normal
-prepared mutation and approval path.
+prepared mutation and approval path. The editor status tooltip exposes bounded
+attachment, dimensions, visibility, editable state, document-size, and file
+diagnostics for native troubleshooting.
 Starting another top-level task is disabled while one is open. An
 orchestration parent cannot be finished or dismissed while a child is pending
 or running. If startup finds that inconsistent state, it marks the parent
@@ -392,6 +400,10 @@ blocked so **Continue** can reconcile it. When a workspace is missing its
 `AGENTS.md`, **Review and create AGENTS.md** previews the file and places a
 normal prepared mutation in the approval queue; it does not write the file
 directly.
+
+If no Agent task is open, the preview must be accepted before Hermaeus creates
+an explicit `Create workspace AGENTS.md` task and queues the patch. Existing
+`AGENTS.md` content is never overwritten by this action.
 
 When a proposed plan contains sub-tasks, its review card has one model selector
 per child. Choose a configured visible model or **Inherit parent** before
@@ -459,6 +471,11 @@ with an explanation of what to configure. The run card keeps execution,
 cancellation, source restore, recommendation, and effective runtime state
 separate. Recipe prompt detail and evidence filters are tucked behind secondary
 disclosures so the next action stays visible on a narrow window.
+
+While a recipe is running, the Experiment card names the experiment and current
+candidate, shows its position and stage, and reports completed and remaining
+workload steps with a determinate percentage. Its terminal state carries the
+actual result instead of leaving a generic running indicator.
 
 The run state names isolation and comparison refusals. Missing counters remain
 missing. A comparison cannot show a headline delta when runtime, model,

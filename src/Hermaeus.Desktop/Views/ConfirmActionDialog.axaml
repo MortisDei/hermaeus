@@ -3,14 +3,24 @@
         x:Class="Hermaeus.Desktop.Views.ConfirmActionDialog"
         Title="Confirm"
         Width="460"
-        Height="200"
+        MinWidth="320"
+        MaxWidth="720"
+        Height="240"
+        MinHeight="180"
+        MaxHeight="520"
         WindowStartupLocation="CenterOwner"
         CanResize="False">
     <Border Padding="18">
-        <StackPanel Spacing="14">
-            <TextBlock x:Name="MessageText"
-                       TextWrapping="Wrap" />
-            <StackPanel Orientation="Horizontal"
+        <Grid RowDefinitions="*,Auto" RowSpacing="14">
+            <ScrollViewer Grid.Row="0"
+                          MaxHeight="360"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <TextBlock x:Name="MessageText"
+                           TextWrapping="Wrap" />
+            </ScrollViewer>
+            <StackPanel Grid.Row="1"
+                        Orientation="Horizontal"
                         HorizontalAlignment="Right"
                         Spacing="8">
                 <Button x:Name="CancelButton"
@@ -22,6 +32,6 @@
                         MinWidth="90"
                         Click="OnConfirmClick" />
             </StackPanel>
-        </StackPanel>
+        </Grid>
     </Border>
 </Window>

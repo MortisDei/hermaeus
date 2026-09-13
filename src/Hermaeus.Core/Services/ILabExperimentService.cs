@@ -64,5 +64,6 @@ public interface ILabExperimentService
 public interface ILabRecipeService
 {
     Task<IReadOnlyList<LabRecipePlan>> InspectAsync(ServerConfig source, CancellationToken ct = default);
-    Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source, string prompt, CancellationToken ct = default);
+    Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source, string prompt,
+        CancellationToken ct = default, IProgress<LabRunProgress>? progress = null);
 }

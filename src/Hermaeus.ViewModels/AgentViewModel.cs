@@ -203,6 +203,8 @@ public sealed class AgentReviewQueueItemViewModel
 /// </summary>
 public sealed class AgentTaskListItemViewModel
 {
+    private const int GoalPreviewLength = 180;
+
     public AgentTaskListItemViewModel(AgentTaskListItem item)
     {
         TaskId = item.TaskId;
@@ -218,6 +220,7 @@ public sealed class AgentTaskListItemViewModel
 
     public string TaskId { get; }
     public string Goal { get; }
+    public string GoalPreview => CompactGoal(Goal);
     public AgentTaskStatus Status { get; }
     public DateTime UpdatedAt { get; }
     public string? ParentTaskId { get; }
@@ -258,6 +261,14 @@ public sealed class AgentTaskListItemViewModel
                 _ => UpdatedAt.ToLocalTime().ToString("d MMM")
             };
         }
+    }
+
+    private static string CompactGoal(string goal)
+    {
+        var compact = string.Join(' ', goal.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return compact.Length <= GoalPreviewLength
+            ? compact
+            : compact[..(GoalPreviewLength - 3)] + "...";
     }
 }
 
@@ -543,7 +554,17 @@ public sealed record AgentTaskRewindConfirmation(IReadOnlyList<string> FilesToRe
 
 public partial class AgentViewModel : ViewModelBase
 {
-    public Func<DraftPatchPreviewRequest, Task<bool>>? RequestDraftPatchPreview { get; set; }
+    private Func<DraftPatchPreviewRequest, Task<bool>>? _requestDraftPatchPreview;
+    public Func<DraftPatchPreviewRequest, Task<bool>>? RequestDraftPatchPreview
+    {
+        get => _requestDraftPatchPreview;
+        set
+        {
+            _requestDraftPatchPreview = value;
+            ReviewSuggestedAgentsCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CanReviewSuggestedAgents));
+        }
+    }
     public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
 
     [RelayCommand]
@@ -688,7 +709,7 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>Drives the "no workspace selected" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasWorkspace => !string.IsNullOrWhiteSpace(WorkspaceRoot) && Directory.Exists(WorkspaceRoot);
 
-    public bool CanReviewSuggestedAgents => CurrentTask is not null
+    public bool CanReviewSuggestedAgents => HasWorkspace
         && !IsRunning
         && RequestDraftPatchPreview is not null
         && SuggestedAgentsMd.Length > 0
@@ -1399,7 +1420,7 @@ public partial class AgentViewModel : ViewModelBase
                 NewTask();
             await RefreshRecentAsync();
             await RefreshReviewQueueAsync();
-            StatusMessage = $"Deleted historical agent run: {item.Goal}";
+            StatusMessage = $"Deleted historical agent run: {item.GoalPreview}";
         }
         catch (Exception ex)
         {
@@ -2404,17 +2425,39 @@ public partial class AgentViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanReviewSuggestedAgents))]
     private async Task ReviewSuggestedAgentsAsync()
     {
-        if (!CanReviewSuggestedAgents || CurrentTask is null)
+        if (!CanReviewSuggestedAgents)
             return;
 
-        var taskId = CurrentTask.TaskId;
         try
         {
+            var taskLabel = CurrentTask?.TaskId ?? "workspace";
             var approved = await RequestDraftPatchPreview!(new DraftPatchPreviewRequest(
-                $"suggested-agents-{taskId}", "AGENTS.md", string.Empty, SuggestedAgentsMd));
+                $"suggested-agents-{taskLabel}", "AGENTS.md", string.Empty, SuggestedAgentsMd));
             if (!approved)
                 return;
 
+            // A workspace analysis can be useful before an Agent run exists.
+            // Create an explicit task only after the user approves the preview,
+            // then send the write through the same prepared patch and approval
+            // path as every other workspace mutation. This makes the action
+            // visible and reviewable without ever writing AGENTS.md directly.
+            if (!CanReviewSuggestedAgents)
+            {
+                StatusMessage = "AGENTS.md was created or the workspace changed while it was under review.";
+                return;
+            }
+
+            if (CurrentTask is null)
+            {
+                CurrentTask = await _agent.CreateTaskAsync(
+                    "Create workspace AGENTS.md",
+                    BuildOptions(),
+                    projectId: ActiveProjectId);
+                _openedTaskId = CurrentTask.TaskId;
+                _currentTaskParentGoal = string.Empty;
+            }
+
+            var taskId = CurrentTask.TaskId;
             await _patchReview.QueueAsync(
                 taskId,
                 "AGENTS.md",
@@ -2422,6 +2465,7 @@ public partial class AgentViewModel : ViewModelBase
                 SuggestedAgentsMd,
                 BuildOptions());
             StatusMessage = "Suggested AGENTS.md queued for review. The file is not written until you approve the queued patch.";
+            SelectedTabIndex = ChangesTabIndex;
             await LoadTaskIfOpenAsync(taskId);
         }
         catch (Exception ex)
@@ -2936,7 +2980,9 @@ public partial class AgentViewModel : ViewModelBase
     {
         StartCommand.NotifyCanExecuteChanged();
         ExplainWorkspaceCommand.NotifyCanExecuteChanged();
+        ReviewSuggestedAgentsCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasWorkspace));
+        OnPropertyChanged(nameof(CanReviewSuggestedAgents));
         SuggestedAgentsMd = string.Empty;
         RefreshCapabilityNotes();
         ClearSelectedWorkspaceFile();

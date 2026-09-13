@@ -210,6 +210,51 @@ public sealed class AgentViewModelWorkspaceTests
         Assert.False(vm.StartCommand.CanExecute(null));
     }
 
+    [Fact]
+    public async Task Suggested_agents_can_be_queued_without_an_open_task_and_never_write_directly()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        vm.WorkspaceRoot = workspace;
+        vm.SuggestedAgentsMd = "# AGENTS.md\n\nKeep changes local and reviewed.";
+
+        DraftPatchPreviewRequest? preview = null;
+        vm.RequestDraftPatchPreview = request =>
+        {
+            preview = request;
+            return Task.FromResult(true);
+        };
+
+        Assert.True(vm.CanReviewSuggestedAgents);
+        await vm.ReviewSuggestedAgentsCommand.ExecuteAsync(null);
+
+        Assert.NotNull(preview);
+        Assert.Equal("AGENTS.md", preview!.RelativePath);
+        Assert.Equal(vm.SuggestedAgentsMd, preview.NewContent);
+        Assert.NotNull(vm.CurrentTask);
+        Assert.Equal("Create workspace AGENTS.md", vm.CurrentTask!.Goal);
+        var patch = Assert.Single(vm.CurrentTask.DraftPatches);
+        Assert.Equal("AGENTS.md", patch.RelativePath);
+        Assert.Equal(AgentDraftPatchStatus.Pending, patch.Status);
+        Assert.False(File.Exists(Path.Combine(workspace, "AGENTS.md")));
+        Assert.Equal(AgentViewModel.ChangesTabIndex, vm.SelectedTabIndex);
+    }
+
+    [Fact]
+    public void Historical_goal_preview_is_bounded_but_full_goal_is_retained()
+    {
+        var goal = string.Join(' ', Enumerable.Repeat("long-goal-word", 40));
+        var item = new AgentTaskListItem("task", goal, AgentTaskStatus.Complete, DateTime.UtcNow);
+
+        var viewModel = new AgentTaskListItemViewModel(item);
+
+        Assert.Equal(goal, viewModel.Goal);
+        Assert.Equal(180, viewModel.GoalPreview.Length);
+        Assert.EndsWith("...", viewModel.GoalPreview, StringComparison.Ordinal);
+    }
+
     // ── r16 03-workbench-and-desktop.md 3.1: recent-tasks list / LoadTaskCommand ──
 
     [Fact]

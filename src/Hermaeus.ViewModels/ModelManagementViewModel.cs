@@ -654,7 +654,7 @@ public partial class ModelManagementViewModel : ObservableObject
         item.ApplySavedState();
         lock (_modelCacheLock)
             _profiles.ApplyProfiles(_modelCache);
-        _toasts.Show("Model profile saved", $"Updated metadata for {item.DisplayName}.", ToastKind.Success);
+        _toasts.Show("Model profile saved", $"Updated metadata for {item.EffectiveName}.", ToastKind.Success);
     }
 
     [RelayCommand]
@@ -3128,7 +3128,27 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _originalAutoManageCompanionAssets = AutoManageCompanionAssets;
     }
 
-    public string EffectiveName => string.IsNullOrWhiteSpace(DisplayName) ? RawName : DisplayName.Trim();
+    public string EffectiveName
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(DisplayName))
+                return DisplayName.Trim();
+            if (!string.IsNullOrWhiteSpace(RawName))
+                return RawName.Trim();
+            try
+            {
+                var fileName = Path.GetFileNameWithoutExtension(ModelId);
+                return string.IsNullOrWhiteSpace(fileName)
+                    ? string.IsNullOrWhiteSpace(ModelId) ? "selected model" : ModelId
+                    : fileName;
+            }
+            catch (ArgumentException)
+            {
+                return string.IsNullOrWhiteSpace(ModelId) ? "selected model" : ModelId;
+            }
+        }
+    }
     public string TagsDisplay => string.Join("  ", Tags);
 
     public ModelProfile ToProfile() => new()

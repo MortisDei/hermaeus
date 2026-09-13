@@ -13,6 +13,24 @@ limit.
 
 ### Changed
 
+- Lab completion now stores comparison and effective-launch evidence as separate
+  bounded records referenced by a compact completion summary. Recipe runs expose
+  named candidate progress, preserve truthful completed and remaining counts,
+  and do not retry finalization after a completion persistence failure.
+- Benchmark run lists and detail now show bounded runtime-evidence reasons plus
+  requested, resolved, launched, effective, and telemetry reconciliation.
+  Switching Services models now restores each model's unsaved runtime draft or
+  starts from target-only defaults, so companions and model-specific options do
+  not leak between models. Empty model metadata uses a stable filename or id.
+- Agent workspace analysis exposes the suggested `AGENTS.md` action before a
+  task exists, creates an explicit task only after preview approval, and queues
+  the write through the normal prepared-mutation gate. History uses compact goal
+  cards while retaining the full goal, and the local editor reports bounded
+  Monaco/fallback attachment and layout diagnostics.
+- Owned desktop modals use a shared client-size, DPI-aware, working-area-clamped
+  placement correction. Long confirmation content scrolls above pinned actions
+  and supports Escape cancellation.
+
 - Lab isolated launches now capture a redacted PID and exact argv with bounded
   startup evidence, parse current b10930 nested `/props` context/slot fields,
   and parse the runtime's explicit offloaded-layer receipt. Stale typed GPU

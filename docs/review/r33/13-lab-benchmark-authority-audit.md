@@ -117,6 +117,35 @@ runtime placement, loopback serving, process cleanup, and measured throughput.
 They do not prove a visible Lab GUI walkthrough, semantic workload equivalence,
 or owner acceptance of the editor fallback.
 
+## Local continuation evidence, 2026-09-13
+
+The repair continuation passed the Debug and Release solution builds with zero
+warnings and zero errors. Each complete sequential suite passed `2,731`,
+skipped `17` expected platform-gated tests, and failed `0`; the focused R33
+repair set passed `119/119`. The final `scripts/coverage.sh` run passed the
+repository's `60%` line-coverage ratchet, with its temporary report outside
+the checkout.
+
+The Release `R33Driver` returned `ok:true` on fresh `/tmp` settings, data, and
+workspace paths. Its evidence included an Applied, changed,
+readback-verified Agent receipt, persisted benchmark cancellation with zero
+cases, one RAG generation/query, Chat retrieval context, voice completion, Lab
+failure cleanup, Lab Apply/reopen, and driver shutdown. The driver uses named
+scratch substitutions for nondeterministic external boundaries and is not
+native-runtime or GUI proof.
+
+The rebuilt `v0.41.0-beta` Linux archive passed its SHA256 check, launcher-link
+and executable assertions, layout/no-PDB checks, and Release package assembly.
+The published package apphost was also started from a dedicated `/tmp`
+working directory. Its runtime log recorded production store startup in
+`258 ms`, and the X11 window tree exposed a `1280x820` top-level
+`Hermaeus - WIZARD` window with class `hermaeus-app` / `hermaeus`. A syscall
+trace found no access to `/mnt/Gaming/Hermaeus` or the normal owner
+`/home/cignoli/.local/share/Hermaeus` path. The process was stopped by
+interrupt after the native check because this host's CUA surface exposed only
+state inventory and no app/window interaction methods. Therefore GUI pixels,
+control exercise, and clean window-close telemetry remain owner-live gates.
+
 ## Monaco and AvaloniaEdit fallback boundary
 
 The workspace editor still follows the bounded local Monaco path first and

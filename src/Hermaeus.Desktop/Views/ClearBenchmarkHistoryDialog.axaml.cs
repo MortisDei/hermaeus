@@ -8,6 +8,7 @@ public partial class ClearBenchmarkHistoryDialog : Window
     public ClearBenchmarkHistoryDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
     }
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);

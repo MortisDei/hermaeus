@@ -9,6 +9,7 @@ public partial class OrganizeModelsPreviewDialog : Window
     public OrganizeModelsPreviewDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
     }
 
     public void SetPlan(ModelOrganizePlan plan)

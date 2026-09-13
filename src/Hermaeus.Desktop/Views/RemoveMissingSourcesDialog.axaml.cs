@@ -13,6 +13,7 @@ public partial class RemoveMissingSourcesDialog : Window
     public RemoveMissingSourcesDialog(string datasetName, IReadOnlyList<string> paths)
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
         DataContext = new RemoveMissingSourcesDialogViewModel(datasetName, paths);
     }
 

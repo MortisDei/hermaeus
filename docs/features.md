@@ -53,6 +53,11 @@ for Knowledge behavior in Chat.
 - Services manages local runtime processes and files. Managed `llama.cpp`,
   Ollama, and OpenAI-compatible profiles are supported, with explicit
   localhost, model, port, and launch configuration.
+- Switching the selected Services model keeps unsaved model-specific runtime
+  fields isolated per local model. A first visit hydrates only the target
+  model's card and tune profile, while a switch back restores that model's
+  in-memory draft. Companion paths, speculative settings, context, placement,
+  threads, cache, and adaptive fields never come from another model.
 - Data-root changes use an explicit confirmation and the existing safe
   migration boundary. The Data Storage page distinguishes the configured root
   from the root currently effective for composed stores and tells the user to
@@ -346,6 +351,9 @@ review and confirmation owned by the Hermaeus window. The result card leads
 with the experiment, recorded model identity when available, status,
 timestamps, tested configurations, recommendation state, correctness, and
 measured or predicted resource deltas. Missing measurements remain `Unknown`.
+Comparison decisions and effective-launch observations are persisted as separate
+bounded records and linked from the summary, so a long run cannot exceed the
+existing per-document limit merely because its detail is retained.
 The Experiment card keeps the execution outcome separate from source-restore
 state and raises an explicit attention state when restoration fails or is
 blocked by a changed configuration.
@@ -358,8 +366,10 @@ safety decision, or rewrites the analytical GPU Fit prediction.
 Lab's Experiment surface describes capability and recipe availability for the
 selected server/model, disables runs that are unavailable or have no eligible
 target, and keeps run, cancellation, source-restore, Apply, and recovery next
-actions visible. Recipe prompt detail and evidence filters are disclosed until
-needed, and action groups wrap on narrow windows. The selected runtime's
+actions visible. During a recipe run it shows the named experiment, candidate
+and position, current stage, completed steps, remaining steps, and a bounded
+determinate percentage. Recipe prompt detail and evidence filters are disclosed
+until needed, and action groups wrap on narrow windows. The selected runtime's
 effective state remains distinct from a recommendation or saved configuration.
 Each baseline-to-candidate comparison also retains the isolated runtime's
 effective launch observation. Context and slots come from the structured
@@ -397,7 +407,11 @@ until rerun with verified evidence.
 
 Benchmark resource readings distinguish process RAM, device totals, and honest
 per-process `Unknown` values. Lab owns controlled configuration experiments;
-Benchmarks own reusable suites and run comparisons.
+Benchmarks own reusable suites and run comparisons. When runtime authority is
+missing or conflicting, the run list, completion notification, and Run Detail
+view retain bounded reasons and the reconciliation of requested, resolved,
+launched, effective, and process-bound telemetry identities. The run remains
+visible but is excluded from trustworthy rankings.
 
 See the [Benchmarks reference](benchmarks.md).
 

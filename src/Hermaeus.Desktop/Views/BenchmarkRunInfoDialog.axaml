@@ -22,6 +22,8 @@
                         <TextBlock Text="{Binding Status}" />
                         <TextBlock Text="Evidence" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
                         <TextBlock Text="{Binding Evidence}" TextWrapping="Wrap" />
+                        <TextBlock Text="Evidence status" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
+                        <TextBlock Text="{Binding EvidenceStatusLabel}" FontWeight="SemiBold" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
                         <TextBlock Text="Metrics" Opacity="0.6" FontSize="11" />
@@ -38,6 +40,13 @@
                         <Button Content="Export" Click="OnExportClick" MinWidth="100" />
                     </StackPanel>
                 </Grid>
+
+                <StackPanel Spacing="5" IsVisible="{Binding HasEvidenceReasons}">
+                    <TextBlock Text="Why runtime evidence is not eligible" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding EvidenceReasonsLabel}" TextWrapping="Wrap" FontFamily="Consolas" />
+                    <TextBlock Text="Reconciliation" Opacity="0.6" FontSize="11" />
+                    <TextBlock Text="{Binding ReconciliationSummary}" TextWrapping="Wrap" FontFamily="Consolas" />
+                </StackPanel>
 
                 <StackPanel Spacing="3">
                     <TextBlock Text="Inference engine" Opacity="0.6" FontSize="11" />

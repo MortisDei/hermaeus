@@ -615,11 +615,15 @@ public sealed class LabRecipeRunner
     }
 
     public async Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source,
-        LocalModelCapabilities capabilities, string prompt, CancellationToken ct = default)
+        LocalModelCapabilities capabilities, string prompt, CancellationToken ct = default,
+        IProgress<LabRunProgress>? progress = null)
     {
         if (plan.Availability != CapabilityState.Available)
             throw new InvalidOperationException($"Recipe {plan.Label} is {plan.Availability}: {plan.AvailabilityDetail}");
         LabRecipeCatalog.Validate(plan);
+        var candidateTotal = plan.Candidates.Count + 1;
+        var total = Math.Max(1, candidateTotal * 3);
+        Report(progress, plan.Label, "Preparing", 0, candidateTotal, "Preparing", 0, total);
         var definition = await _experiments.CreateDefinitionAsync(plan.Label, plan.Id, source,
             plan.Baseline, plan.Candidates, 3, plan.CorrectnessRequirement, ct);
         definition = definition with
@@ -640,6 +644,7 @@ public sealed class LabRecipeRunner
             RequiredMetrics = plan.RequiredMetrics,
             RequestedCapabilityIds = plan.RequiredCapabilityIds
         };
+        Report(progress, definition.Name, "Preparing", 0, candidateTotal, "Predicting resource fit", 0, total);
         var plannedPredictions = new Dictionary<string, ModelFitPrediction>(StringComparer.Ordinal);
         foreach (var configuration in plan.Candidates.Prepend(plan.Baseline))
         {
@@ -650,18 +655,33 @@ public sealed class LabRecipeRunner
             plannedPredictions[configuration.Id] = await PredictModelAsync(source, configuration, fingerprint, capabilities, ct);
         }
         var run = await _experiments.StartAsync(definition, source, ct);
-        if (run.Status != LabRunStatus.Running) return run;
+        if (run.Status != LabRunStatus.Running)
+        {
+            ReportTerminal(progress, definition.Name, "Preparing", 0, candidateTotal, run.Status,
+                "The isolated runtime did not reach the running state.", 0, total);
+            return run;
+        }
+        Report(progress, definition.Name, "Baseline", 1, candidateTotal, "Starting isolated runtime", 0, total);
 
         var observations = new List<LabObservation>();
         var outputs = new List<LabOutputEvidence>();
         var failures = new List<string>();
+        var completed = 0;
+        var currentCandidateIndex = 0;
+        var currentCandidateLabel = "Preparing";
         try
         {
             var consecutiveFailures = 0;
             var reusedCounterField = PromptReuseEvidenceAdapter.ProvenCounterField(capabilities.Observations ?? []);
             var configurations = plan.Candidates.Prepend(plan.Baseline).ToArray();
-            foreach (var configuration in configurations)
+            for (var configurationIndex = 0; configurationIndex < configurations.Length; configurationIndex++)
             {
+                var configuration = configurations[configurationIndex];
+                var candidateIndex = configurationIndex + 1;
+                currentCandidateIndex = candidateIndex;
+                currentCandidateLabel = configuration.Label;
+                Report(progress, definition.Name, configuration.Label, candidateIndex, candidateTotal,
+                    "Starting candidate", completed, total);
                 if (configuration.Id != plan.Baseline.Id)
                 {
                     try { run = await _experiments.SwitchConfigurationAsync(run.Id, source, configuration.Id, ct); }
@@ -688,6 +708,8 @@ public sealed class LabRecipeRunner
                     observations.Add(MissingQualityObservation(run.Id, configuration.Id, fingerprint));
                 for (var repetition = 0; repetition < definition.Repetitions; repetition++)
                 {
+                    Report(progress, definition.Name, configuration.Label, candidateIndex, candidateTotal,
+                        $"Running repetition {repetition + 1} of {definition.Repetitions}", completed, total);
                     var workloadPrompt = plan.Kind == LabRecipeKind.PromptPrefixReuse
                         ? SharedPrefixPromptFixture.Build(prompt, repetition) : prompt;
                     var caseId = plan.Kind == LabRecipeKind.PromptPrefixReuse
@@ -700,6 +722,9 @@ public sealed class LabRecipeRunner
                     observations.AddRange(result.Observations);
                     if (result.Output is not null) outputs.Add(result.Output);
                     observations.AddRange(await CaptureTelemetryAsync(run, configuration, fingerprint, ct));
+                    completed++;
+                    Report(progress, definition.Name, configuration.Label, candidateIndex, candidateTotal,
+                        "Repetition complete", completed, total);
                     if (result.Failure is not null)
                     {
                         failures.Add($"{configuration.Id} repetition {repetition}: {result.Failure}");
@@ -717,23 +742,89 @@ public sealed class LabRecipeRunner
                     if (comparison.State == LabEquivalenceState.Different) break;
                 }
             }
-            return await _experiments.CompleteAsync(run.Id, observations, outputs, failures, ct);
+            Report(progress, definition.Name, "Finalizing", candidateTotal, candidateTotal,
+                "Persisting bounded evidence", completed, total);
+            var completedRun = await _experiments.CompleteAsync(run.Id, observations, outputs, failures, ct);
+            ReportTerminal(progress, definition.Name, "Finalizing", candidateTotal, candidateTotal,
+                completedRun.Status, "Lab evidence persisted.", total, total);
+            return completedRun;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return await _experiments.CancelAsync(run.Id, CancellationToken.None);
+            var cancelled = await _experiments.CancelAsync(run.Id, CancellationToken.None);
+            ReportTerminal(progress, definition.Name, currentCandidateLabel, currentCandidateIndex, candidateTotal,
+                cancelled.Status, "The Lab recipe was cancelled; captured evidence was retained.", completed, total);
+            return cancelled;
         }
         catch (Exception ex)
         {
             failures.Add($"run failed: {ex.Message}");
+            var current = _experiments.GetRun(run.Id) ?? run;
+            if (current.Status != LabRunStatus.Running)
+                throw;
             try
             {
-                return await _experiments.CompleteAsync(run.Id, observations, outputs, failures, CancellationToken.None);
+                var failedRun = await _experiments.CompleteAsync(run.Id, observations, outputs, failures, CancellationToken.None);
+                ReportTerminal(progress, definition.Name, currentCandidateLabel, currentCandidateIndex, candidateTotal,
+                    failedRun.Status, "The Lab recipe failed; captured evidence was retained.", completed, total);
+                return failedRun;
             }
             catch (Exception cleanupException)
             {
-                throw new AggregateException("The Lab run failed and cleanup also failed.", ex, cleanupException);
+                ReportTerminal(progress, definition.Name, currentCandidateLabel, currentCandidateIndex, candidateTotal,
+                    LabRunStatus.Failed, $"Lab evidence finalization failed: {cleanupException.Message}", completed, total);
+                throw new AggregateException("The Lab run failed and finalization also failed.", ex, cleanupException);
             }
+        }
+    }
+
+    private static void Report(
+        IProgress<LabRunProgress>? progress,
+        string experimentName,
+        string candidateLabel,
+        int candidateIndex,
+        int candidateTotal,
+        string stage,
+        int completed,
+        int total,
+        string detail = "")
+    {
+        if (progress is null)
+            return;
+        try
+        {
+            progress.Report(new LabRunProgress(experimentName, candidateLabel,
+                candidateIndex, candidateTotal, stage, completed,
+                total, Math.Max(0, total - completed), Detail: detail));
+        }
+        catch (Exception)
+        {
+            // Progress is presentation-only and must never change Lab evidence.
+        }
+    }
+
+    private static void ReportTerminal(
+        IProgress<LabRunProgress>? progress,
+        string experimentName,
+        string candidateLabel,
+        int candidateIndex,
+        int candidateTotal,
+        LabRunStatus status,
+        string detail,
+        int completed,
+        int total)
+    {
+        if (progress is null)
+            return;
+        try
+        {
+            progress.Report(new LabRunProgress(experimentName, candidateLabel,
+                candidateIndex, candidateTotal, status.ToString(), completed,
+                total, Math.Max(0, total - completed), status, detail));
+        }
+        catch (Exception)
+        {
+            // Progress is presentation-only and must never change Lab evidence.
         }
     }
 
@@ -887,7 +978,7 @@ public sealed class LabRecipeService : ILabRecipeService
     }
 
     public async Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source,
-        string prompt, CancellationToken ct = default)
+        string prompt, CancellationToken ct = default, IProgress<LabRunProgress>? progress = null)
     {
         if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 4096)
             throw new InvalidOperationException("A Lab recipe prompt must contain 1 to 4,096 characters.");
@@ -899,7 +990,7 @@ public sealed class LabRecipeService : ILabRecipeService
             != LabCanonicalJson.Hash(LabCanonicalJson.Serialize(plan)))
             throw new InvalidOperationException("The recipe capability, asset identity, or baseline changed after inspection. Inspect it again.");
         var capabilities = await _capabilities.ProbeAsync(source.ModelPath, source.ExecutablePath, ct: ct);
-        return await _runner.RunAsync(currentPlan, source, capabilities, prompt, ct);
+        return await _runner.RunAsync(currentPlan, source, capabilities, prompt, ct, progress);
     }
 
     private async Task<ModelIdentityV2?> ProvenIdentityAsync(string path, GgufModelInfo? gguf, CancellationToken ct)

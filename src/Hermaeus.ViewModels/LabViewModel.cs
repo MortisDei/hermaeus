@@ -61,7 +61,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
     public string StatusLabel => LabPresentationText.EvidenceStatus(Experience.Status);
     public string ContextSummary => SummarizeJson(Experience.ContextJson);
     public string ActionSummary => SummarizeJson(Experience.ActionJson);
-    public string ResultSummary => SummarizeLabCompletion(Experience.ActionJson);
+    public string ResultSummary => SummarizeLabCompletion(Experience.ActionJson, EvidenceRecords);
     public LabResultSummaryViewModel? ResultDetails { get; }
     [ObservableProperty] private bool _isExportSelected;
 
@@ -99,7 +99,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
         static string Truncate(string value) => value.Length <= 120 ? value : value[..117] + "...";
     }
 
-    private static string SummarizeLabCompletion(string json)
+    private static string SummarizeLabCompletion(string json, IReadOnlyList<EmpiricalExperience> evidenceRecords)
     {
         try
         {
@@ -117,19 +117,11 @@ public partial class ExperienceRowViewModel : ViewModelBase
             lines.Add($"Started: {summary.StartedAtUtc.ToLocalTime():g}." +
                 (summary.CompletedAtUtc is { } completed ? $" Completed: {completed.ToLocalTime():g}." : string.Empty));
 
-            if (summary.DetailedComparisons is { Count: > 0 } detailedComparisons)
-            {
-                foreach (var comparison in detailedComparisons)
-                    lines.Add(FormatComparison(comparison, configurations));
-            }
-            else
-            {
-                foreach (var comparison in comparisons)
-                    lines.Add(FormatComparison(comparison, configurations));
-            }
+            var detailedComparisons = ReadDetailedComparisons(summary, evidenceRecords);
+            foreach (var comparison in detailedComparisons)
+                lines.Add(FormatComparison(comparison, configurations));
 
-            var hasEligibleComparison = summary.DetailedComparisons?.Any(comparison => comparison.CanShowHeadlineDelta)
-                ?? comparisons.Any(comparison => comparison.CanShowHeadlineDelta);
+            var hasEligibleComparison = detailedComparisons.Any(comparison => comparison.CanShowHeadlineDelta);
             var eligible = comparisons
                 .Where(comparison => comparison.CanShowHeadlineDelta)
                 .Select(comparison => configurations.TryGetValue(comparison.CandidateConfigurationId, out var configuration)
@@ -146,7 +138,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
             if (failures.Count > 0)
                 lines.Add($"Failures: {string.Join(" ", failures)}");
             lines.Add($"Evidence: {(summary.EvidenceSliceIds ?? []).Count} immutable configuration slice(s).");
-            lines.Add($"Effective launch: {FormatEffectiveLaunches(summary)}");
+            lines.Add($"Effective launch: {FormatEffectiveLaunches(summary, ReadEffectiveLaunches(summary, evidenceRecords))}");
             return string.Join(Environment.NewLine, lines);
         }
         catch (JsonException)
@@ -219,7 +211,83 @@ public partial class ExperienceRowViewModel : ViewModelBase
         var summary = TryReadSummary(experience.ActionJson);
         if (!string.IsNullOrWhiteSpace(summary?.ExperimentName))
             return summary.ExperimentName;
+        try
+        {
+            using var document = JsonDocument.Parse(experience.ActionJson);
+            if (document.RootElement.TryGetProperty("definition", out var definition)
+                && definition.ValueKind == JsonValueKind.Object
+                && definition.TryGetProperty("name", out var name)
+                && name.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(name.GetString()))
+                return name.GetString();
+        }
+        catch (JsonException) { }
         return "Lab experiment";
+    }
+
+    internal static IReadOnlyList<LabComparison> ReadDetailedComparisons(
+        LabRunCompletionSummary summary, IReadOnlyList<EmpiricalExperience> evidenceRecords)
+    {
+        if (summary.DetailedComparisons is { Count: > 0 } detailed)
+            return detailed;
+
+        var ids = summary.ComparisonEvidenceIds.ToHashSet(StringComparer.Ordinal);
+        return evidenceRecords
+            .Where(record => ids.Count == 0 || ids.Contains(record.Id))
+            .Select(record => TryReadComparisonEvidence(record.ActionJson))
+            .Where(comparison => comparison is not null)
+            .Select(comparison => comparison!)
+            .ToArray();
+    }
+
+    internal static IReadOnlyDictionary<string, EffectiveLaunchObservation> ReadEffectiveLaunches(
+        LabRunCompletionSummary summary, IReadOnlyList<EmpiricalExperience> evidenceRecords)
+    {
+        if (summary.EffectiveLaunches.Count > 0)
+            return summary.EffectiveLaunches;
+
+        var ids = summary.EffectiveLaunchEvidenceIds.ToHashSet(StringComparer.Ordinal);
+        return evidenceRecords
+            .Where(record => ids.Count == 0 || ids.Contains(record.Id))
+            .Select(record => TryReadEffectiveLaunchEvidence(record.ActionJson))
+            .Where(evidence => evidence is not null)
+            .Select(evidence => evidence!)
+            .ToDictionary(evidence => evidence.ConfigurationId, evidence => evidence.Observation,
+                StringComparer.Ordinal);
+    }
+
+    private static LabComparison? TryReadComparisonEvidence(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("comparison", out var comparison)
+                || comparison.ValueKind != JsonValueKind.Object)
+                return null;
+            return JsonSerializer.Deserialize<LabRunComparisonEvidence>(json,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Comparison;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static LabRunEffectiveLaunchEvidence? TryReadEffectiveLaunchEvidence(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("observation", out var observation)
+                || observation.ValueKind != JsonValueKind.Object)
+                return null;
+            return JsonSerializer.Deserialize<LabRunEffectiveLaunchEvidence>(json,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string ShortId(string value) => value.Length <= 8 ? value : value[..8];
@@ -256,7 +324,9 @@ public partial class ExperienceRowViewModel : ViewModelBase
             : comparison.RefusalReason);
     }
 
-    private static string FormatEffectiveLaunches(LabRunCompletionSummary summary)
+    private static string FormatEffectiveLaunches(
+        LabRunCompletionSummary summary,
+        IReadOnlyDictionary<string, EffectiveLaunchObservation> effectiveLaunches)
     {
         var configurations = summary.Configurations ?? [];
         if (configurations.Count == 0)
@@ -264,7 +334,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
 
         return string.Join("; ", configurations.Select(configuration =>
         {
-            if (!summary.EffectiveLaunches.TryGetValue(configuration.Id, out var observation))
+            if (!effectiveLaunches.TryGetValue(configuration.Id, out var observation))
                 return $"{configuration.Id}: Unknown";
             var state = observation.IsAuditable ? "auditable" : "not auditable";
             return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
@@ -328,14 +398,15 @@ public sealed class LabResultSummaryViewModel
 
         var configurations = (summary.Configurations ?? []).ToDictionary(item => item.Id, StringComparer.Ordinal);
         var decisions = summary.Comparisons ?? [];
-        var comparisons = summary.DetailedComparisons is { Count: > 0 } detailed
+        var comparisons = ExperienceRowViewModel.ReadDetailedComparisons(summary, evidenceRecords) is { Count: > 0 } detailed
             ? detailed.Select(comparison => new LabResultComparisonViewModel(comparison, configurations)).ToArray()
             : decisions
                 .Select(decision => new LabResultComparisonViewModel(ToComparison(decision), configurations))
                 .ToArray();
         Comparisons = comparisons;
         TestedConfigurations = FormatConfigurations(configurations, decisions, summary.Configurations);
-        EffectiveLaunchLabel = FormatEffectiveLaunches(summary);
+        EffectiveLaunchLabel = FormatEffectiveLaunches(summary,
+            ExperienceRowViewModel.ReadEffectiveLaunches(summary, evidenceRecords));
 
         var eligible = comparisons
             .Where(comparison => comparison.IsEligible)
@@ -377,7 +448,9 @@ public sealed class LabResultSummaryViewModel
         RefusalReason = decision.RefusalReason
     };
 
-    private static string FormatEffectiveLaunches(LabRunCompletionSummary summary)
+    private static string FormatEffectiveLaunches(
+        LabRunCompletionSummary summary,
+        IReadOnlyDictionary<string, EffectiveLaunchObservation> effectiveLaunches)
     {
         var configurations = summary.Configurations ?? [];
         if (configurations.Count == 0)
@@ -385,7 +458,7 @@ public sealed class LabResultSummaryViewModel
 
         return string.Join("; ", configurations.Select(configuration =>
         {
-            if (!summary.EffectiveLaunches.TryGetValue(configuration.Id, out var observation))
+            if (!effectiveLaunches.TryGetValue(configuration.Id, out var observation))
                 return $"{configuration.Id}: Unknown";
             var state = observation.IsAuditable ? "auditable" : "not auditable";
             return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
@@ -640,6 +713,15 @@ public partial class LabViewModel : ViewModelBase
     [ObservableProperty] private string _effectiveLaunchSummary = "Effective launch evidence: not captured.";
     [ObservableProperty] private string _applyReviewSummary = string.Empty;
     [ObservableProperty] private bool _isRunActive;
+    [ObservableProperty] private string _progressExperimentName = string.Empty;
+    [ObservableProperty] private string _progressCandidateLabel = string.Empty;
+    [ObservableProperty] private string _progressCandidatePosition = string.Empty;
+    [ObservableProperty] private string _progressStage = string.Empty;
+    [ObservableProperty] private int _progressCompleted;
+    [ObservableProperty] private int _progressTotal;
+    [ObservableProperty] private int _progressRemaining;
+    [ObservableProperty] private int _progressPercent;
+    [ObservableProperty] private bool _hasRunProgress;
     [ObservableProperty] private LabRecipeRowViewModel? _selectedRecipe;
     [ObservableProperty] private string _recipePrompt = "Reply with exactly: Hermaeus Lab.";
     [ObservableProperty] private bool _isRecipeRunning;
@@ -752,8 +834,16 @@ public partial class LabViewModel : ViewModelBase
         OnPropertyChanged(nameof(RunStatusLabel));
         OnPropertyChanged(nameof(RunNextActionLabel));
     }
+    partial void OnProgressCompletedChanged(int value) => OnPropertyChanged(nameof(ProgressCountLabel));
+    partial void OnProgressTotalChanged(int value) => OnPropertyChanged(nameof(ProgressCountLabel));
+    partial void OnProgressRemainingChanged(int value) => OnPropertyChanged(nameof(ProgressRemainingLabel));
     partial void OnRestoreStatusChanged(string value) => OnPropertyChanged(nameof(RunNextActionLabel));
     partial void OnAppliedRecommendationIdChanged(string value) => OnPropertyChanged(nameof(ApplyStateLabel));
+
+    public string ProgressCountLabel => ProgressTotal > 0
+        ? $"{ProgressCompleted} of {ProgressTotal} workload step(s) completed"
+        : "No workload steps completed";
+    public string ProgressRemainingLabel => $"{ProgressRemaining} remaining";
 
     private void NotifyRunCommands()
     {
@@ -968,7 +1058,9 @@ public partial class LabViewModel : ViewModelBase
             if (_suspendedSourceServers.Count == 0)
                 RestoreStatus = "Not required";
             await SuspendSelectedSourceAsync();
-            _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt, _recipeCts.Token);
+            var progress = new Progress<LabRunProgress>(value => RunOnUi(() => ApplyRunProgress(value)));
+            _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt,
+                _recipeCts.Token, progress);
             ShowCompletedRun(_currentRun);
             TradeoffSummary = BuildTradeoffSummary(_currentRun);
             var failureMessage = _currentRun.Status switch
@@ -1359,6 +1451,13 @@ public partial class LabViewModel : ViewModelBase
     {
         RunStatus = run.Status.ToString();
         IsRunActive = false;
+        HasRunProgress = true;
+        ProgressExperimentName = run.Definition.Name;
+        ProgressCandidateLabel = "Finalizing";
+        ProgressCandidatePosition = $"{run.Definition.Candidates.Count + 1} of {run.Definition.Candidates.Count + 1}";
+        ProgressStage = run.Status.ToString();
+        ProgressRemaining = 0;
+        ProgressPercent = 100;
         OnPropertyChanged(nameof(CanReviewCurrentRun));
         RuntimeIsolation = "The dedicated Lab runtime is stopped and its ownership record is cleaned up.";
         EffectiveLaunchSummary = FormatEffectiveLaunches(run);
@@ -1367,6 +1466,25 @@ public partial class LabViewModel : ViewModelBase
                 : string.Join(Environment.NewLine, run.Comparisons.Select(comparison => comparison.CanShowHeadlineDelta
                 ? $"{comparison.CandidateConfigurationId}: controlled and correctness-gated"
                 : $"{comparison.CandidateConfigurationId}: {comparison.RefusalReason}"));
+    }
+
+    private void ApplyRunProgress(LabRunProgress progress)
+    {
+        ProgressExperimentName = progress.ExperimentName;
+        ProgressCandidateLabel = progress.CandidateLabel;
+        ProgressCandidatePosition = progress.CandidateTotal > 0
+            ? $"{Math.Clamp(progress.CandidateIndex, 0, progress.CandidateTotal)} of {progress.CandidateTotal}"
+            : string.Empty;
+        ProgressStage = progress.Stage;
+        ProgressCompleted = Math.Max(0, progress.Completed);
+        ProgressTotal = Math.Max(0, progress.Total);
+        ProgressRemaining = Math.Max(0, progress.Remaining);
+        ProgressPercent = progress.Percent;
+        HasRunProgress = true;
+        if (progress.TerminalStatus is { } terminal)
+            RunStatus = terminal.ToString();
+        else if (IsRecipeRunning)
+            RunStatus = LabRunStatus.Running.ToString();
     }
 
     private static string FormatEffectiveLaunches(LabRunSnapshot run)

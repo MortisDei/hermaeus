@@ -11,6 +11,7 @@ public partial class BenchmarkCaseInfoDialog : Window
     public BenchmarkCaseInfoDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
         DataContextChanged += OnDataContextChanged;
     }
 

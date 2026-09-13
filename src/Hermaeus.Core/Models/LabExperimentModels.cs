@@ -15,6 +15,21 @@ public enum LabRunStatus
     Failed
 }
 
+public sealed record LabRunProgress(
+    string ExperimentName,
+    string CandidateLabel,
+    int CandidateIndex,
+    int CandidateTotal,
+    string Stage,
+    int Completed,
+    int Total,
+    int Remaining,
+    LabRunStatus? TerminalStatus = null,
+    string Detail = "")
+{
+    public int Percent => Total <= 0 ? 0 : Math.Clamp((int)Math.Round(Completed * 100d / Total), 0, 100);
+}
+
 public enum LabEquivalenceState
 {
     Equivalent,
@@ -233,6 +248,17 @@ public sealed record LabRunEvidenceSlice(
     IReadOnlyList<LabOutputEvidence> Outputs,
     int ChunkIndex = 0);
 
+public sealed record LabRunComparisonEvidence(
+    string RunId,
+    string DefinitionHash,
+    LabComparison Comparison);
+
+public sealed record LabRunEffectiveLaunchEvidence(
+    string RunId,
+    string DefinitionHash,
+    string ConfigurationId,
+    EffectiveLaunchObservation Observation);
+
 public sealed record LabComparisonDecision(
     string BaselineConfigurationId,
     string CandidateConfigurationId,
@@ -259,6 +285,8 @@ public sealed record LabRunCompletionSummary(
 {
     public IReadOnlyDictionary<string, EffectiveLaunchObservation> EffectiveLaunches { get; init; } =
         new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal);
+    public IReadOnlyList<string> ComparisonEvidenceIds { get; init; } = [];
+    public IReadOnlyList<string> EffectiveLaunchEvidenceIds { get; init; } = [];
 }
 
 public sealed record LabApplyEvidence(

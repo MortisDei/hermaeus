@@ -110,6 +110,12 @@ envelope. Historical and legacy runs are not backfilled with presumed runtime
 facts. They remain visible with their evidence caveat and must be rerun before
 being used for trustworthy comparison.
 
+The run list and completion notification show a bounded subset of the recorded
+reasons. **Run Detail** shows the full bounded reason list plus a reconciliation
+summary of requested, resolved, launched, effective, and process-bound
+telemetry identities and effective fields. A missing envelope is reported as a
+missing reconciliation, not as a verified run.
+
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off
 runs only the highlighted suite. Selecting a discovered local GGUF model in the

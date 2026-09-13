@@ -49,6 +49,21 @@
                   <TextBlock Text="Execution:" />
                   <TextBlock Text="{Binding RunStatusLabel}" />
                 </StackPanel>
+                <TextBlock Text="{Binding ProgressExperimentName}" FontWeight="SemiBold"
+                           IsVisible="{Binding HasRunProgress}" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasRunProgress}">
+                  <TextBlock Text="Candidate:" />
+                  <TextBlock Text="{Binding ProgressCandidateLabel}" />
+                  <TextBlock Text="{Binding ProgressCandidatePosition}" FontFamily="Consolas" />
+                  <TextBlock Text="Stage:" />
+                  <TextBlock Text="{Binding ProgressStage}" />
+                </StackPanel>
+                <ProgressBar Minimum="0" Maximum="100" Value="{Binding ProgressPercent}"
+                             IsVisible="{Binding HasRunProgress}" Height="8" />
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasRunProgress}">
+                  <TextBlock Text="{Binding ProgressCountLabel}" />
+                  <TextBlock Text="{Binding ProgressRemainingLabel}" Opacity="0.7" />
+                </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="4">
                   <TextBlock Text="Source restore:" />
                   <TextBlock Text="{Binding RestoreStatus}" TextWrapping="Wrap" />

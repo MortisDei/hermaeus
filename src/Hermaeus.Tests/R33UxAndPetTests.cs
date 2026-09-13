@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Hermaeus.Desktop.Views;
 using Hermaeus.Agent.Models;
 using Hermaeus.Agent.Services;
 using Hermaeus.Core.Models;
@@ -151,6 +152,16 @@ public sealed class R33UxAndPetTests
         Assert.Contains("layout()", source, StringComparison.Ordinal);
         Assert.Contains("AttachFallbackEditor", source, StringComparison.Ordinal);
         Assert.Contains("AvaloniaEdit fallback", source, StringComparison.Ordinal);
+        Assert.Contains("_attachedToVisualTree", source, StringComparison.Ordinal);
+        Assert.Contains("EditorHost.SizeChanged", source, StringComparison.Ordinal);
+        Assert.Contains("webView.ZIndex = 1", source, StringComparison.Ordinal);
+        Assert.Contains("webView.IsVisible = false", source, StringComparison.Ordinal);
+        Assert.Contains("_fallbackEditor.IsVisible = true", source, StringComparison.Ordinal);
+        Assert.Contains("IsReadOnly = false", source, StringComparison.Ordinal);
+        Assert.Contains("ToolTip.SetTip", source, StringComparison.Ordinal);
+
+        var appStyles = File.ReadAllText(Path.Combine(root, "src", "Hermaeus.Desktop", "App.axaml"));
+        Assert.Contains("avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml", appStyles, StringComparison.Ordinal);
 
         var editorHost = File.ReadAllText(Path.Combine(
             root,
@@ -160,5 +171,77 @@ public sealed class R33UxAndPetTests
             "AgentView.axaml"));
         Assert.Contains("Height=\"320\"", editorHost, StringComparison.Ordinal);
         Assert.Contains("MaxHeight=\"600\"", editorHost, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Owned_modals_use_the_shared_dpi_safe_placement_correction()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var views = Path.Combine(root, "src", "Hermaeus.Desktop", "Views");
+        var helper = File.ReadAllText(Path.Combine(views, "ModalWindowPlacement.cs"));
+
+        Assert.Contains("PixelSize.FromSize(owner.ClientSize, scaling)", helper, StringComparison.Ordinal);
+        Assert.Contains("screen.WorkingArea", helper, StringComparison.Ordinal);
+        Assert.Contains("Math.Clamp", helper, StringComparison.Ordinal);
+
+        foreach (var axamlPath in Directory.EnumerateFiles(views, "*.axaml"))
+        {
+            var axaml = File.ReadAllText(axamlPath);
+            if (!axaml.Contains("WindowStartupLocation=\"CenterOwner\"", StringComparison.Ordinal))
+                continue;
+
+            var codeBehind = Path.ChangeExtension(axamlPath, ".axaml.cs");
+            Assert.True(File.Exists(codeBehind), $"Missing code-behind for {Path.GetFileName(axamlPath)}");
+            Assert.Contains("ModalWindowPlacement.ScheduleCenterOnOwner", File.ReadAllText(codeBehind),
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Model_identity_fallback_is_never_empty_for_a_local_file()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "gemma-4-E2B.gguf");
+        var item = new ModelProfileItemViewModel(
+            new LlmModel { Id = path, Name = string.Empty },
+            new ModelProfile { ModelId = path });
+
+        Assert.Equal("gemma-4-E2B", item.EffectiveName);
+
+        var unnamed = new ModelProfileItemViewModel(
+            new LlmModel { Id = string.Empty, Name = string.Empty },
+            new ModelProfile());
+        Assert.Equal("selected model", unnamed.EffectiveName);
+    }
+
+    [Fact]
+    public void Benchmark_unverified_detail_keeps_reasons_and_reconciliation_bounded()
+    {
+        var run = new BenchmarkRun
+        {
+            SuiteName = "RAG Answer Style",
+            ModelName = "Gemma",
+            RuntimeEvidence = new RuntimeEvidenceEnvelope
+            {
+                Status = RuntimeEvidenceStatus.Unverified,
+                RequestedConfigurationStableId = "requested-configuration",
+                ResolvedConfigurationStableId = "resolved-configuration",
+                LaunchedConfigurationStableId = "launched-configuration",
+                EffectiveConfigurationStableId = string.Empty,
+                EffectiveFields = new Dictionary<string, string>
+                {
+                    ["context"] = "131072",
+                    ["gpu_layers"] = "999"
+                },
+                TelemetryProcessInstanceIds = ["189803:2026-09-13T00:00:00Z"],
+                Reasons = Enumerable.Range(0, 20).Select(index => $"reason-{index}").ToArray()
+            }
+        };
+
+        var viewModel = new BenchmarkRunInfoViewModel(run);
+
+        Assert.Equal(RuntimeEvidenceStatus.Unverified.ToString(), viewModel.EvidenceStatusLabel);
+        Assert.Equal(12, viewModel.EvidenceReasonsLabel.Split(Environment.NewLine).Length);
+        Assert.Contains("requested-config", viewModel.ReconciliationSummary, StringComparison.Ordinal);
+        Assert.Contains("context=131072", viewModel.ReconciliationSummary, StringComparison.Ordinal);
     }
 }

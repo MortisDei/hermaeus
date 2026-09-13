@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -464,6 +465,37 @@ public sealed class LabExperimentTests
         Assert.Equal(outputs.Length, slices.Sum(slice => slice.Outputs.Count));
         Assert.Contains(records, record => record.Id == completed.CompletionEvidenceId);
         Assert.All(slices, slice => Assert.True(ExperienceJson.Canonicalize(slice).Length <= ExperienceJson.MaxDocumentBytes));
+    }
+
+    [Fact]
+    public async Task Completion_summary_keeps_comparisons_and_effective_launches_in_bounded_records()
+    {
+        using var fixture = new Fixture();
+        var run = await fixture.Service.StartAsync(await fixture.DefinitionAsync(), fixture.Source);
+        await fixture.Service.SwitchConfigurationAsync(run.Id, fixture.Source, "candidate");
+        var completed = await fixture.Service.CompleteAsync(run.Id, Observations(run), []);
+        var summaryRecord = await fixture.Store.GetAsync(completed.CompletionEvidenceId);
+
+        Assert.NotNull(summaryRecord);
+        Assert.True(Encoding.UTF8.GetByteCount(summaryRecord!.ActionJson) <= ExperienceJson.MaxDocumentBytes);
+        var summary = ExperienceJson.Decode<LabRunCompletionSummary>(summaryRecord.ActionJson);
+        Assert.Null(summary.DetailedComparisons);
+        Assert.Empty(summary.EffectiveLaunches);
+        Assert.NotEmpty(summary.ComparisonEvidenceIds);
+        Assert.NotEmpty(summary.EffectiveLaunchEvidenceIds);
+
+        foreach (var evidenceId in summary.ComparisonEvidenceIds.Concat(summary.EffectiveLaunchEvidenceIds))
+        {
+            var evidence = await fixture.Store.GetAsync(evidenceId);
+            Assert.NotNull(evidence);
+            Assert.True(Encoding.UTF8.GetByteCount(evidence!.ActionJson) <= ExperienceJson.MaxDocumentBytes);
+        }
+
+        var comparisonRecord = await fixture.Store.GetAsync(summary.ComparisonEvidenceIds[0]);
+        var comparison = ExperienceJson.Decode<LabRunComparisonEvidence>(comparisonRecord!.ActionJson);
+        Assert.Equal(run.Id, comparison.RunId);
+        Assert.Equal(run.DefinitionHash, comparison.DefinitionHash);
+        Assert.Equal("candidate", comparison.Comparison.CandidateConfigurationId);
     }
 
     [Fact]

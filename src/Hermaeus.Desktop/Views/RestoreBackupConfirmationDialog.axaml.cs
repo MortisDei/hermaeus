@@ -8,6 +8,7 @@ public partial class RestoreBackupConfirmationDialog : Window
     public RestoreBackupConfirmationDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
     }
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);

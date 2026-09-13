@@ -229,7 +229,8 @@ public partial class BenchmarkViewModel : ObservableObject
             else if (run?.Status == "Completed")
             {
                 _toasts.Show("Benchmark complete, evidence unverified",
-                    "The workload finished, but runtime authority was not proven, so it is excluded from rankings.",
+                    "The workload finished, but runtime authority was not proven, so it is excluded from rankings. "
+                    + EvidenceReasonSummary(run),
                     ToastKind.Warning, 9000);
             }
             else if (run?.Status == "Cancelled")
@@ -266,6 +267,17 @@ public partial class BenchmarkViewModel : ObservableObject
             ? $"Benchmark {run.SuiteName} on {modelName} cancelled."
             : $"Benchmark {run.SuiteName} on {modelName} complete: {run.Passed} of {run.Total} passed.";
         _ = _voice.EnqueueAsync(new VoiceUtterance(text, VoiceChannel.Benchmark, VoicePriority.Normal, DedupeKey: $"benchmark:{run.Id}"));
+    }
+
+    private static string EvidenceReasonSummary(BenchmarkRun run)
+    {
+        var reasons = run.RuntimeEvidence?.Reasons
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .Take(4)
+            .ToArray() ?? [];
+        return reasons.Length == 0
+            ? "Open Run Detail for the reconciliation state."
+            : $"Reasons: {string.Join(", ", reasons)}.";
     }
 
     [RelayCommand]
@@ -840,6 +852,14 @@ public sealed class BenchmarkRunViewModel
     public string Summary => Run.ComparisonEligible
         ? $"{Score} · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}"
         : $"unverified evidence · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}";
+    public string EvidenceReasonSummary => Run.ComparisonEligible
+        ? string.Empty
+        : string.Join("; ", (Run.RuntimeEvidence?.Reasons ?? []).Take(4)) switch
+        {
+            { Length: > 0 } reasons => $"Excluded from rankings: {reasons}",
+            _ => "Excluded from rankings: runtime reconciliation is not recorded."
+        };
+    public bool HasEvidenceReasonSummary => EvidenceReasonSummary.Length > 0;
     public BenchmarkRunViewModel(BenchmarkRun run, int runCount = 1)
     {
         Run = run;
