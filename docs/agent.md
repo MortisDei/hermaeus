@@ -267,16 +267,22 @@ readback, benchmark cancellation, RAG generation/query, Chat retrieval
 context, voice orchestration, Lab failure cleanup, Lab Apply/settings reopen,
 and shared startup/shutdown. It requires separate scratch paths for settings,
 Data Root, and workspace, and refuses unknown arguments or workspace-overlapping
-paths. For a local run, use the repository wrapper so its settings, Data Root,
-and workspace scratch tree are deleted on success, failure, or cancellation:
+paths. The reusable `scripts/verification-scratch.sh` helper creates one unique
+owned root below a bounded verification parent, installs success/failure/
+cancellation cleanup traps, and reclaims only matching stale runs older than
+one hour. For a local R33 run, use the thin repository adapter so its settings,
+Data Root, and workspace scratch tree are deleted on success, failure, or
+cancellation:
 
 ```bash
 bash scripts/run-r33-driver.sh
 ```
 
-The wrapper streams the compact JSON result and does not create a routine log
-file. The driver does not use the owner's settings, Data Root, or workspace.
-Its result is a verification receipt, not a GUI or native-runtime proof.
+The adapter streams the compact JSON result and does not create a routine log
+file. The R33 driver keeps its workflow-specific arguments and behavior; the
+scratch helper is reusable by future verification drivers and tools. The
+driver does not use the owner's settings, Data Root, or workspace. Its result
+is a verification receipt, not a GUI or native-runtime proof.
 
 ## Autonomous Runs
 

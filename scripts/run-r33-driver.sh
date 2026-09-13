@@ -2,17 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hermaeus-r33-driver.XXXXXX")"
-
-cleanup() {
-  if [[ -n "${RUN_ROOT:-}" && -d "$RUN_ROOT" ]]; then
-    rm -rf -- "$RUN_ROOT"
-  fi
-}
-
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+source "$ROOT_DIR/scripts/verification-scratch.sh"
+verification_scratch_create "r33-driver"
 
 run_options=()
 configuration="Debug"
@@ -39,6 +30,6 @@ done
 
 dotnet run --project "$ROOT_DIR/src/Tools/R33Driver/R33Driver.csproj" \
   --configuration "$configuration" "${run_options[@]}" -- \
-  --settings-path "$RUN_ROOT/settings/settings.json" \
-  --data-root "$RUN_ROOT/data" \
-  --workspace "$RUN_ROOT/workspace"
+  --settings-path "$(verification_scratch_path settings/settings.json)" \
+  --data-root "$(verification_scratch_path data)" \
+  --workspace "$(verification_scratch_path workspace)"

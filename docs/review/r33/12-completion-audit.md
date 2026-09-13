@@ -48,6 +48,7 @@ The status words have the following precise meaning in this document:
 | E12 | Final evidence continuation on 2026-09-13: approved-host Debug/Release builds, focused Release authority tests, complete Debug/Release suites, fresh Release R33 driver, and `./scripts/coverage.sh` | Both builds completed with `0` warnings and `0` errors; the focused authority set passed `260/260`; each complete suite passed `2,722`, skipped `17`, failed `0`, total `2,739`; the fresh driver returned `ok:true`; the final coverage gate passed the repository's 60% line ratchet. This remains host-automated evidence, not owner GUI proof. |
 | E13 | Current local repair continuation on 2026-09-13: focused R33 regressions, complete Debug/Release suites, final `./scripts/coverage.sh`, fresh Release driver, rebuilt `v0.41.0-beta` Linux package, and isolated package apphost launch | The focused repair set passed `119/119`; each complete suite passed `2,731`, skipped `17`, failed `0`, total `2,748`; the coverage gate passed the 60% ratchet; the driver returned `ok:true`; package checksum/layout/no-PDB checks passed. The apphost created a native `Hermaeus - WIZARD` `1280x820` window and its syscall trace found no owner-data path, but interruption was used after the native check. No GUI pixel, control-flow, or clean-window-close proof is claimed. |
 | E14 | 2026-09-13 cleanup-source continuation: per-process test scratch ownership, scenario-run outer-finally cleanup, build failure traps, isolated driver wrapper, clipboard/Python/voice/provider cleanup, R30 temp-parent cleanup, and an approved-host packaged launch using existing Linux owner data | The final Debug suite passed `2,733`, skipped `17`, failed `0`, total `2,750`; the Release suite had the same result; the cleanup-focused regression set and driver passed; the package checksum/layout/no-PDB checks passed. The live package loaded the configured Gemma chat and Qwen embedding servers, and a COSMIC screenshot was captured and pixel-inspected. The native CUA surface exposed no app/window controls, so model switching, Lab/Benchmark walkthroughs, editor/approval/dialog checks, and GUI close remain owner validation. The fallback console interrupt stopped the app and children but left the lifecycle journal `CleanExit:false`; no clean-close claim is made for this attempt. |
+| E15 | 2026-09-13 pre-dogfood correction: reusable verification scratch helper, bash smoke coverage for success/failure/SIGINT/stale/unrelated paths, fresh Release driver, and isolated packaged Linux signal checks | `scripts/verification-scratch.sh` passed syntax and cleanup smoke checks, and the Release driver returned `ok:true` with its isolated Agent, benchmark, RAG, Chat, voice, Lab, Apply/reopen, and shutdown receipt. The direct packaged SIGINT check left the app alive with `CleanExit:false` and `LastOperation:"running"`; the exact test process was then stopped with SIGTERM and exited 143, also without a clean marker. This classifies the current `CleanExit:false` as console-interrupt/harness termination evidence that bypasses the Avalonia close/tray path, not as a demonstrated product shutdown defect. The original exit-139 event remains `UNRESOLVED`. |
 
 ## Mandatory batches and roadmap acceptance cells
 
@@ -312,8 +313,11 @@ give each producer an owner and a cleanup boundary:
 - `AgentScenarioRunner` cleans the leaf, run id, and parent roots from an outer
   `finally`, including cancellation and post-processing failures.
 - `build.sh` removes only its exact publish/package outputs when a build does
-  not reach checksum completion; `scripts/run-r33-driver.sh` owns and removes
-  its isolated settings, data, and workspace root on every exit path.
+  not reach checksum completion; `scripts/verification-scratch.sh` owns one
+  namespace-scoped scratch root, removes it on every normal exit path, and
+  performs bounded stale recovery without sweeping unrelated `/tmp` paths.
+  `scripts/run-r33-driver.sh` is only the R33-specific adapter that passes its
+  settings, data, and workspace paths to the driver.
 - Clipboard image paste, Python health validation, Kokoro bootstrap scripts,
   and OpenAI, F5, Kokoro, XTTS, and native Kokoro implicit audio outputs now
   delete owned partial or playback-failed artifacts. Explicit output paths stay
@@ -321,10 +325,12 @@ give each producer an owner and a cleanup boundary:
 
 The complete Debug and Release suites both passed `2,733`, skipped `17`, and
 failed `0`. The focused cleanup regressions passed, and the fresh Release
-driver returned `ok:true` with no Hermaeus or R33 roots remaining under `/tmp`
-after completion. This is source and host automation evidence. It does not
-claim that a hard process kill can run managed cleanup; stale-run recovery is
-the bounded fallback for that boundary.
+driver returned `ok:true` with no verification scratch root remaining after
+completion. The helper smoke checks also covered failure, SIGINT cancellation,
+bounded stale recovery, and preservation of an unrelated namespace. This is
+source and host automation evidence. It does not claim that a hard process
+kill can run managed cleanup; stale-run recovery is the bounded fallback for
+that boundary.
 
 The focused AutoTune regression suite covers a loaded source server and an
 unloaded target model. It observes the order `suspend -> tune -> restore`,
@@ -343,7 +349,16 @@ item **Quit Hermaeus** was invoked. The process exited with code 0, both
 `llama-server` children were gone, and the lifecycle journal recorded
 `CleanExit:true`; runtime logs recorded all three shutdown owners and
 `timedOut:false`. This is native Linux shutdown evidence for the exact tray
-path. Windows, restart handoff, and broader owner-live GUI checks remain open.
+path. A later isolated package check sent SIGINT directly to the app and
+observed the process remain alive with `CleanExit:false` and
+`LastOperation:"running"`; stopping that exact test process with SIGTERM
+returned 143 and still did not invoke the lifecycle clean marker. `Program.Main`
+does not register a console interrupt handler, and the product shutdown
+coordinator is entered by the Avalonia window/tray close path, so this is
+classified as console-interrupt/harness evidence rather than a product close
+failure. The original exit-139 event remains `UNRESOLVED`, and normal packaged
+window close remains `NEEDS OWNER VALIDATION`. Windows, restart handoff, and
+broader owner-live GUI checks remain open.
 
 ## Final owner gate
 

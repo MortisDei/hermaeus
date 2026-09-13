@@ -148,6 +148,13 @@ dialog placement, and clean window-close telemetry remain owner-live gates.
 The fallback console interrupt stopped the app and managed children but left
 the lifecycle journal `CleanExit:false`; the earlier tray-path clean evidence
 is retained separately and is not replaced by this incomplete close attempt.
+The follow-up isolated packaged check sent SIGINT directly and observed the
+same incomplete `running` journal, then stopped only that exact test process
+with SIGTERM. Because `Program.Main` has no console interrupt handler and
+SIGINT did not enter the Avalonia close/tray coordinator, this is classified as
+console-interrupt/harness evidence, not a demonstrated product shutdown defect.
+The original exit-139 event remains `UNRESOLVED`; normal packaged window close
+is still `NEEDS OWNER VALIDATION`.
 
 ## Monaco and AvaloniaEdit fallback boundary
 

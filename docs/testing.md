@@ -83,6 +83,13 @@ at most one bounded run container, and the next test process reclaims stale
 Hermaeus test containers older than one hour. Do not create ad hoc top-level
 `/tmp/hermaeus-*` roots for routine verification.
 
+Shell verification drivers use `scripts/verification-scratch.sh` for the same
+ownership boundary. It creates a unique namespace-scoped child below
+`/tmp/hermaeus-verification-runs`, cleans only that child on success, failure,
+or cancellation, and reclaims only matching stale children whose owner is no
+longer running. The R33 wrapper is a thin driver-specific adapter, not the
+reusable lifecycle abstraction. Unrelated `/tmp` paths are never swept.
+
 ## Platform-specific tests report Skipped, not Passed
 
 Use `[WindowsOnlyFact]` (`src/Hermaeus.Tests/WindowsOnlyFactAttribute.cs`) for

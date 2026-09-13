@@ -185,7 +185,8 @@ scenario, owner defect, and conditional branch are recorded in
   data, and workspace paths. It produced an Applied, changed,
   readback-verified mutation receipt, persisted cancelled benchmark evidence,
   exercised RAG, Chat, voice, Lab failure cleanup, Lab Apply/reopen, and clean
-  driver shutdown.
+  driver shutdown through the reusable `scripts/verification-scratch.sh`
+  ownership helper.
 - The current Linux package was rebuilt from the Release output and its archive
   checksum, launcher link, executable bits, package layout, and no-PDB rule
   passed. An isolated package apphost smoke launch created a native

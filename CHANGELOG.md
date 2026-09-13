@@ -17,6 +17,9 @@ limit.
   and failed-package artifacts now have explicit source owners and cleanup
   boundaries. Implicit generated audio is removed after playback, failure, or
   cancellation, while explicit output paths remain caller-owned.
+- Verification drivers now share a namespace-scoped scratch-root helper with
+  bounded stale-run recovery and success, failure, and cancellation cleanup;
+  the R33 script remains only a driver-specific adapter.
 - Lab completion now stores comparison and effective-launch evidence as separate
   bounded records referenced by a compact completion summary. Recipe runs expose
   named candidate progress, preserve truthful completed and remaining counts,

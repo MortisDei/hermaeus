@@ -8,6 +8,7 @@ Hermaeus is a native, local-first AI workstation: Avalonia UI + .NET 10, Windows
 - Minimise dependencies: adding a NuGet package requires written justification in the PR. Prefer small internal components.
 - Security-conscious by default: no shell-string process launches (use `ProcessStartInfo.ArgumentList`), localhost binding for managed servers, redact before persisting logs, atomic writes for state files, SHA256-pinned downloads, path-traversal and symlink rejection for anything under user control.
 - Never use em dashes in code, docs, or UI text.
+- Use the strongest practical evidence available. If stronger evidence for an acceptance claim is reasonably obtainable, weaker evidence does not close that claim.
 - Be concise. Avoid unnecessary narration, repeated analysis and repeated file reads. Minimise token usage where practical, but never at the expense of correctness or code quality.
 
 ## Solution map
@@ -43,6 +44,9 @@ source behaviour, treat the skill as drift and correct it.
   invariants.
 - `storage-and-data-root`: SQLite, backup, atomic writes, and staged Data Root
   migration lifecycle.
+- `screenshot-verification`: real Linux/COSMIC and Windows screenshot capture,
+  pixel inspection, and the boundary between visual evidence and interaction
+  or runtime acceptance.
 
 ## Build, test, run
 
