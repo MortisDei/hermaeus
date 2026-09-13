@@ -360,6 +360,49 @@ public static class LabRecipeCatalog
         _ => new HashSet<string>(StringComparer.Ordinal)
     };
 
+    /// <summary>
+    /// Every shipped recipe must prove the common launch identity and the
+    /// field it varies. A rendered flag or configuration fingerprint is not
+    /// effective evidence for any of these fields.
+    /// </summary>
+    public static IReadOnlyList<string> RequiredEffectiveFields(LabRecipeKind kind)
+    {
+        var fields = new List<string> { "context", "slots", "gpu_layers" };
+        switch (kind)
+        {
+            case LabRecipeKind.KvCache:
+                fields.AddRange(["kv_cache_type_k", "kv_cache_type_v"]);
+                break;
+            case LabRecipeKind.FlashAttention:
+                fields.Add("flash_attention");
+                break;
+            case LabRecipeKind.CpuMoePlacement:
+                fields.Add("cpu_moe_layers");
+                break;
+            case LabRecipeKind.ExternalDraft:
+            case LabRecipeKind.Eagle3:
+                fields.Add("speculative_mechanism");
+                break;
+            case LabRecipeKind.SpeculativeDraftMaximum:
+                fields.AddRange(["speculative_mechanism", "speculative_nmax"]);
+                break;
+            case LabRecipeKind.SpeculativeDraftMinimum:
+                fields.AddRange(["speculative_mechanism", "speculative_nmin"]);
+                break;
+            case LabRecipeKind.SpeculativeProbabilityMinimum:
+                fields.AddRange(["speculative_mechanism", "speculative_pmin"]);
+                break;
+            case LabRecipeKind.SpeculativeDraftGpuLayers:
+                fields.AddRange(["speculative_mechanism", "speculative_draft_gpu_layers"]);
+                break;
+            case LabRecipeKind.PromptPrefixReuse:
+                fields.Add("prompt_cache");
+                break;
+        }
+
+        return fields;
+    }
+
     private static IReadOnlyList<string> Differences(LabConfiguration left, LabConfiguration right)
     {
         var differences = new List<string>();
@@ -581,6 +624,10 @@ public sealed class LabRecipeRunner
             plan.Baseline, plan.Candidates, 3, plan.CorrectnessRequirement, ct);
         definition = definition with
         {
+            RequiredEffectiveFields = LabRecipeCatalog.RequiredEffectiveFields(plan.Kind)
+        };
+        definition = definition with
+        {
             WorkloadId = "greedy-chat-completion-v1",
             PromptHashes = plan.Kind == LabRecipeKind.PromptPrefixReuse
                 ? Enumerable.Range(0, 3).Select(repetition =>
@@ -777,7 +824,8 @@ public sealed class LabRecipeRunner
         Trust = sample?.Trust.ToString() ?? "Unknown",
         MissingReason = sample?.ValueBytes.HasValue == true ? string.Empty : sample?.Detail ?? "No trustworthy process-scoped measurement is available.",
         RuntimeFingerprint = fingerprint.Runtime.StableId, ModelFingerprint = fingerprint.Model.StableId,
-        HardwareFingerprint = fingerprint.Hardware.StableId, ConfigurationFingerprint = fingerprint.Configuration.StableId
+        HardwareFingerprint = fingerprint.Hardware.StableId, ConfigurationFingerprint = fingerprint.Configuration.StableId,
+        RuntimeProcessInstanceId = sample?.ProcessInstanceId ?? string.Empty
     };
 
     private static LabObservation MissingObservation(string runId, string configurationId,

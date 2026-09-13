@@ -196,6 +196,7 @@ namespace Hermaeus.Tests
                 ModelId = "model-a",
                 ModelName = "Model A",
                 StartedAt = DateTime.UtcNow.AddMinutes(-10),
+                RuntimeEvidence = new RuntimeEvidenceEnvelope { Status = RuntimeEvidenceStatus.Verified },
                 Results = [new BenchmarkResult { QualityScore = 0.2, ApproxTokensPerSecond = 2, ResourceScore = 0.2 }]
             };
             var fast = new BenchmarkRun
@@ -203,6 +204,7 @@ namespace Hermaeus.Tests
                 ModelId = "model-a",
                 ModelName = "Model A",
                 StartedAt = DateTime.UtcNow,
+                RuntimeEvidence = new RuntimeEvidenceEnvelope { Status = RuntimeEvidenceStatus.Verified },
                 Results = [new BenchmarkResult { QualityScore = 1, ApproxTokensPerSecond = 40, ResourceScore = 1 }]
             };
             var other = new BenchmarkRun
@@ -210,6 +212,7 @@ namespace Hermaeus.Tests
                 ModelId = "model-b",
                 ModelName = "Model B",
                 StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                RuntimeEvidence = new RuntimeEvidenceEnvelope { Status = RuntimeEvidenceStatus.Verified },
                 Results = [new BenchmarkResult { QualityScore = 0.6, ApproxTokensPerSecond = 12, ResourceScore = 0.8 }]
             };
 

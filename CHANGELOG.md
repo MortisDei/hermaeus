@@ -19,6 +19,11 @@ limit.
   placement can no longer collapse engine candidates, and missing or mismatched
   effective evidence, including missing process association, finishes as
   Inconclusive with no recommendation or Apply.
+- Lab and Benchmarks now share a fail-closed runtime evidence envelope that
+  separates requested, resolved, launched, effective, and process-bound
+  telemetry identity. Completed but unverified benchmark runs remain visible
+  with an evidence caveat and are excluded from rankings, Insights, and Speed
+  Check; every shipped Lab recipe requires proof of its varied effective field.
   Workspace now bounds the editor host and reattaches a functional AvaloniaEdit
   fallback with the current document when local Monaco is unavailable.
 - Shared application lifecycle now owns startup, recovery, and bounded shutdown

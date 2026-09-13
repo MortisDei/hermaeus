@@ -80,6 +80,19 @@ controlled comparison or Apply recommendation. An unreviewed sibling candidate
 does not invalidate the candidate currently being compared, but it cannot
 receive an Apply review until its own run evidence exists.
 
+Lab and Benchmarks share the `RuntimeEvidenceEnvelope`. It keeps requested,
+resolved, and launched configuration identities separate from the effective
+runtime receipt and process-scoped telemetry identity. A workload can complete
+while its envelope is `Inconclusive`, `Unverified`, or `Mismatch`; only
+`Verified` evidence is eligible for a controlled comparison, recommendation,
+or Apply. Every shipped recipe adds its varied effective field to the common
+`context`, `slots`, and `gpu_layers` requirements: KV cache K/V types, Flash
+Attention, CPU-MoE placement, speculative mechanism and parameter, or prompt
+cache state as applicable. If the selected runtime does not expose a required
+field through an auditable receipt, the result stays Inconclusive rather than
+using the requested value as a proxy. The complete recipe matrix and native
+receipts are recorded in [the R33 authority audit](review/r33/13-lab-benchmark-authority-audit.md).
+
 Correctness compares token ids when both sides expose them and falls back to an
 exact UTF-8 output hash at a weaker declared level. It reports `Equivalent`,
 `Different`, or `Unknown`. A deterministic mismatch blocks an Apply

@@ -253,7 +253,11 @@ public sealed class ServerProcessManager : IDisposable
 
             var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(cfg.ExecutablePath, runtime.VersionOrHelpText, ct);
             var props = await ReadPropsAsync(cfg.Port, ct);
-            var evidence = processEvidence with { StartupEvidence = CaptureEffectiveRuntimeEvidence() };
+            var evidence = processEvidence with
+            {
+                ExecutableSha256 = runtimeIdentity.ExecutableSha256,
+                StartupEvidence = CaptureEffectiveRuntimeEvidence()
+            };
             var effective = EffectiveLaunchObservationParser.Parse(cfg, runtimeIdentity, props, evidence,
                 string.Join('\n', _logRing));
             SetStatus(ServerStatus.Running);

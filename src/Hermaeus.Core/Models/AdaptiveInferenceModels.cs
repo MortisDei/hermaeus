@@ -114,6 +114,9 @@ public sealed record RuntimeLaunchProcessEvidence(
     string ExecutablePath,
     IReadOnlyList<string> Arguments)
 {
+    /// <summary>SHA-256 of the executable captured for the launch, when available.</summary>
+    public string ExecutableSha256 { get; init; } = string.Empty;
+
     /// <summary>
     /// Bounded startup lines that identify effective runtime state for this
     /// process. These are evidence, not a replacement for the exact argv.

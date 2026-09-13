@@ -411,7 +411,9 @@ public static class LabComparisonEngine
                 ? correctnessPassed ? definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly ? "Speed-only experiments cannot produce an Apply recommendation." : string.Empty
                     : missingCorrectnessMetric is not null ? $"Required correctness evidence {missingCorrectnessMetric} is missing." : "The declared correctness requirement failed."
                 : effectiveDifferences.Count > 0
-                    ? "Effective runtime configuration evidence is missing or does not match the reviewed Lab configuration."
+                    ? missingCorrectnessMetric is not null
+                        ? $"Effective runtime configuration evidence is missing or does not match the reviewed Lab configuration. Required correctness evidence {missingCorrectnessMetric} is missing."
+                        : "Effective runtime configuration evidence is missing or does not match the reviewed Lab configuration."
                     : "Uncontrolled fingerprint differences prevent a headline delta."
         };
     }
@@ -501,6 +503,9 @@ public static class LabEffectiveConfigurationValidator
             RequireInteger(configuration.Id, fields, "slots", Math.Max(1, configuration.Slots), mismatches);
             RequireGpuPlacement(configuration, fields, mismatches);
 
+            foreach (var requiredField in definition.RequiredEffectiveFields)
+                RequireRecipeField(configuration, fields, requiredField, mismatches);
+
             if (ResolvePlacement(configuration)?.Kind == GpuPlacementKind.Auto
                 && !MatchesBoolean(fields, "fit", expected: true))
                 mismatches.Add($"effective:{configuration.Id}:fit");
@@ -563,6 +568,48 @@ public static class LabEffectiveConfigurationValidator
             mismatches.Add($"effective:{configuration.Id}:gpu_layers");
     }
 
+    private static void RequireRecipeField(
+        LabConfiguration configuration,
+        IReadOnlyDictionary<string, AdaptiveFieldObservation> fields,
+        string fieldName,
+        ICollection<string> mismatches)
+    {
+        if (fieldName is "context" or "slots" or "gpu_layers")
+            return;
+        if (fieldName == "fit")
+        {
+            if (ResolvePlacement(configuration)?.Kind == GpuPlacementKind.Auto
+                && !MatchesBoolean(fields, "fit", true))
+                mismatches.Add($"effective:{configuration.Id}:fit");
+            return;
+        }
+
+        if (!fields.TryGetValue(fieldName, out var field)
+            || field.EvidenceState != AdaptiveEvidenceState.Proven
+            || string.IsNullOrWhiteSpace(field.EffectiveValue))
+        {
+            mismatches.Add($"effective:{configuration.Id}:{fieldName}");
+            return;
+        }
+
+        var expected = fieldName switch
+        {
+            "kv_cache_type_k" => configuration.KvCacheTypeK,
+            "kv_cache_type_v" => configuration.KvCacheTypeV,
+            "flash_attention" => configuration.FlashAttention,
+            "cpu_moe_layers" => configuration.CpuMoeLayers.ToString(CultureInfo.InvariantCulture),
+            "speculative_nmax" => configuration.SpeculativeNMax?.ToString(CultureInfo.InvariantCulture),
+            "speculative_nmin" => configuration.SpeculativeNMin?.ToString(CultureInfo.InvariantCulture),
+            "speculative_pmin" => configuration.SpeculativePMin?.ToString(CultureInfo.InvariantCulture),
+            "speculative_draft_gpu_layers" => configuration.SpeculativeDraftGpuLayers?.ToString(CultureInfo.InvariantCulture),
+            "speculative_mechanism" => string.Join(',', configuration.SpeculativeTypes),
+            _ => null
+        };
+        if (expected is not null
+            && !string.Equals(field.EffectiveValue.Trim(), expected.Trim(), StringComparison.OrdinalIgnoreCase))
+            mismatches.Add($"effective:{configuration.Id}:{fieldName}");
+    }
+
     private static bool MatchesBoolean(
         IReadOnlyDictionary<string, AdaptiveFieldObservation> fields,
         string fieldName,
@@ -615,9 +662,15 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         _manifest = manifest;
     }
 
+    public Task<LabExperimentDefinition> CreateDefinitionAsync(string name, string protocolId,
+        ServerConfig source, LabConfiguration baseline, IReadOnlyList<LabConfiguration> candidates,
+        int repetitions, LabCorrectnessRequirement correctness, CancellationToken ct = default) =>
+        CreateDefinitionAsync(name, protocolId, source, baseline, candidates, repetitions, correctness, ct, null);
+
     public async Task<LabExperimentDefinition> CreateDefinitionAsync(string name, string protocolId,
         ServerConfig source, LabConfiguration baseline, IReadOnlyList<LabConfiguration> candidates,
-        int repetitions, LabCorrectnessRequirement correctness, CancellationToken ct = default)
+        int repetitions, LabCorrectnessRequirement correctness, CancellationToken ct,
+        IReadOnlyList<string>? requiredEffectiveFields)
     {
         var profile = await CreateFingerprintAsync(source, baseline, ct);
         LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
@@ -636,6 +689,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             ConfigurationIdentities = configurationIdentities,
             Candidates = candidates.ToArray(), WorkloadId = "lab-shell-baseline",
             Repetitions = repetitions, RequiredMetrics = ["runtime.ready", "process.ram.current"],
+            RequiredEffectiveFields = (requiredEffectiveFields ?? []).ToArray(),
             CorrectnessRequirement = correctness
         };
         LabDefinitionValidator.Validate(definition);
@@ -783,14 +837,49 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         var boundedFailures = (failures ?? []).Take(32).Select(value => value[..Math.Min(value.Length, 512)]).ToArray();
         var effectiveMismatches = LabEffectiveConfigurationValidator.FindMismatches(
             definition, state.Snapshot.EffectiveLaunches);
-        var status = boundedFailures.Length == 0 && effectiveMismatches.Count > 0 ? LabRunStatus.Inconclusive
+        var runtimeEvidence = BuildRuntimeEvidence(state.Snapshot, observations);
+        var evidenceMismatches = runtimeEvidence.Values
+            .Where(evidence => !evidence.ComparisonEligible)
+            .SelectMany(evidence => evidence.Reasons.Select(reason =>
+                $"effective:{evidence.CandidateId}:{reason}"))
+            .ToArray();
+        comparisons = comparisons.Select(comparison =>
+        {
+            var invalidEvidence = new[] { definition.Baseline.Id, comparison.CandidateConfigurationId }
+                .Select(id => runtimeEvidence.GetValueOrDefault(id))
+                .Where(evidence => evidence is not null && !evidence.ComparisonEligible)
+                .Cast<RuntimeEvidenceEnvelope>()
+                .ToArray();
+            if (invalidEvidence.Length == 0)
+                return comparison;
+
+            var reasons = invalidEvidence.SelectMany(evidence => evidence.Reasons)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var evidenceRefusal = "Runtime evidence is not eligible for a controlled comparison: "
+                + string.Join(", ", reasons);
+            return comparison with
+            {
+                IsControlled = false,
+                CanShowHeadlineDelta = false,
+                FingerprintDifferences = comparison.FingerprintDifferences
+                    .Concat(reasons.Select(reason => $"effective:{reason}"))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray(),
+                RefusalReason = string.IsNullOrWhiteSpace(comparison.RefusalReason)
+                    ? evidenceRefusal
+                    : $"{comparison.RefusalReason} {evidenceRefusal}"
+            };
+        }).ToArray();
+        var status = boundedFailures.Length == 0 && (effectiveMismatches.Count > 0 || evidenceMismatches.Length > 0) ? LabRunStatus.Inconclusive
             : boundedFailures.Length == 0 ? LabRunStatus.Succeeded
             : observations.Count > 0 ? LabRunStatus.PartiallySucceeded : LabRunStatus.Failed;
         state.Snapshot = state.Snapshot with
         {
             Status = status, CompletedAtUtc = DateTime.UtcNow,
             Observations = observations.ToArray(), Outputs = safeOutputs,
-            Comparisons = comparisons, Failures = boundedFailures
+            Comparisons = comparisons, Failures = boundedFailures,
+            RuntimeEvidence = runtimeEvidence
         };
         await DisposeSessionAsync(state, ct);
         var outcome = status switch
@@ -810,6 +899,38 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         {
             ReleaseActiveRun(runId);
         }
+    }
+
+    private static IReadOnlyDictionary<string, RuntimeEvidenceEnvelope> BuildRuntimeEvidence(
+        LabRunSnapshot snapshot, IReadOnlyList<LabObservation> observations)
+    {
+        if (snapshot.Definition.RequiredEffectiveFields.Count == 0)
+            return new Dictionary<string, RuntimeEvidenceEnvelope>(StringComparer.Ordinal);
+
+        var evidence = new Dictionary<string, RuntimeEvidenceEnvelope>(StringComparer.Ordinal);
+        foreach (var configuration in snapshot.Definition.Candidates.Prepend(snapshot.Definition.Baseline))
+        {
+            snapshot.Definition.ConfigurationIdentities.TryGetValue(configuration.Id, out var identity);
+            snapshot.EffectiveLaunches.TryGetValue(configuration.Id, out var effective);
+            var process = effective?.Process;
+            var telemetryIds = observations
+                .Where(item => item.ConfigurationId == configuration.Id)
+                .Select(item => item.RuntimeProcessInstanceId)
+                .Where(value => !string.IsNullOrWhiteSpace(value));
+            evidence[configuration.Id] = RuntimeEvidenceEvaluator.Evaluate(
+                "lab", snapshot.Id, configuration.Id,
+                snapshot.Definition.ProfileFingerprint.Runtime,
+                snapshot.Definition.ProfileFingerprint.Model,
+                identity, identity, identity,
+                process, effective,
+                snapshot.Definition.RequiredEffectiveFields,
+                telemetryIds,
+                RuntimeEvidenceStatus.Inconclusive,
+                RuntimeEvidenceEvaluator.ExpectedEffectiveValues(identity,
+                    snapshot.Definition.RequiredEffectiveFields));
+        }
+
+        return evidence;
     }
 
     public async Task<LabRunSnapshot> CancelAsync(string runId, CancellationToken ct = default)
@@ -855,7 +976,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             : run.Status is not (LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded)
                 ? "Only a completed Lab run can produce an Apply review."
             : effectiveRefusal is not null
-                ? effectiveRefusal
+                ? string.IsNullOrWhiteSpace(comparison?.RefusalReason)
+                    ? effectiveRefusal
+                    : $"{effectiveRefusal} {comparison.RefusalReason}"
             : comparison is null || !comparison.CanShowHeadlineDelta
                 ? comparison?.RefusalReason ?? "The candidate has no controlled comparison."
                 : changes.Count == 0 ? "The candidate does not change any persisted Services field." : string.Empty;

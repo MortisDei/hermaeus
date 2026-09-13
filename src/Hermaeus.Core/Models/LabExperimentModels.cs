@@ -123,6 +123,11 @@ public sealed record LabExperimentDefinition
     public int TimeoutSeconds { get; init; } = 300;
     public IReadOnlyList<string> StopConditions { get; init; } = [];
     public IReadOnlyList<string> RequiredMetrics { get; init; } = [];
+    /// <summary>
+    /// Effective runtime fields required for this protocol to be a controlled
+    /// comparison. A missing field is Unknown, never inferred from argv.
+    /// </summary>
+    public IReadOnlyList<string> RequiredEffectiveFields { get; init; } = [];
     public LabCorrectnessRequirement CorrectnessRequirement { get; init; } = LabCorrectnessRequirement.ExactEquivalence;
     public IReadOnlyList<string> RequestedCapabilityIds { get; init; } = [];
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
@@ -151,6 +156,7 @@ public sealed record LabObservation
     public string ModelFingerprint { get; init; } = string.Empty;
     public string HardwareFingerprint { get; init; } = string.Empty;
     public string ConfigurationFingerprint { get; init; } = string.Empty;
+    public string RuntimeProcessInstanceId { get; init; } = string.Empty;
 }
 
 public sealed record LabOutputEvidence(
@@ -212,6 +218,8 @@ public sealed record LabRunSnapshot
     public IReadOnlyList<LabComparison> Comparisons { get; init; } = [];
     public IReadOnlyDictionary<string, EffectiveLaunchObservation> EffectiveLaunches { get; init; } =
         new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, RuntimeEvidenceEnvelope> RuntimeEvidence { get; init; } =
+        new Dictionary<string, RuntimeEvidenceEnvelope>(StringComparer.Ordinal);
     public IReadOnlyList<string> Failures { get; init; } = [];
     public string StartEvidenceId { get; init; } = string.Empty;
     public string CompletionEvidenceId { get; init; } = string.Empty;

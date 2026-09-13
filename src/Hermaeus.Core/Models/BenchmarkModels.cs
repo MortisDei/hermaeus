@@ -47,6 +47,7 @@ public sealed class BenchmarkRun
     public string RuntimeSnapshot { get; set; } = string.Empty;
     public SystemSnapshot HardwareSnapshot { get; set; } = new();
     public BenchmarkRunMetadata Metadata { get; set; } = new();
+    public RuntimeEvidenceEnvelope? RuntimeEvidence { get; set; }
     public string RunMode { get; set; } = BenchmarkRunMode.ColdWarm.ToString();
     public int IterationsPerCase { get; set; } = 1;
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
@@ -60,6 +61,12 @@ public sealed class BenchmarkRun
     public string CurrentPhase { get; set; } = string.Empty;
     public string Error { get; set; } = string.Empty;
     public string EvidenceSaveError { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True only when the serving process, effective configuration, and
+    /// process-scoped telemetry were bound to this run.
+    /// </summary>
+    public bool ComparisonEligible => RuntimeEvidence?.ComparisonEligible == true;
 
     public int Total => Results.Count;
     public int Passed => Results.Count(r => r.Passed);
@@ -118,6 +125,7 @@ public sealed class BenchmarkRun
 public sealed class BenchmarkResult
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string RuntimeEvidenceId { get; set; } = string.Empty;
     public string CaseId { get; set; } = string.Empty;
     public string CaseName { get; set; } = string.Empty;
     public string CaseVersion { get; set; } = string.Empty;

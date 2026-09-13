@@ -222,9 +222,15 @@ public partial class BenchmarkViewModel : ObservableObject
             await RefreshInsightsIfLoadedAsync();
             if (run is not null)
                 SelectedRun = Runs.FirstOrDefault(r => r.Id == run.Id);
-            if (run?.Status == "Completed")
+            if (run?.Status == "Completed" && run.ComparisonEligible)
             {
                 _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
+            }
+            else if (run?.Status == "Completed")
+            {
+                _toasts.Show("Benchmark complete, evidence unverified",
+                    "The workload finished, but runtime authority was not proven, so it is excluded from rankings.",
+                    ToastKind.Warning, 9000);
             }
             else if (run?.Status == "Cancelled")
             {
@@ -627,7 +633,7 @@ public partial class BenchmarkViewModel : ObservableObject
     private void UpdateRankedRuns(List<BenchmarkRunViewModel> runs)
     {
         RankedRuns.Clear();
-        var list = runs.Select(r => r.Run).ToList();
+        var list = runs.Where(r => r.Run.ComparisonEligible).Select(r => r.Run).ToList();
         if (SelectedSuite is not null)
             list = list.Where(r => r.SuiteId == SelectedSuite.Id).ToList();
 
@@ -818,7 +824,9 @@ public sealed class BenchmarkRunViewModel
     public string Id => Run.Id;
     public string Title => $"{Run.SuiteName} · {Run.ModelName}";
     public string Model => string.IsNullOrWhiteSpace(Run.Provider) ? Run.ModelName : $"{Run.ModelName} [{Run.Provider}]";
-    public string Status => Run.Status;
+    public string Status => Run.ComparisonEligible
+        ? Run.Status
+        : $"{Run.Status} · {(string.IsNullOrWhiteSpace(Run.Metadata.EvidenceStatus) ? "evidence unknown" : Run.Metadata.EvidenceStatus)}";
     public string Started => Run.StartedAt.ToLocalTime().ToString("g");
     public string Score => $"{Run.RankingScore:P0}";
     /// <summary>0-100 fill for the Rankings score bar (r19 6.6); RankingScore is a 0-1 fraction.</summary>
@@ -829,7 +837,9 @@ public sealed class BenchmarkRunViewModel
     public string RunCountLabel => RunCount == 1 ? "Best run" : $"Best of {RunCount} runs";
     public bool HasResults => Run.Results.Count > 0;
     public BenchmarkResultViewModel? FirstResult => Run.Results.FirstOrDefault() is { } result ? new BenchmarkResultViewModel(result) : null;
-    public string Summary => $"{Score} · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}";
+    public string Summary => Run.ComparisonEligible
+        ? $"{Score} · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}"
+        : $"unverified evidence · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}";
     public BenchmarkRunViewModel(BenchmarkRun run, int runCount = 1)
     {
         Run = run;

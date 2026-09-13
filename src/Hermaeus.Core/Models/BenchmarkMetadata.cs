@@ -93,6 +93,9 @@ public sealed class BenchmarkRunMetadata
     /// </summary>
     public SourceReference? ObservationSource { get; set; }
 
+    /// <summary>Short persisted summary for exports and old readers.</summary>
+    public string EvidenceStatus { get; set; } = string.Empty;
+
     /// <summary>
     /// The one-line description of this run's speculative configuration, used
     /// as the difference a comparison reports between two runs.

@@ -25,6 +25,9 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
             if (process.HasExited || process.StartTime.ToUniversalTime() != request.ProcessStartedAtUtc.ToUniversalTime())
                 return UnknownProcessSamples(request, processInstance, observedAt, "runtime-process-restarted", "The matching runtime process is no longer alive.");
 
+            if (!await MatchesExpectedRuntimeAsync(process, request.RuntimeIdentity, ct))
+                return UnknownProcessSamples(request, processInstance, observedAt, "runtime-executable-mismatch", "The PID is alive, but its executable does not match the recorded runtime identity.");
+
             process.Refresh();
             samples.Add(Sample(
                 request, processInstance, RuntimeTelemetryMetric.ProcessWorkingSetBytes,
@@ -63,6 +66,26 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         }
 
         return samples;
+    }
+
+    private static async Task<bool> MatchesExpectedRuntimeAsync(
+        Process process, RuntimeIdentityV2 expected, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(expected.ExecutableSha256))
+            return true;
+
+        try
+        {
+            var path = process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+            var observed = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(path, null, ct);
+            return expected.IdentifiesSameRuntime(observed);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException or IOException)
+        {
+            return false;
+        }
     }
 
     private static async Task<(long? Bytes, string Source)> TryCaptureNvidiaProcessMemoryAsync(int processId, CancellationToken ct)

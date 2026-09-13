@@ -40,13 +40,17 @@ Runs record the following metrics and metadata:
   layers, generation and prompt thread counts, model path, quantization, KV
   cache K/V types, and Flash Attention (all sourced from the managed server
   actually serving a local GGUF model, not app-process values)
+- A shared runtime evidence envelope with requested, resolved, and launched
+  configuration identities, the effective launch receipt, process identity,
+  telemetry binding, evidence status, and comparison eligibility
 - Persistent empirical profile fingerprints over the material model and
   inference configuration, plus a shared direct-observation source reference.
   The historical v1 fingerprint remains readable. New runs also carry a v2
   composition of runtime, model, hardware, and configuration identity whose
-  stable id excludes local paths. These associate the run with what was
-  actually measured. They are not a generic capability score or an automatic
-  model recommendation.
+  stable id excludes local paths. These identify the intended run composition,
+  but do not by themselves prove what was measured. A `Verified`
+  `RuntimeEvidenceEnvelope` is required before the run is comparison-eligible.
+  They are not a generic capability score or an automatic model recommendation.
 - Suite version, case version, scoring profile, and run mode
 - Cold-only single-iteration runs, or cold and warm phase attempts when suites
 	use repeated iterations per case
@@ -68,7 +72,7 @@ without appearing here.
 `SpeculativeTypes`, `SpeculativeDraftModel`,
 `SpeculativeNMax`, `SpeculativeNMin`, `SpeculativePMin`,
 `SpeculativeDraftGpuLayers`, `ProfileFingerprint`, `ProfileFingerprintV2`,
-`ObservationSource`.
+`ObservationSource`, `EvidenceStatus`.
 
 KV cache and Flash Attention are configuration provenance, not a score or a
 recommendation. New local-GGUF runs record the managed server values in their
@@ -86,6 +90,25 @@ observation source is local direct evidence for that one run, not a claim that
 the model behaves the same way on another machine or workload. Historical runs
 keep their absent or v1 identity rather than being reconstructed from presumed
 defaults.
+
+### Runtime authority and evidence status
+
+The saved `RuntimeEvidenceEnvelope` is the trust boundary for benchmark
+comparison. A run can have `Status = Completed` while its evidence status is
+`Unverified` or `Mismatch`; workload completion is not proof that the selected
+managed process, effective configuration, and telemetry produced the numbers.
+For a local managed server, verification requires registry resolution to the
+serving server, PID and start-time ownership, the exact launch receipt and
+executable identity, auditable effective `/props` and startup fields, and
+telemetry samples bound to that same process instance. Requested, resolved,
+launched, effective, and observed identities are compared independently.
+
+Missing or conflicting evidence makes the run ineligible for rankings,
+Insights, and Speed Check. Markdown and CSV exports include the envelope id,
+status, reasons, and comparison-eligibility flag; JSON retains the complete
+envelope. Historical and legacy runs are not backfilled with presumed runtime
+facts. They remain visible with their evidence caveat and must be rerun before
+being used for trustworthy comparison.
 
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off

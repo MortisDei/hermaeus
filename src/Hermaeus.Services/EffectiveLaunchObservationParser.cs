@@ -50,6 +50,16 @@ public static class EffectiveLaunchObservationParser
                     Add(root, effective, "kv_cache_type_k", "cache_type_k", "kv_cache_type_k");
                     Add(root, effective, "kv_cache_type_v", "cache_type_v", "kv_cache_type_v");
                     Add(root, effective, "cpu_moe", "cpu_moe", "n_cpu_moe");
+                    Add(root, effective, "flash_attention", "flash_attn", "flash_attention");
+                    Add(root, effective, "threads", "threads", "n_threads");
+                    Add(root, effective, "prompt_threads", "threads_batch", "prompt_threads");
+                    Add(root, effective, "batch_size", "n_batch", "batch_size");
+                    Add(root, effective, "ubatch_size", "n_ubatch", "ubatch_size");
+                    Add(root, effective, "speculative_mechanism", "spec_type", "speculative_type");
+                    Add(root, effective, "speculative_nmax", "spec_n_max", "n_max");
+                    Add(root, effective, "speculative_nmin", "spec_n_min", "n_min");
+                    Add(root, effective, "speculative_pmin", "spec_p_min", "p_min");
+                    Add(root, effective, "speculative_draft_gpu_layers", "spec_draft_ngl", "draft_gpu_layers");
 
                     if (root.TryGetProperty("default_generation_settings", out var generation)
                         && generation.ValueKind == JsonValueKind.Object
@@ -111,6 +121,20 @@ public static class EffectiveLaunchObservationParser
                 effective.GetValueOrDefault("slots"), "props.slots")
         };
 
+        AddOptionalField("kv_cache_type_k", config.KvCacheTypeK, "props.kv_cache_type_k");
+        AddOptionalField("kv_cache_type_v", config.KvCacheTypeV, "props.kv_cache_type_v");
+        AddOptionalField("flash_attention", config.FlashAttention, "props.flash_attention");
+        AddOptionalField("cpu_moe_layers", config.CpuMoeLayers.ToString(CultureInfo.InvariantCulture), "props.cpu_moe");
+        AddOptionalField("threads", config.Threads.ToString(CultureInfo.InvariantCulture), "props.threads");
+        AddOptionalField("prompt_threads", config.PromptThreads.ToString(CultureInfo.InvariantCulture), "props.prompt_threads");
+        AddOptionalField("batch_size", null, "props.batch_size");
+        AddOptionalField("ubatch_size", null, "props.ubatch_size");
+        AddOptionalField("speculative_mechanism", string.Empty, "props.speculative_mechanism");
+        AddOptionalField("speculative_nmax", config.Speculative?.NMax?.ToString(CultureInfo.InvariantCulture), "props.speculative_nmax");
+        AddOptionalField("speculative_nmin", config.Speculative?.NMin?.ToString(CultureInfo.InvariantCulture), "props.speculative_nmin");
+        AddOptionalField("speculative_pmin", config.Speculative?.PMin?.ToString(CultureInfo.InvariantCulture), "props.speculative_pmin");
+        AddOptionalField("speculative_draft_gpu_layers", config.Speculative?.DraftGpuLayers?.ToString(CultureInfo.InvariantCulture), "props.speculative_draft_gpu_layers");
+
         var contextKnown = effective.ContainsKey("context");
         var placementKnown = effective.ContainsKey("gpu_layers");
         var slotsKnown = effective.ContainsKey("slots");
@@ -169,6 +193,13 @@ public static class EffectiveLaunchObservationParser
             value is { ProcessId: > 0 }
             && !string.IsNullOrWhiteSpace(value.ExecutablePath)
             && value.Arguments is { Count: > 0 };
+
+        void AddOptionalField(string name, string? configured, string evidenceId)
+        {
+            if (!effective.ContainsKey(name))
+                return;
+            fields.Add(Field(name, configured, null, effective.GetValueOrDefault(name), evidenceId));
+        }
 
         string? placementValue(int usedLayers, int? totalLayers) =>
             placement?.Kind == GpuPlacementKind.All

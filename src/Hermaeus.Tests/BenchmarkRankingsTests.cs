@@ -26,6 +26,13 @@ public sealed class BenchmarkRankingsTests
             ModelId = modelId,
             ModelName = modelId,
             StartedAt = DateTime.UtcNow,
+            RuntimeEvidence = new RuntimeEvidenceEnvelope
+            {
+                Workflow = "benchmark",
+                Status = RuntimeEvidenceStatus.Verified,
+                RunId = modelId,
+                CandidateId = "benchmark-run"
+            },
             Results =
             [
                 new BenchmarkResult

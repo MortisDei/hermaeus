@@ -1,7 +1,8 @@
 # 12. R33 strict completion audit
 
 Audit date: 2026-09-13. Branch: `r33/planning`. Release target: `v0.41.0-beta`.
-Baseline: `c944feb`. Implementation closeout commit: `911e4ba`.
+Baseline: `c944feb`. Implementation closeout: the local continuation commit
+for this audit.
 
 This audit is against the supplied planning pack and roadmap, not against a
 reduced list of implemented files. The mandatory local code is complete, but
@@ -43,6 +44,8 @@ The status words have the following precise meaning in this document:
 | E8 | Two Release runs of a temporary `NativeAutoTuneOwnerScenarioTests` harness on 2026-09-13, with a copied owner settings file and temporary data root | The production `ModelManagementViewModel.AutoTuneModelCommand` started the real owner Gemma GGUF plus its Gemma MTP draft, stopped that source, observed a real b10924 `llama-server` candidate for Qwen3.5-4B, and restored Gemma afterward. `/proc` observations showed a target-only window with no source model, the target command used `--ctx-size 16384` and `--n-gpu-layers all` with no draft flags, and the target profile was persisted only after restoration. This is native runtime/model-card command-path evidence, not a visible GUI click. |
 | E9 | Controlled b10930 Linux probe on 2026-09-13, loopback port `39352`, PID `17768`, owner Gemma GGUF, `--n-gpu-layers 17`, `--props`, `--metrics`, and trace logging; stopped with Ctrl-C | The runtime returned context as `default_generation_settings.params.n_ctx = 4096` and slots as `total_slots = 1`, omitted GPU layers from `/props`, and emitted `offloaded 17/36 layers to GPU` plus the PID-visible Vulkan model allocation. This establishes the native evidence shape used by the repaired parser. It is not a completed owner Lab run or GUI acceptance proof. |
 | E10 | Final 2026-09-13 continuation: Debug and Release solution builds, focused Release regressions, complete Debug/Release suites, `./scripts/coverage.sh`, and the Release R33 driver on fresh `/tmp/hermaeus-r33-driver-final-Uek2YZ` state | Both builds completed with `0` warnings and `0` errors; the focused set passed `131/131`; each complete suite passed `2,719`, skipped `17`, failed `0`, total `2,736`; the coverage gate passed; the driver returned `ok:true`. The process-association validator and deterministic Lab fixtures now require PID, executable, and argv evidence before Lab control or Apply. This remains host-automated evidence, not owner GUI proof. |
+| E11 | Approved-host native b10930 matrix on 2026-09-13 using the exact owner Gemma GGUF, loopback ports `39413`, `39411`, and `39412`, `--props`, `--metrics`, and bounded SIGINT cleanup; detailed receipts are in `docs/review/r33/13-lab-benchmark-authority-audit.md` | CPU reported `0/36` offloaded, partial GPU `17/36`, and all GPU `36/36`; all three returned HTTP 200, exposed context `4096` and slots `1`, reported timing metrics, exited `0`, and left no server. This proves native placement and cleanup, not semantic equivalence or owner Lab GUI acceptance. |
+| E12 | Final evidence continuation on 2026-09-13: approved-host Debug/Release builds, focused Release authority tests, complete Debug/Release suites, fresh Release R33 driver, and `./scripts/coverage.sh` | Both builds completed with `0` warnings and `0` errors; the focused authority set passed `260/260`; each complete suite passed `2,722`, skipped `17`, failed `0`, total `2,739`; the fresh driver returned `ok:true`; the final coverage gate passed the repository's 60% line ratchet. This remains host-automated evidence, not owner GUI proof. |
 
 ## Mandatory batches and roadmap acceptance cells
 
@@ -235,7 +238,9 @@ acceptance repair pass adds eight regression cases for effective Lab launch
 evidence, saved-projection verification, parent/child lifecycle recovery, and
 open-task isolation, followed by one process-association regression in the
 final continuation. The current Debug and Release harness results are each
-`2,719` passed, `17` skipped, `2,736` total.
+`2,722` passed, `17` skipped, `2,739` total. The continuation adds the shared
+runtime evidence envelope, effective-value mismatch guard, and complete Lab
+recipe authority audit.
 
 ## Acceptance continuation
 
@@ -257,6 +262,15 @@ Missing or invalid process association, or missing or mismatched effective
 fields, finish the workload as `Inconclusive`, not `Succeeded`, with no
 recommendation or Apply. Lab and recommendation Apply
 paths read the live Services projection after save before recording success.
+
+The continuation also audits all twelve shipped Lab recipes and the reusable
+Benchmark path against one `RuntimeEvidenceEnvelope`. Requested, resolved,
+launched, effective, and telemetry identities are compared independently. A
+completed Benchmark workload with missing or conflicting evidence is retained
+as visible `Unverified` or `Mismatch` evidence but is excluded from ranking,
+Insights, and Speed Check. The complete recipe/effective-field matrix and
+approved-host CPU, partial-GPU, and all-GPU receipts are in
+`docs/review/r33/13-lab-benchmark-authority-audit.md`.
 The workbench now exposes before/after mutation receipt content, human-readable
 runtime/model telemetry identities, a bounded Monaco readiness fallback whose
 AvaloniaEdit host is bounded and reattached with current text, and semantic

@@ -9,7 +9,7 @@ actions remain owner-only.
 
 Baseline: `c944febf8e7eda96dcf8f6461a02e870b40b8465`, verified against remote
 `main` on 2026-09-07. The review pack was anchored locally before implementation.
-Local implementation closeout: `cc494ac`.
+Local implementation closeout: the local continuation commit for this audit.
 Production and regression-test changes are scoped to the batches below. The
 only new runtime dependency is the bounded Desktop WebView used by the local
 workspace editor; no workflow or owner-data publication changes are included.
@@ -51,6 +51,9 @@ The mandatory R33 scope is implemented locally:
   runtime fixture.
 - B7: baseline-aware Lab availability plus isolated run, failure cleanup,
   Apply, settings reopen, and retained evidence paths.
+- B7 continuation: Lab and Benchmark results now share a fail-closed runtime
+  evidence envelope, with every shipped Lab recipe audited for effective field
+  and process-bound telemetry proof.
 - B8: Agent/RAG/Lab hierarchy, save-state visibility, typed Doctor target
   mapping, missing-entity feedback, and focused control navigation. The
   continuation also makes Agent outcomes, RAG evidence state, and Lab
@@ -73,11 +76,14 @@ evidence. Monaco is implemented locally but still requires owner platform and
 native WebView validation before it can be called a fully shipped editor path.
 
 Automated closure evidence includes sequential Debug and Release solution builds
-and test harnesses, focused lifecycle/restore/Agent regression tests, the
-isolated driver mutation receipt, Linux package creation, package checksum
-verification, and an installed-path test with spaces. Native Windows, live
-managed-runtime/GPU behavior, and GUI pixel acceptance remain owner validation
-gates. The exact dispositions for every batch, acceptance cell, V01-V14
+and test harnesses, focused Lab/Benchmark authority regressions, the isolated
+driver mutation receipt, the approved-host b10930 CPU/partial-GPU/all-GPU
+receipt matrix, Linux package creation, package checksum verification, and an
+installed-path test with spaces. The current Debug and Release suites each
+passed `2,722`, skipped `17`, failed `0`, total `2,739`; the focused authority
+set passed `260/260`. Native Windows, live owner Lab/Benchmark walkthroughs,
+and GUI pixel acceptance remain owner validation gates. The exact dispositions
+for every batch, acceptance cell, V01-V14
 scenario, owner defect, and conditional branch are recorded in
 [12-completion-audit.md](12-completion-audit.md).
 
@@ -97,6 +103,7 @@ scenario, owner defect, and conditional branch are recorded in
 | [10-scope-and-deferred-decisions.md](10-scope-and-deferred-decisions.md) | Every open ledger item, rejection and descope decisions |
 | [11-dependency-roadmap.md](11-dependency-roadmap.md) | Batches, dependencies, acceptance gates, implementation handoff |
 | [12-completion-audit.md](12-completion-audit.md) | Strict batch, scenario, defect, conditional, and owner-gate audit |
+| [13-lab-benchmark-authority-audit.md](13-lab-benchmark-authority-audit.md) | Complete Lab recipe matrix, shared runtime evidence contract, Benchmark eligibility, and native Linux receipts |
 
 ## Evidence vocabulary
 

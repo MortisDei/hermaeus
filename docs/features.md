@@ -389,7 +389,11 @@ Benchmarks run reusable local prompt suites, retain immutable run history, recor
 failures and runtime metadata, compare models over shared cases, and export
 Markdown, JSON, and CSV. Ranking profiles, Best overall, Best across every
 suite, and the fixed Speed Check answer different questions and do not collapse
-missing evidence into a score.
+missing evidence into a score. Lab and Benchmarks share a runtime evidence
+envelope that keeps requested, resolved, launched, effective, and
+process-bound telemetry identity separate. A completed run with unverified or
+mismatched evidence remains visible but is excluded from rankings and Insights
+until rerun with verified evidence.
 
 Benchmark resource readings distinguish process RAM, device totals, and honest
 per-process `Unknown` values. Lab owns controlled configuration experiments;

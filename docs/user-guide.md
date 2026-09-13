@@ -478,6 +478,15 @@ confirmation, Lab reads the live Services
 projection back after saving so a successful Apply means the reviewed fields
 are visible in settings, not merely that a save call returned.
 
+Every shipped recipe also requires proof of the field it changes. KV recipes
+require effective K/V cache types, Flash Attention requires its effective mode,
+CPU-MoE requires effective CPU expert placement, speculative recipes require
+the effective mechanism and relevant parameter, and prompt-prefix reuse
+requires a prompt-cache observation. If the runtime cannot expose that field,
+the workload may finish but remains Inconclusive. Lab and Benchmarks use the
+same runtime evidence envelope, so requested settings or configuration
+fingerprints cannot stand in for effective runtime or telemetry identity.
+
 On **Lab > Evidence**, an empty pane says whether no evidence has been captured
 yet or whether the current filters exclude existing records.
 

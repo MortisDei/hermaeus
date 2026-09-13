@@ -20,6 +20,8 @@
                         <TextBlock Text="{Binding Started}" />
                         <TextBlock Text="Status" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
                         <TextBlock Text="{Binding Status}" />
+                        <TextBlock Text="Evidence" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
+                        <TextBlock Text="{Binding Evidence}" TextWrapping="Wrap" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
                         <TextBlock Text="Metrics" Opacity="0.6" FontSize="11" />

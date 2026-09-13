@@ -11,7 +11,7 @@ namespace Hermaeus.Tests;
 public sealed class BenchmarkInsightsServiceTests
 {
     [Fact]
-    public async Task LoadReportAsync_joins_case_tags_onto_older_untagged_runs_via_the_surviving_suite()
+    public async Task LoadReportAsync_excludes_older_runs_without_runtime_authority_from_rankings()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
@@ -31,8 +31,9 @@ public sealed class BenchmarkInsightsServiceTests
         var insights = new BenchmarkInsightsService(benchmarks, new FakeSystemInfo());
         var report = await insights.LoadReportAsync();
 
-        var board = Assert.Single(report.TagLeaderboards, b => b.Tag == "coding");
-        Assert.Contains(board.Ranked, m => m.ModelId == "model-a");
+        Assert.DoesNotContain(report.TagLeaderboards, b => b.Tag == "coding");
+        Assert.Contains(report.Caveats,
+            caveat => caveat.Contains("unverified runtime authority", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

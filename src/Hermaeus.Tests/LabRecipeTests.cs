@@ -508,7 +508,9 @@ public sealed class LabRecipeTests
 
         var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities([]), "shared prefix");
 
-        Assert.Equal(LabRunStatus.Succeeded, run.Status);
+        Assert.Equal(LabRunStatus.Inconclusive, run.Status);
+        Assert.Contains(run.RuntimeEvidence.Values,
+            evidence => evidence.Reasons.Contains("effective-field:prompt_cache", StringComparer.Ordinal));
         Assert.Equal(6, fixture.Workload.Requests.Count);
         var disabled = fixture.Workload.Requests.Where(request => request.DisablePromptCache).ToArray();
         var enabled = fixture.Workload.Requests.Where(request => !request.DisablePromptCache).ToArray();
@@ -601,7 +603,15 @@ public sealed class LabRecipeTests
             StartedConfigurations.Add(configuration.Id);
             var session = new FakeSession(50000 + Sessions.Count, 100 + Sessions.Count);
             if (!OmitEffectiveLaunch)
-                session.EffectiveLaunch = EffectiveLaunch(configuration);
+            {
+                var process = session.Process!;
+                session.EffectiveLaunch = EffectiveLaunch(configuration) with
+                {
+                    Process = new RuntimeLaunchProcessEvidence(
+                        process.ProcessId, process.StartedAtUtc, "/runtime/llama-server",
+                        ["--ctx-size", configuration.ContextSize.ToString(CultureInfo.InvariantCulture)])
+                };
+            }
             Sessions.Add(session);
             return Task.FromResult<ILabRuntimeSession>(session);
         }

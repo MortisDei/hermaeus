@@ -286,7 +286,10 @@ public static class BenchmarkInsightsMath
     {
         var now = nowUtc ?? DateTime.UtcNow;
         var caveats = new List<string>();
-        var foreignCount = Math.Max(0, allRuns.Count - comparableRuns.Count);
+        var unverifiedCount = allRuns.Count(run => !run.ComparisonEligible);
+        var foreignCount = Math.Max(0, allRuns.Count - comparableRuns.Count - unverifiedCount);
+        if (unverifiedCount > 0)
+            caveats.Add($"{unverifiedCount} run(s) have unverified runtime authority and were excluded from trustworthy rankings. Re-run them after process, effective-configuration, and telemetry evidence is available.");
         if (foreignCount > 0)
             caveats.Add($"{foreignCount} run(s) from different hardware were ignored.");
 

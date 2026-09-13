@@ -33,7 +33,8 @@ public sealed class BenchmarkInsightsService : IBenchmarkInsightsService
         return runs
             .Where(r => string.Equals(r.SuiteId, SpeedCheck.SuiteId, StringComparison.Ordinal)
                 && string.Equals(r.ModelId, modelId, StringComparison.OrdinalIgnoreCase)
-                && r.Results.Count > 0)
+                && r.Results.Count > 0
+                && r.ComparisonEligible)
             .OrderByDescending(r => r.StartedAt)
             .FirstOrDefault();
     }
@@ -47,8 +48,11 @@ public sealed class BenchmarkInsightsService : IBenchmarkInsightsService
         ResolveTags(runs, suites);
         NormalizeRuntimeKind(runs);
 
-        var comparableRuns = runs
+        var hardwareComparableRuns = runs
             .Where(r => BenchmarkInsightsMath.IsHardwareComparable(r.HardwareSnapshot, currentSnapshot))
+            .ToList();
+        var comparableRuns = hardwareComparableRuns
+            .Where(r => r.ComparisonEligible)
             .ToList();
 
         var currentAppVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
