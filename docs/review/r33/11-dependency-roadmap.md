@@ -110,13 +110,13 @@ by this implementation. Local commits are authorized by the owner.
 
 | Batch | State | Required evidence |
 | --- | --- | --- |
-| B0 | Implemented and verified | `ApplicationLifecycleCoordinatorTests`, identity/isolation source, and driver evidence; retained Unknown crash/child mechanisms remain explicit |
+| B0 | Implemented and verified | `ApplicationLifecycleCoordinatorTests`, identity/isolation source, and driver evidence; E17/E18 attribute and reproduce the historical llama child failure class while the native mechanism remains explicit as Unknown |
 | B1 | Owner validation required | Launcher parser/install and preparation cancellation are verified locally; full phase matrix and visible launch remain open |
 | B2 | Owner validation required | Shared lifecycle, runtime registry, restart handoff, and driver are verified locally; live two-process/native startup remains open |
 | B3 | Owner validation required | Prepared mutation/policy boundaries are verified locally; owner selected-model/manual/child/command review remains open |
 | B4 | Owner validation required | Receipt recovery, readback, child/task projections are verified locally; live delayed callbacks and interruption remain open |
 | B5 | Owner validation required | Configuration/recommendation reconciliation is verified locally; owner UI/rapid-save/Details/restart cells remain open |
-| B6 | Owner validation required | Canonical full-config tuning, cancellation, admission and evidence are locally verified; original native crash and fit gate remain open |
+| B6 | Owner validation required | Canonical full-config tuning, cancellation, admission and evidence are locally verified; the old inherited-draft trigger is classified and reproduced, while the native fault mechanism, visible card path, and broader fit gate remain open |
 | B7 | Owner validation required | Baseline-aware Lab, cleanup, Apply/reopen are locally verified with deterministic boundaries; real runtime/restore remains open |
 | B8 | Owner validation required | Typed Doctor destination and touched UX projections are locally verified; owner keyboard/DPI/focus/resize walkthrough remains open |
 | S | Implemented and verified | Restore budgets, actual-byte staging, duplicate-target and cancellation cleanup tests pass; no owner restore is required |

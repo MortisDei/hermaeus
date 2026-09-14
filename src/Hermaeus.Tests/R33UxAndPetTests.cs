@@ -39,7 +39,7 @@ public sealed class R33UxAndPetTests
     public void Pet_is_off_by_default_and_position_stays_inside_the_window()
     {
         var settings = new UiSettingsViewModel();
-        var pet = new ChatGptPetViewModel();
+        var pet = new DesktopPetViewModel();
         pet.BindSettings(settings);
         pet.UpdateViewport(800, 600, 96, 104);
 
@@ -59,7 +59,7 @@ public sealed class R33UxAndPetTests
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
-        var catalog = new ChatGptPetPackageCatalog(settings);
+        var catalog = new PetPackageCatalog(settings);
 
         var package = Assert.Single(catalog.GetAvailablePackages(), candidate => candidate.Manifest.Id == "moss");
         Assert.True(package.IsBundled);
@@ -73,13 +73,13 @@ public sealed class R33UxAndPetTests
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
-        var catalog = new ChatGptPetPackageCatalog(settings);
+        var catalog = new PetPackageCatalog(settings);
         var packageRoot = temp.PathFor("incoming/pet");
         Directory.CreateDirectory(packageRoot);
 
         await File.WriteAllTextAsync(
             Path.Combine(packageRoot, "pet.json"),
-            JsonSerializer.Serialize(new ChatGptPetManifest
+            JsonSerializer.Serialize(new PetPackageManifest
             {
                 Id = "unsafe-pet",
                 DisplayName = "Unsafe",
@@ -98,7 +98,7 @@ public sealed class R33UxAndPetTests
             Path.Combine(packageRoot, "spritesheet.webp"));
         await File.WriteAllTextAsync(
             Path.Combine(packageRoot, "pet.json"),
-            JsonSerializer.Serialize(new ChatGptPetManifest
+            JsonSerializer.Serialize(new PetPackageManifest
             {
                 Id = "unsafe-pet",
                 DisplayName = "Unsafe",

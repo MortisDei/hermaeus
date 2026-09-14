@@ -30,11 +30,11 @@ public partial class UiSettingsViewModel : ObservableObject
     [ObservableProperty] private string _selectedPetId = "moss";
     [ObservableProperty] private double _petPositionX = -1;
     [ObservableProperty] private double _petPositionY = -1;
-    [ObservableProperty] private ChatGptPetOptionViewModel? _selectedPet;
+    [ObservableProperty] private PetPackageOptionViewModel? _selectedPet;
 
-    private readonly IChatGptPetPackageCatalog? _petCatalog;
+    private readonly IPetPackageCatalog? _petCatalog;
 
-    public UiBoundCollection<ChatGptPetOptionViewModel> PetChoices { get; } = [];
+    public UiBoundCollection<PetPackageOptionViewModel> PetChoices { get; } = [];
     public string PetStatus { get; private set; } = string.Empty;
     public Func<Task<string?>>? RequestPetManifestPicker { get; set; }
     public bool HasPetChoices => PetChoices.Count > 0;
@@ -43,7 +43,7 @@ public partial class UiSettingsViewModel : ObservableObject
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
 
-    public UiSettingsViewModel(IChatGptPetPackageCatalog? petCatalog = null)
+    public UiSettingsViewModel(IPetPackageCatalog? petCatalog = null)
     {
         _petCatalog = petCatalog;
         RefreshPetChoices();
@@ -147,14 +147,14 @@ public partial class UiSettingsViewModel : ObservableObject
             return;
 
         foreach (var package in _petCatalog.GetAvailablePackages())
-            PetChoices.Add(new ChatGptPetOptionViewModel(package));
+            PetChoices.Add(new PetPackageOptionViewModel(package));
 
         SelectedPet = PetChoices.FirstOrDefault(option =>
             string.Equals(option.Id, SelectedPetId, StringComparison.OrdinalIgnoreCase));
         OnPropertyChanged(nameof(HasPetChoices));
     }
 
-    partial void OnSelectedPetChanged(ChatGptPetOptionViewModel? value)
+    partial void OnSelectedPetChanged(PetPackageOptionViewModel? value)
     {
         if (value is not null && !string.Equals(SelectedPetId, value.Id, StringComparison.Ordinal))
             SelectedPetId = value.Id;

@@ -44,7 +44,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ProjectViewModel         Projects { get; }
     public PaletteViewModel         Palette { get; }
     public ActivityViewModel        Activity { get; }
-    public ChatGptPetViewModel      Pet { get; }
+    public DesktopPetViewModel      Pet { get; }
 
     public UiBoundCollection<ConversationItemViewModel> Conversations { get; } = [];
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
@@ -127,7 +127,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ConversationExportService exports,
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
         LlamaCppService? llamaCpp = null,
-        ChatGptPetViewModel? pet = null)
+        DesktopPetViewModel? pet = null)
     {
         _recallIndexing = recallIndexing;
         Palette = palette;
@@ -141,7 +141,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Chat.AttachManagedServices(services);
         Benchmarks = benchmarks; Lab = lab; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Projects = projects;
-        Pet = pet ?? new ChatGptPetViewModel();
+        Pet = pet ?? new DesktopPetViewModel();
         Pet.BindSettings(Settings.Ui);
         // r24 doc 01 1.6: switching a project only ever changes what NEW work
         // inherits. Existing conversations/tasks/datasets are never rewritten.

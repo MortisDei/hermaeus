@@ -57,7 +57,7 @@
                 <ComboBox Grid.Column="1" ItemsSource="{Binding PetChoices}" SelectedItem="{Binding SelectedPet}"
                           IsEnabled="{Binding HasPetChoices}" FontSize="13">
                     <ComboBox.ItemTemplate>
-                        <DataTemplate DataType="{x:Type vm:ChatGptPetOptionViewModel}">
+                        <DataTemplate DataType="{x:Type vm:PetPackageOptionViewModel}">
                             <TextBlock Text="{Binding Display}" />
                         </DataTemplate>
                     </ComboBox.ItemTemplate>

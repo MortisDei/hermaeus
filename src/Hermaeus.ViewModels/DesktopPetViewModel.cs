@@ -9,9 +9,9 @@ namespace Hermaeus.ViewModels;
 /// source of truth, so edits made by the overlay use the same settings
 /// autosave path as the Settings page.
 /// </summary>
-public sealed class ChatGptPetViewModel : ViewModelBase
+public sealed class DesktopPetViewModel : ViewModelBase
 {
-    private readonly IChatGptPetPackageCatalog _catalog;
+    private readonly IPetPackageCatalog _catalog;
     private UiSettingsViewModel? _settings;
     private double _viewportWidth;
     private double _viewportHeight;
@@ -21,7 +21,7 @@ public sealed class ChatGptPetViewModel : ViewModelBase
     private double _positionY;
     private bool _settingPosition;
 
-    public ChatGptPetViewModel(IChatGptPetPackageCatalog? catalog = null)
+    public DesktopPetViewModel(IPetPackageCatalog? catalog = null)
     {
         _catalog = catalog ?? EmptyPetCatalog.Instance;
     }
@@ -30,7 +30,7 @@ public sealed class ChatGptPetViewModel : ViewModelBase
 
     public string SelectedPetId => _settings?.SelectedPetId ?? "moss";
 
-    public ChatGptPetPackage? SelectedPackage =>
+    public PetPackage? SelectedPackage =>
         _catalog.GetAvailablePackages().FirstOrDefault(package =>
             string.Equals(package.Manifest.Id, SelectedPetId, StringComparison.OrdinalIgnoreCase));
 
@@ -143,15 +143,15 @@ public sealed class ChatGptPetViewModel : ViewModelBase
         OnPropertyChanged(nameof(StatusLabel));
     }
 
-    private sealed class EmptyPetCatalog : IChatGptPetPackageCatalog
+    private sealed class EmptyPetCatalog : IPetPackageCatalog
     {
         public static readonly EmptyPetCatalog Instance = new();
 
-        public IReadOnlyList<ChatGptPetPackage> GetAvailablePackages() => [];
+        public IReadOnlyList<PetPackage> GetAvailablePackages() => [];
 
-        public Task<ChatGptPetPackageResult> ImportAsync(
+        public Task<PetPackageResult> ImportAsync(
             string manifestPath,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(ChatGptPetPackageResult.Failure("Pet catalog is unavailable."));
+            Task.FromResult(PetPackageResult.Failure("Pet catalog is unavailable."));
     }
 }

@@ -2,11 +2,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
-             x:Class="Hermaeus.Desktop.Views.ChatGptPetOverlay"
-             x:DataType="vm:ChatGptPetViewModel">
+             x:Class="Hermaeus.Desktop.Views.DesktopPetOverlay"
+             x:DataType="vm:DesktopPetViewModel">
     <Canvas x:Name="PetCanvas"
             ClipToBounds="True">
-        <controls:ChatGptPetSprite x:Name="PetSprite"
+        <controls:PetSprite x:Name="PetSprite"
                                    Width="96"
                                    Height="104"
                                    Package="{Binding SelectedPackage}"

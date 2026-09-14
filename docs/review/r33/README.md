@@ -46,9 +46,10 @@ The mandatory R33 scope is implemented locally:
   reconciliation.
 - B6: full-config transient tuning probes with GGUF and hardware context,
   shared Services/Models cancellation, bounded failure evidence, and cleanup.
-  The original native/runtime crash reproduction is still an owner validation
-  gate because the planning pack did not contain a reproducible stack or
-  runtime fixture.
+  The historical exit-139 event is now attributed to a `llama-server` child
+  reached through the old inherited-draft path, and E18 reproduces that
+  failure class. The native fault mechanism and visible current-path gates
+  remain open.
 - B7: baseline-aware Lab availability plus isolated run, failure cleanup,
   Apply, settings reopen, and retained evidence paths.
 - B7 continuation: Lab and Benchmark results now share a fail-closed runtime
@@ -80,7 +81,7 @@ and test harnesses, focused Lab/Benchmark authority regressions, the isolated
 driver mutation receipt, the approved-host b10930 CPU/partial-GPU/all-GPU
 receipt matrix, Linux package creation, package checksum verification, and an
 installed-path test with spaces. The current Debug and Release suites each
-passed `2,733`, skipped `17`, failed `0`, total `2,750`; the earlier focused
+passed `2,737`, skipped `17`, failed `0`, total `2,754`; the earlier focused
 R33 repair set passed `119/119`, with the broader authority set retained at
 `260/260`. The cleanup-focused set and source audit are recorded in the
 completion audit. Native Windows, live owner Lab/Benchmark walkthroughs, and
@@ -177,11 +178,11 @@ scenario, owner defect, and conditional branch are recorded in
   (`50,267/77,713`) against the 60% ratchet, with results kept under `/tmp`.
   The initial instrumented run exposed two timing-sensitive reconciliation
   assertions; the waits were strengthened and the final full run passed.
-- The current continuation rebuilt Debug and Release with zero warnings and
+- The 2026-09-13 continuation rebuilt Debug and Release with zero warnings and
   zero errors, passed `2,731` tests with `17` expected platform skips in each
   full suite, passed the focused R33 repair set `119/119`, and passed the final
   `scripts/coverage.sh` 60% line-coverage ratchet.
-- The current Release R33 driver returned `ok:true` on fresh `/tmp` settings,
+- That Release R33 driver returned `ok:true` on fresh `/tmp` settings,
   data, and workspace paths. It produced an Applied, changed,
   readback-verified mutation receipt, persisted cancelled benchmark evidence,
   exercised RAG, Chat, voice, Lab failure cleanup, Lab Apply/reopen, and clean

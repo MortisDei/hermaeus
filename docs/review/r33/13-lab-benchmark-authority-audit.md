@@ -1,6 +1,6 @@
 # R33 Lab and Benchmark runtime-authority audit
 
-Audit date: 2026-09-13. Branch: `r33/planning`. Release target:
+Audit date: 2026-09-14. Branch: `r33/planning` at `3801a0d`. Release target:
 `v0.41.0-beta`.
 
 This audit covers every shipped Lab recipe and the reusable Benchmark path after
@@ -166,8 +166,35 @@ SIGTERM then returned `143` without a clean marker. Because `Program.Main` has
 no console interrupt handler and SIGINT did not enter the Avalonia close/tray
 coordinator, this is classified as console-interrupt/harness evidence, not a
 demonstrated product shutdown defect.
-The original exit-139 event remains `UNRESOLVED`; normal packaged window close
-is still `NEEDS OWNER VALIDATION`.
+The historical exit-139 process and invalid-draft trigger are classified in
+the completion audit's E17/E18. The native fault mechanism remains
+`UNRESOLVED`; normal packaged window close is still `NEEDS OWNER VALIDATION`.
+
+## Historical exit-139 and shutdown classification
+
+The old AutoTune failure was a managed `llama-server` child, not a WebView or
+Monaco process. Retained owner evidence identifies target Nemotron, inherited
+Gemma MTP draft, old runtime `b10924`, candidate-0 CPU placement, context
+`131072`, four threads, port `41387`, and child log PID `803762`. The old
+`BuildModelTuneProbe` cloned the active ChatServer configuration and changed
+only target model, port, and context, so it retained the source draft and any
+other source launch state. The complete historical argv and OS parent PID were
+not persisted.
+
+A bounded `b10930` replay of that CPU-only target plus Gemma MTP shape also
+exited `139` after loading the draft, with a kernel `libllama.so.0` fault at
+`+0x22d792`. A matching Nemotron no-draft control loaded and listened normally.
+This establishes the invalid speculative-pair trigger and reproduces the
+failure class, but does not provide a symbolic native stack or prove the
+upstream mechanism fixed. The current production model-card path constructs a
+fresh target config and uses only verified target companions; E8 proved the
+target-only command and source restoration.
+
+The packaged Linux tray Quit run is a scoped owner pass: code `0`, no managed
+children, and `CleanExit:true`. Direct package SIGINT is separate harness
+evidence: the app remained alive with `CleanExit:false` and
+`LastOperation:"running"`, then bounded SIGTERM returned `143`. Normal window
+close and Windows lifecycle remain owner gates.
 
 ## Monaco and AvaloniaEdit fallback boundary
 

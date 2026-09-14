@@ -7,11 +7,11 @@ namespace Hermaeus.Core.Services;
 /// package into the managed data root. The catalog never executes package
 /// content or exposes a package-controlled navigation surface.
 /// </summary>
-public interface IChatGptPetPackageCatalog
+public interface IPetPackageCatalog
 {
-    IReadOnlyList<ChatGptPetPackage> GetAvailablePackages();
+    IReadOnlyList<PetPackage> GetAvailablePackages();
 
-    Task<ChatGptPetPackageResult> ImportAsync(
+    Task<PetPackageResult> ImportAsync(
         string manifestPath,
         CancellationToken cancellationToken = default);
 }

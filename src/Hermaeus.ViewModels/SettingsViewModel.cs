@@ -175,7 +175,7 @@ public partial class SettingsViewModel : ViewModelBase
         IActivityRecorder? activity = null,
         Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null,
         Action? autoSaveLifecycleCompleted = null,
-        IChatGptPetPackageCatalog? petCatalog = null)
+        IPetPackageCatalog? petCatalog = null)
     {
         _svc = svc;
         _toasts = toasts;

@@ -2,9 +2,9 @@ using Hermaeus.Core.Models;
 
 namespace Hermaeus.ViewModels;
 
-public sealed class ChatGptPetOptionViewModel
+public sealed class PetPackageOptionViewModel
 {
-    public ChatGptPetOptionViewModel(ChatGptPetPackage package)
+    public PetPackageOptionViewModel(PetPackage package)
     {
         Id = package.Manifest.Id;
         DisplayName = package.Manifest.DisplayName;

@@ -9,7 +9,7 @@ namespace Hermaeus.Services;
 /// the manifest and a bounded set of image/metadata files are accepted, all
 /// paths remain inside the package directory, and symbolic links are rejected.
 /// </summary>
-public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
+public sealed class PetPackageCatalog : IPetPackageCatalog
 {
     public const int SpriteVersionNumber = 2;
     public const int MaxManifestBytes = 1024 * 1024;
@@ -30,20 +30,20 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
     private readonly ISettingsService _settings;
     private readonly string _bundledRoot;
 
-    public ChatGptPetPackageCatalog(ISettingsService settings)
+    public PetPackageCatalog(ISettingsService settings)
         : this(settings, Path.Combine(AppContext.BaseDirectory, "Pets"))
     {
     }
 
-    internal ChatGptPetPackageCatalog(ISettingsService settings, string bundledRoot)
+    internal PetPackageCatalog(ISettingsService settings, string bundledRoot)
     {
         _settings = settings;
         _bundledRoot = Path.GetFullPath(bundledRoot);
     }
 
-    public IReadOnlyList<ChatGptPetPackage> GetAvailablePackages()
+    public IReadOnlyList<PetPackage> GetAvailablePackages()
     {
-        var packages = new Dictionary<string, ChatGptPetPackage>(StringComparer.OrdinalIgnoreCase);
+        var packages = new Dictionary<string, PetPackage>(StringComparer.OrdinalIgnoreCase);
         AddPackagesFromRoot(ResolveUserRoot(), isBundled: false, packages);
         AddPackagesFromRoot(_bundledRoot, isBundled: true, packages);
         return packages.Values
@@ -52,16 +52,16 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
             .ToArray();
     }
 
-    public Task<ChatGptPetPackageResult> ImportAsync(
+    public Task<PetPackageResult> ImportAsync(
         string manifestPath,
         CancellationToken cancellationToken = default) =>
         Task.Run(() => ImportCore(manifestPath, cancellationToken), cancellationToken);
 
-    private ChatGptPetPackageResult ImportCore(string manifestPath, CancellationToken cancellationToken)
+    private PetPackageResult ImportCore(string manifestPath, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(manifestPath))
-            return ChatGptPetPackageResult.Failure("Choose a pet.json file.");
+            return PetPackageResult.Failure("Choose a pet.json file.");
 
         string fullManifestPath;
         try
@@ -70,23 +70,23 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return ChatGptPetPackageResult.Failure("The selected manifest path is not valid.");
+            return PetPackageResult.Failure("The selected manifest path is not valid.");
         }
 
         if (!string.Equals(Path.GetFileName(fullManifestPath), "pet.json", StringComparison.OrdinalIgnoreCase))
-            return ChatGptPetPackageResult.Failure("Select the package's pet.json manifest.");
+            return PetPackageResult.Failure("Select the package's pet.json manifest.");
 
         var sourceRoot = Path.GetDirectoryName(fullManifestPath);
         if (sourceRoot is null)
-            return ChatGptPetPackageResult.Failure("The selected manifest has no package folder.");
+            return PetPackageResult.Failure("The selected manifest has no package folder.");
 
         if (!TryReadPackage(sourceRoot, isBundled: false, out var package, out var error))
-            return ChatGptPetPackageResult.Failure(error);
+            return PetPackageResult.Failure(error);
 
         var destinationRoot = ResolveUserRoot();
         var destination = Path.Combine(destinationRoot, package.Manifest.Id);
         if (Directory.Exists(destination) || File.Exists(destination))
-            return ChatGptPetPackageResult.Failure($"A pet with id '{package.Manifest.Id}' is already installed.");
+            return PetPackageResult.Failure($"A pet with id '{package.Manifest.Id}' is already installed.");
 
         try
         {
@@ -104,10 +104,10 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
             if (!TryReadPackage(destination, isBundled: false, out var copied, out error))
             {
                 TryDeleteOwnedDirectory(destination);
-                return ChatGptPetPackageResult.Failure($"The imported package did not verify: {error}");
+                return PetPackageResult.Failure($"The imported package did not verify: {error}");
             }
 
-            return new ChatGptPetPackageResult(true, copied, string.Empty);
+            return new PetPackageResult(true, copied, string.Empty);
         }
         catch (OperationCanceledException)
         {
@@ -117,14 +117,14 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             TryDeleteOwnedDirectory(destination);
-            return ChatGptPetPackageResult.Failure($"The pet package could not be imported: {ex.Message}");
+            return PetPackageResult.Failure($"The pet package could not be imported: {ex.Message}");
         }
     }
 
     private void AddPackagesFromRoot(
         string root,
         bool isBundled,
-        IDictionary<string, ChatGptPetPackage> packages)
+        IDictionary<string, PetPackage> packages)
     {
         if (!Directory.Exists(root) || IsReparsePoint(root))
             return;
@@ -153,7 +153,7 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
     private bool TryReadPackage(
         string packageRoot,
         bool isBundled,
-        out ChatGptPetPackage package,
+        out PetPackage package,
         out string error)
     {
         package = null!;
@@ -191,7 +191,7 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
                 return false;
             }
 
-            var manifest = JsonSerializer.Deserialize<ChatGptPetManifest>(
+            var manifest = JsonSerializer.Deserialize<PetPackageManifest>(
                 File.ReadAllText(manifestPath),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (manifest is null)
@@ -253,7 +253,7 @@ public sealed class ChatGptPetPackageCatalog : IChatGptPetPackageCatalog
                 return false;
             }
 
-            package = new ChatGptPetPackage(root, manifest, spritesheetPath, isBundled);
+            package = new PetPackage(root, manifest, spritesheetPath, isBundled);
             return true;
         }
         catch (JsonException)

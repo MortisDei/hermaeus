@@ -7,7 +7,7 @@ namespace Hermaeus.Core.Models;
 /// format. Packages contain no executable hooks. The desktop host owns image
 /// decoding and animation, while Services owns path and resource validation.
 /// </summary>
-public sealed class ChatGptPetManifest
+public sealed class PetPackageManifest
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -25,16 +25,16 @@ public sealed class ChatGptPetManifest
     public string SpritesheetPath { get; set; } = string.Empty;
 }
 
-public sealed record ChatGptPetPackage(
+public sealed record PetPackage(
     string RootDirectory,
-    ChatGptPetManifest Manifest,
+    PetPackageManifest Manifest,
     string SpritesheetPath,
     bool IsBundled);
 
-public sealed record ChatGptPetPackageResult(
+public sealed record PetPackageResult(
     bool Succeeded,
-    ChatGptPetPackage? Package,
+    PetPackage? Package,
     string Error)
 {
-    public static ChatGptPetPackageResult Failure(string error) => new(false, null, error);
+    public static PetPackageResult Failure(string error) => new(false, null, error);
 }

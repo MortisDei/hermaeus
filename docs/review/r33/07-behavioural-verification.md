@@ -93,24 +93,29 @@ are necessary evidence at different boundaries.
 
 ## 7.4 Owner-live matrix
 
-All R33 live cells begin **NEEDS OWNER VALIDATION**. Historical R32 Doctor action
-presentation/Agent tabs/data migration passes are retained as historical facts,
-not upgraded into passes for new target navigation, task isolation or R33 changes.
-Use one row per run with binary/build/config identity, date and retained evidence
-reference. Explicitly mark Unknown or Not applicable rather than an empty pass.
+Unclosed R33 live cells are tracked as **NEEDS OWNER VALIDATION**. The scoped
+Linux owner passes recorded below do not widen into passes for Windows, other
+models, other controls, or the remaining workflows. Historical R32 Doctor
+action presentation/Agent tabs/data migration passes are retained as historical
+facts, not upgraded into passes for new target navigation, task isolation or
+R33 changes. Use one row per run with binary/build/config identity, date and
+retained evidence reference. Explicitly mark Unknown or Not applicable rather
+than an empty pass.
 
 | Scenario | Deterministic evidence | Linux GTX 1660 Super 6 GB | Windows RTX 4060 8 GB | Status/evidence |
 | --- | --- | --- | --- | --- |
-| Install/menu launch, reopen, clean exit | V09/V12 | COSMIC menu, icon/window, spaces, runtime resolution | Portable launcher, spaces, clean exit | Needs owner; Linux parser defect reproduced only |
+| Install/menu launch, reopen, clean exit | V09/V12 | **OWNER PASS, scoped:** packaged Linux launch and tray Quit after normal use; children exited and `CleanExit:true` | Portable launcher, spaces, clean exit | Linux tray path passed; visible window-close, restart handoff, and Windows remain needs owner |
 | Agent create/edit/full rewrite and child approval | V01-V04/V11 | Actual selected local model, filesystem/artifact review | Same workflow with Windows path/locking behavior | Needs owner |
 | New Task and primary artifact | V05 | Slow callbacks, narrow/wide window, keyboard | Same, DPI/accessibility | Needs owner |
-| Switch model then fit/tune recovery | V07 | Constrained VRAM, other active consumers, cancellation | 8 GB pressure; real effective backend | Needs owner; exact crash mechanism Unknown |
+| Switch model then fit/tune recovery | V07 | **OWNER PASS, scoped:** Models-card AutoTune with a loaded source and different real target; source restore observed | 8 GB pressure; real effective backend | Linux model-card path passed; broader combinations and Windows remain needs owner; native mechanism is unresolved but the old invalid draft trigger is classified in doc 12 |
 | Preferred/installed/service/effective backend | V07/V12 | Vulkan, explicit CPU placement, unavailable/manual path | Auto/CUDA/Vulkan as actually installed | Needs owner; do not force backend installation |
 | Lab discovery/run/cancel/restore | V07/V08 | Correct baseline, observable pressure, restore failure | Same, process VRAM may be Unknown | Needs owner |
 | Recommendation applied then Details/restart | V08/V10 | Services row, no duplicate action, retained history | Same | Needs owner |
-| Benchmark cancellation at preparation and case | V06 | Dispatcher remains alive; no success toast | Same | Needs owner |
-| RAG ingest/manage/query/history and cancel | V12 | Mounted-source paths, selected versus query scope | Path casing and file sharing | Needs owner |
-| Doctor target remediation | V10 | Exact backend/config section focused | Exact supported Windows target | Needs owner |
+| Benchmark cancellation at preparation and case | V06 | **OWNER PASS, scoped:** Linux cancellation left the dispatcher alive without a success result | Same | Linux cancellation scope passed; remaining phases and Windows remain needs owner |
+| RAG retrieval and citations | V12 | **OWNER PASS, scoped:** Linux retrieval returned citations for the selected knowledge scope | Query scope, path casing, file sharing | Retrieval/citation scope passed; ingest/manage/history/cancel and Windows remain needs owner |
+| Voice playback and audio feedback | V12 | **OWNER PASS, scoped:** Linux playback and configured feedback paths were exercised | Device selection, playback, failure recovery | Linux scope passed; Windows device/backend and failure recovery remain needs owner |
+| RAG ingest/manage/query/history and cancel | V12 | Mounted-source paths, selected versus query scope | Path casing and file sharing | Needs owner for the unclosed ingest/manage/history/cancel workflow |
+| Doctor target remediation | V10 | **OWNER PASS, scoped:** Linux remediation reached the intended target path | Exact supported Windows target | Linux target path passed; physical focus and Windows remain needs owner |
 | Optional Monaco editor/offline/diff | V14 | Actual WebKitGTK/XWayland or verified WPE | Actual WebView2 | Conditional; no renderer proof yet |
 | Optional runtime experiments | Existing recipe controls + doc 05 | Exact compatible binary/model only | Exact compatible binary/model only | Conditional; unsupported remains unavailable |
 | Existing live watches | Existing targeted tests | COSMIC picker, real Whisper, warm/cold Recall as relevant | Real Whisper/speculation pairs as relevant | Retain original gates; no destructive repeat migration |

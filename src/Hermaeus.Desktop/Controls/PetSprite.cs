@@ -13,10 +13,10 @@ namespace Hermaeus.Desktop.Controls;
 /// second UI or script host. The standard atlas is eight columns by eleven
 /// rows, with the first three rows used for idle and horizontal walking.
 /// </summary>
-public sealed class ChatGptPetSprite : Control
+public sealed class PetSprite : Control
 {
-    public static readonly StyledProperty<ChatGptPetPackage?> PackageProperty =
-        AvaloniaProperty.Register<ChatGptPetSprite, ChatGptPetPackage?>(nameof(Package));
+    public static readonly StyledProperty<PetPackage?> PackageProperty =
+        AvaloniaProperty.Register<PetSprite, PetPackage?>(nameof(Package));
 
     private const int AtlasColumns = 8;
     private const int AtlasRows = 11;
@@ -32,7 +32,7 @@ public sealed class ChatGptPetSprite : Control
     private bool _moving;
     private bool _movingRight = true;
 
-    public ChatGptPetSprite()
+    public PetSprite()
     {
         Focusable = false;
         IsTabStop = false;
@@ -42,7 +42,7 @@ public sealed class ChatGptPetSprite : Control
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
-    public ChatGptPetPackage? Package
+    public PetPackage? Package
     {
         get => GetValue(PackageProperty);
         set => SetValue(PackageProperty, value);
@@ -52,7 +52,7 @@ public sealed class ChatGptPetSprite : Control
     {
         base.OnPropertyChanged(change);
         if (change.Property == PackageProperty)
-            LoadPackage(change.GetNewValue<ChatGptPetPackage?>());
+            LoadPackage(change.GetNewValue<PetPackage?>());
         else if (change.Property == IsVisibleProperty)
             UpdateTimerState();
     }
@@ -84,7 +84,7 @@ public sealed class ChatGptPetSprite : Control
         context.DrawImage(_spritesheet, source, destination);
     }
 
-    private void LoadPackage(ChatGptPetPackage? package)
+    private void LoadPackage(PetPackage? package)
     {
         _animationTimer.Stop();
         _spritesheet?.Dispose();

@@ -6,7 +6,7 @@ using Hermaeus.ViewModels;
 
 namespace Hermaeus.Desktop.Views;
 
-public partial class ChatGptPetOverlay : UserControl
+public partial class DesktopPetOverlay : UserControl
 {
     private const double DirectionDeadzone = 4;
     private IPointer? _dragPointer;
@@ -14,7 +14,7 @@ public partial class ChatGptPetOverlay : UserControl
     private double _positionStartX;
     private double _positionStartY;
 
-    public ChatGptPetOverlay()
+    public DesktopPetOverlay()
     {
         InitializeComponent();
         SizeChanged += OnSizeChanged;
@@ -25,7 +25,7 @@ public partial class ChatGptPetOverlay : UserControl
     private void OnPetPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(PetSprite).Properties.IsLeftButtonPressed
-            || DataContext is not ChatGptPetViewModel pet)
+            || DataContext is not DesktopPetViewModel pet)
             return;
 
         _dragPointer = e.Pointer;
@@ -41,7 +41,7 @@ public partial class ChatGptPetOverlay : UserControl
     {
         if (_dragPointer is null || !ReferenceEquals(e.Pointer, _dragPointer)
             || !e.GetCurrentPoint(PetCanvas).Properties.IsLeftButtonPressed
-            || DataContext is not ChatGptPetViewModel pet)
+            || DataContext is not DesktopPetViewModel pet)
             return;
 
         var current = e.GetPosition(PetCanvas);
@@ -72,7 +72,7 @@ public partial class ChatGptPetOverlay : UserControl
 
     private void UpdateViewport()
     {
-        if (DataContext is ChatGptPetViewModel pet)
+        if (DataContext is DesktopPetViewModel pet)
             pet.UpdateViewport(Bounds.Width, Bounds.Height, PetSprite.Bounds.Width, PetSprite.Bounds.Height);
     }
 

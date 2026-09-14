@@ -322,7 +322,7 @@
                 <!-- Optional, data-only ChatGPT Pet v2 overlay. The overlay
                      has no background, so it does not steal clicks from the
                      active view except on the sprite itself. -->
-                <views:ChatGptPetOverlay DataContext="{Binding Pet}"
+                <views:DesktopPetOverlay DataContext="{Binding Pet}"
                                          IsVisible="{Binding IsVisible}"
                                          ZIndex="20" />
 
