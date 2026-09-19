@@ -151,6 +151,20 @@ public static class WorkspaceCommandRecipes
     }
 
     /// <summary>
+    /// Explains why a command cannot be prepared without conflating an
+    /// unknown family with a recognized family whose argument failed its
+    /// workspace validation.
+    /// </summary>
+    public static string DescribeMatchFailure(string command, string workspaceRoot)
+    {
+        var family = ExtractFamily(command);
+        return family is null
+            ? "The command does not belong to a fixed executable family. There is nothing to allow here; run it yourself if it needs running."
+            : $"The command family '{family}' is recognized, but its argument failed workspace validation. "
+                + "Use a workspace-relative target or a script declared in package.json.";
+    }
+
+    /// <summary>
     /// Go's package pattern "./..." is how every real Go command is written and
     /// is not a filesystem path, so it is allowed literally; anything else has
     /// to be a contained workspace path like every other family's argument.

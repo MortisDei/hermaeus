@@ -243,6 +243,125 @@ public sealed class AgentViewModelWorkspaceTests
     }
 
     [Fact]
+    public async Task Per_patch_approve_command_uses_the_authoritative_prepared_mutation()
+    {
+        using var temp = new TempDir();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "note.txt"), "old");
+        var (vm, _, store) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var state = await SavePreparedPatchTaskAsync(store, workspace, "new");
+
+        vm.WorkspaceRoot = workspace;
+        vm.RequestDraftPatchPreview = _ => Task.FromResult(true);
+        await vm.LoadTaskCommand.ExecuteAsync(state.TaskId);
+
+        await vm.ApprovePatchCommand.ExecuteAsync(new AgentDraftPatchViewModel(state.DraftPatches[0]));
+
+        var saved = await store.LoadAsync(state.TaskId);
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(workspace, "note.txt")));
+        Assert.Null(saved!.PendingToolAction);
+        Assert.Equal(AgentDraftPatchStatus.Applied, Assert.Single(saved.DraftPatches).Status);
+        Assert.Contains(saved.MutationReceipts, receipt => receipt.Verified && receipt.Outcome == AgentMutationOutcome.Applied);
+    }
+
+    [Fact]
+    public async Task Per_patch_reject_command_records_the_same_authoritative_review_transition()
+    {
+        using var temp = new TempDir();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "note.txt"), "old");
+        var (vm, _, store) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var state = await SavePreparedPatchTaskAsync(store, workspace, "new");
+
+        vm.WorkspaceRoot = workspace;
+        await vm.LoadTaskCommand.ExecuteAsync(state.TaskId);
+
+        await vm.RejectPatchCommand.ExecuteAsync(new AgentDraftPatchViewModel(state.DraftPatches[0]));
+
+        var saved = await store.LoadAsync(state.TaskId);
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Equal("old", File.ReadAllText(Path.Combine(workspace, "note.txt")));
+        Assert.Null(saved!.PendingToolAction);
+        Assert.Equal(AgentDraftPatchStatus.Rejected, Assert.Single(saved.DraftPatches).Status);
+        Assert.False(Assert.Single(saved.ApprovalHistory).Approved);
+    }
+
+    [Fact]
+    public async Task Per_patch_block_command_preserves_the_blocked_owner_action_state()
+    {
+        using var temp = new TempDir();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "note.txt"), "old");
+        var (vm, _, store) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var state = await SavePreparedPatchTaskAsync(store, workspace, "new");
+
+        vm.WorkspaceRoot = workspace;
+        await vm.LoadTaskCommand.ExecuteAsync(state.TaskId);
+
+        await vm.BlockPatchCommand.ExecuteAsync(new AgentDraftPatchViewModel(state.DraftPatches[0]));
+
+        var saved = await store.LoadAsync(state.TaskId);
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Equal("old", File.ReadAllText(Path.Combine(workspace, "note.txt")));
+        Assert.Null(saved!.PendingToolAction);
+        Assert.Equal(AgentTaskStatus.Blocked, saved.Status);
+        Assert.Equal(AgentDraftPatchStatus.Blocked, Assert.Single(saved.DraftPatches).Status);
+        Assert.Contains("blocked", saved.LastUserMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<AgentTaskState> SavePreparedPatchTaskAsync(
+        FileAgentTaskStateStore store,
+        string workspace,
+        string proposedContent)
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["relative_path"] = "note.txt",
+            ["proposed_content"] = proposedContent
+        };
+        var preparation = await AgentMutationPreparation.PrepareAsync(
+            "apply_draft_patch",
+            arguments,
+            new AgentWorkspaceOptions(workspace),
+            policy: null,
+            workspaceTools: new AgentWorkspaceTools());
+        Assert.True(preparation.IsValid, preparation.Error);
+        var pending = preparation.Pending!;
+        var patch = new AgentDraftPatch
+        {
+            RelativePath = pending.RelativePath,
+            Rationale = "Update the note.",
+            ProposedContent = pending.ProposedContent,
+            Status = AgentDraftPatchStatus.Pending,
+            CreatedAt = pending.PreparedAt,
+            ProposalId = pending.ProposalId,
+            ProposalRevision = pending.ProposalRevision,
+            WorkspaceRoot = pending.WorkspaceRoot,
+            ExpectedPreImageSha256 = pending.ExpectedPreImageSha256,
+            ExpectedPreImageExisted = pending.ExpectedPreImageExisted,
+            ProposedContentSha256 = pending.ProposedContentSha256,
+            PolicyFingerprint = pending.PolicyFingerprint,
+            PreparedAt = pending.PreparedAt,
+            ApprovalFingerprint = AgentApprovalFingerprint.Resolve(pending)
+        };
+        var state = new AgentTaskState
+        {
+            Goal = "Review a prepared patch",
+            Status = AgentTaskStatus.WaitingForUser,
+            WorkspaceRoot = workspace,
+            PendingToolAction = pending,
+            LastUserMessage = "Review the prepared note patch.",
+            DraftPatches = [patch]
+        };
+        await store.SaveAsync(state);
+        return state;
+    }
+
+    [Fact]
     public void Historical_goal_preview_is_bounded_but_full_goal_is_retained()
     {
         var goal = string.Join(' ', Enumerable.Repeat("long-goal-word", 40));

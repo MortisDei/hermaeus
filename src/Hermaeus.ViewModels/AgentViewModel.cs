@@ -342,17 +342,21 @@ public sealed partial class AgentLessonViewModel : ObservableObject
 
 public sealed class AgentWorkspaceFileViewModel
 {
-    public AgentWorkspaceFileViewModel(string relativePath, string snippet, DateTime modifiedUtc)
+    public AgentWorkspaceFileViewModel(string relativePath, string snippet, DateTime? modifiedUtc, bool isDirectory = false)
     {
         RelativePath = relativePath;
         Snippet = snippet;
         ModifiedUtc = modifiedUtc;
+        IsDirectory = isDirectory;
     }
 
     public string RelativePath { get; }
     public string Snippet { get; }
-    public DateTime ModifiedUtc { get; }
-    public string ModifiedLabel => LocalTimeFormat.DateTimeMinutes(ModifiedUtc);
+    public DateTime? ModifiedUtc { get; }
+    public bool IsDirectory { get; }
+    public string ModifiedLabel => ModifiedUtc is { } value
+        ? LocalTimeFormat.DateTimeMinutes(value)
+        : "Modified time unavailable";
 }
 
 public sealed class ProjectInstructionFileViewModel
@@ -624,6 +628,9 @@ public partial class AgentViewModel : ViewModelBase
     private int _workspaceFilesGeneration;
     private int _workspaceFileSelectionGeneration;
     private int _taskViewGeneration;
+    private bool _preserveWorkspaceEditorOnRefresh;
+    private string _workspaceFileRevisionHash = string.Empty;
+    private bool _workspaceFileRevisionExisted;
 
     public UiBoundCollection<LlmModel> AvailableModels { get; } = [];
     public UiBoundCollection<RagDataset> Datasets { get; } = [];
@@ -789,6 +796,8 @@ public partial class AgentViewModel : ViewModelBase
     [ObservableProperty] private string _workspaceFileQuery = string.Empty;
     [ObservableProperty] private AgentWorkspaceFileViewModel? _selectedWorkspaceFile;
     [ObservableProperty] private string _workspaceFilePreview = string.Empty;
+    [ObservableProperty] private bool _workspaceEditorDirty;
+    [ObservableProperty] private string _workspaceEditorStatus = string.Empty;
     [ObservableProperty] private string _draftRationale = string.Empty;
     [ObservableProperty] private string _draftProposedContent = string.Empty;
     [ObservableProperty] private string _draftPreview = string.Empty;
@@ -983,6 +992,10 @@ public partial class AgentViewModel : ViewModelBase
     partial void OnSelectedLedgerFileChanged(AgentLedgerFileEntryViewModel? value) => OnPropertyChanged(nameof(HasSelectedLedgerFile));
 
     public bool HasSelectedWorkspaceFile => SelectedWorkspaceFile is not null;
+
+    public bool CanSaveWorkspaceFile => !IsRunning
+        && SelectedWorkspaceFile is not null
+        && WorkspaceEditorDirty;
 
     public AgentViewModel(
         IAgentService agent,
@@ -1613,6 +1626,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         if (CurrentTask is null || string.IsNullOrWhiteSpace(ReplyText)) return;
         var taskId = CurrentTask.TaskId;
+        var resumeTaskId = CurrentTask.ParentTaskId ?? taskId;
 
         // Routing, not a second control: a running task gets a steering
         // instruction, a paused one gets an answer to its question.
@@ -1635,7 +1649,7 @@ public partial class AgentViewModel : ViewModelBase
             // Same approve-and-continue shape as ApproveReviewAsync: a
             // reply that unblocked the task should resume the loop instead
             // of requiring a separate manual step.
-            await ResumeAgentLoopIfRunnableAsync(taskId);
+            await ResumeAgentLoopIfRunnableAsync(resumeTaskId);
         }
         catch (Exception ex)
         {
@@ -2095,12 +2109,16 @@ public partial class AgentViewModel : ViewModelBase
     {
         var generation = ++_workspaceFilesGeneration;
         var selectedPath = SelectedWorkspaceFile?.RelativePath;
+        var preserveDirtyEditor = WorkspaceEditorDirty && !string.IsNullOrWhiteSpace(selectedPath);
         var query = WorkspaceFileQuery;
         var options = BuildOptions();
         WorkspaceFiles.Clear();
-        WorkspaceFilePreview = string.Empty;
-        WorkspaceFileSummary = string.Empty;
-        SelectedWorkspaceFile = null;
+        if (!preserveDirtyEditor)
+        {
+            WorkspaceFilePreview = string.Empty;
+            WorkspaceFileSummary = string.Empty;
+            SelectedWorkspaceFile = null;
+        }
 
         if (string.IsNullOrWhiteSpace(options.WorkspaceRoot))
             return;
@@ -2110,8 +2128,13 @@ public partial class AgentViewModel : ViewModelBase
             var files = await Task.Run(() =>
             {
                 return string.IsNullOrWhiteSpace(query)
-                    ? _workspaceTools.ListFiles(options)
-                        .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
+                    ? _workspaceTools.ListFileEntries(options)
+                        .Where(entry => !entry.IsTruncationNotice)
+                        .Select(entry => new AgentWorkspaceFileViewModel(
+                            entry.RelativePath,
+                            string.Empty,
+                            entry.ModifiedUtc,
+                            entry.IsDirectory))
                         .ToList()
                     : _workspaceTools.SearchFiles(options, query)
                         .Where(result => !result.IsTruncationNotice)
@@ -2127,8 +2150,24 @@ public partial class AgentViewModel : ViewModelBase
                 WorkspaceFiles.Add(file);
 
             if (!string.IsNullOrWhiteSpace(selectedPath))
-                SelectedWorkspaceFile = WorkspaceFiles.FirstOrDefault(file =>
+            {
+                var refreshedSelection = WorkspaceFiles.FirstOrDefault(file =>
                     string.Equals(file.RelativePath, selectedPath, StringComparison.Ordinal));
+                if (preserveDirtyEditor)
+                {
+                    if (refreshedSelection is not null)
+                    {
+                        _preserveWorkspaceEditorOnRefresh = true;
+                        SelectedWorkspaceFile = refreshedSelection;
+                        _preserveWorkspaceEditorOnRefresh = false;
+                    }
+                    WorkspaceEditorStatus = "Workspace refreshed. Unsaved owner changes are retained; save will recheck the loaded revision.";
+                }
+                else
+                {
+                    SelectedWorkspaceFile = refreshedSelection;
+                }
+            }
 
             OnPropertyChanged(nameof(WorkspaceFileCount));
             OnPropertyChanged(nameof(HasWorkspaceFiles));
@@ -2154,20 +2193,74 @@ public partial class AgentViewModel : ViewModelBase
             if (generation != _workspaceFileSelectionGeneration) return;
             WorkspaceFilePreview = string.Empty;
             WorkspaceFileSummary = string.Empty;
+            _workspaceFileRevisionHash = string.Empty;
+            _workspaceFileRevisionExisted = false;
             DraftProposedContent = string.Empty;
+            WorkspaceEditorDirty = false;
+            WorkspaceEditorStatus = string.Empty;
             return;
         }
 
-        var options = BuildOptions();
-        var preview = await Task.Run(() => _workspaceTools.ReadFile(options, file.RelativePath));
-        var summary = await Task.Run(() => _workspaceTools.SummarizeFile(options, file.RelativePath));
-        if (generation != _workspaceFileSelectionGeneration)
+        try
+        {
+            var options = BuildOptions();
+            var preview = await Task.Run(() => _workspaceTools.ReadFile(options, file.RelativePath));
+            var summary = await Task.Run(() => _workspaceTools.SummarizeFile(options, file.RelativePath));
+            if (generation != _workspaceFileSelectionGeneration)
+                return;
+
+            WorkspaceFilePreview = preview.Content;
+            WorkspaceFileSummary = summary.Summary;
+            _workspaceFileRevisionHash = AgentMutationPreparation.ComputeContentSha256(preview.Content);
+            _workspaceFileRevisionExisted = true;
+            WorkspaceEditorDirty = false;
+            WorkspaceEditorStatus = "Loaded. Owner Save writes directly; Agent patches remain reviewable.";
+            // Populate the editor with the exact revision that was read.
+            DraftProposedContent = WorkspaceFilePreview;
+        }
+        catch (Exception ex)
+        {
+            if (generation == _workspaceFileSelectionGeneration)
+            {
+                WorkspaceEditorStatus = "Load failed.";
+                SetError($"Could not load {file.RelativePath}: {ex.Message}");
+            }
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSaveWorkspaceFile))]
+    private async Task SaveWorkspaceFileAsync()
+    {
+        if (SelectedWorkspaceFile is null || !WorkspaceEditorDirty)
             return;
 
-        WorkspaceFilePreview = preview.Content;
-        WorkspaceFileSummary = summary.Summary;
-        // Populate draft proposed content with the current file preview by default
-        DraftProposedContent = WorkspaceFilePreview;
+        try
+        {
+            var relativePath = SelectedWorkspaceFile.RelativePath;
+            var result = await _workspaceTools.SaveOwnerFileAsync(
+                BuildOptions(), relativePath, DraftProposedContent ?? string.Empty,
+                _workspaceFileRevisionHash, _workspaceFileRevisionExisted);
+            if (result.Conflict)
+            {
+                WorkspaceEditorStatus = "Conflict. Reload before saving.";
+                SetError(result.Message);
+                return;
+            }
+
+            WorkspaceFilePreview = result.Content;
+            _workspaceFileRevisionHash = result.ContentSha256;
+            _workspaceFileRevisionExisted = true;
+            WorkspaceEditorDirty = false;
+            WorkspaceEditorStatus = result.Changed ? "Saved directly by the owner." : "No changes to save.";
+            StatusMessage = result.Message;
+            IsError = false;
+            await RefreshWorkspaceFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            WorkspaceEditorStatus = "Save failed.";
+            SetError($"Could not save the workspace file: {ex.Message}");
+        }
     }
 
     [RelayCommand]
@@ -2232,12 +2325,17 @@ public partial class AgentViewModel : ViewModelBase
             if (found is not null)
             {
                 var filePreview = _workspaceTools.ReadFile(BuildOptions(), found.RelativePath)?.Content ?? string.Empty;
-                var approved = RequestDraftPatchPreview is not null
-                    && await RequestDraftPatchPreview(new DraftPatchPreviewRequest(
-                        found.Id,
-                        found.RelativePath,
-                        filePreview,
-                        found.ProposedContent));
+                if (RequestDraftPatchPreview is null)
+                {
+                    StatusMessage = "Patch preview is unavailable in this session. No file was changed.";
+                    return;
+                }
+
+                var approved = await RequestDraftPatchPreview(new DraftPatchPreviewRequest(
+                    found.Id,
+                    found.RelativePath,
+                    filePreview,
+                    found.ProposedContent));
                 if (approved)
                     await HandlePreviewDecisionAsync(found.Id, apply: true);
             }
@@ -2256,6 +2354,42 @@ public partial class AgentViewModel : ViewModelBase
         try
         {
             var selectedPath = SelectedWorkspaceFile?.RelativePath;
+            if (found.IsPrepared)
+            {
+                if (!TryGetAuthoritativePendingPatch(CurrentTask, found, out var pending))
+                {
+                    StatusMessage = "The prepared patch changed before approval. Refresh Changes and review the current proposal.";
+                    await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+                    return;
+                }
+
+                var result = await _agent.AppendApprovalAsync(
+                    CurrentTask.TaskId,
+                    "changes",
+                    approved: true,
+                    AgentApprovalFingerprint.Resolve(pending),
+                    BuildOptions());
+                await RefreshReviewQueueAsync();
+                await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+                if (result.Outcome is AgentMutationOutcome.Applied or AgentMutationOutcome.AlreadySatisfied)
+                {
+                    StatusMessage = result.Outcome == AgentMutationOutcome.Applied
+                        ? $"Patch for {found.RelativePath} applied and verified."
+                        : $"Patch for {found.RelativePath} was already satisfied and verified.";
+                    await RefreshWorkspaceFilesAsync();
+                    if (!string.IsNullOrWhiteSpace(selectedPath))
+                        SelectedWorkspaceFile = WorkspaceFiles.FirstOrDefault(file => file.RelativePath == selectedPath);
+                    await ResumeAgentLoopIfRunnableAsync(CurrentTask?.ParentTaskId ?? CurrentTask?.TaskId ?? string.Empty);
+                }
+                else
+                {
+                    StatusMessage = string.IsNullOrWhiteSpace(result.Message)
+                        ? "The prepared patch was not applied. Review the current task state."
+                        : result.Message;
+                }
+                return;
+            }
+
             var outcome = await _patchReview.ApplyAsync(CurrentTask, found, BuildOptions());
             StatusMessage = outcome switch
             {
@@ -2274,6 +2408,27 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
+    private static bool TryGetAuthoritativePendingPatch(
+        AgentTaskState task,
+        AgentDraftPatch patch,
+        out AgentPendingToolAction pending)
+    {
+        pending = task.PendingToolAction!;
+        return pending is { IsPrepared: true }
+            && patch.IsPrepared
+            && string.Equals(patch.ProposalId, pending.ProposalId, StringComparison.Ordinal)
+            && patch.ProposalRevision == pending.ProposalRevision
+            && string.Equals(patch.WorkspaceRoot, pending.WorkspaceRoot, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(patch.RelativePath, pending.RelativePath, StringComparison.Ordinal)
+            && string.Equals(patch.ExpectedPreImageSha256, pending.ExpectedPreImageSha256, StringComparison.Ordinal)
+            && patch.ExpectedPreImageExisted == pending.ExpectedPreImageExisted
+            && string.Equals(patch.ProposedContent, pending.ProposedContent, StringComparison.Ordinal)
+            && string.Equals(patch.ProposedContentSha256, pending.ProposedContentSha256, StringComparison.Ordinal)
+            && string.Equals(patch.PolicyFingerprint, pending.PolicyFingerprint, StringComparison.Ordinal)
+            && patch.PreparedAt == pending.PreparedAt
+            && string.Equals(patch.ApprovalFingerprint, AgentApprovalFingerprint.Resolve(pending), StringComparison.Ordinal);
+    }
+
     [RelayCommand]
     private async Task RejectPatchAsync(AgentDraftPatchViewModel? patch)
     {
@@ -2283,6 +2438,27 @@ public partial class AgentViewModel : ViewModelBase
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
+                if (found.IsPrepared)
+                {
+                    if (!TryGetAuthoritativePendingPatch(CurrentTask, found, out var pending))
+                    {
+                        StatusMessage = "The prepared patch changed before rejection. Refresh Changes and review the current proposal.";
+                        await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+                        return;
+                    }
+
+                    var result = await _agent.AppendApprovalAsync(
+                        CurrentTask.TaskId,
+                        "changes",
+                        approved: false,
+                        AgentApprovalFingerprint.Resolve(pending),
+                        BuildOptions());
+                    await RefreshReviewQueueAsync();
+                    await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+                    StatusMessage = result.Applied ? $"Patch for {patch.RelativePath} rejected." : result.Message;
+                    return;
+                }
+
                 await _patchReview.RejectAsync(CurrentTask, found);
                 StatusMessage = $"Patch for {patch.RelativePath} rejected.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
@@ -2303,6 +2479,26 @@ public partial class AgentViewModel : ViewModelBase
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
+                if (found.IsPrepared)
+                {
+                    if (!TryGetAuthoritativePendingPatch(CurrentTask, found, out var pending))
+                    {
+                        StatusMessage = "The prepared patch changed before blocking. Refresh Changes and review the current proposal.";
+                        await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+                        return;
+                    }
+
+                    var result = await _agent.BlockPendingActionAsync(
+                        CurrentTask.TaskId,
+                        "changes",
+                        AgentApprovalFingerprint.Resolve(pending),
+                        BuildOptions());
+                    await RefreshReviewQueueAsync();
+                    await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+                    StatusMessage = result.Applied ? $"Patch for {patch.RelativePath} blocked." : result.Message;
+                    return;
+                }
+
                 await _patchReview.BlockAsync(CurrentTask, found);
                 StatusMessage = $"Patch for {patch.RelativePath} blocked.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
@@ -2926,7 +3122,11 @@ public partial class AgentViewModel : ViewModelBase
         SelectedWorkspaceFile = null;
         WorkspaceFilePreview = string.Empty;
         WorkspaceFileSummary = string.Empty;
+        _workspaceFileRevisionHash = string.Empty;
+        _workspaceFileRevisionExisted = false;
         DraftProposedContent = string.Empty;
+        WorkspaceEditorDirty = false;
+        WorkspaceEditorStatus = string.Empty;
         DraftPreview = string.Empty;
     }
 
@@ -2992,6 +3192,26 @@ public partial class AgentViewModel : ViewModelBase
         // describes this root, so it follows the root.
         _ = RunOnUiAsync(RefreshWorkspaceFilesAsync);
     }
+
+    partial void OnDraftProposedContentChanged(string value)
+    {
+        WorkspaceEditorDirty = SelectedWorkspaceFile is not null
+            && !string.Equals(value, WorkspaceFilePreview, StringComparison.Ordinal);
+        if (SelectedWorkspaceFile is not null && WorkspaceEditorDirty)
+            WorkspaceEditorStatus = "Unsaved owner changes.";
+        else if (SelectedWorkspaceFile is not null && WorkspaceEditorStatus.Length == 0)
+            WorkspaceEditorStatus = "Loaded.";
+
+        SaveWorkspaceFileCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSaveWorkspaceFile));
+    }
+
+    partial void OnWorkspaceEditorDirtyChanged(bool value)
+    {
+        SaveWorkspaceFileCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSaveWorkspaceFile));
+    }
+
     /// <summary>
     /// r12 02-async-and-threading.md 2.3: reuses the 300 ms + CTS debounce
     /// shape from <see cref="MainWindowViewModel.OnSearchQueryChanged"/>
@@ -3018,6 +3238,19 @@ public partial class AgentViewModel : ViewModelBase
     partial void OnSelectedWorkspaceFileChanged(AgentWorkspaceFileViewModel? value)
     {
         OnPropertyChanged(nameof(HasSelectedWorkspaceFile));
+        if (_preserveWorkspaceEditorOnRefresh)
+        {
+            // Invalidate a slower load started for the previous selection before
+            // retaining the owner's dirty editor text.
+            _workspaceFileSelectionGeneration++;
+            SaveWorkspaceFileCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(CanSaveWorkspaceFile));
+            return;
+        }
+        WorkspaceEditorDirty = false;
+        WorkspaceEditorStatus = value is null ? string.Empty : "Loading file...";
+        SaveWorkspaceFileCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSaveWorkspaceFile));
         var generation = ++_workspaceFileSelectionGeneration;
         _ = LoadSelectedWorkspaceFileAsync(value, generation);
     }
@@ -3141,6 +3374,8 @@ public partial class AgentViewModel : ViewModelBase
         ContinuePlannedTaskCommand.NotifyCanExecuteChanged();
         FinishTaskCommand.NotifyCanExecuteChanged();
         SendReplyCommand.NotifyCanExecuteChanged();
+        SaveWorkspaceFileCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSaveWorkspaceFile));
         OnPropertyChanged(nameof(CanShowNewTaskButton));
         // r29 doc 03 3.5: the reply row's caption, watermark, button label and
         // visibility all turn on whether a run is in flight.

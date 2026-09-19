@@ -359,6 +359,7 @@ public sealed class AdaptiveInferenceTests
     [Theory]
     [InlineData("out of memory", ServerLaunchFailureKind.ResourceExhaustion)]
     [InlineData("invalid value for --ctx-size", ServerLaunchFailureKind.Configuration)]
+    [InlineData("unsupported ggml tensor type 42", ServerLaunchFailureKind.Configuration)]
     public void Launch_failures_are_classified_without_treating_unknown_as_resource_exhaustion(
         string message, ServerLaunchFailureKind expected)
     {

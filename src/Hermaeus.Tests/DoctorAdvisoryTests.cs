@@ -93,6 +93,23 @@ public sealed class DoctorAdvisoryTests
     }
 
     [Fact]
+    public void Outdated_llama_cpp_check_exposes_update_primary_and_services_secondary_actions()
+    {
+        var outdated = DoctorService.BuildCheck(
+            "llama-server-update", "llama.cpp update check", DoctorCheckStatus.Warning,
+            "Installed old; latest new", "Update is available", "Update llama.cpp", true,
+            "diagnostics", "Runtime");
+        var current = DoctorService.BuildCheck(
+            "llama-server-update", "llama.cpp update check", DoctorCheckStatus.Info,
+            "Installed current", "detail", "Open Services", true, "diagnostics", "Runtime");
+
+        Assert.Equal(DoctorActionKind.Fix, outdated.ActionKind);
+        Assert.True(outdated.HasSecondaryAction);
+        Assert.Equal("Open Services", outdated.SecondaryActionLabel);
+        Assert.False(current.HasSecondaryAction);
+    }
+
+    [Fact]
     public void Server_specific_doctor_findings_keep_a_typed_remediation_target()
     {
         var check = DoctorService.BuildCheck(

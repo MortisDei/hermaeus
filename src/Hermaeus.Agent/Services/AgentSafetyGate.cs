@@ -41,6 +41,12 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         if (string.IsNullOrWhiteSpace(toolName))
             return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Missing tool name.");
 
+        // Read-only authority is independent of the model's claimed
+        // requires_approval bit. A model asking for approval around a read
+        // must not turn listing/searching/reading into an approval ceremony.
+        if (ReadOnlyTools.Contains(toolName))
+            return new AgentToolPolicyDecision(AgentToolDisposition.Allowed, AgentRiskLevel.Low, "Read-only local operation.");
+
         if (wouldMutate)
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Local write actions require approval.");
 
@@ -57,9 +63,6 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
 
         if (toolName.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "MCP tool calls always require approval, regardless of what the server claims about itself.");
-
-        if (ReadOnlyTools.Contains(toolName))
-            return new AgentToolPolicyDecision(AgentToolDisposition.Allowed, AgentRiskLevel.Low, "Read-only local operation.");
 
         if (HighRiskTools.Contains(toolName))
             return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "High-risk or external action is blocked.");

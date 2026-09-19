@@ -69,6 +69,19 @@ public sealed class R33UxAndPetTests
     }
 
     [Fact]
+    public void Pet_blink_is_a_small_eye_overlay_and_never_hides_the_pet()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "Hermaeus.Desktop", "Controls", "PetSprite.cs"));
+
+        Assert.Contains("BlinkFrameIndex", source, StringComparison.Ordinal);
+        Assert.Contains("BlinkEyeBand", source, StringComparison.Ordinal);
+        Assert.Contains("_blinkActive", source, StringComparison.Ordinal);
+        Assert.Contains("context.DrawImage(_spritesheet, blinkSource, blinkDestination)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsVisible = false", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Pet_import_rejects_traversal_and_executable_content()
     {
         using var temp = new TempDir();
@@ -113,22 +126,20 @@ public sealed class R33UxAndPetTests
     }
 
     [Fact]
-    public void Monaco_bundle_exposes_only_the_local_editor_contract()
+    public void Workspace_editor_has_no_embedded_browser_bundle()
     {
-        var indexPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Monaco", "index.html");
-        Assert.True(File.Exists(indexPath));
-        var html = File.ReadAllText(indexPath);
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var assetDirectory = Path.Combine(root, "src", "Hermaeus.Desktop", "Assets", "Monaco");
+        Assert.False(Directory.Exists(assetDirectory));
 
-        Assert.Contains("hermaeusEditorApi", html, StringComparison.Ordinal);
-        Assert.Contains("setDocument", html, StringComparison.Ordinal);
-        Assert.Contains("getText", html, StringComparison.Ordinal);
-        Assert.Contains("setTheme", html, StringComparison.Ordinal);
-        Assert.DoesNotContain("http://", html, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("https://", html, StringComparison.OrdinalIgnoreCase);
+        var project = File.ReadAllText(Path.Combine(root, "src", "Hermaeus.Desktop", "Hermaeus.Desktop.csproj"));
+        Assert.DoesNotContain("Avalonia.Controls.WebView", project, StringComparison.Ordinal);
+        Assert.DoesNotContain("Monaco", project, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Avalonia.AvaloniaEdit", project, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Workspace_editor_keeps_local_lifecycle_and_fallback_contract()
+    public void Workspace_editor_is_one_local_editing_surface_with_owner_save_hook()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
         var source = File.ReadAllText(Path.Combine(
@@ -138,27 +149,17 @@ public sealed class R33UxAndPetTests
             "Views",
             "WorkspaceEditorView.axaml.cs"));
 
-        Assert.Contains("TryCreateMonaco", source, StringComparison.Ordinal);
-        Assert.Contains("BuildFallbackEditor", source, StringComparison.Ordinal);
+        Assert.Contains("BuildEditor", source, StringComparison.Ordinal);
+        Assert.Contains("TextEditor", source, StringComparison.Ordinal);
+        Assert.Contains("SaveCommand", source, StringComparison.Ordinal);
+        Assert.Contains("KeyModifiers.Control", source, StringComparison.Ordinal);
         Assert.Contains("OnDetachedFromVisualTree", source, StringComparison.Ordinal);
-        Assert.Contains("_monacoAttempted = false", source, StringComparison.Ordinal);
-        Assert.Contains("DisposeWebViewAsync", source, StringComparison.Ordinal);
-        Assert.Contains("ActualThemeVariantChanged", source, StringComparison.Ordinal);
-        Assert.Contains("MaxMonacoCharacters", source, StringComparison.Ordinal);
-        Assert.Contains("MonacoReadyTimeout", source, StringComparison.Ordinal);
-        Assert.Contains("FallbackIfMonacoDoesNotBecomeReadyAsync", source, StringComparison.Ordinal);
-        Assert.Contains("3 seconds", source, StringComparison.Ordinal);
-        Assert.Contains("new Uri(Path.GetFullPath(indexPath))", source, StringComparison.Ordinal);
-        Assert.Contains("layout()", source, StringComparison.Ordinal);
-        Assert.Contains("AttachFallbackEditor", source, StringComparison.Ordinal);
-        Assert.Contains("AvaloniaEdit fallback", source, StringComparison.Ordinal);
         Assert.Contains("_attachedToVisualTree", source, StringComparison.Ordinal);
         Assert.Contains("EditorHost.SizeChanged", source, StringComparison.Ordinal);
-        Assert.Contains("webView.ZIndex = 1", source, StringComparison.Ordinal);
-        Assert.Contains("webView.IsVisible = false", source, StringComparison.Ordinal);
-        Assert.Contains("_fallbackEditor.IsVisible = true", source, StringComparison.Ordinal);
         Assert.Contains("IsReadOnly = false", source, StringComparison.Ordinal);
         Assert.Contains("ToolTip.SetTip", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Monaco", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("WebView", source, StringComparison.OrdinalIgnoreCase);
 
         var appStyles = File.ReadAllText(Path.Combine(root, "src", "Hermaeus.Desktop", "App.axaml"));
         Assert.Contains("avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml", appStyles, StringComparison.Ordinal);
@@ -171,6 +172,18 @@ public sealed class R33UxAndPetTests
             "AgentView.axaml"));
         Assert.Contains("Height=\"320\"", editorHost, StringComparison.Ordinal);
         Assert.Contains("MaxHeight=\"600\"", editorHost, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HuggingFace_selection_brings_repository_details_and_files_into_view()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var view = File.ReadAllText(Path.Combine(root, "src", "Hermaeus.Desktop", "Views", "HuggingFaceWorkspaceView.axaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src", "Hermaeus.Desktop", "Views", "HuggingFaceWorkspaceView.axaml.cs"));
+
+        Assert.Contains("x:Name=\"SelectedHfRepoPanel\"", view, StringComparison.Ordinal);
+        Assert.Contains("SelectedHfRepoPanel.BringIntoView()", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("IsLoadingHfFiles", codeBehind, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -8,16 +8,28 @@ namespace Hermaeus.Services;
 /// </summary>
 internal static class AudioFeedbackAssets
 {
+    internal sealed record Cue(string Id, IReadOnlyList<int> Frequencies, int ToneMilliseconds = 110, int GapMilliseconds = 45);
+
+    public static Cue Resolve(AudioFeedbackEventKind kind) => kind switch
+    {
+        AudioFeedbackEventKind.TaskNeedsApproval => new("task-needs-approval-ascending", [660, 880]),
+        AudioFeedbackEventKind.TaskCompleted => new("task-completed-triad", [523, 659, 784]),
+        AudioFeedbackEventKind.TaskFailed => new("task-failed-descending", [440, 330], 180, 70),
+        AudioFeedbackEventKind.ManagedRuntimeReady => new("runtime-ready-ascending", [440, 660, 880]),
+        AudioFeedbackEventKind.ManagedRuntimeFailed => new("runtime-failed-descending", [440, 220], 180, 70),
+        AudioFeedbackEventKind.LongOperationCompleted => new("long-operation-completed-triad", [392, 523, 659]),
+        AudioFeedbackEventKind.RecordingStarted => new("recording-started-short", [880], 90, 20),
+        AudioFeedbackEventKind.RecordingStopped => new("recording-stopped-short", [660], 90, 20),
+        _ => new("generic-notification", [520])
+    };
+
     public static byte[] CreateWav(AudioFeedbackEventKind kind, int volume)
     {
-        var sampleRate = 8000;
-        var sampleCount = kind == AudioFeedbackEventKind.TaskFailed ? 1600 : 900;
-        var frequency = kind switch
-        {
-            AudioFeedbackEventKind.TaskFailed or AudioFeedbackEventKind.ManagedRuntimeFailed => 330,
-            AudioFeedbackEventKind.TaskNeedsApproval => 660,
-            _ => 520
-        };
+        var cue = Resolve(kind);
+        const int sampleRate = 16000;
+        var toneSamples = Math.Max(1, sampleRate * cue.ToneMilliseconds / 1000);
+        var gapSamples = Math.Max(0, sampleRate * cue.GapMilliseconds / 1000);
+        var sampleCount = cue.Frequencies.Count * toneSamples + Math.Max(0, cue.Frequencies.Count - 1) * gapSamples;
         var amplitude = (short)(Math.Clamp(volume, 0, 100) * 300);
         var dataLength = sampleCount * sizeof(short);
         using var stream = new MemoryStream(44 + dataLength);
@@ -37,8 +49,20 @@ internal static class AudioFeedbackAssets
         writer.Write(dataLength);
         for (var i = 0; i < sampleCount; i++)
         {
-            var envelope = i < 40 ? i / 40d : (sampleCount - i < 80 ? (sampleCount - i) / 80d : 1d);
-            writer.Write((short)(Math.Sin(i * 2 * Math.PI * frequency / sampleRate) * amplitude * envelope));
+            var cuePosition = toneSamples + gapSamples;
+            var frequencyIndex = Math.Min(cue.Frequencies.Count - 1, i / cuePosition);
+            var tonePosition = i % cuePosition;
+            if (tonePosition >= toneSamples)
+            {
+                writer.Write((short)0);
+                continue;
+            }
+
+            var fadeIn = Math.Min(1d, tonePosition / (sampleRate * 0.008d));
+            var fadeOut = Math.Min(1d, (toneSamples - tonePosition) / (sampleRate * 0.012d));
+            var envelope = Math.Min(fadeIn, fadeOut);
+            var frequency = cue.Frequencies[frequencyIndex];
+            writer.Write((short)(Math.Sin(tonePosition * 2 * Math.PI * frequency / sampleRate) * amplitude * envelope));
         }
         return stream.ToArray();
     }

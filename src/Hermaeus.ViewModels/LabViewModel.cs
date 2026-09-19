@@ -62,6 +62,12 @@ public partial class ExperienceRowViewModel : ViewModelBase
     public string ContextSummary => SummarizeJson(Experience.ContextJson);
     public string ActionSummary => SummarizeJson(Experience.ActionJson);
     public string ResultSummary => SummarizeLabCompletion(Experience.ActionJson, EvidenceRecords);
+    /// <summary>Human-readable outcome shown before technical evidence and raw JSON.</summary>
+    public string HumanSummary => IsLabCompletionSummary
+        ? ResultSummary
+        : string.IsNullOrWhiteSpace(Experience.Outcome.Detail)
+            ? $"{OutcomeLabel}. {ActionSummary}"
+            : $"{OutcomeLabel}: {Experience.Outcome.Detail}";
     public LabResultSummaryViewModel? ResultDetails { get; }
     [ObservableProperty] private bool _isExportSelected;
 

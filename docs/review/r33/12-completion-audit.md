@@ -1,5 +1,8 @@
 # 12. R33 strict completion audit
 
+> Historical completion snapshot. It is retained as evidence and is superseded
+> for current status by [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+
 Audit date: 2026-09-14. Branch: `r33/planning` at `3801a0d`. Release target:
 `v0.41.0-beta`.
 Baseline: `c944feb`. Implementation closeout: the local continuation commit

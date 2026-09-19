@@ -562,7 +562,9 @@ public partial class DoctorViewModel : ObservableObject
         }
 
         var wantsLlamaDownload = check.Key == "llama-server" && check.FixLabel.StartsWith("Download", StringComparison.OrdinalIgnoreCase);
-        if (check.Key == "llama-server-update" || wantsLlamaDownload)
+        if ((check.Key == "llama-server-update"
+                && check.FixLabel.StartsWith("Update", StringComparison.OrdinalIgnoreCase))
+            || wantsLlamaDownload)
         {
             await RunLlamaUpdateAsync();
             return;
@@ -601,5 +603,26 @@ public partial class DoctorViewModel : ObservableObject
             RequestNavigateToTarget(typedTarget);
         else
             RequestNavigate?.Invoke(target);
+    }
+
+    [RelayCommand]
+    private void RunSecondaryAction(DoctorCheck? check)
+    {
+        if (check is null || !check.HasSecondaryAction)
+            return;
+
+        if (RequestNavigateToTarget is not null)
+        {
+            RequestNavigateToTarget(check.Target ?? new DoctorActionTarget("services"));
+            return;
+        }
+
+        if (RequestNavigate is not null)
+        {
+            RequestNavigate("services");
+            return;
+        }
+
+        _toasts.Show("Navigation unavailable", "Doctor navigation is not configured.", ToastKind.Warning, 4000);
     }
 }

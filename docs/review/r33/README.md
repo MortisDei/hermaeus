@@ -1,18 +1,17 @@
 # Review round 33: Hermaeus beyond the desktop
 
-Status: **mandatory local implementation complete on `r33/planning`; owner
-validation remains**. The pack is the authoritative R33 implementation record
-for the `v0.41.0-beta` target.
-Local commits are
-authorized; push, PR, merge, tag, release, settings, and other publication
-actions remain owner-only.
+Status: **R33 continuation is closed locally on `r33/round`; owner validation
+remains**. `HEAD` is `b620944`; the current working-tree implementation and
+evidence are recorded in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+This current closeout supersedes implementation claims in the older planning
+snapshots below without rewriting their historical evidence.
+The implementation remains uncommitted; push, PR, merge, tag, release, settings,
+and other publication actions remain owner-only.
 
-Baseline: `c944febf8e7eda96dcf8f6461a02e870b40b8465`, verified against remote
-`main` on 2026-09-07. The review pack was anchored locally before implementation.
-Local implementation closeout: the local continuation commit for this audit.
-Production and regression-test changes are scoped to the batches below. The
-only new runtime dependency is the bounded Desktop WebView used by the local
-workspace editor; no workflow or owner-data publication changes are included.
+The earlier `r33/planning` baseline remains historical. Production and
+regression-test changes are scoped to the batches below. No new runtime
+dependency or owner-data publication action is included in the current
+continuation.
 
 ## Recommendation
 
@@ -25,8 +24,8 @@ application lifecycle and mutation authority do not yet follow from it.
 The mandatory result is a Desktop client and an exclusive headless application
 driver exercising the same production workflows, with trustworthy Agent
 mutation outcomes, bounded runtime recovery, and useful evidence/navigation.
-Agent HTTP execution and Monaco remain conditional branches with explicit
-exit gates. Neither may hold correctness repairs hostage.
+Agent HTTP execution remains conditional with an explicit exit gate. It may not
+hold correctness repairs hostage.
 
 ## Implementation status
 
@@ -64,17 +63,18 @@ The mandatory R33 scope is implemented locally:
   expanded-byte enforcement, and rollback-safe commit cleanup.
 - B9: integrated sequential verification, package validation, and this
   implementation ledger. Owner platform and publication gates remain open.
-- P1: a local, offline Monaco workspace editor is preferred when the native
-  WebView host is available, with a bounded AvaloniaEdit fallback. The bridge
-  carries only document text, display path, theme, and layout.
+- P1 continuation: Monaco and the WebView dependency/assets were removed after
+  the bounded comparison decision. AvaloniaEdit is the sole workspace editor;
+  owner Save/Ctrl+S is revision-checked and atomic, while Agent patches remain
+  prepared and approval-gated.
 - P2: generic ChatGPT Pet v2 package support is data-only, bounded, disabled
   by default, and includes the bundled Moss package without granting it
   filesystem, network, script, or chat-content access.
 
 Agent HTTP execution remains deferred because its R33 ownership gate was not
 earned. JSONL/runtime experiments remain deferred pending installed-runtime
-evidence. Monaco is implemented locally but still requires owner platform and
-native WebView validation before it can be called a fully shipped editor path.
+evidence. Native desktop rendering, playback, pet interaction, and live
+managed-runtime walkthroughs still require owner validation.
 
 Automated closure evidence includes sequential Debug and Release solution builds
 and test harnesses, focused Lab/Benchmark authority regressions, the isolated
@@ -107,6 +107,7 @@ scenario, owner defect, and conditional branch are recorded in
 | [11-dependency-roadmap.md](11-dependency-roadmap.md) | Batches, dependencies, acceptance gates, implementation handoff |
 | [12-completion-audit.md](12-completion-audit.md) | Strict batch, scenario, defect, conditional, and owner-gate audit |
 | [13-lab-benchmark-authority-audit.md](13-lab-benchmark-authority-audit.md) | Complete Lab recipe matrix, shared runtime evidence contract, Benchmark eligibility, and native Linux receipts |
+| [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md) | Current r33/round A-T disposition, automated evidence, and staged owner dogfood checklist |
 
 ## Evidence vocabulary
 
@@ -122,7 +123,7 @@ scenario, owner defect, and conditional branch are recorded in
 - **Unknown (U):** absent evidence. Never translate this into zero, supported,
   passed, safe-to-apply, or a completed implementation.
 
-## What changed from the supplied direction
+## What changed from the supplied direction (historical planning snapshot)
 
 1. Workspace inheritance, Run/Changes/Workspace/History, core composition,
    isolated Lab recipes, resource admission, and Apply transactions already
@@ -157,7 +158,10 @@ scenario, owner defect, and conditional branch are recorded in
   changes no executable behavior; retain the mandatory final precommit coverage
   gate for subsequent authorized implementation.
 
-## Verification performed during implementation
+## Verification performed during implementation (historical snapshot)
+
+The current evidence and A-T dispositions superseding this snapshot are in
+[14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
 
 - Debug and Release solution builds passed with zero warnings and zero errors.
 - The complete sequential Debug and Release harnesses each passed 2,695 tests,
@@ -198,8 +202,9 @@ scenario, owner defect, and conditional branch are recorded in
   Native Windows, live managed-runtime/GPU behavior, GUI pixel acceptance, and
   the owner PR/check gate remain outside this local proof.
 
-Authoritative user-facing behavior docs and CHANGELOG now describe the
-implemented R33 behavior and `v0.41.0-beta` target. Archived R32 evidence and
-the central deferred ledger remain intact; JSONL/runtime experiments and Agent
-HTTP execution remain deferred, while Monaco and ChatGPT Pet remain subject to
-the explicit owner GUI/platform gates in the completion audit.
+Authoritative user-facing behavior docs and CHANGELOG now describe the current
+R33 AvaloniaEdit/direct-save, convergence, evidence, audio, and pet behavior and
+the `v0.41.0-beta` target. Archived R32/R33 planning evidence and the central
+deferred ledger remain intact; JSONL/runtime experiments and Agent HTTP
+execution remain deferred, while native desktop rendering, playback, managed
+runtime, GPU, and ChatGPT Pet owner gates remain explicit in doc 14.

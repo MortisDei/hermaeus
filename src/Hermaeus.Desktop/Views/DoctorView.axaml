@@ -89,6 +89,13 @@
                                                 CommandParameter="{Binding}"
                                                 Padding="10,5" CornerRadius="6"
                                                 ToolTip.Tip="{Binding ActionTooltip}" />
+                                        <Button Content="{Binding SecondaryActionLabel}"
+                                                IsVisible="{Binding HasSecondaryAction}"
+                                                IsEnabled="{Binding !DataContext.IsScanning, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                Command="{Binding $parent[ItemsControl].DataContext.RunSecondaryActionCommand}"
+                                                CommandParameter="{Binding}"
+                                                Padding="10,5" CornerRadius="6"
+                                                ToolTip.Tip="{Binding SecondaryActionTooltip}" />
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock Text="{Binding Detail}" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />

@@ -34,14 +34,19 @@ public sealed class AgentService : IAgentService
         once. Use create_file (relative_path, content) only for new files; it
         refuses to overwrite an existing one. draft_patch, edit_file, create_file,
         apply_draft_patch, and run_command always require approval. Use
+        ask_user only when required information or a real user decision is
+        missing. Do not ask for permission to continue ordinary read-only
+        work, and do not repeat a question that the user has already answered.
         set_plan (steps: array of {description, status: pending|in_progress|done})
         to keep a visible checklist for multi-step goals; it replaces the
         whole plan each time. Use plan_subtasks (subtasks: array of 2 to 6
         {goal, profile, success_criteria, model_id?}, profile one of general|correctness|
         security|tests|performance|docs) only for a broad, multi-domain goal
         that should be split into focused sub-tasks each run through this
-        same loop; never for a goal that fits a normal plan (set_plan is the
-        right tool there). plan_subtasks always requires approval, and a
+        same loop. A simple one-file create or edit goal belongs on the parent
+        path: use set_plan for a checklist and create_file or edit_file for the
+        prepared mutation. Do not use plan_subtasks merely to make a checklist
+        or to delegate ordinary file creation. plan_subtasks always requires approval, and a
         sub-task can never itself request plan_subtasks. run_command only accepts one of the workspace's
         own pre-declared safe recipes (for example "dotnet build" or "dotnet
         test") passed verbatim as the "command" argument; it cannot run
@@ -174,7 +179,7 @@ public sealed class AgentService : IAgentService
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"},"content":{"type":"string"}},"required":["relative_path","content"]}""")),
             new("set_plan", "Replace the task's visible plan checklist. Executes immediately, never requires approval.",
                 Schema("""{"type":"object","properties":{"steps":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["description"]}}},"required":["steps"]}""")),
-            new("plan_subtasks", "Propose splitting the current goal into 2 to 6 focused sub-tasks, each with a goal, fixed profile, success criteria, and optional model_id chosen exactly from EligibleModels. Omit model_id to inherit the parent model. Always requires approval.",
+            new("plan_subtasks", "Propose splitting a broad multi-domain goal into 2 to 6 focused sub-tasks. Do not use for a simple one-file create or edit goal or merely to make a checklist; use set_plan and the parent create_file/edit_file path instead. Each sub-task needs a goal, fixed profile, success criteria, and optional model_id chosen exactly from EligibleModels. Omit model_id to inherit the parent model. Always requires approval.",
                 Schema("""{"type":"object","properties":{"subtasks":{"type":"array","minItems":2,"maxItems":6,"items":{"type":"object","properties":{"goal":{"type":"string"},"profile":{"type":"string","enum":["general","correctness","security","tests","performance","docs"]},"success_criteria":{"type":"string"},"model_id":{"type":"string"}},"required":["goal","profile","success_criteria"]}}},"required":["subtasks"]}""")),
             new("run_command", "Run one of the workspace's own pre-declared safe recipes (e.g. \"dotnet build\"). Requires user approval.",
                 Schema("""{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""))
@@ -390,12 +395,28 @@ public sealed class AgentService : IAgentService
 
         var modelWasFrozen = !string.IsNullOrWhiteSpace(state.ModelId);
         var visibleModels = await GetVisibleModelsAsync(ct);
-        if (!modelWasFrozen)
-            state.ModelId = options.ModelId.Trim();
-        var selectedModel = visibleModels.FirstOrDefault(model => string.Equals(model.Id, state.ModelId, StringComparison.Ordinal));
-        if (modelWasFrozen && selectedModel is null)
-            return await PauseForUnavailableModelAsync(state, ct);
-        state.ModelDisplayName = selectedModel?.DisplayName ?? (string.IsNullOrWhiteSpace(state.ModelDisplayName) ? state.ModelId : state.ModelDisplayName);
+        var requestedModelId = modelWasFrozen ? state.ModelId : options.ModelId.Trim();
+        var selectedModel = AgentModelIdentityResolver.Resolve(visibleModels, requestedModelId);
+        if (selectedModel is null)
+        {
+            if (modelWasFrozen || requestedModelId.Length == 0)
+                return await PauseForUnavailableModelAsync(state, ct);
+
+            // Preserve the explicit caller-selected model path for providers
+            // whose inventory endpoint does not enumerate every directly
+            // addressable model. This is not a fallback: no other model is
+            // guessed, and a frozen task still requires a visible exact or
+            // unambiguous legacy reference before it can resume.
+            state.ModelId = requestedModelId;
+            state.ModelDisplayName = requestedModelId;
+        }
+        else
+        {
+            // Stable inventory identity is authoritative after the compatibility
+            // resolver has accepted a legacy display label.
+            state.ModelId = selectedModel.Id;
+            state.ModelDisplayName = selectedModel.DisplayName;
+        }
 
         state.Status = AgentTaskStatus.Running;
         await _store.SaveAsync(state, ct);
@@ -529,7 +550,9 @@ public sealed class AgentService : IAgentService
         await RecordStatedLessonsAsync(state, options, response, ct);
         var nextTool = response.NextAction.ToolName ?? string.Empty;
         AgentToolResult? executedToolResult = null;
+        AgentToolResult? attemptedToolResult = null;
         AgentToolResult? preparedToolResult = null;
+        var stoppedForNonProgress = false;
         if (response.NextAction.Type == AgentActionKind.Tool)
         {
             var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
@@ -644,7 +667,7 @@ public sealed class AgentService : IAgentService
                 {
                     var unavailable = specs.Select(s => s.ModelId).FirstOrDefault(modelId =>
                         !string.IsNullOrWhiteSpace(modelId)
-                        && !visibleModels.Any(model => string.Equals(model.Id, modelId, StringComparison.Ordinal)));
+                        && AgentModelIdentityResolver.Resolve(visibleModels, modelId) is null);
                     if (unavailable is not null)
                     {
                         decision = new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High,
@@ -674,6 +697,31 @@ public sealed class AgentService : IAgentService
             {
                 response.ThoughtSummary = $"The requested {nextTool} action was blocked before execution: {decision.Reason}";
                 response.UserMessage = response.ThoughtSummary;
+            }
+            if (preparation?.Pending is { } preparedMutation
+                && preparedMutation.MutationKind is not (AgentMutationKind.Command or AgentMutationKind.SubTaskPlan))
+            {
+                var equivalentReason = AgentConvergencePolicy.FindEquivalentMutation(state, preparedMutation);
+                if (equivalentReason is not null)
+                {
+                    decision = new AgentToolPolicyDecision(
+                        AgentToolDisposition.Blocked,
+                        decision.RiskLevel,
+                        equivalentReason);
+                    attemptedToolResult = new AgentToolResult
+                    {
+                        Tool = nextTool,
+                        Arguments = AgentMutationPreparation.CloneArguments(response.NextAction.Arguments),
+                        ResultSummary = equivalentReason,
+                        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(
+                            nextTool,
+                            new AgentToolOutcomeEvidence(
+                                AgentToolOutcomeSignal.NoEffect,
+                                Detail: "A verified receipt already established this mutation or its complete output."))
+                    };
+                    response.ThoughtSummary = equivalentReason;
+                    response.UserMessage = equivalentReason;
+                }
             }
             if (decision.Disposition == AgentToolDisposition.RequiresApproval)
             {
@@ -709,7 +757,7 @@ public sealed class AgentService : IAgentService
                     // below: Blocked, with an explanatory result (r15
                     // 03-scenarios-and-hardening.md 3.2).
                     state.Status = AgentTaskStatus.Blocked;
-                    state.ToolResults.Add(new AgentToolResult
+                    var unavailableResult = new AgentToolResult
                     {
                         Tool = nextTool,
                         Arguments = response.NextAction.Arguments,
@@ -717,7 +765,9 @@ public sealed class AgentService : IAgentService
                         NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(nextTool,
                             new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Unavailable,
                                 Detail: "No registered executor exists for the requested tool."))
-                    });
+                    };
+                    state.ToolResults.Add(unavailableResult);
+                    attemptedToolResult = unavailableResult;
                 }
             }
             if (decision.Disposition == AgentToolDisposition.Blocked)
@@ -833,7 +883,7 @@ public sealed class AgentService : IAgentService
                 else
                 {
                     state.Status = AgentTaskStatus.Blocked;
-                    state.ToolResults.Add(new AgentToolResult
+                    var unavailableResult = new AgentToolResult
                     {
                         Tool = nextTool,
                         Arguments = response.NextAction.Arguments,
@@ -841,7 +891,9 @@ public sealed class AgentService : IAgentService
                         NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(nextTool,
                             new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Unavailable,
                                 Detail: "No registered executor exists for the requested tool."))
-                    });
+                    };
+                    state.ToolResults.Add(unavailableResult);
+                    attemptedToolResult = unavailableResult;
                 }
             }
 
@@ -864,10 +916,33 @@ public sealed class AgentService : IAgentService
                 // approval behind it.
                 state.PendingToolAction = null;
             }
+
+            var convergence = AgentConvergencePolicy.ObserveTool(
+                state,
+                nextTool,
+                response.NextAction.Arguments,
+                decision,
+                executedToolResult ?? attemptedToolResult);
+            if (convergence.ShouldStop)
+            {
+                stoppedForNonProgress = true;
+                StopForNonProgress(state, response, convergence);
+            }
         }
 
-        if (response.NextAction.Type == AgentActionKind.AskUser)
-            state.Status = AgentTaskStatus.WaitingForUser;
+        if (response.NextAction.Type == AgentActionKind.AskUser && !stoppedForNonProgress)
+        {
+            var convergence = AgentConvergencePolicy.ObserveAskUser(state, response.UserMessage);
+            if (convergence.ShouldStop)
+            {
+                stoppedForNonProgress = true;
+                StopForNonProgress(state, response, convergence);
+            }
+            else
+            {
+                state.Status = AgentTaskStatus.WaitingForUser;
+            }
+        }
         if (response.NextAction.Type == AgentActionKind.Final)
         {
             state.Status = AgentTaskStatus.Complete;
@@ -981,7 +1056,10 @@ public sealed class AgentService : IAgentService
                 AgentTranscriptCompactor.FromToolResult(state.StepCount, preparedToolResult, DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
         }
 
+        SyncOwnOwnerInteraction(state);
         await _store.SaveAsync(state, ct);
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            await RefreshParentOwnerInteractionsAsync(state.ParentTaskId, ct);
         await RecordExperiencesAsync(state, options, firstNewToolResult, ct);
 
         if (_traces is not null)
@@ -1110,6 +1188,7 @@ public sealed class AgentService : IAgentService
                 "Step budget exhausted",
                 $"MaxAutoSteps ({maxSteps}) reached after {steps} step(s).",
                 DateTime.UtcNow));
+            SyncOwnOwnerInteraction(result.State);
             await _store.AppendLogAsync(taskId, note, ct);
             await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
                 result.State.StepCount, "assistant", null, note, DateTime.UtcNow, ModelId: result.State.ModelId), ct);
@@ -1214,6 +1293,8 @@ public sealed class AgentService : IAgentService
             parent.Status = childResult.State.Status;
             var childIndex = parent.SubTaskPlan.FindIndex(s => s.TaskId == childTaskId);
             parent.ActiveStep = $"Waiting on sub-task {childIndex + 1}/{parent.SubTaskPlan.Count}: {next.Goal}";
+            UpsertOwnerInteraction(parent, childResult.State, childIndex);
+            ApplyParentOwnerInteraction(parent);
             await _store.SaveAsync(parent, ct);
             return childResult;
         }
@@ -1234,26 +1315,267 @@ public sealed class AgentService : IAgentService
     private async Task ReconcileSubTaskPlanAsync(AgentTaskState parent, CancellationToken ct)
     {
         var changed = false;
-        foreach (var spec in parent.SubTaskPlan.Where(s => s.Status == AgentSubTaskStatus.Running && s.TaskId is not null))
+        foreach (var (spec, index) in parent.SubTaskPlan
+            .Select((spec, index) => (spec, index))
+            .Where(item => item.spec.TaskId is not null))
         {
             var child = await _store.LoadAsync(spec.TaskId!, ct);
-            if (child is null || child.Status is not (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted))
+            if (child is null)
                 continue;
 
-            spec.Status = child.Status switch
+            if (spec.Status == AgentSubTaskStatus.Running
+                && child.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted)
             {
-                AgentTaskStatus.Complete => AgentSubTaskStatus.Complete,
-                AgentTaskStatus.Interrupted => AgentSubTaskStatus.Interrupted,
-                _ => AgentSubTaskStatus.Failed
-            };
-            var summary = string.IsNullOrWhiteSpace(child.InterruptionReason) ? child.Summary : child.InterruptionReason;
-            spec.ResultSummary = summary.Length > 1200 ? summary[..1200] + "..." : summary;
-            changed = true;
+                spec.Status = child.Status switch
+                {
+                    AgentTaskStatus.Complete => AgentSubTaskStatus.Complete,
+                    AgentTaskStatus.Interrupted => AgentSubTaskStatus.Interrupted,
+                    _ => AgentSubTaskStatus.Failed
+                };
+                var summary = string.IsNullOrWhiteSpace(child.InterruptionReason) ? child.Summary : child.InterruptionReason;
+                spec.ResultSummary = summary.Length > 1200 ? summary[..1200] + "..." : summary;
+                changed = true;
+            }
+
+            changed |= UpsertOwnerInteraction(parent, child, index);
         }
+
+        var beforeOwnerTask = parent.PendingOwnerInteractionTaskId;
+        var beforeOwnerId = parent.PendingOwnerInteractionId;
+        ApplyParentOwnerInteraction(parent);
+        changed |= !string.Equals(beforeOwnerTask, parent.PendingOwnerInteractionTaskId, StringComparison.Ordinal)
+            || !string.Equals(beforeOwnerId, parent.PendingOwnerInteractionId, StringComparison.Ordinal);
 
         if (changed)
             await _store.SaveAsync(parent, ct);
     }
+
+    private static AgentOwnerInteraction? BuildOwnerInteraction(AgentTaskState state, int sequence)
+    {
+        if (state.PendingToolAction is { } pending && state.Status == AgentTaskStatus.WaitingForUser)
+        {
+            return new AgentOwnerInteraction
+            {
+                SourceTaskId = state.TaskId,
+                Kind = AgentOwnerInteractionKind.Approval,
+                SourceStatus = state.Status,
+                SourceStepCount = state.StepCount,
+                Prompt = string.IsNullOrWhiteSpace(state.LastUserMessage)
+                    ? string.IsNullOrWhiteSpace(pending.Reason) ? "Review the pending action." : pending.Reason
+                    : state.LastUserMessage,
+                PendingToolAction = ClonePendingToolAction(pending),
+                ProposalId = pending.ProposalId,
+                ProposalRevision = pending.ProposalRevision,
+                Fingerprint = AgentApprovalFingerprint.Resolve(pending),
+                Sequence = sequence
+            };
+        }
+
+        if (state.Status == AgentTaskStatus.WaitingForUser
+            && !string.IsNullOrWhiteSpace(state.LastUserMessage))
+        {
+            return new AgentOwnerInteraction
+            {
+                SourceTaskId = state.TaskId,
+                Kind = AgentOwnerInteractionKind.Question,
+                SourceStatus = state.Status,
+                SourceStepCount = state.StepCount,
+                Prompt = state.LastUserMessage,
+                Sequence = sequence
+            };
+        }
+
+        if (state.Status == AgentTaskStatus.Blocked
+            && state.UserTransitions.LastOrDefault()?.Kind != AgentTaskTransitionKind.StopRun)
+        {
+            var prompt = string.IsNullOrWhiteSpace(state.LastUserMessage) ? state.ActiveStep : state.LastUserMessage;
+            if (string.IsNullOrWhiteSpace(prompt))
+                return null;
+
+            return new AgentOwnerInteraction
+            {
+                SourceTaskId = state.TaskId,
+                Kind = AgentOwnerInteractionKind.Instruction,
+                SourceStatus = state.Status,
+                SourceStepCount = state.StepCount,
+                Prompt = prompt,
+                Sequence = sequence
+            };
+        }
+
+        return null;
+    }
+
+    private static void SyncOwnOwnerInteraction(AgentTaskState state)
+    {
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+        {
+            RemoveOwnOwnerInteractions(state);
+            return;
+        }
+
+        if (state.PendingOwnerInteractionTaskId.Length > 0)
+            return;
+
+        var desired = BuildOwnerInteraction(state, sequence: -1);
+        if (desired is null)
+        {
+            RemoveOwnOwnerInteractions(state);
+            return;
+        }
+
+        var existing = state.PendingOwnerInteractions.FirstOrDefault(item => item.SourceTaskId == state.TaskId);
+        if (existing is not null)
+        {
+            desired.InteractionId = existing.InteractionId;
+            desired.CreatedAtUtc = existing.CreatedAtUtc;
+        }
+        RemoveOwnOwnerInteractions(state);
+        state.PendingOwnerInteractions.Add(desired);
+    }
+
+    private static void RemoveOwnOwnerInteractions(AgentTaskState state) =>
+        state.PendingOwnerInteractions.RemoveAll(item => item.SourceTaskId == state.TaskId);
+
+    private static bool TryGetPendingOwnerInteraction(AgentTaskState state, out AgentOwnerInteraction interaction)
+    {
+        interaction = state.PendingOwnerInteractions.FirstOrDefault(item =>
+            item.InteractionId == state.PendingOwnerInteractionId)
+            ?? state.PendingOwnerInteractions.FirstOrDefault(item =>
+                item.SourceTaskId == state.PendingOwnerInteractionTaskId)!;
+        return interaction is not null;
+    }
+
+    private static bool UpsertOwnerInteraction(AgentTaskState parent, AgentTaskState child, int sequence)
+    {
+        var desired = BuildOwnerInteraction(child, sequence);
+        var existing = parent.PendingOwnerInteractions.FirstOrDefault(item => item.SourceTaskId == child.TaskId);
+        if (desired is null)
+        {
+            if (existing is not null)
+            {
+                parent.PendingOwnerInteractions.Remove(existing);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (existing is not null)
+        {
+            var equivalent = OwnerInteractionEquivalent(existing, desired);
+            if (equivalent)
+            {
+                desired.InteractionId = existing.InteractionId;
+                desired.CreatedAtUtc = existing.CreatedAtUtc;
+            }
+            parent.PendingOwnerInteractions[parent.PendingOwnerInteractions.IndexOf(existing)] = desired;
+            return !equivalent;
+        }
+
+        parent.PendingOwnerInteractions.Add(desired);
+        return true;
+    }
+
+    private static bool OwnerInteractionEquivalent(AgentOwnerInteraction left, AgentOwnerInteraction right) =>
+        left.SourceTaskId == right.SourceTaskId
+        && left.Kind == right.Kind
+        && left.SourceStatus == right.SourceStatus
+        && left.SourceStepCount == right.SourceStepCount
+        && string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
+        && string.Equals(left.ProposalId, right.ProposalId, StringComparison.Ordinal)
+        && left.ProposalRevision == right.ProposalRevision
+        && string.Equals(left.Fingerprint, right.Fingerprint, StringComparison.Ordinal)
+        && left.Sequence == right.Sequence
+        && string.Equals(
+            left.PendingToolAction is null ? string.Empty : AgentApprovalFingerprint.Resolve(left.PendingToolAction),
+            right.PendingToolAction is null ? string.Empty : AgentApprovalFingerprint.Resolve(right.PendingToolAction),
+            StringComparison.Ordinal);
+
+    private static void ApplyParentOwnerInteraction(AgentTaskState parent)
+    {
+        var selected = parent.PendingOwnerInteractions
+            .OrderBy(item => item.Sequence)
+            .ThenBy(item => item.CreatedAtUtc)
+            .ThenBy(item => item.InteractionId, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        if (selected is null)
+        {
+            if (parent.PendingOwnerInteractionTaskId.Length == 0)
+                return;
+
+            parent.PendingOwnerInteractionTaskId = string.Empty;
+            parent.PendingOwnerInteractionId = string.Empty;
+            parent.PendingToolAction = null;
+            parent.LastUserMessage = string.Empty;
+            if (parent.SubTaskPlan.Any(item => item.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
+                parent.Status = AgentTaskStatus.Running;
+            return;
+        }
+
+        var selectedSource = selected.SourceTaskId == parent.TaskId ? string.Empty : selected.SourceTaskId;
+        var sourceChanged = !string.Equals(parent.PendingOwnerInteractionTaskId, selectedSource, StringComparison.Ordinal);
+        var interactionChanged = !string.Equals(parent.PendingOwnerInteractionId, selected.InteractionId, StringComparison.Ordinal);
+        var promptChanged = !string.Equals(parent.LastUserMessage, selected.Prompt, StringComparison.Ordinal);
+        var pendingChanged = !string.Equals(
+            parent.PendingToolAction is null ? string.Empty : AgentApprovalFingerprint.Resolve(parent.PendingToolAction),
+            selected.PendingToolAction is null ? string.Empty : AgentApprovalFingerprint.Resolve(selected.PendingToolAction),
+            StringComparison.Ordinal);
+        var expectedStatus = selected.Kind == AgentOwnerInteractionKind.Instruction
+            ? AgentTaskStatus.Blocked
+            : AgentTaskStatus.WaitingForUser;
+        if (!sourceChanged && !interactionChanged && !promptChanged && !pendingChanged && parent.Status == expectedStatus)
+            return;
+
+        parent.PendingOwnerInteractionTaskId = selectedSource;
+        parent.PendingOwnerInteractionId = selected.InteractionId;
+        parent.PendingToolAction = ClonePendingToolAction(selected.PendingToolAction);
+        parent.LastUserMessage = selected.Prompt;
+        parent.Status = selected.Kind == AgentOwnerInteractionKind.Instruction
+            ? AgentTaskStatus.Blocked
+            : AgentTaskStatus.WaitingForUser;
+        if (selectedSource.Length > 0)
+        {
+            var childIndex = parent.SubTaskPlan.FindIndex(item => item.TaskId == selected.SourceTaskId);
+            var goal = childIndex >= 0 ? parent.SubTaskPlan[childIndex].Goal : selected.SourceTaskId;
+            parent.ActiveStep = $"Waiting on sub-task {childIndex + 1}/{parent.SubTaskPlan.Count}: {goal}";
+        }
+    }
+
+    private async Task RefreshParentOwnerInteractionsAsync(string parentTaskId, CancellationToken ct)
+    {
+        var parent = await _store.LoadAsync(parentTaskId, ct);
+        if (parent is null || parent.SubTaskPlan.Count == 0)
+            return;
+
+        await ReconcileSubTaskPlanAsync(parent, ct);
+    }
+
+    private static AgentPendingToolAction? ClonePendingToolAction(AgentPendingToolAction? pending) => pending is null
+        ? null
+        : new AgentPendingToolAction
+        {
+            ToolName = pending.ToolName,
+            Arguments = AgentMutationPreparation.CloneArguments(pending.Arguments),
+            RiskLevel = pending.RiskLevel,
+            RequestedAt = pending.RequestedAt,
+            Reason = pending.Reason,
+            Fingerprint = pending.Fingerprint,
+            ProposalId = pending.ProposalId,
+            ProposalRevision = pending.ProposalRevision,
+            SchemaVersion = pending.SchemaVersion,
+            RequestedActionFingerprint = AgentApprovalFingerprint.ResolveRequestedAction(pending),
+            WorkspaceRoot = pending.WorkspaceRoot,
+            MutationKind = pending.MutationKind,
+            RelativePath = pending.RelativePath,
+            ExpectedPreImageSha256 = pending.ExpectedPreImageSha256,
+            ExpectedPreImageExisted = pending.ExpectedPreImageExisted,
+            ProposedContent = pending.ProposedContent,
+            ProposedContentSha256 = pending.ProposedContentSha256,
+            PolicyFingerprint = pending.PolicyFingerprint,
+            PreparedAt = pending.PreparedAt
+        };
 
     /// <summary>
     /// One final ordinary model step on the parent once every sub-task is
@@ -1300,6 +1622,9 @@ public sealed class AgentService : IAgentService
 
         state.Status = AgentTaskStatus.Complete;
         state.PendingToolAction = null;
+        state.PendingOwnerInteractions.Clear();
+        state.PendingOwnerInteractionTaskId = string.Empty;
+        state.PendingOwnerInteractionId = string.Empty;
         state.Summary = report;
         await _store.SaveAsync(state, ct);
         await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
@@ -1417,9 +1742,19 @@ public sealed class AgentService : IAgentService
         var visibleModels = await GetVisibleModelsAsync(ct);
         var unavailable = specs.Select(s => s.ModelId).FirstOrDefault(modelId =>
             !string.IsNullOrWhiteSpace(modelId)
-            && !visibleModels.Any(model => string.Equals(model.Id, modelId, StringComparison.Ordinal)));
+            && AgentModelIdentityResolver.Resolve(visibleModels, modelId) is null);
         if (unavailable is not null)
             throw new InvalidOperationException($"The selected sub-task model '{unavailable}' is not visible and available.");
+
+        foreach (var selection in modelIds.Where(item => !string.IsNullOrWhiteSpace(item.Value)))
+        {
+            var model = AgentModelIdentityResolver.Resolve(visibleModels, selection.Value);
+            if (model is null)
+                throw new InvalidOperationException($"The selected sub-task model '{selection.Value}' is not visible and available.");
+            if (nodes[selection.Key] is System.Text.Json.Nodes.JsonObject node)
+                node["model_id"] = model.Id;
+        }
+        arguments["subtasks"] = JsonSerializer.SerializeToElement(nodes);
 
         var root = state.WorkspaceRoot.Length > 0
             ? AgentWorkspaceTools.ResolveWorkspaceRoot(state.WorkspaceRoot)
@@ -1447,8 +1782,7 @@ public sealed class AgentService : IAgentService
             throw new InvalidOperationException("Stop or pause the task before changing its model.");
         if (state.PendingToolAction is not null)
             throw new InvalidOperationException("Review the pending action before changing this task's model.");
-        var model = (await GetVisibleModelsAsync(ct)).FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, modelId, StringComparison.Ordinal));
+        var model = AgentModelIdentityResolver.Resolve(await GetVisibleModelsAsync(ct), modelId);
         if (model is null)
             throw new InvalidOperationException($"Model '{modelId}' is not currently visible and available.");
 
@@ -1475,13 +1809,23 @@ public sealed class AgentService : IAgentService
     {
         var operationId = OperationCorrelation.NewId();
         return await _commandOwner.ExecuteTaskAsync(taskId,
-            ownerToken => AppendApprovalCoreAsync(taskId, action, approved, expectedFingerprint, options, ownerToken, operationId), ct);
+            ownerToken => AppendApprovalCoreAsync(taskId, action, approved, block: false,
+                expectedFingerprint: expectedFingerprint, options: options, ct: ownerToken, operationId: operationId), ct);
+    }
+
+    public async Task<AgentApprovalResult> BlockPendingActionAsync(string taskId, string action, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
+    {
+        var operationId = OperationCorrelation.NewId();
+        return await _commandOwner.ExecuteTaskAsync(taskId,
+            ownerToken => AppendApprovalCoreAsync(taskId, action, approved: false, block: true,
+                expectedFingerprint: expectedFingerprint, options: options, ct: ownerToken, operationId: operationId), ct);
     }
 
     private async Task<AgentApprovalResult> AppendApprovalCoreAsync(
         string taskId,
         string action,
         bool approved,
+        bool block,
         string expectedFingerprint,
         AgentWorkspaceOptions? options,
         CancellationToken ct,
@@ -1490,6 +1834,39 @@ public sealed class AgentService : IAgentService
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
         var firstNewToolResult = state.ToolResults.Count;
+
+        if (state.PendingOwnerInteractionTaskId.Length > 0
+            && TryGetPendingOwnerInteraction(state, out var routedInteraction)
+            && routedInteraction.IsApproval)
+        {
+            var routedFingerprint = AgentApprovalFingerprint.Resolve(routedInteraction.PendingToolAction);
+            if (!string.Equals(routedFingerprint, expectedFingerprint, StringComparison.Ordinal))
+                return new AgentApprovalResult(false, "The sub-task approval changed since it was displayed. Review it again.");
+
+            var child = await _store.LoadAsync(routedInteraction.SourceTaskId, ct);
+            if (child?.PendingToolAction is not { } childPending
+                || !string.Equals(AgentApprovalFingerprint.Resolve(childPending), routedFingerprint, StringComparison.Ordinal)
+                || childPending.ProposalRevision != routedInteraction.ProposalRevision
+                || !string.Equals(childPending.ProposalId, routedInteraction.ProposalId, StringComparison.Ordinal))
+                return new AgentApprovalResult(false, "The sub-task approval changed since it was displayed. Review it again.");
+
+            var routedResult = block
+                ? await BlockPendingActionAsync(
+                    routedInteraction.SourceTaskId,
+                    action,
+                    routedFingerprint,
+                    options,
+                    ct)
+                : await AppendApprovalAsync(
+                    routedInteraction.SourceTaskId,
+                    action,
+                    approved,
+                    routedFingerprint,
+                    options,
+                    ct);
+            await RefreshParentOwnerInteractionsAsync(state.TaskId, ct);
+            return routedResult;
+        }
 
         // A task with nothing pending has no decision to record (r26 01 1.2).
         // Before this, an approval here appended a history record and set the
@@ -1546,11 +1923,16 @@ public sealed class AgentService : IAgentService
         AgentApprovalResult? executionOutcome = null;
         if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
         {
-            var planError = await ValidatePreparedPlanAsync(state, state.PendingToolAction, options, ct);
+            var planPending = state.PendingToolAction;
+            var planError = await ValidatePreparedPlanAsync(state, planPending, options, ct);
             if (planError is not null)
             {
                 state.Status = AgentTaskStatus.Blocked;
-                state.ToolResults.Add(BuildMutationRefusalResult(state.PendingToolAction, planError));
+                state.PendingToolAction = null;
+                state.PlanApprovalPending = false;
+                state.LastUserMessage = planError;
+                state.ActiveStep = "Blocked: the approved sub-task plan is no longer valid.";
+                state.ToolResults.Add(BuildMutationRefusalResult(planPending, planError));
                 executionOutcome = new AgentApprovalResult(false, planError)
                 {
                     Outcome = AgentMutationOutcome.Conflict
@@ -1581,6 +1963,15 @@ public sealed class AgentService : IAgentService
                 ? await ExecutePreparedMutationAsync(state, state.PendingToolAction, effectiveOptions, operationId, ct)
                 : await ExecuteApprovedNonMutationAsync(state, state.PendingToolAction, effectiveOptions, operationId, ct);
         }
+        else if (block)
+        {
+            var blocked = state.PendingToolAction!;
+            MarkDraftPatchBlocked(state, blocked, "Blocked during review.", approved: false);
+            state.Status = AgentTaskStatus.Blocked;
+            state.ActiveStep = "The pending action was blocked. Provide an instruction to continue.";
+            state.LastUserMessage = "The pending action was blocked. Provide an instruction to continue.";
+            state.PendingToolAction = null;
+        }
         else
         {
             // Rejection: the guard above guarantees there is a pending action
@@ -1593,7 +1984,10 @@ public sealed class AgentService : IAgentService
         }
         if (FindLatestPreparedDraftPatch(state) is { } updatedPatch)
             state.Summary = BuildAuthoritativeDraftPatchNarrative(updatedPatch);
+        SyncOwnOwnerInteraction(state);
         await _store.SaveAsync(state, ct);
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            await RefreshParentOwnerInteractionsAsync(state.ParentTaskId, ct);
         await RecordExperiencesAsync(state, options ?? new AgentWorkspaceOptions(state.WorkspaceRoot), firstNewToolResult, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
         _logs?.Add(new RuntimeLogEntry(
@@ -1602,7 +1996,7 @@ public sealed class AgentService : IAgentService
             RuntimeLogCategory.Agent,
             $"Agent approval recorded: task={taskId}, action={action}, approved={approved}.",
             operationId));
-        return executionOutcome ?? new AgentApprovalResult(true, string.Empty)
+        return executionOutcome ?? new AgentApprovalResult(true, block ? "The pending action was blocked." : string.Empty)
         {
             Outcome = approved ? AgentMutationOutcome.Applied : AgentMutationOutcome.Blocked
         };
@@ -1701,7 +2095,7 @@ public sealed class AgentService : IAgentService
         var visibleModels = await GetVisibleModelsAsync(ct);
         var unavailable = specs.Select(s => s.ModelId).FirstOrDefault(modelId =>
             !string.IsNullOrWhiteSpace(modelId)
-            && !visibleModels.Any(model => string.Equals(model.Id, modelId, StringComparison.Ordinal)));
+            && AgentModelIdentityResolver.Resolve(visibleModels, modelId) is null);
         return unavailable is null
             ? null
             : $"The pending sub-task plan references model '{unavailable}', which is no longer visible and available.";
@@ -1787,6 +2181,7 @@ public sealed class AgentService : IAgentService
                     ExpectedPreImageSha256 = effectivePending.ExpectedPreImageSha256,
                     ExpectedPreImageExisted = effectivePending.ExpectedPreImageExisted,
                     ProposedContentSha256 = effectivePending.ProposedContentSha256,
+                    RequestedActionFingerprint = AgentApprovalFingerprint.ResolveRequestedAction(effectivePending),
                     ApprovalRecorded = true,
                     Outcome = AgentMutationOutcome.Pending,
                     StartedAt = DateTime.UtcNow
@@ -1920,6 +2315,7 @@ public sealed class AgentService : IAgentService
                 }
 
                 receipt.FinishedAt = DateTime.UtcNow;
+                AgentConvergencePolicy.ObserveMutationReceipt(state, receipt);
                 await _store.AppendTraceAsync(state.TaskId, new
                 {
                     task_id = state.TaskId,
@@ -2326,6 +2722,9 @@ public sealed class AgentService : IAgentService
             MarkDraftPatchBlocked(state, dismissedPending, "Task dismissed without approval.", approved: false);
         state.PendingToolAction = null;
         state.PlanApprovalPending = false;
+        state.PendingOwnerInteractions.Clear();
+        state.PendingOwnerInteractionTaskId = string.Empty;
+        state.PendingOwnerInteractionId = string.Empty;
         state.Status = AgentTaskStatus.Cancelled;
         await _store.SaveAsync(state, ct);
 
@@ -2355,10 +2754,28 @@ public sealed class AgentService : IAgentService
 
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+        if (state.PendingOwnerInteractionTaskId.Length > 0
+            && TryGetPendingOwnerInteraction(state, out var routedInteraction)
+            && routedInteraction.Kind is AgentOwnerInteractionKind.Question or AgentOwnerInteractionKind.Instruction)
+        {
+            var child = await _store.LoadAsync(routedInteraction.SourceTaskId, ct);
+            if (child is null
+                || child.Status != AgentTaskStatus.WaitingForUser
+                || child.PendingToolAction is not null
+                || child.StepCount != routedInteraction.SourceStepCount
+                || !string.Equals(child.LastUserMessage, routedInteraction.Prompt, StringComparison.Ordinal))
+                throw new InvalidOperationException("The sub-task question changed before it was answered. Open it again and review the current question.");
+
+            await AppendUserReplyAsync(routedInteraction.SourceTaskId, trimmed, ct);
+            await RefreshParentOwnerInteractionsAsync(state.TaskId, ct);
+            return;
+        }
         if (state.Status != AgentTaskStatus.WaitingForUser)
             throw new InvalidOperationException("This task is not waiting for a reply.");
         if (state.PendingToolAction is not null)
             throw new InvalidOperationException("A tool approval is pending; approve or reject it instead of replying.");
+
+        state.LastAnsweredQuestion = state.LastUserMessage;
 
         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
             state.StepCount, "user", null, trimmed, DateTime.UtcNow, ModelId: state.ModelId), ct);
@@ -2368,7 +2785,10 @@ public sealed class AgentService : IAgentService
         // its own (the step budget running out, for one) re-displayed a
         // question the user had already dealt with.
         state.LastUserMessage = string.Empty;
+        RemoveOwnOwnerInteractions(state);
         await _store.SaveAsync(state, ct);
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            await RefreshParentOwnerInteractionsAsync(state.ParentTaskId, ct);
         await _store.AppendLogAsync(taskId, "user reply recorded", ct);
     }
 
@@ -2633,6 +3053,9 @@ public sealed class AgentService : IAgentService
         // Reopening the task settles whatever it was last asking; the
         // instruction just given is the answer.
         state.LastUserMessage = string.Empty;
+        state.PendingOwnerInteractions.Clear();
+        state.PendingOwnerInteractionTaskId = string.Empty;
+        state.PendingOwnerInteractionId = string.Empty;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"continued: {transcriptInstruction}", ct);
         return state;
@@ -2668,6 +3091,9 @@ public sealed class AgentService : IAgentService
                 : $"Run finished by user. {state.Summary}";
             state.Decisions.Add(new AgentDecision("Run finished", "The user accepted the current result and ended the run.", DateTime.UtcNow));
         }
+        state.PendingOwnerInteractions.Clear();
+        state.PendingOwnerInteractionTaskId = string.Empty;
+        state.PendingOwnerInteractionId = string.Empty;
         state.UserTransitions.Add(new AgentTaskTransition(AgentTaskTransitionKind.FinishRun, DateTime.UtcNow));
         await _store.AppendTranscriptEntryAsync(taskId,
             new AgentTranscriptEntry(state.StepCount, "user", null, "finish: end run", DateTime.UtcNow, ModelId: state.ModelId), ct);
@@ -2697,6 +3123,9 @@ public sealed class AgentService : IAgentService
         state.Summary = string.IsNullOrWhiteSpace(state.Summary)
             ? "Stopped by user. Completed work remains available below."
             : $"Stopped by user. Completed work remains available below. {state.Summary}";
+        state.PendingOwnerInteractions.Clear();
+        state.PendingOwnerInteractionTaskId = string.Empty;
+        state.PendingOwnerInteractionId = string.Empty;
         state.Decisions.Add(new AgentDecision("Run stopped", "The user stopped active work after cancellation reached a safe boundary.", DateTime.UtcNow));
         state.UserTransitions.Add(new AgentTaskTransition(AgentTaskTransitionKind.StopRun, DateTime.UtcNow));
         await _store.AppendTranscriptEntryAsync(taskId,
@@ -3099,7 +3528,10 @@ public sealed class AgentService : IAgentService
         state.ActiveStep = "Waiting for the task's selected model to become available.";
         state.LastUserMessage = message;
         state.Decisions.Add(new AgentDecision("Selected model unavailable", message, DateTime.UtcNow));
+        SyncOwnOwnerInteraction(state);
         await _store.SaveAsync(state, ct);
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            await RefreshParentOwnerInteractionsAsync(state.ParentTaskId, ct);
         await _store.AppendLogAsync(state.TaskId, message, ct);
         await _store.AppendTraceAsync(state.TaskId, new
         {
@@ -3457,6 +3889,24 @@ public sealed class AgentService : IAgentService
             state.Decisions.Add(new AgentDecision(blocker, "model-reported blocker", DateTime.UtcNow));
     }
 
+    private static void StopForNonProgress(
+        AgentTaskState state,
+        AgentPlannerResponse response,
+        AgentConvergencePolicy.Observation observation)
+    {
+        var message = $"The agent stopped after {observation.Count} non-progressing actions. "
+            + $"{observation.Description} No further automatic retries were made.";
+        state.Status = AgentTaskStatus.Blocked;
+        state.StepBudgetExhausted = false;
+        state.PlanApprovalPending = false;
+        state.PendingToolAction = null;
+        state.ActiveStep = "Stopped after repeated non-progress.";
+        state.Decisions.Add(new AgentDecision("Non-progress loop stopped", message, DateTime.UtcNow));
+        response.CurrentStep = state.ActiveStep;
+        response.ThoughtSummary = message;
+        response.UserMessage = message;
+    }
+
     /// <summary>
     /// Validates and materializes an approved plan_subtasks action onto the
     /// parent (r15 01-subtask-orchestration.md 1.2 step 3, 1.4). No child
@@ -3515,13 +3965,31 @@ public sealed class AgentService : IAgentService
         }
 
         var visibleModels = await GetVisibleModelsAsync(ct);
-        var parentModelId = string.IsNullOrWhiteSpace(state.ModelId) ? options?.ModelId ?? string.Empty : state.ModelId;
-        var parentModel = visibleModels.FirstOrDefault(model => string.Equals(model.Id, parentModelId, StringComparison.Ordinal));
+        var parentModelReference = string.IsNullOrWhiteSpace(state.ModelId) ? options?.ModelId ?? string.Empty : state.ModelId;
+        var parentModel = AgentModelIdentityResolver.Resolve(visibleModels, parentModelReference);
+        if (parentModel is null)
+        {
+            error = $"The parent task model '{parentModelReference}' is not visible and available; inherited child models were not materialized.";
+            state.Status = AgentTaskStatus.WaitingForUser;
+            state.ToolResults.Add(new AgentToolResult
+            {
+                Tool = "plan_subtasks",
+                Arguments = argumentsCopy,
+                ResultSummary = error,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "The active parent model was not in the configured visible model list."))
+            });
+            await _store.AppendTranscriptEntryAsync(state.TaskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow) with { ModelId = state.ModelId }, ct);
+            return;
+        }
+
         foreach (var spec in specs)
         {
             if (!string.IsNullOrWhiteSpace(spec.ModelId))
             {
-                var selected = visibleModels.FirstOrDefault(model => string.Equals(model.Id, spec.ModelId, StringComparison.Ordinal));
+                var selected = AgentModelIdentityResolver.Resolve(visibleModels, spec.ModelId);
                 if (selected is null)
                 {
                     error = $"Proposed sub-task plan references unknown, hidden, or unavailable model '{spec.ModelId}'.";
@@ -3544,13 +4012,14 @@ public sealed class AgentService : IAgentService
             }
             else
             {
-                spec.ResolvedModelId = parentModelId;
-                spec.ModelDisplayName = parentModel?.DisplayName ?? state.ModelDisplayName;
+                spec.ResolvedModelId = parentModel.Id;
+                spec.ModelDisplayName = parentModel.DisplayName;
             }
         }
 
         state.SubTaskPlan = specs;
         state.Status = AgentTaskStatus.Running;
+        state.LastUserMessage = string.Empty;
         var summary = $"Approved sub-task plan ({specs.Count}): "
             + string.Join("; ", specs.Select(s => $"[{s.ProfileName}, {s.ModelLabel}] {s.Goal}"));
         state.ToolResults.Add(new AgentToolResult

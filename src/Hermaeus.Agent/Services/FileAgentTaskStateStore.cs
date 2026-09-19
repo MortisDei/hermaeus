@@ -192,9 +192,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
             -- Approval history lives in the run ledger and on each row's own
             -- approval labels.
             WHERE t.status IN ('WaitingForUser', 'Blocked')
-            ORDER BY t.updated_at DESC
-            LIMIT $limit";
-        cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));
+            ORDER BY t.updated_at DESC";
         var queue = new List<AgentReviewQueueItem>();
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
@@ -215,24 +213,46 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 ParentTaskId: r.IsDBNull(11) ? null : r.GetString(11)));
         }
 
-        // The index table only carries summary columns; a task actually
-        // waiting on an approval needs its PendingToolAction, which only
-        // exists in the full per-task state file.
-        for (var i = 0; i < queue.Count; i++)
+        // The index table is only a rebuildable summary. The full task state
+        // is authoritative for whether an interaction still exists, whether
+        // a child is owned by a parent, and whether the status has changed
+        // since the index row was written.
+        var actionable = new List<AgentReviewQueueItem>();
+        foreach (var indexed in queue)
         {
-            if (queue[i].Status is not (AgentTaskStatus.WaitingForUser or AgentTaskStatus.Blocked))
+            var full = await LoadAsync(indexed.TaskId, ct);
+            if (full is null)
+            {
+                // The index is intentionally rebuildable but remains useful
+                // when a task JSON file is unavailable. Preserve the legacy
+                // status summary rather than silently dropping an owner row;
+                // startup reconciliation repairs JSON-backed rows whenever it
+                // can load their authoritative state.
+                actionable.Add(indexed);
+                continue;
+            }
+
+            if (full.Status is not (AgentTaskStatus.WaitingForUser or AgentTaskStatus.Blocked))
                 continue;
 
-            var full = await LoadAsync(queue[i].TaskId, ct);
-            if (full is null) continue;
-            queue[i] = queue[i] with
+            if (!HasActionableOwnerInteraction(full))
+                continue;
+
+            actionable.Add(indexed with
             {
+                Status = full.Status,
+                UpdatedAt = full.UpdatedAt,
+                ActiveStep = full.ActiveStep,
+                Summary = full.Summary,
                 PendingToolAction = full.PendingToolAction,
                 WorkspaceRoot = full.WorkspaceRoot is { Length: > 0 } ? full.WorkspaceRoot : null
-            };
+            });
         }
 
-        return queue;
+        return actionable
+            .OrderByDescending(item => item.UpdatedAt)
+            .Take(Math.Max(1, limit))
+            .ToList();
     }
 
     public async Task AppendLogAsync(string taskId, string line, CancellationToken ct = default)
@@ -460,6 +480,12 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 changed.Add(entry);
         }
 
+        foreach (var entry in ReconcileOwnerInteractions(states))
+        {
+            if (!changed.Any(existing => string.Equals(existing.State.TaskId, entry.State.TaskId, StringComparison.Ordinal)))
+                changed.Add(entry);
+        }
+
         foreach (var entry in changed)
         {
             ct.ThrowIfCancellationRequested();
@@ -611,6 +637,297 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         state.Summary = string.IsNullOrWhiteSpace(state.Summary)
             ? reason
             : $"{state.Summary} {reason}";
+    }
+
+    private static IReadOnlyList<(string Path, AgentTaskState State)> ReconcileOwnerInteractions(
+        IReadOnlyDictionary<string, (string Path, AgentTaskState State)> states)
+    {
+        var changed = new Dictionary<string, (string Path, AgentTaskState State)>(StringComparer.Ordinal);
+
+        foreach (var entry in states.Values)
+        {
+            var state = entry.State;
+            if (string.IsNullOrWhiteSpace(state.ParentTaskId))
+                continue;
+
+            var parentExists = states.TryGetValue(state.ParentTaskId, out var parentEntry)
+                && parentEntry.State.SubTaskPlan.Any(spec => string.Equals(spec.TaskId, state.TaskId, StringComparison.Ordinal));
+            if (parentExists)
+                continue;
+
+            const string reason = "This sub-task no longer has a persisted parent owner, so its pending interaction was closed during startup recovery.";
+            var stateChanged = state.PendingToolAction is not null
+                || state.PendingOwnerInteractions.Count > 0
+                || state.PendingOwnerInteractionTaskId.Length > 0
+                || state.PendingOwnerInteractionId.Length > 0;
+            state.PendingToolAction = null;
+            state.PendingOwnerInteractions.Clear();
+            state.PendingOwnerInteractionTaskId = string.Empty;
+            state.PendingOwnerInteractionId = string.Empty;
+            state.LastUserMessage = string.Empty;
+            if (state.Status is not (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted))
+            {
+                state.Status = AgentTaskStatus.Interrupted;
+                state.InterruptionReason = reason;
+                state.ActiveStep = "Interrupted: orphaned sub-task";
+                state.Decisions.Add(new AgentDecision("Orphaned sub-task recovered", reason, DateTime.UtcNow));
+                state.Summary = string.IsNullOrWhiteSpace(state.Summary) ? reason : $"{state.Summary} {reason}";
+                stateChanged = true;
+            }
+
+            if (stateChanged)
+                changed[state.TaskId] = entry;
+        }
+
+        foreach (var entry in states.Values)
+        {
+            var parent = entry.State;
+            var desired = new List<AgentOwnerInteraction>();
+            if (parent.SubTaskPlan.Count > 0)
+            {
+                foreach (var (spec, index) in parent.SubTaskPlan
+                    .Select((spec, index) => (spec, index))
+                    .Where(item => !string.IsNullOrWhiteSpace(item.spec.TaskId)))
+                {
+                    if (!states.TryGetValue(spec.TaskId!, out var childEntry)
+                        || !string.Equals(childEntry.State.ParentTaskId, parent.TaskId, StringComparison.Ordinal))
+                    {
+                        if (spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running)
+                        {
+                            spec.Status = AgentSubTaskStatus.Interrupted;
+                            spec.ResultSummary = "The persisted sub-task state is missing, so this sub-task was closed during startup recovery.";
+                            changed[parent.TaskId] = entry;
+                        }
+                        continue;
+                    }
+
+                    if (childEntry.State.PendingOwnerInteractions.Count > 0
+                        || childEntry.State.PendingOwnerInteractionTaskId.Length > 0
+                        || childEntry.State.PendingOwnerInteractionId.Length > 0)
+                    {
+                        childEntry.State.PendingOwnerInteractions.Clear();
+                        childEntry.State.PendingOwnerInteractionTaskId = string.Empty;
+                        childEntry.State.PendingOwnerInteractionId = string.Empty;
+                        changed[childEntry.State.TaskId] = childEntry;
+                    }
+
+                    if (BuildOwnerInteraction(childEntry.State, index) is { } childInteraction)
+                    {
+                        PreserveInteractionIdentity(parent.PendingOwnerInteractions, childInteraction);
+                        desired.Add(childInteraction);
+                    }
+                }
+
+                if (desired.Count == 0 && string.IsNullOrWhiteSpace(parent.PendingOwnerInteractionTaskId)
+                    && BuildOwnerInteraction(parent, sequence: -1) is { } ownInteraction)
+                {
+                    PreserveInteractionIdentity(parent.PendingOwnerInteractions, ownInteraction);
+                    desired.Add(ownInteraction);
+                }
+            }
+            else if (BuildOwnerInteraction(parent, sequence: -1) is { } ownInteraction)
+            {
+                PreserveInteractionIdentity(parent.PendingOwnerInteractions, ownInteraction);
+                desired.Add(ownInteraction);
+            }
+
+            if (!OwnerInteractionListsEqual(parent.PendingOwnerInteractions, desired))
+            {
+                parent.PendingOwnerInteractions = desired;
+                changed[parent.TaskId] = entry;
+            }
+
+            var selected = desired
+                .OrderBy(item => item.Sequence)
+                .ThenBy(item => item.CreatedAtUtc)
+                .ThenBy(item => item.InteractionId, StringComparer.Ordinal)
+                .FirstOrDefault();
+            var selectedSource = selected is null || selected.SourceTaskId == parent.TaskId
+                ? string.Empty
+                : selected.SourceTaskId;
+            var selectedId = selected?.InteractionId ?? string.Empty;
+            var expectedStatus = selected is null
+                ? parent.Status
+                : selected.Kind == AgentOwnerInteractionKind.Instruction
+                    ? AgentTaskStatus.Blocked
+                    : AgentTaskStatus.WaitingForUser;
+            var expectedPrompt = selected?.Prompt ?? string.Empty;
+            var expectedPending = selected?.PendingToolAction;
+            var expectedActiveStep = selectedSource.Length == 0
+                ? parent.ActiveStep
+                : BuildChildActiveStep(parent, selectedSource);
+            var mirrorChanged = !string.Equals(parent.PendingOwnerInteractionTaskId, selectedSource, StringComparison.Ordinal)
+                || !string.Equals(parent.PendingOwnerInteractionId, selectedId, StringComparison.Ordinal)
+                || !string.Equals(parent.LastUserMessage, expectedPrompt, StringComparison.Ordinal)
+                || !string.Equals(
+                    parent.PendingToolAction is null ? string.Empty : AgentApprovalFingerprint.Resolve(parent.PendingToolAction),
+                    expectedPending is null ? string.Empty : AgentApprovalFingerprint.Resolve(expectedPending),
+                    StringComparison.Ordinal)
+                || (selected is not null && parent.Status != expectedStatus);
+            if (selected is null)
+            {
+                if (parent.PendingOwnerInteractionTaskId.Length > 0 || parent.PendingOwnerInteractionId.Length > 0
+                    || parent.PendingToolAction is not null || parent.LastUserMessage.Length > 0)
+                    mirrorChanged = true;
+                parent.PendingOwnerInteractionTaskId = string.Empty;
+                parent.PendingOwnerInteractionId = string.Empty;
+                parent.PendingToolAction = null;
+                parent.LastUserMessage = string.Empty;
+                if (parent.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running)
+                    && (parent.Status is AgentTaskStatus.WaitingForUser or AgentTaskStatus.Blocked))
+                {
+                    parent.Status = AgentTaskStatus.Running;
+                    mirrorChanged = true;
+                }
+            }
+            else
+            {
+                parent.PendingOwnerInteractionTaskId = selectedSource;
+                parent.PendingOwnerInteractionId = selectedId;
+                parent.PendingToolAction = ClonePendingToolAction(expectedPending);
+                parent.LastUserMessage = expectedPrompt;
+                parent.Status = expectedStatus;
+                if (selectedSource.Length > 0)
+                    parent.ActiveStep = expectedActiveStep;
+            }
+
+            if (mirrorChanged)
+                changed[parent.TaskId] = entry;
+        }
+
+        return changed.Values.ToList();
+    }
+
+    private static AgentOwnerInteraction? BuildOwnerInteraction(AgentTaskState state, int sequence)
+    {
+        if (state.Status == AgentTaskStatus.WaitingForUser && state.PendingToolAction is { } pending)
+        {
+            return new AgentOwnerInteraction
+            {
+                SourceTaskId = state.TaskId,
+                Kind = AgentOwnerInteractionKind.Approval,
+                SourceStatus = state.Status,
+                Prompt = string.IsNullOrWhiteSpace(state.LastUserMessage)
+                    ? string.IsNullOrWhiteSpace(pending.Reason) ? "Review the pending action." : pending.Reason
+                    : state.LastUserMessage,
+                PendingToolAction = ClonePendingToolAction(pending),
+                ProposalId = pending.ProposalId,
+                ProposalRevision = pending.ProposalRevision,
+                Fingerprint = AgentApprovalFingerprint.Resolve(pending),
+                SourceStepCount = state.StepCount,
+                Sequence = sequence
+            };
+        }
+
+        if (state.Status == AgentTaskStatus.WaitingForUser && state.LastUserMessage.Length > 0)
+        {
+            return new AgentOwnerInteraction
+            {
+                SourceTaskId = state.TaskId,
+                Kind = AgentOwnerInteractionKind.Question,
+                SourceStatus = state.Status,
+                Prompt = state.LastUserMessage,
+                SourceStepCount = state.StepCount,
+                Sequence = sequence
+            };
+        }
+
+        if (state.Status == AgentTaskStatus.Blocked
+            && state.UserTransitions.LastOrDefault()?.Kind != AgentTaskTransitionKind.StopRun)
+        {
+            var prompt = state.LastUserMessage.Length > 0 ? state.LastUserMessage : state.ActiveStep;
+            if (prompt.Length == 0)
+                return null;
+            return new AgentOwnerInteraction
+            {
+                SourceTaskId = state.TaskId,
+                Kind = AgentOwnerInteractionKind.Instruction,
+                SourceStatus = state.Status,
+                Prompt = prompt,
+                SourceStepCount = state.StepCount,
+                Sequence = sequence
+            };
+        }
+
+        return null;
+    }
+
+    private static void PreserveInteractionIdentity(
+        IEnumerable<AgentOwnerInteraction> existing,
+        AgentOwnerInteraction desired)
+    {
+        var prior = existing.FirstOrDefault(item => string.Equals(item.SourceTaskId, desired.SourceTaskId, StringComparison.Ordinal));
+        if (prior is null)
+            return;
+        desired.InteractionId = prior.InteractionId;
+        desired.CreatedAtUtc = prior.CreatedAtUtc;
+    }
+
+    private static bool OwnerInteractionListsEqual(
+        IReadOnlyList<AgentOwnerInteraction> left,
+        IReadOnlyList<AgentOwnerInteraction> right) =>
+        left.Count == right.Count
+        && left.Zip(right).All(pair =>
+            string.Equals(pair.First.InteractionId, pair.Second.InteractionId, StringComparison.Ordinal)
+            && string.Equals(pair.First.SourceTaskId, pair.Second.SourceTaskId, StringComparison.Ordinal)
+            && pair.First.Kind == pair.Second.Kind
+            && pair.First.SourceStatus == pair.Second.SourceStatus
+            && string.Equals(pair.First.Prompt, pair.Second.Prompt, StringComparison.Ordinal)
+            && pair.First.SourceStepCount == pair.Second.SourceStepCount
+            && pair.First.Sequence == pair.Second.Sequence
+            && string.Equals(
+                pair.First.PendingToolAction is null ? string.Empty : AgentApprovalFingerprint.Resolve(pair.First.PendingToolAction),
+                pair.Second.PendingToolAction is null ? string.Empty : AgentApprovalFingerprint.Resolve(pair.Second.PendingToolAction),
+                StringComparison.Ordinal));
+
+    private static string BuildChildActiveStep(AgentTaskState parent, string childTaskId)
+    {
+        var index = parent.SubTaskPlan.FindIndex(item => string.Equals(item.TaskId, childTaskId, StringComparison.Ordinal));
+        var goal = index >= 0 ? parent.SubTaskPlan[index].Goal : childTaskId;
+        return $"Waiting on sub-task {index + 1}/{parent.SubTaskPlan.Count}: {goal}";
+    }
+
+    private static AgentPendingToolAction? ClonePendingToolAction(AgentPendingToolAction? pending) => pending is null
+        ? null
+        : new AgentPendingToolAction
+        {
+            ToolName = pending.ToolName,
+            Arguments = AgentMutationPreparation.CloneArguments(pending.Arguments),
+            RiskLevel = pending.RiskLevel,
+            RequestedAt = pending.RequestedAt,
+            Reason = pending.Reason,
+            Fingerprint = pending.Fingerprint,
+            RequestedActionFingerprint = AgentApprovalFingerprint.ResolveRequestedAction(pending),
+            ProposalId = pending.ProposalId,
+            ProposalRevision = pending.ProposalRevision,
+            SchemaVersion = pending.SchemaVersion,
+            WorkspaceRoot = pending.WorkspaceRoot,
+            MutationKind = pending.MutationKind,
+            RelativePath = pending.RelativePath,
+            ExpectedPreImageSha256 = pending.ExpectedPreImageSha256,
+            ExpectedPreImageExisted = pending.ExpectedPreImageExisted,
+            ProposedContent = pending.ProposedContent,
+            ProposedContentSha256 = pending.ProposedContentSha256,
+            PolicyFingerprint = pending.PolicyFingerprint,
+            PreparedAt = pending.PreparedAt
+        };
+
+    private static bool HasActionableOwnerInteraction(AgentTaskState state)
+    {
+        if (state.PendingOwnerInteractionTaskId.Length > 0)
+            return state.PendingOwnerInteractions.Any(item =>
+                string.Equals(item.InteractionId, state.PendingOwnerInteractionId, StringComparison.Ordinal)
+                && item.Kind is AgentOwnerInteractionKind.Approval or AgentOwnerInteractionKind.Question or AgentOwnerInteractionKind.Instruction);
+
+        return state.Status switch
+        {
+            // WaitingForUser is itself the durable owner-facing pause marker.
+            // Older task files may not have the additive interaction mirror or
+            // a copied prompt, but must remain reviewable by status.
+            AgentTaskStatus.WaitingForUser => true,
+            AgentTaskStatus.Blocked => state.UserTransitions.LastOrDefault()?.Kind != AgentTaskTransitionKind.StopRun,
+            _ => false
+        };
     }
 
     /// <summary>Additive schema change for r15 sub-task orchestration (doc 01 1.1): a fresh install already gets the column from CREATE TABLE, so this only matters for a pre-r15 index file.</summary>

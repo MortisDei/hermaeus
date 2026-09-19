@@ -196,10 +196,8 @@
                   <Button Grid.Column="1" Content="Copy" Command="{Binding CopyEvidenceDetailCommand}"
                           ToolTip.Tip="Copy the selected Lab result, persisted evidence records, raw JSON, and provenance to the clipboard." />
                 </Grid>
-                <TextBlock Text="{Binding SelectedExperience.EvidenceRecordLabel}" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding SelectedExperience.Experience.Id}" FontFamily="Consolas" TextWrapping="Wrap" />
-                <TextBlock Text="Normalized outcome" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding SelectedExperience.Experience.Outcome.Detail}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding SelectedExperience.HumanSummary}" TextWrapping="Wrap"
+                           IsVisible="{Binding !SelectedExperience.IsLabCompletionSummary}" />
                 <Border Classes="card" Padding="10" IsVisible="{Binding SelectedExperience.IsLabCompletionSummary}">
                   <StackPanel Spacing="7">
                     <TextBlock Text="{Binding SelectedExperience.ResultDetails.ExperimentLabel}" FontSize="16" FontWeight="SemiBold" />
@@ -244,6 +242,14 @@
                     </ItemsControl>
                   </StackPanel>
                 </Border>
+                <Expander Header="Technical evidence">
+                  <StackPanel Spacing="4" Margin="8,4">
+                    <TextBlock Text="{Binding SelectedExperience.EvidenceRecordLabel}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SelectedExperience.Experience.Id}" FontFamily="Consolas" TextWrapping="Wrap" />
+                    <TextBlock Text="Normalized outcome" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SelectedExperience.Experience.Outcome.Detail}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Expander>
                 <StackPanel Spacing="4" IsVisible="{Binding SelectedExperience.IsLabCompletionSummary}">
                   <TextBlock Text="Apply review" FontWeight="SemiBold" />
                   <TextBlock Text="Review the current in-memory run here. Historical evidence remains read-only and never applies settings by itself." TextWrapping="Wrap" Opacity="0.7" />

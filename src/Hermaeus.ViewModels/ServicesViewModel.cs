@@ -1609,6 +1609,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                 ggufInfo: ggufInfo,
                 hardware: _hardwareProfile);
 
+            LlamaTuneProfileStore.ValidateAutoTuneResult(result, previousContext);
             GpuLayers = result.GpuLayers;
             Threads = result.Threads;
             if (result.TunedContextSize is int tunedContext)

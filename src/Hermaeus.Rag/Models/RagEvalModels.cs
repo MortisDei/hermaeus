@@ -54,6 +54,8 @@ public sealed class RagEvalResult
     public bool RetrievalHit { get; set; }
     public bool KeywordHit { get; set; }
     public bool RefusalCorrect { get; set; } = true;
+    public string RefusalAssessment { get; set; } = string.Empty;
+    public string RefusalEvaluatorVersion { get; set; } = string.Empty;
     public bool Passed { get; set; }
     public double LatencyMs { get; set; }
     public float GroundingScore { get; set; }

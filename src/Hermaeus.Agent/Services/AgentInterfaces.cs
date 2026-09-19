@@ -47,6 +47,8 @@ public interface IAgentWorkspaceTools
     /// flat listing (default) or a bounded tree view.
     /// </summary>
     IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null);
+    /// <summary>Lists the same safe entries with best-effort filesystem metadata for owner-facing views.</summary>
+    IReadOnlyList<AgentWorkspaceFileEntry> ListFileEntries(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null);
     /// <summary>
     /// <paramref name="regex"/> switches <paramref name="query"/> from a
     /// literal substring match to a regular expression; <paramref name="contextLines"/>
@@ -63,6 +65,20 @@ public interface IAgentWorkspaceTools
     AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath, int? lineOffset = null, int? lineLimit = null);
     AgentFileSummaryResult SummarizeFile(AgentWorkspaceOptions options, string relativePath);
     Task<AgentFileReadResult> ApplyDraftPatchAsync(AgentWorkspaceOptions options, string relativePath, string proposedContent, CancellationToken ct = default);
+    /// <summary>
+    /// Saves text from the owner-facing Workspace editor without entering the
+    /// Agent approval queue. The expected revision is checked immediately
+    /// before the atomic write so an external edit produces a conflict rather
+    /// than being overwritten. Agent proposals retain their own authority and
+    /// become stale through the same content-hash check when later approved.
+    /// </summary>
+    Task<AgentOwnerFileSaveResult> SaveOwnerFileAsync(
+        AgentWorkspaceOptions options,
+        string relativePath,
+        string content,
+        string expectedContentSha256,
+        bool expectedExisted,
+        CancellationToken ct = default);
     string DraftPatch(string relativePath, string rationale, string proposedContent);
     /// <summary>
     /// Applies a surgical text edit: <paramref name="oldString"/> must match
@@ -142,6 +158,13 @@ public interface IAgentService
     /// non-applied result instead of running whatever is actually pending.
     /// </summary>
     Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
+    /// <summary>
+    /// Blocks the task's currently pending action without executing it. This is
+    /// the authoritative sibling of Reject for owner-facing Changes actions:
+    /// the fingerprint still binds the decision to the exact rendered
+    /// proposal, and the task remains blocked with an instruction required.
+    /// </summary>
+    Task<AgentApprovalResult> BlockPendingActionAsync(string taskId, string action, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
     /// <summary>
     /// Answers a task's <c>ask_user</c> question: appends the reply to the
     /// task's transcript so the next step sees it, and resumes the task to

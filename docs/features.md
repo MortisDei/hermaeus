@@ -76,7 +76,9 @@ for Knowledge behavior in Chat.
   refused instead of silently becoming CPU.
   Update identity uses the verified upstream b-numbered release tag and
   SHA256-checked archive, with `--version` output captured from both stdout and
-  stderr. Help text or a zero exit code alone never proves build identity.
+  stderr. The version probe has a bounded 15-second budget and records elapsed
+  time in timeout diagnostics. Help text or a zero exit code alone never proves
+  build identity.
   Known upstream archive wrapper directories are removed at the owned version
   boundary, while flat upstream packages are accepted as well; mixed layouts
   fail closed and legacy nested installations remain discoverable and protected.
@@ -112,6 +114,8 @@ for Knowledge behavior in Chat.
   model update check may backfill either source when its verified manifest
   revision matches the fetched card and tree; decoration failures never fail
   the update check.
+- Replacing or abandoning a Hugging Face repository inspection cancels the
+  superseded request and prevents stale details or artwork from publishing.
 - GPU Fit is a deterministic prediction over the current editor values. It
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are
@@ -169,6 +173,9 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
 - Watched sources use cancellable drift scans. Refresh applies only new and
   changed files by default; removing missing sources remains a separate,
   explicitly confirmed action. Automatic refresh is off by default.
+- Manual ingest and reindex are single-flight operations. A duplicate start
+  while one is active does not create a competing generation, and the existing
+  overall and current-stage progress remains the authoritative operation state.
 - Dataset Manager exposes source and chunk health, embedding identity,
   dimensions, missing and stale files, duplicate rows, index size, reindex
   state, and published generation history. A dataset embedded with another
@@ -264,6 +271,10 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   target changed and matches the proposed post-image; `AlreadySatisfied` is a
   separate no-write outcome. Workspace-browser patch queues use the same
   preparation and ownership path.
+- Per-patch Approve, Reject, and Block decisions revalidate the authoritative
+  proposal, revision, preimage, content, fingerprint, and policy before they
+  enter the task transition. Parent-owned child questions and approvals retain
+  source identity and reject stale answers or decisions.
 - The workbench exposes the current decision, live progress, plan, response,
   changes, approvals, reservations, commands, and unfinished work. Responses
   are selectable Markdown with an explicit copy action. Continue planned work,
@@ -274,12 +285,23 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   terms, including answer waits, approvals, blocked/failed/cancelled runs,
   interruption recovery, and complete runs with reservations. Changes
   distinguishes pending review from applied/readback-verified and conflicted
-  files. Workspace includes a bounded local Monaco editor when its native host
-  is available, with a functional AvaloniaEdit fallback when Monaco is not
-  ready, and terminal runs can open their
+  files. Workspace uses AvaloniaEdit as its sole local editor. The owner can
+  edit the selected file and save directly with Save or Ctrl+S; the write is
+  revision-checked, atomic, and reports an external conflict instead of
+  overwriting newer content. Agent-proposed patches remain on the prepared,
+  reviewable path. Terminal runs can open their
   persisted state/transcript/trace/log folder. New Task clears task-scoped
   composer, response, draft, selection, and evidence projections without
   deleting the persisted task.
+- Workspace file listings distinguish directories and preserve nullable
+  modification times. When the filesystem cannot provide a trustworthy time,
+  the UI says **Modified time unavailable** instead of displaying a fabricated
+  date.
+- Equivalent approved mutation requests and already-verified post-images are
+  bounded as task-level non-progress before another approval is offered.
+  Startup rebuilds parent-owned child interaction mirrors from child state,
+  preserves routable child queue rows, and terminalizes orphaned children as
+  interrupted rather than leaving phantom approval rows.
 - A second top-level task cannot start while another task is open. An
   orchestration parent cannot be finished or dismissed while a child is still
   pending or running; startup recovery marks that inconsistent terminal state
@@ -434,8 +456,9 @@ action; a healthy native provider is not offered as an install action.
 
 Audio feedback is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
-speaks. It does not cue ordinary clicks, token arrival, navigation, or high GPU
-use.
+speaks. Event kinds resolve to distinct bounded generated cue patterns, and
+diagnostics identify the resource, backend attempts, fallback, and result. It
+does not cue ordinary clicks, token arrival, navigation, or high GPU use.
 
 See the [Voice reference](voice.md).
 
@@ -466,7 +489,9 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   component, and best-effort GPU information.
 - Chat telemetry can sample the currently active managed server process. Its
   process RAM and per-process GPU readings are tied to that process identity;
-  missing counters remain Unknown.
+  missing counters remain Unknown, and the telemetry flyout exposes the
+  evidence code and bounded source detail explaining an unavailable process
+  counter.
 - Telemetry identifies the selected runtime by kind, version, build, and
   backend, and the model by manifest or local identity plus architecture and
   quantization. Stable identifiers remain available as secondary diagnostic

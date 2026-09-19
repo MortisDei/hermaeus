@@ -32,6 +32,9 @@ Runs record the following metrics and metadata:
 	but not yet surfaced in the UI itself - treat displayed tok/s as
 	provider-measured only when you know the provider reports real timings.
 - Deterministic quality checks
+- A versioned, provider-neutral refusal assessment. The evaluator records the
+  classification and detail for every answer, and applies the refusal check to
+  refusal-expected cases without a provider or suite-name special case.
 - Resource deltas (CPU, memory, storage changes) for display; the scoring
 	weight for this slot is neutral (reserved, not currently a real signal -
 	see Resource Sampling Notes)
@@ -115,6 +118,28 @@ reasons. **Run Detail** shows the full bounded reason list plus a reconciliation
 summary of requested, resolved, launched, effective, and process-bound
 telemetry identities and effective fields. A missing envelope is reported as a
 missing reconciliation, not as a verified run.
+
+Ranking is scoped to the selected suite and counts only `ComparisonEligible`
+runs. The ranking panel explains why it is empty: no recorded runs, no eligible
+runs because runtime evidence is unverified or mismatched, or only one eligible
+model. It asks for another eligible model rather than implying that a single
+model is ranked or substituting requested settings for effective runtime
+evidence.
+
+### Semantic refusal evaluation
+
+The shared evaluator is `refusal-v2`. It distinguishes direct, indirect,
+hedged, and clarification-request refusals from mixed answers,
+hallucinated-answer claims, empty responses, and ordinary no-refusal answers.
+For a refusal-expected case, the four refusal forms are valid; mixed,
+hallucinated, and empty responses fail. The provider, model name, and suite
+label do not alter the classification. Each result stores the classification
+and bounded reason in JSON, Markdown, CSV, and Run Detail so PASS/FAIL is
+inspectable.
+
+Suite definitions and runs persist the evaluator version. A stale suite is
+refused with an instruction to rerun from the current definition. Rerun creates
+a new observation with `RerunOfRunId`; the earlier run remains unchanged.
 
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off
@@ -592,7 +617,13 @@ The **System Overview** page shows the local machine and app environment:
 
 The Services auto-tune action now probes descending GPU layer candidates and
 keeps the highest candidate that starts and reaches `/health`, with CPU fallback
-as the final candidate. Successful tune results are saved per GGUF model file
+as the final candidate. Before persistence, the selected context, threads, and
+reported GPU placement are reconstructed into a second exact probe. Successful
+tune results are saved per GGUF model file only when that confirmation carries
+an exact configuration receipt and context identity. Missing or estimated
+receipts are refused without saving a profile. There is no blanket 16K context
+cap; context selection remains bounded by the reviewed ladder and fit evidence.
+Successful tune results are saved per GGUF model file
 with model size and modified-time metadata. When that model is selected again,
 Hermaeus reapplies the saved GPU layer, thread, context, and extra-argument
 profile before starting the managed server. The Models card shows the current
@@ -634,6 +665,9 @@ Where both the used and total values are trustworthy, RAM, storage, and GPU
 cards also show a small observed-use bar. A bar is omitted when the source is
 unknown; device-wide memory is never presented as process-owned memory. On
 Windows, process GPU memory uses PID-scoped NVML first and a PID-scoped
-`nvidia-smi` query as fallback, otherwise it remains `Unknown`.
+`nvidia-smi` query as fallback, otherwise it remains `Unknown`. A device total
+is never relabelled as process VRAM. Process RAM and GPU samples require the
+same PID, start time, and runtime identity; the bounded GPU probe cache avoids
+re-running an expensive platform query for every nearby sample.
 
 This helps monitor storage usage and plan data cleanup or archival.

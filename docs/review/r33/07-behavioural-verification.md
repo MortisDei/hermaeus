@@ -1,5 +1,8 @@
 # 07. Behavioural verification and owner evidence
 
+> Historical planning baseline. Current automated results and owner-live gates
+> are recorded in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+
 ## 7.1 Keep useful tests; add proof at the missing boundaries
 
 **RF:** the planning baseline build passed and 2,675 tests passed with 17

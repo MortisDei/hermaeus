@@ -1,5 +1,8 @@
 # 09. Security, platform and release boundaries
 
+> Historical platform snapshot. Current verification and unresolved owner
+> boundaries are recorded in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+
 ## 9.1 Installed Linux launch investigation
 
 **OO:** current application/menu launcher fails; an older installation worked.

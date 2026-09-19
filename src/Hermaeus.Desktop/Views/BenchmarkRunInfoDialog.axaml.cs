@@ -42,6 +42,12 @@ public sealed class BenchmarkRunInfoViewModel
     public string Summary => $"{_run.RankingScore:P0} · pass {_run.PassRate:P0} · median {_run.MedianApproxTokensPerSecond:F1} tok/s";
     public string Started => _run.StartedAt.ToLocalTime().ToString("g");
     public string Status => _run.Status;
+    public string EvaluatorVersion => string.IsNullOrWhiteSpace(_run.EvaluatorVersion)
+        ? "Unknown"
+        : _run.EvaluatorVersion;
+    public string RerunRelation => string.IsNullOrWhiteSpace(_run.RerunOfRunId)
+        ? "Original run"
+        : $"Re-run of {_run.RerunOfRunId}";
     public string Evidence => _run.ComparisonEligible
         ? "Verified and eligible for comparison"
         : $"{(string.IsNullOrWhiteSpace(_run.Metadata.EvidenceStatus) ? "Unknown" : _run.Metadata.EvidenceStatus)} and excluded from trustworthy rankings";

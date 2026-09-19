@@ -17,7 +17,11 @@ namespace Hermaeus.Voice;
 /// </summary>
 public static class AudioPlayback
 {
-    public static async Task PlayAsync(string wavFilePath, CancellationToken ct, Action<string>? onBackendSelected = null)
+    public static async Task PlayAsync(
+        string wavFilePath,
+        CancellationToken ct,
+        Action<string>? onBackendSelected = null,
+        Action<string, bool>? onBackendAttempt = null)
     {
         if (string.IsNullOrWhiteSpace(wavFilePath) || !File.Exists(wavFilePath))
             throw new InvalidDataException("Audio playback was not started because the generated WAV file is missing.");
@@ -38,19 +42,22 @@ public static class AudioPlayback
         players.Add(("afplay", [wavFilePath]));
         players.Add(("ffplay", ["-nodisp", "-autoexit", wavFilePath]));
 
-        await PlayCandidatesAsync(players, TryRunAsync, ct, onBackendSelected);
+        await PlayCandidatesAsync(players, TryRunAsync, ct, onBackendSelected, onBackendAttempt);
     }
 
     internal static async Task PlayCandidatesAsync(
         IReadOnlyList<(string Command, IReadOnlyList<string> Arguments)> players,
         Func<string, IReadOnlyList<string>, CancellationToken, Task<bool>> tryRun,
         CancellationToken ct,
-        Action<string>? onBackendSelected = null)
+        Action<string>? onBackendSelected = null,
+        Action<string, bool>? onBackendAttempt = null)
     {
         foreach (var player in players)
         {
             ct.ThrowIfCancellationRequested();
-            if (await tryRun(player.Command, player.Arguments, ct))
+            var succeeded = await tryRun(player.Command, player.Arguments, ct);
+            onBackendAttempt?.Invoke(player.Command, succeeded);
+            if (succeeded)
             {
                 onBackendSelected?.Invoke(player.Command);
                 return;

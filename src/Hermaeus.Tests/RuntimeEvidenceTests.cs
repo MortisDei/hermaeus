@@ -115,6 +115,33 @@ public sealed class RuntimeEvidenceTests
         Assert.False(envelope.ComparisonEligible);
     }
 
+    [Fact]
+    public void Process_arguments_do_not_substitute_for_missing_effective_runtime_evidence()
+    {
+        var runtime = new RuntimeIdentityV2(
+            "llama.cpp", "runtime-hash", 1, DateTime.UnixEpoch, "v", "b", "c", "cpu", "",
+            IdentityCompleteness.Complete);
+        var model = new ModelIdentityV2(
+            "model", "model-hash", 1, DateTime.UnixEpoch, "test", "Q4", "",
+            ModelIdentityStrength.VerifiedHash, IdentityCompleteness.Complete);
+        var configuration = Configuration(4096);
+        var process = new RuntimeLaunchProcessEvidence(
+            42, DateTime.UnixEpoch, "/runtime/llama-server", ["--ctx-size", "4096"])
+        {
+            ExecutableSha256 = "runtime-hash"
+        };
+
+        var envelope = RuntimeEvidenceEvaluator.Evaluate(
+            "benchmark", "run", "candidate", runtime, model,
+            configuration, configuration, configuration, process, effectiveLaunch: null,
+            ["context"], [RuntimeTelemetrySeries.ProcessInstance(42, DateTime.UnixEpoch)],
+            RuntimeEvidenceStatus.Unverified);
+
+        Assert.Contains("effective-runtime-missing", envelope.Reasons);
+        Assert.Equal(string.Empty, envelope.EffectiveConfigurationStableId);
+        Assert.False(envelope.ComparisonEligible);
+    }
+
     private static ConfigurationIdentityV2 Configuration(int context) => new(
         context, 0, "v2:cpu", 4, 0, 1, null, null, "f16", "f16", "off", "", "", "", 0,
         new Dictionary<string, string>(), IdentityCompleteness.Complete);

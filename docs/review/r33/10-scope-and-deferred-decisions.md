@@ -1,5 +1,10 @@
 # 10. Scope and deferred decisions
 
+> Historical planning record. The current `r33/round` disposition is recorded
+> in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md). Monaco and
+> the WebView dependency are no longer part of the current editor surface;
+> this document's earlier conditional wording is retained as planning history.
+
 ## 10.1 Mandatory, conditional, parked
 
 Mandatory R33 scope is application lifecycle/authority, Agent mutation validity
@@ -99,7 +104,8 @@ with the owning future batch; do not claim it was fixed during this pass.
 ## 10.6 Descope order
 
 If implementation grows beyond a credible single round, first drop new runtime
-recipes, then further Monaco/native-WebView adoption, then API execution endpoints. Keep the shared
+recipes, then API execution endpoints. The optional editor adoption decision is
+already closed in the current continuation. Keep the shared
 owner/driver, mutation correctness, task isolation, configuration/recommendation
 reconciliation, cancellation and demonstrated platform defects. Reduce UX scope
 to these changed workflows before expanding to secondary pages. Do not descope

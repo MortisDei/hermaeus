@@ -177,7 +177,18 @@ defaults, volume, mute, visual equivalents, and suppression while TTS speaks.
 It never cues ordinary token arrival, clicks, navigation, or high GPU use.
 Windows playback uses the native winmm `PlaySound` API directly, so a preview
 does not open a media player or depend on the WAV file association. Temporary
-cue files are deleted after playback.
+cue files are deleted after playback. Approval, task-complete, task-failed, and
+managed-runtime-failed cues are enabled by default; other event kinds remain
+opt-in. Each event resolves to a distinct bounded multi-tone generated WAV
+pattern, so approval, completion, failure, and runtime events are not one
+generic beep. The service logs the cue identity and pattern, generated PCM
+resource, every backend attempt, fallback reason, policy decision, and playback
+result. When suppression is enabled and
+TTS is speaking, a cue waits for the speaking state to clear and then rechecks
+the current settings; it is not silently dropped or played over speech. A
+backend failure is a diagnostic warning and does not turn the originating
+operation into a failure. Linux and Windows device playback still require
+owner live validation.
 
 ## Audio Data and Privacy Lifecycle
 

@@ -25,6 +25,11 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     };
 
     public IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null)
+        => ListFileEntries(options, subdirectory, maxDepth)
+            .Select(entry => entry.RelativePath)
+            .ToList();
+
+    public IReadOnlyList<AgentWorkspaceFileEntry> ListFileEntries(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null)
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var scope = string.IsNullOrWhiteSpace(subdirectory) ? root : ResolveSafePath(root, subdirectory);
@@ -36,19 +41,33 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         // workspace root.
         var directories = EnumerateSafeDirectories(scope)
             .Where(path => PathDepthBelow(scope, path) <= depth)
-            .Select(path => ToRelative(root, path))
-            .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
-            .Select(relative => relative + "/");
+            .Select(path => new
+            {
+                Path = path,
+                RelativePath = ToRelative(root, path) + "/"
+            })
+            .Where(entry => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, entry.RelativePath).Allowed)
+            .Select(entry => new AgentWorkspaceFileEntry(
+                entry.RelativePath,
+                GetLastWriteTimeUtcOrUnknown(entry.Path),
+                IsDirectory: true));
 
         var files = EnumerateSafeFiles(scope, options.MaxFileBytes)
             .Where(path => PathDepthBelow(scope, path) <= depth)
-            .Select(path => ToRelative(root, path))
-            .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed);
+            .Select(path => new
+            {
+                Path = path,
+                RelativePath = ToRelative(root, path)
+            })
+            .Where(entry => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, entry.RelativePath).Allowed)
+            .Select(entry => new AgentWorkspaceFileEntry(
+                entry.RelativePath,
+                GetLastWriteTimeUtcOrUnknown(entry.Path)));
 
         // Sorted, so a listing is stable between calls and shallow entries are
         // not buried by whichever subtree the walk happened to reach first.
         var entries = directories.Concat(files)
-            .OrderBy(entry => entry, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var cap = Math.Max(1, options.MaxListResults);
@@ -57,9 +76,29 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
 
         // Says it stopped early rather than implying the rest is not there.
         var shown = entries.Take(cap).ToList();
-        shown.Add($"[listing truncated: {entries.Count - cap} more entries not shown. "
-            + "Narrow it with the subdirectory or max_depth argument; do not conclude a path is absent from this list alone.]");
+        shown.Add(new AgentWorkspaceFileEntry(
+            $"[listing truncated: {entries.Count - cap} more entries not shown. "
+            + "Narrow it with the subdirectory or max_depth argument; do not conclude a path is absent from this list alone.]",
+            null,
+            IsTruncationNotice: true));
         return shown;
+    }
+
+    private static DateTime? GetLastWriteTimeUtcOrUnknown(string path)
+    {
+        try
+        {
+            var value = File.GetLastWriteTimeUtc(path);
+            return value == DateTime.MinValue ? null : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<string> EnumerateSafeDirectories(string root)
@@ -273,6 +312,60 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         return new AgentFileReadResult(ToRelative(root, full), content, false, Changed: true);
     }
 
+    public async Task<AgentOwnerFileSaveResult> SaveOwnerFileAsync(
+        AgentWorkspaceOptions options,
+        string relativePath,
+        string content,
+        string expectedContentSha256,
+        bool expectedExisted,
+        CancellationToken ct = default)
+    {
+        var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var full = ResolveSafePath(root, relativePath);
+        if (Directory.Exists(full))
+            throw new InvalidOperationException("The owner save target is a directory, not a file.");
+
+        var currentExisted = File.Exists(full);
+        var current = currentExisted ? await File.ReadAllTextAsync(full, ct) : string.Empty;
+        ValidateOwnerSaveTextFile(full, currentExisted, current, options.MaxFileBytes);
+        var currentHash = currentExisted ? AgentMutationPreparation.ComputeContentSha256(current) : string.Empty;
+        if (currentExisted != expectedExisted
+            || !string.Equals(currentHash, expectedContentSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return new AgentOwnerFileSaveResult(
+                ToRelative(root, full), content, currentHash, Changed: false, Conflict: true,
+                "The file changed outside Hermaeus after it was opened. Reload it before saving so newer content is not overwritten.");
+        }
+
+        // Re-read the expected revision at the last safe boundary before the
+        // atomic replacement. This closes the normal external-edit race while
+        // keeping the owner path independent of Agent approval state.
+        currentExisted = File.Exists(full);
+        current = currentExisted ? await File.ReadAllTextAsync(full, ct) : string.Empty;
+        ValidateOwnerSaveTextFile(full, currentExisted, current, options.MaxFileBytes);
+        currentHash = currentExisted ? AgentMutationPreparation.ComputeContentSha256(current) : string.Empty;
+        if (currentExisted != expectedExisted
+            || !string.Equals(currentHash, expectedContentSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return new AgentOwnerFileSaveResult(
+                ToRelative(root, full), content, currentHash, Changed: false, Conflict: true,
+                "The file changed outside Hermaeus while the save was being prepared. Reload it before saving.");
+        }
+
+        if (currentExisted && string.Equals(current, content, StringComparison.Ordinal))
+        {
+            return new AgentOwnerFileSaveResult(
+                ToRelative(root, full), content, currentHash, Changed: false, Conflict: false,
+                "The file already contains these contents.");
+        }
+
+        ValidateOwnerSaveTextFile(full, true, content, options.MaxFileBytes);
+        await AtomicFileWriter.WriteAllTextAsync(full, content, ct);
+        return new AgentOwnerFileSaveResult(
+            ToRelative(root, full), content, AgentMutationPreparation.ComputeContentSha256(content),
+            Changed: true, Conflict: false, "Saved directly from the Workspace editor.");
+    }
+
     public string DraftPatch(string relativePath, string rationale, string proposedContent)
     {
         var path = relativePath.Replace('\\', '/').Trim();
@@ -402,6 +495,19 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var verdict = WorkspacePolicyEvaluator.EvaluateWrite(options.Policy, relativePath);
         if (!verdict.Allowed)
             throw new AgentWorkspacePolicyDeniedException($"write blocked by workspace policy: {verdict.Reason}");
+    }
+
+    private static void ValidateOwnerSaveTextFile(string full, bool exists, string content, int maxFileBytes)
+    {
+        var maxBytes = maxFileBytes > 0 ? maxFileBytes : 128 * 1024;
+        var info = exists ? new FileInfo(full) : null;
+        if (!SupportedTextFileTypes.IsSupported(Path.GetFileName(full))
+            || (info is not null && info.Length > maxBytes)
+            || Encoding.UTF8.GetByteCount(content) > maxBytes
+            || content.Contains('\0'))
+        {
+            throw new InvalidOperationException("The owner save target is no longer a supported, bounded text file.");
+        }
     }
 
     private static int CountOccurrences(string content, string needle)

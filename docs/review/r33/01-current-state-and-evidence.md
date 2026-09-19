@@ -1,5 +1,8 @@
 # 01. Current state and evidence
 
+> Historical inspection snapshot from the planning checkout. Current branch,
+> source, and disposition are maintained in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+
 ## 1.1 Baseline and inspection boundary
 
 Inspected on 2026-09-07, on Pop!_OS in a COSMIC Wayland session. Clean `main`

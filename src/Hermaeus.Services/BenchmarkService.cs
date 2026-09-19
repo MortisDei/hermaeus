@@ -12,6 +12,7 @@ namespace Hermaeus.Services;
 
 public sealed class BenchmarkService
 {
+    public const string CurrentEvaluatorVersion = RefusalEvaluator.CurrentVersion;
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
     private readonly ISettingsService _settings;
     private readonly ILlmService _llm;
@@ -134,12 +135,18 @@ public sealed class BenchmarkService
         CancellationToken ct = default,
         Func<CancellationToken, Task>? preparation = null)
     {
+        if (!string.IsNullOrWhiteSpace(suite.EvaluatorVersion)
+            && !string.Equals(suite.EvaluatorVersion, CurrentEvaluatorVersion, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Benchmark suite evaluator {suite.EvaluatorVersion} is not supported by this build. Re-run it from the current suite definition.");
+
         var run = new BenchmarkRun
         {
             OperationId = OperationCorrelation.NewId(),
             SuiteId = suite.Id,
             SuiteName = suite.Name,
             SuiteVersion = suite.SuiteVersion,
+            EvaluatorVersion = CurrentEvaluatorVersion,
             ScoringProfile = suite.ScoringProfile,
             ModelId = model.Id,
             ModelName = string.IsNullOrWhiteSpace(model.ProfileDisplayName) ? model.Name : model.ProfileDisplayName,
@@ -280,7 +287,10 @@ public sealed class BenchmarkService
             Id = previous.SuiteId,
             Name = previous.SuiteName,
             SuiteVersion = previous.SuiteVersion,
+            EvaluatorVersion = CurrentEvaluatorVersion,
             ScoringProfile = previous.ScoringProfile,
+            // Reruns are new observations. The relationship is recorded on
+            // the new run below, while the historical run remains unchanged.
             Temperature = previous.Temperature,
             TimeoutSeconds = previous.TimeoutSeconds,
             IterationsPerCase = previous.IterationsPerCase,
@@ -309,7 +319,10 @@ public sealed class BenchmarkService
         var liveModels = await _llm.GetModelsAsync(ct);
         var model = liveModels.FirstOrDefault(m => string.Equals(m.Id, previous.ModelId, StringComparison.OrdinalIgnoreCase))
             ?? new LlmModel { Id = previous.ModelId, Name = previous.ModelName, Provider = previous.Provider };
-        return await RunAsync(suite, model, progress, ct);
+        var rerun = await RunAsync(suite, model, progress, ct);
+        rerun.RerunOfRunId = previous.Id;
+        await SaveRunAsync(rerun, CancellationToken.None);
+        return rerun;
     }
 
     public async Task<string> ExportAsync(string runId, string targetDirectory, CancellationToken ct = default)
@@ -385,7 +398,8 @@ public sealed class BenchmarkService
             && test.ExpectedKeywordAlternatives.All(group => group.Count > 0 && group.Any(k => ContainsExpected(output, k)));
         var regexHit = test.ExpectedRegexes.Count == 0
             || test.ExpectedRegexes.All(rx => IsRegexMatch(output, rx));
-        var refusalCorrect = !test.ShouldRefuse || LooksLikeRefusal(output);
+        var refusal = RefusalEvaluator.Evaluate(output, test.ShouldRefuse);
+        var refusalCorrect = refusal.IsCorrect;
         var checks = new[] { keywordHit, regexHit, refusalCorrect };
         var quality = checks.Count(x => x) / (double)checks.Length;
         return new BenchmarkResult
@@ -404,6 +418,8 @@ public sealed class BenchmarkService
             KeywordHit = keywordHit,
             RegexHit = regexHit,
             RefusalCorrect = refusalCorrect,
+            RefusalAssessment = refusal.Classification,
+            RefusalDetail = refusal.Detail,
             QualityScore = Math.Round(quality, 4),
             Passed = keywordHit && regexHit && refusalCorrect
         };
@@ -1359,28 +1375,6 @@ public sealed class BenchmarkService
         return ex.GetType().Name;
     }
 
-    private static bool LooksLikeRefusal(string answer)
-    {
-        if (string.IsNullOrWhiteSpace(answer)) return false;
-        var refusal = answer.Contains("not enough", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("insufficient", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("cannot determine", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("cannot answer", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("no context", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("cannot provide", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("did not provide", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("do not have access", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("don't have access", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("no record", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("unable to verify", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("can't verify", StringComparison.OrdinalIgnoreCase);
-        if (!refusal) return false;
-
-        return !Regex.IsMatch(answer,
-            @"\b(?:but|however|actually|the answer is|it is|it's)\s+(?:\$?\d|[A-Z][\w-]{2,})",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    }
-
     private static bool ContainsExpected(string output, string expected)
     {
         if (string.IsNullOrEmpty(expected)) return true;
@@ -1412,6 +1406,9 @@ public sealed class BenchmarkService
         md.AppendLine($"- Model: `{run.ModelName}`");
         md.AppendLine($"- Provider: `{run.Provider}`");
         md.AppendLine($"- Suite version: `{run.SuiteVersion}`");
+        md.AppendLine($"- Evaluator version: `{run.EvaluatorVersion}`");
+        if (!string.IsNullOrWhiteSpace(run.RerunOfRunId))
+            md.AppendLine($"- Rerun of: `{run.RerunOfRunId}`");
         md.AppendLine($"- Scoring profile: `{run.ScoringProfile}`");
         md.AppendLine($"- Run mode: `{run.RunMode}`");
         md.AppendLine($"- Iterations per case: {run.IterationsPerCase}");
@@ -1462,6 +1459,8 @@ public sealed class BenchmarkService
             md.AppendLine($"- Total: {result.TotalMs} ms");
             md.AppendLine($"- Approx tokens/sec: {result.ApproxTokensPerSecond:F2}");
             md.AppendLine($"- Quality: {result.QualityScore:P0}");
+            md.AppendLine($"- Refusal assessment: `{result.RefusalAssessment}`");
+            md.AppendLine($"- Refusal detail: {result.RefusalDetail}");
             md.AppendLine($"- Failure category: {result.FailureCategory}");
             if (!string.IsNullOrWhiteSpace(result.Error))
                 md.AppendLine($"- Error: {result.Error}");
@@ -1477,12 +1476,12 @@ public sealed class BenchmarkService
     private static string ToCsv(BenchmarkRun run)
     {
         var csv = new StringBuilder();
-        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error,kv_cache_type_k,kv_cache_type_v,flash_attention,profile_fingerprint,observation_origin,runtime_evidence_id,evidence_status,comparison_eligible");
+        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,refusal_assessment,refusal_detail,failure_category,error,evaluator_version,rerun_of_run_id,kv_cache_type_k,kv_cache_type_v,flash_attention,profile_fingerprint,observation_origin,runtime_evidence_id,evidence_status,comparison_eligible");
         var evidenceStatus = string.IsNullOrWhiteSpace(run.Metadata.EvidenceStatus)
             ? run.RuntimeEvidence?.Status.ToString() ?? string.Empty
             : run.Metadata.EvidenceStatus;
         foreach (var result in run.Results)
-            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)},{Csv(run.Metadata.ProfileFingerprint?.StableId ?? string.Empty)},{Csv(run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? string.Empty)},{Csv(run.RuntimeEvidence?.EnvelopeId ?? string.Empty)},{Csv(evidenceStatus)},{run.ComparisonEligible}");
+            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.RefusalAssessment)},{Csv(result.RefusalDetail)},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.EvaluatorVersion)},{Csv(run.RerunOfRunId)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)},{Csv(run.Metadata.ProfileFingerprint?.StableId ?? string.Empty)},{Csv(run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? string.Empty)},{Csv(run.RuntimeEvidence?.EnvelopeId ?? string.Empty)},{Csv(evidenceStatus)},{run.ComparisonEligible}");
         return csv.ToString();
     }
 

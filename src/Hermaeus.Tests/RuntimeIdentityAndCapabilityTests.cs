@@ -115,6 +115,16 @@ public sealed class RuntimeIdentityAndCapabilityTests
     }
 
     [Fact]
+    public void Empty_model_path_is_an_unknown_identity_instead_of_a_path_exception()
+    {
+        var identity = RuntimeIdentityFactory.CreateModelIdentity(string.Empty, null);
+
+        Assert.Equal(ModelIdentityStrength.Unknown, identity.Strength);
+        Assert.Equal(IdentityCompleteness.Incomplete, identity.Completeness);
+        Assert.Null(identity.FileSizeBytes);
+    }
+
+    [Fact]
     public void V2_fingerprint_is_incomplete_when_any_component_is_incomplete()
     {
         var fingerprint = Fingerprint(Runtime() with { Completeness = IdentityCompleteness.Incomplete });

@@ -1,5 +1,8 @@
 # 08. Desktop product UX and information architecture
 
+> Historical UX audit. The current implementation and remaining live gates are
+> recorded in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+
 ## 8.1 Audit basis and priorities
 
 This is a source-grounded product workflow audit, using views, bound commands,

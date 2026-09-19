@@ -746,7 +746,7 @@ public sealed class HuggingFaceArtworkTests
         var firstSelection = vm.SelectHfRepoCommand.ExecuteAsync(firstRepo);
         await firstArtworkStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
         await vm.SelectHfRepoCommand.ExecuteAsync(secondRepo);
-        try { await firstSelection; } catch (OperationCanceledException) { }
+        await firstSelection;
         await Helpers.WaitForAsync(() => secondRepo.ArtworkState == HfArtworkState.Available, "second repository artwork");
 
         Assert.Same(secondRepo, vm.SelectedHfRepo);

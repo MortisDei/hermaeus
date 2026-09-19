@@ -1126,10 +1126,20 @@
                                         </Border>
 
                                         <StackPanel Grid.Column="1" Spacing="8">
-                                            <TextBlock Text="{Binding SelectedWorkspaceFile.RelativePath, TargetNullValue=Select a file to edit}" FontWeight="SemiBold" />
+                                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                                <TextBlock Text="{Binding SelectedWorkspaceFile.RelativePath, TargetNullValue=Select a file to edit}"
+                                                           FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1" Text="{Binding WorkspaceEditorStatus}"
+                                                           FontSize="10" Opacity="0.65" TextTrimming="CharacterEllipsis" />
+                                                <Button Grid.Column="2" Content="Save"
+                                                        Command="{Binding SaveWorkspaceFileCommand}"
+                                                        Padding="10,5"
+                                                        ToolTip.Tip="Save the selected file directly as the owner. This does not create an Agent approval item." />
+                                            </Grid>
                                             <TextBlock Text="{Binding WorkspaceFileSummary, StringFormat=Summary: {0}}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
                                             <views:WorkspaceEditorView Text="{Binding DraftProposedContent, Mode=TwoWay}"
                                                                        FilePath="{Binding SelectedWorkspaceFile.RelativePath}"
+                                                                       SaveCommand="{Binding SaveWorkspaceFileCommand}"
                                                                        Height="320" MinHeight="260" MaxHeight="600"
                                                                        VerticalAlignment="Top"
                                                                        IsVisible="{Binding HasSelectedWorkspaceFile}" />
@@ -1140,8 +1150,8 @@
                                             <!-- The composer stays with the file list it is bound to
                                                  (SelectedWorkspaceFile), not with the patch queue it feeds. -->
                                             <Expander Header="Draft Patch" IsExpanded="False" Margin="0,8,0,0">
-                                                <StackPanel Spacing="8">
-                                                    <TextBlock Text="Edit proposed content in the workspace editor above, then explain the change before queuing it for review."
+                                                                    <StackPanel Spacing="8">
+                                                    <TextBlock Text="Save edits directly with Save or Ctrl+S. Use this optional patch path when you want an Agent-proposed change queued for review."
                                                                FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
                                                     <TextBox Text="{Binding DraftRationale}"
                                                              PlaceholderText="Rationale for this patch..."

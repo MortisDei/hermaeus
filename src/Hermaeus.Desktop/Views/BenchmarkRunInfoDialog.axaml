@@ -20,6 +20,10 @@
                         <TextBlock Text="{Binding Started}" />
                         <TextBlock Text="Status" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
                         <TextBlock Text="{Binding Status}" />
+                        <TextBlock Text="Semantic evaluator" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
+                        <TextBlock Text="{Binding EvaluatorVersion}" />
+                        <TextBlock Text="History" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
+                        <TextBlock Text="{Binding RerunRelation}" TextWrapping="Wrap" />
                         <TextBlock Text="Evidence" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
                         <TextBlock Text="{Binding Evidence}" TextWrapping="Wrap" />
                         <TextBlock Text="Evidence status" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
@@ -61,6 +65,8 @@
                                 <StackPanel>
                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
                                     <TextBlock Text="{Binding Timings}" FontSize="11" Opacity="0.6" />
+                                    <TextBlock Text="{Binding Checks}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding RefusalDetail}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </DataTemplate>

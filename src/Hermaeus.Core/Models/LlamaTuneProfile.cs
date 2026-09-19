@@ -25,6 +25,8 @@ public sealed class LlamaTuneProfile
     public int ContextSize { get; set; }
     public string ExtraArgs { get; set; } = string.Empty;
     public string LlamaServerVersion { get; set; } = string.Empty;
+    public string ProbeConfigurationStableId { get; set; } = string.Empty;
+    public int? ProbeContextSize { get; set; }
     public DateTime TunedAtUtc { get; set; } = DateTime.UtcNow;
 
     public string ModelFileName => string.IsNullOrWhiteSpace(ModelPath)

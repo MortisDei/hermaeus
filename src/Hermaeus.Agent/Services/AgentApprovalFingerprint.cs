@@ -55,6 +55,13 @@ public static class AgentApprovalFingerprint
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
+    public static string ResolveRequestedAction(AgentPendingToolAction? pending) =>
+        pending is null
+            ? string.Empty
+            : pending.RequestedActionFingerprint.Length > 0
+                ? pending.RequestedActionFingerprint
+                : Compute(pending.ToolName, pending.Arguments);
+
     /// <summary>
     /// The fingerprint to treat as "current" for a pending action: its own
     /// stored value when present, else freshly computed from ToolName and

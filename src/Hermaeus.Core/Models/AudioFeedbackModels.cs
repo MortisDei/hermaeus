@@ -24,6 +24,9 @@ public sealed class AudioFeedbackSettings
     {
         if (EventEnabled.TryGetValue(kind.ToString(), out var enabled))
             return enabled;
-        return kind is AudioFeedbackEventKind.ManagedRuntimeFailed;
+        return kind is AudioFeedbackEventKind.TaskNeedsApproval
+            or AudioFeedbackEventKind.TaskCompleted
+            or AudioFeedbackEventKind.TaskFailed
+            or AudioFeedbackEventKind.ManagedRuntimeFailed;
     }
 }

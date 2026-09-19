@@ -1,5 +1,8 @@
 # 11. Dependency-spined roadmap
 
+> Historical implementation roadmap. The current `r33/round` continuation and
+> its final disposition are recorded in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+
 This document was the implementation proposal for owner review. The local
 implementation now follows it on `r33/planning`, baseline `c944feb`, with the
 mandatory local closeout recorded in `cc494ac` and the strict audit in

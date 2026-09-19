@@ -1020,6 +1020,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnActivePanelChanged(string value)
     {
+        if (!string.Equals(value, "models", StringComparison.OrdinalIgnoreCase))
+            Models.CancelHuggingFaceSelection();
+
         OnPropertyChanged(nameof(ShowChat));
         OnPropertyChanged(nameof(ShowAgent));
         OnPropertyChanged(nameof(ShowSettings));

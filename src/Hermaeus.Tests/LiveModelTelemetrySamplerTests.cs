@@ -1,6 +1,7 @@
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using Hermaeus.ViewModels;
 using Xunit;
 
 namespace Hermaeus.Tests;
@@ -35,6 +36,19 @@ public sealed class LiveModelTelemetrySamplerTests
         Assert.All(sampler.CurrentSeries.Samples, sample => Assert.Equal(sampler.CurrentSeries.ProcessInstanceId, sample.ProcessInstanceId));
     }
 
+    [Fact]
+    public async Task Telemetry_flyout_keeps_unknown_process_vram_and_exposes_its_evidence_reason()
+    {
+        await using var viewModel = new LiveModelTelemetryViewModel(new LiveModelTelemetrySampler(
+            new GpuUnknownSource(), TimeSpan.FromHours(1)));
+
+        await viewModel.OpenAsync(Request("one"));
+
+        Assert.Equal("Unknown", viewModel.ProcessGpuMemory);
+        Assert.Contains("process-gpu-unavailable", viewModel.ProcessGpuMemoryDetail, StringComparison.Ordinal);
+        Assert.Contains("No trustworthy", viewModel.ProcessGpuMemoryDetail, StringComparison.Ordinal);
+    }
+
     private static RuntimeTelemetryRequest Request(string modelId)
     {
         var runtime = new RuntimeIdentityV2("test", "runtime", null, null, "1", "build", "compiler", "cpu", "", IdentityCompleteness.Complete);
@@ -53,6 +67,23 @@ public sealed class LiveModelTelemetrySamplerTests
                 new(request.SeriesId, instance, RuntimeTelemetryMetric.ProcessWorkingSetBytes, 123,
                     RuntimeTelemetrySourceKind.ProcessCounter, RuntimeTelemetryTrustState.ProcessScoped,
                     DateTime.UtcNow, request.RuntimeIdentity.StableId, "test", "test")
+            ]);
+        }
+    }
+
+    private sealed class GpuUnknownSource : IRuntimeTelemetrySource
+    {
+        public Task<IReadOnlyList<RuntimeTelemetrySample>> CaptureAsync(RuntimeTelemetryRequest request, CancellationToken ct = default)
+        {
+            var instance = RuntimeTelemetrySeries.ProcessInstance(request.ProcessId, request.ProcessStartedAtUtc);
+            return Task.FromResult<IReadOnlyList<RuntimeTelemetrySample>>([
+                new(request.SeriesId, instance, RuntimeTelemetryMetric.ProcessWorkingSetBytes, 123,
+                    RuntimeTelemetrySourceKind.ProcessCounter, RuntimeTelemetryTrustState.ProcessScoped,
+                    DateTime.UtcNow, request.RuntimeIdentity.StableId, "process-working-set", "RAM"),
+                new(request.SeriesId, instance, RuntimeTelemetryMetric.ProcessGpuMemoryBytes, null,
+                    RuntimeTelemetrySourceKind.Unknown, RuntimeTelemetryTrustState.Unknown,
+                    DateTime.UtcNow, request.RuntimeIdentity.StableId, "process-gpu-unavailable",
+                    "No trustworthy per-process GPU memory counter is available from this source.")
             ]);
         }
     }

@@ -45,15 +45,53 @@ public sealed class ManagedRuntimeTuningService : IManagedRuntimeTuningService
         try
         {
             progress?.Report($"[hermaeus] Auto-tune operation {operationId} acquired the shared runtime owner.");
-            return await ServerProcessManager.AutoTuneWithProbeAsync(
+            ServerConfig? successfulProbe = null;
+            var selected = await ServerProcessManager.AutoTuneWithProbeAsync(
                 config,
                 progress,
                 ct,
                 portOwnerLookup: null,
                 ggufInfo,
                 hardware,
-                (candidate, requestedLayers, report, token) =>
-                    ProbeCandidateAsync(operationId, candidate, requestedLayers, report, token, ggufInfo, hardware));
+                async (candidate, requestedLayers, report, token) =>
+                {
+                    var result = await ProbeCandidateAsync(
+                        operationId, candidate, requestedLayers, report, token, ggufInfo, hardware);
+                    if (result.Success)
+                        successfulProbe = candidate;
+                    return result;
+                });
+
+            if (successfulProbe is null)
+                throw new InvalidOperationException("Auto-tune final validation failed because the successful probe configuration was unavailable; no tune profile was saved.");
+
+            var confirmation = ServerProcessManager.BuildAutoTuneConfirmationProbe(successfulProbe, selected);
+            progress?.Report($"[hermaeus] Auto-tune: final validation is probing the observed {selected.GpuLayers} GPU layer(s) at context {confirmation.ContextSize:N0}.");
+            var confirmationResult = await ProbeCandidateAsync(
+                operationId,
+                confirmation,
+                selected.GpuLayers,
+                progress,
+                ct,
+                ggufInfo,
+                hardware);
+            if (!confirmationResult.Success || confirmationResult.TuneResult is null)
+            {
+                throw new InvalidOperationException(
+                    $"Auto-tune final validation failed; no tune profile was saved. {confirmationResult.Error}");
+            }
+
+            if (confirmationResult.TuneResult.GpuLayers != selected.GpuLayers)
+            {
+                throw new InvalidOperationException(
+                    $"Auto-tune final validation failed because the observed GPU layer count changed from {selected.GpuLayers} to {confirmationResult.TuneResult.GpuLayers}; no tune profile was saved.");
+            }
+
+            return confirmationResult.TuneResult with
+            {
+                TunedContextSize = selected.TunedContextSize,
+                TotalLayers = selected.TotalLayers ?? confirmationResult.TuneResult.TotalLayers
+            };
         }
         finally
         {
@@ -119,7 +157,7 @@ public sealed class ManagedRuntimeTuningService : IManagedRuntimeTuningService
 
             var result = launch.FailureKind == ServerLaunchFailureKind.None
                 && manager.Status == ServerStatus.Running
-                ? ProbeResult.Ok(BuildTuneResult(manager, requestedLayers, candidate.Threads))
+                ? ProbeResult.Ok(BuildTuneResult(manager, requestedLayers, candidate))
                 : ProbeResult.Failed(BuildFailure(requestedLayers, launch, manager));
 
             evidenceAttempted = true;
@@ -245,7 +283,7 @@ public sealed class ManagedRuntimeTuningService : IManagedRuntimeTuningService
     private static ServerTuneResult BuildTuneResult(
         ServerProcessManager manager,
         int requestedLayers,
-        int threads)
+        ServerConfig candidate)
     {
         var log = manager.GetLog();
         int? observedLayers = null;
@@ -260,9 +298,11 @@ public sealed class ManagedRuntimeTuningService : IManagedRuntimeTuningService
         return new(
             observedLayers ?? requestedLayers,
             totalLayers,
-            threads,
+            candidate.Threads,
             ServerProcessManager.ParseLlamaBuildLabel(log),
-            log);
+            log,
+            ProbeConfigurationStableId: ConfigurationIdentityFactory.Create(candidate).StableId,
+            ProbeContextSize: candidate.ContextSize);
     }
 
     private static string BuildFailure(

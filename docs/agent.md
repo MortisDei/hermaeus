@@ -27,7 +27,7 @@ explicit user approval before it executes.
   `waiting_for_review` or `blocked`, and nothing else. A task that has been
   approved in the past is not in the queue; its approvals live in the run
   ledger and in that task's own approval labels. A row with a gated action
-  pending offers Approve and Reject; a row waiting on an answer or a blocked
+  pending offers Approve, Reject, or Block as appropriate; a row waiting on an answer or a blocked
   run says so and offers Open, which loads the task into the workbench where
   the reply and Continue boxes are. The queue refreshes itself whenever a run
   pauses, so there is no manual refresh to remember.
@@ -85,22 +85,47 @@ for the persisted state, transcript, trace, and log files. New Task clears the
 current composer, response, draft, selection, and evidence projections while
 leaving the persisted task available in Recent Tasks.
 
-Workspace file inspection uses the bounded editor host. A local Monaco bundle is
-preferred when the native WebView adapter can initialize; AvaloniaEdit remains
-the functional fallback. The editor receives document data only. It cannot read
-or write files, run commands, approve actions, navigate arbitrary pages, or
-access chat content. Editing proposed content still creates a normal reviewable
-Agent patch, and the Changes view remains the source for applied, verified, and
+Workspace file inspection uses the bounded AvaloniaEdit host as the sole local
+editor. The selected file is loaded as a bounded text revision. Save or Ctrl+S
+is an explicit owner action: it compares the loaded SHA256 and existence state,
+uses atomic replacement, and refuses with a reload message when an external
+edit wins the race. It does not enter the Agent approval queue. The editor
+cannot run commands, approve actions, navigate arbitrary pages, or access chat
+content. Editing proposed content still creates a normal reviewable Agent
+patch, and the Changes view remains the source for applied, verified, and
 conflicted outcomes. The status tooltip retains bounded lifecycle diagnostics
-including visual-tree attachment, host and fallback dimensions, editable state,
-surface visibility, document size, and selected file path.
+including visual-tree attachment, dimensions, editable state, surface
+visibility, document size, and selected file path.
 When the selected workspace has no `AGENTS.md`, the workbench can preview a
 suggested file and queue it as a normal prepared mutation, even before a normal
 Agent run exists. In that case the workbench creates an explicit `Create
 workspace AGENTS.md` task only after the preview is accepted, then uses the same
 patch review and approval path. The suggestion is never written directly.
-Monaco also has a bounded readiness timeout, after which AvaloniaEdit remains
-the usable local editor.
+Read-only list, search, glob, file-read, summary, diff-inspection, and plan
+tools remain directly executable even if the model sets an approval flag. A
+workspace with no command recipes blocks only `run_command`; it does not block
+independent inspection or prepared file mutations. Equivalent blocked or
+non-progress results, including repeated read-only results, stop after three
+observations with the exact reason persisted. Repeated `ask_user` questions
+after an answer are consumed and bounded the same way. A simple writable file
+action still follows the prepared-mutation gate and stops truthfully if it
+cannot proceed. Mutation receipts also persist the requested-action
+fingerprint. A verified mutation that requests the same action again, or
+proposes the already-verified post-image, is treated as no progress before
+another approval is offered. Legitimate iterative edits to the same file
+remain distinct when their request or proposed content changes.
+
+The non-progress bound belongs to the task, not to one tool name or one
+outcome label. A no-effect `set_plan` followed by a blocked `plan_subtasks`
+proposal therefore still consumes the same bounded sequence. A changed
+read-only result starts a new sequence. Stable model ids are authoritative for
+the frozen parent and each child; legacy display labels are accepted only when
+they resolve unambiguously against the current visible inventory, including
+the provider identity. A missing or ambiguous frozen or child model blocks
+without guessing or silently falling back. A new task may retain an explicit
+caller-provided model string when a provider does not enumerate it, but that
+path does not select an alternate model and the task still freezes the exact
+string it used.
 
 ### Context & Retrieval
 
@@ -237,7 +262,10 @@ review, and then approve or reject queued patches from the dedicated panel.
 Approving a queued patch applies the proposed content to the selected workspace
 file immediately and refreshes the preview. Queued patches expose explicit
 pending, applied, rejected, and blocked states so review decisions are visible
-at a glance.
+at a glance. Each per-patch decision revalidates the authoritative prepared
+mutation, target revision, proposal identity, preimage, content, and safety
+policy before routing through the same task approval transition as the global
+decision strip. A stale row cannot approve, reject, or block a newer patch.
 
 ### Prepared mutations and receipts
 
@@ -455,6 +483,21 @@ task happens to be open in the workbench). The parent's own status mirrors a
 paused child's (`WaitingForUser`/`Blocked`) and names which sub-task it is
 waiting on, instead of showing `Running` with nothing happening.
 
+When a child pauses for an owner question, approval, or blocked action, the
+parent stores a source-identified interaction mirror. Replying or deciding
+from the parent routes to that exact child interaction, then refreshes the
+parent from the child's persisted state. Child results remain available to the
+parent, but a child cannot replace an unrelated parent interaction. Prompt,
+proposal, fingerprint, revision, and step identity checks reject stale
+answers or decisions, and a newly issued interaction gets a new route identity.
+
+Startup rebuilds parent interaction mirrors from authoritative child task state.
+Valid child queue rows remain directly routable, stale parent mirrors are
+refreshed, and an orphaned child whose parent or plan entry is missing is
+terminalized as Interrupted with its pending interaction cleared. This makes
+restart recovery deterministic without treating a parent mirror as a second
+source of truth.
+
 A child can reach `Complete`/`Failed` outside the orchestration loop entirely
 - opened directly from the recent-tasks list and stepped to completion, for
 example. The parent self-heals this on its next run: before choosing what to
@@ -491,8 +534,10 @@ The plan review shows a model selector for every proposed child. Choices are
 limited to configured visible models plus an explicit **Inherit parent** option.
 The selection is written back into the pending plan and its approval fingerprint
 is recomputed before approval, so the approved payload is exactly the plan that
-materializes. Unknown, hidden, removed, or unavailable explicit model ids are
-rejected before any child is created.
+materializes. Stable model ids are persisted after resolving a legacy display
+label, and the provider-qualified label is retained for review. Unknown,
+ambiguous, hidden, removed, or unavailable explicit model ids are rejected
+before any child is created.
 
 Each resolved child model is persisted on the sub-task spec and child task before
 execution. Task state, recent-task and sub-task rows, transcripts, traces,
@@ -838,7 +883,9 @@ Approved patches are applied as text edits against the selected workspace file.
 The apply result, approving user, approval timestamp, and any failure reason
 are recorded in task state. Patch review decisions are independent from a
 separate pending tool action on the same task and cannot approve, reject, or
-execute that action. A queued full-content patch does not currently carry a
+execute that action. Approve, Reject, and Block all use the authoritative
+prepared patch identity when the queue item represents a prepared mutation. A
+queued full-content patch does not currently carry a
 draft-time file hash, so review the live file before applying when other tools
 or people may have edited it since the draft was created. Apply captures the
 live pre-image immediately before writing, allowing Revert to restore that

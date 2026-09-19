@@ -145,6 +145,9 @@ public partial class BenchmarkViewModel : ObservableObject
     /// asks for a second model instead of rendering a table of one.</summary>
     public bool HasComparableRankings => RankedRuns.Count >= 2;
 
+    /// <summary>Explains the current per-suite ranking shortage, including why recorded but unverified runs are excluded.</summary>
+    [ObservableProperty] private string _rankingEmptyState = "Run the same suite against two or more models to compare them.";
+
     /// <summary>
     /// Re-entrancy-safe (r12 02-async-and-threading.md 2.5): overlapping
     /// callers (panel navigation, startup) share the one in-flight load
@@ -645,9 +648,13 @@ public partial class BenchmarkViewModel : ObservableObject
     private void UpdateRankedRuns(List<BenchmarkRunViewModel> runs)
     {
         RankedRuns.Clear();
-        var list = runs.Where(r => r.Run.ComparisonEligible).Select(r => r.Run).ToList();
-        if (SelectedSuite is not null)
-            list = list.Where(r => r.SuiteId == SelectedSuite.Id).ToList();
+        var suiteRuns = SelectedSuite is null
+            ? runs
+            : runs.Where(r => string.Equals(r.Run.SuiteId, SelectedSuite.Id, StringComparison.Ordinal)).ToList();
+        var list = suiteRuns.Where(r => r.Run.ComparisonEligible).Select(r => r.Run).ToList();
+        var eligibleModelCount = list.Select(GetRankingGroupKey).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var unverifiedCount = suiteRuns.Count(r => !r.Run.ComparisonEligible);
+        RankingEmptyState = BuildRankingEmptyState(suiteRuns.Count, eligibleModelCount, unverifiedCount);
 
         // counts per model for display
         var counts = list.GroupBy(r => GetRankingGroupKey(r), StringComparer.OrdinalIgnoreCase)
@@ -664,6 +671,23 @@ public partial class BenchmarkViewModel : ObservableObject
             counts.TryGetValue(GetRankingGroupKey(run), out var count);
             RankedRuns.Add(new BenchmarkRunViewModel(run, Math.Max(1, count)) { Rank = rank });
         }
+    }
+
+    private static string BuildRankingEmptyState(int recordedRunCount, int eligibleModelCount, int unverifiedCount)
+    {
+        if (eligibleModelCount >= 2)
+            return string.Empty;
+
+        var evidenceNote = unverifiedCount > 0
+            ? $" {unverifiedCount} recorded run{(unverifiedCount == 1 ? " is" : "s are")} excluded because runtime evidence is unverified."
+            : string.Empty;
+
+        return eligibleModelCount switch
+        {
+            1 => $"One eligible model is recorded. Run this suite on one more eligible model to compare them.{evidenceNote}",
+            0 when recordedRunCount > 0 => $"No eligible runs can be ranked yet. Verify runtime evidence, then run this suite on two eligible models to compare them.{evidenceNote}",
+            _ => "Run the same suite against two or more eligible models to compare them."
+        };
     }
 
     private bool CanRun() => !IsRunning && SelectedSuite is not null && SelectedModel is not null;
@@ -801,6 +825,7 @@ public partial class BenchmarkViewModel : ObservableObject
         Name = suite.Name,
         Description = suite.Description,
         SuiteVersion = suite.SuiteVersion,
+        EvaluatorVersion = suite.EvaluatorVersion,
         ScoringProfile = suite.ScoringProfile,
         BaselineModelId = suite.BaselineModelId,
         BaselineModelName = suite.BaselineModelName,
@@ -888,7 +913,13 @@ public sealed class BenchmarkResultViewModel
     };
     public bool HasDraftAcceptance => Result.DraftTokens.HasValue;
     public string Quality => $"{Result.QualityScore:P0}";
-    public string Checks => $"keyword {Result.KeywordHit} · regex {Result.RegexHit} · refusal {Result.RefusalCorrect} · failure {Result.FailureCategory}";
+    public string RefusalAssessment => string.IsNullOrWhiteSpace(Result.RefusalAssessment)
+        ? "Unknown"
+        : Result.RefusalAssessment;
+    public string RefusalDetail => string.IsNullOrWhiteSpace(Result.RefusalDetail)
+        ? "No refusal assessment detail was persisted."
+        : Result.RefusalDetail;
+    public string Checks => $"keyword {Result.KeywordHit} · regex {Result.RegexHit} · refusal {Result.RefusalCorrect} ({RefusalAssessment}) · failure {Result.FailureCategory}";
     public string Error => Result.Error;
     public string Output => Result.Output;
     public BenchmarkResultViewModel(BenchmarkResult result) => Result = result;

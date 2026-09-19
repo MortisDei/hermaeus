@@ -369,6 +369,15 @@ public sealed class ModelManagementViewModelTests
         }
     }
 
+    private sealed class AsyncRoutingHandler(
+        Func<string, CancellationToken, Task<HttpResponseMessage>> route) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            route(request.RequestUri!.ToString(), cancellationToken);
+    }
+
     private sealed class BytesHandler(byte[] bytes) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -445,6 +454,20 @@ public sealed class ModelManagementViewModelTests
     {
         Content = new StringContent(json, Encoding.UTF8, "application/json")
     };
+
+    private static ModelManagementViewModel NewHuggingFaceViewModel(
+        SettingsService settings,
+        HuggingFaceClient client) =>
+        new(
+            new ScriptedModelsLlm(() => []),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            settings,
+            new FakeSystemInfo(),
+            NewServicesViewModel(settings),
+            new ModelManifestStore(settings),
+            client,
+            new ModelDownloadService());
 
     private static (string Metadata, string MetadataHash, string ModelHash, string CompanionHash) CompanionFixture(
         byte[] modelBytes, byte[] companionBytes)
@@ -868,6 +891,48 @@ public sealed class ModelManagementViewModelTests
 
         Assert.Equal(2, vm.HfSearchResults.Count);
         Assert.Equal("org/repo-a", vm.HfSearchResults[0].RepoId);
+    }
+
+    [Fact]
+    public async Task Replaced_or_navigated_hf_selection_completes_without_leaking_expected_cancellation()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new AsyncRoutingHandler(async (url, ct) =>
+        {
+            if (url.Contains("/api/models/", StringComparison.Ordinal))
+                return Response("{\"sha\":\"abc\",\"cardData\":{\"license\":\"mit\"}}");
+            if (url.Contains("/tree/", StringComparison.Ordinal))
+                return Response("[{\"path\":\"model.gguf\",\"size\":1,\"lfs\":{\"oid\":\"hash\"}}]");
+
+            started.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return Response("{}");
+        });
+        var vm = NewHuggingFaceViewModel(settings, new HuggingFaceClient(new HttpClient(handler)));
+
+        var selection = vm.SelectHfRepoCommand.ExecuteAsync(new HfRepoResultViewModel("org/repo", 10));
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        vm.CancelHuggingFaceSelection();
+
+        await selection;
+
+        Assert.False(vm.IsLoadingHfFiles);
+    }
+
+    [Fact]
+    public async Task Unowned_hf_operation_cancellation_still_propagates_for_diagnosis()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var handler = new AsyncRoutingHandler((_, _) =>
+            Task.FromException<HttpResponseMessage>(new OperationCanceledException("unowned cancellation")));
+        var vm = NewHuggingFaceViewModel(settings, new HuggingFaceClient(new HttpClient(handler)));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            vm.SelectHfRepoCommand.ExecuteAsync(new HfRepoResultViewModel("org/repo", 10)));
+        Assert.False(vm.IsLoadingHfFiles);
     }
 
     [Fact]

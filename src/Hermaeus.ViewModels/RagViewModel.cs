@@ -660,6 +660,8 @@ public partial class RagViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanIngest))]
     private async Task IngestAsync()
     {
+        if (IsIngesting || IsQuerying)
+            return;
         if (string.IsNullOrWhiteSpace(NewDatasetName)) return;
         if (EnableWebLoader && string.IsNullOrWhiteSpace(WebUrlList)) return;
         if (!EnableWebLoader && string.IsNullOrWhiteSpace(IngestPath)) return;
@@ -1108,7 +1110,7 @@ public partial class RagViewModel : ObservableObject
     [RelayCommand]
     private async Task ReindexDatasetAsync(RagDatasetManagerItemViewModel item)
     {
-        if (item?.Dataset is null || !item.ReindexRequired)
+        if (IsIngesting || IsQuerying || item?.Dataset is null || !item.ReindexRequired)
             return;
 
         IsIngesting = true;
@@ -1606,6 +1608,8 @@ public sealed class RagEvalResultViewModel
         RetrievalHit = result.RetrievalHit;
         KeywordHit = result.KeywordHit;
         RefusalCorrect = result.RefusalCorrect;
+        RefusalAssessment = string.IsNullOrWhiteSpace(result.RefusalAssessment) ? "Unknown" : result.RefusalAssessment;
+        RefusalEvaluatorVersion = string.IsNullOrWhiteSpace(result.RefusalEvaluatorVersion) ? "Unknown" : result.RefusalEvaluatorVersion;
         Passed = result.Passed;
         LatencyMs = result.LatencyMs;
         GroundingScore = result.GroundingScore;
@@ -1619,6 +1623,8 @@ public sealed class RagEvalResultViewModel
     public bool RetrievalHit { get; }
     public bool KeywordHit { get; }
     public bool RefusalCorrect { get; }
+    public string RefusalAssessment { get; }
+    public string RefusalEvaluatorVersion { get; }
     public bool Passed { get; }
     public double LatencyMs { get; }
     public float GroundingScore { get; }

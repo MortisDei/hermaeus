@@ -1,5 +1,6 @@
 using Hermaeus.Agent.Models;
 using Hermaeus.Agent.Services;
+using Hermaeus.ViewModels;
 using Xunit;
 
 namespace Hermaeus.Tests;
@@ -139,5 +140,22 @@ public sealed class AgentWorkspaceListingTests
 
         Assert.Contains(listing, entry => entry.Contains("top.cs", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(listing, entry => entry.Contains("deep.cs", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Structured_listing_preserves_directories_and_real_or_unknown_timestamps()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("workspace");
+        Directory.CreateDirectory(Path.Combine(root, "folder"));
+        File.WriteAllText(Path.Combine(root, "notes.txt"), "notes");
+
+        var entries = new AgentWorkspaceTools().ListFileEntries(new AgentWorkspaceOptions(root));
+        var directory = Assert.Single(entries, entry => entry.IsDirectory);
+        var file = Assert.Single(entries, entry => !entry.IsDirectory && !entry.IsTruncationNotice);
+
+        Assert.Equal("folder/", directory.RelativePath);
+        Assert.NotEqual(DateTime.MinValue, file.ModifiedUtc ?? DateTime.MinValue);
+        Assert.Equal("Modified time unavailable", new AgentWorkspaceFileViewModel("unknown", string.Empty, null).ModifiedLabel);
     }
 }

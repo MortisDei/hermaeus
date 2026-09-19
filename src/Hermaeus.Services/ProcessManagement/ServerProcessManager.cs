@@ -510,6 +510,35 @@ public sealed class ServerProcessManager : IDisposable
         return probe;
     }
 
+    /// <summary>
+    /// Reconstructs the exact launch shape that a managed auto-tune result will
+    /// persist. A successful probe may have requested "all" or an optimistic
+    /// layer count while the runtime reported a smaller effective count. The
+    /// confirmation must probe that reported count explicitly so the saved
+    /// profile is tied to a launchable configuration, including context and
+    /// all unrelated normalized options.
+    /// </summary>
+    internal static ServerConfig BuildAutoTuneConfirmationProbe(
+        ServerConfig successfulProbe,
+        ServerTuneResult result)
+    {
+        ArgumentNullException.ThrowIfNull(successfulProbe);
+        ArgumentNullException.ThrowIfNull(result);
+        if (!GpuPlacementIntent.TryFromLegacy(result.GpuLayers, out var placement, out var error)
+            || placement is null)
+            throw new InvalidOperationException($"Auto-tune final validation could not represent the observed GPU placement: {error}");
+
+        var confirmation = NormalizeConfig(successfulProbe);
+        confirmation.Id = $"{successfulProbe.Id}-confirmation";
+        confirmation.Name = $"{successfulProbe.Name} (auto-tune confirmation)";
+        confirmation.ContextSize = result.ProbeContextSize ?? successfulProbe.ContextSize;
+        confirmation.Threads = result.Threads;
+        confirmation.GpuPlacement = placement;
+        confirmation.GpuLayers = placement.LegacyGpuLayers ?? result.GpuLayers;
+        confirmation.AutoStart = false;
+        return confirmation;
+    }
+
     private static async Task<ProbeResult> TryProbeAsync(
         ServerConfig probe,
         int requestedLayers,
@@ -561,7 +590,14 @@ public sealed class ServerProcessManager : IDisposable
             var layers = observedLayers ?? requestedLayers;
             var log = string.Join('\n', lines);
             progress?.Report($"[hermaeus] Auto-tune: candidate {requestedLayers} reached /health.");
-            return ProbeResult.Ok(new ServerTuneResult(layers, totalLayers, probe.Threads, ParseLlamaBuildLabel(log), log));
+            return ProbeResult.Ok(new ServerTuneResult(
+                layers,
+                totalLayers,
+                probe.Threads,
+                ParseLlamaBuildLabel(log),
+                log,
+                ProbeConfigurationStableId: ConfigurationIdentityFactory.Create(probe).StableId,
+                ProbeContextSize: probe.ContextSize));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1528,7 +1564,9 @@ public sealed record ServerTuneResult(
     int Threads,
     string LlamaServerVersion,
     string RecentLog,
-    int? TunedContextSize = null);
+    int? TunedContextSize = null,
+    string ProbeConfigurationStableId = "",
+    int? ProbeContextSize = null);
 
 internal sealed record ProbeResult(bool Success, ServerTuneResult? TuneResult, string Error)
 {

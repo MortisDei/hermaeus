@@ -1,5 +1,9 @@
 # R33 Lab and Benchmark runtime-authority audit
 
+> Historical authority audit. Current source and verification dispositions are
+> recorded in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md); the
+> dated branch/SHA below is intentionally retained as historical provenance.
+
 Audit date: 2026-09-14. Branch: `r33/planning` at `3801a0d`. Release target:
 `v0.41.0-beta`.
 

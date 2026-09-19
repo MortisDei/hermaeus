@@ -100,7 +100,8 @@ Attention, CPU-MoE placement, speculative mechanism and parameter, or prompt
 cache state as applicable. If the selected runtime does not expose a required
 field through an auditable receipt, the result stays Inconclusive rather than
 using the requested value as a proxy. The complete recipe matrix and native
-receipts are recorded in [the R33 authority audit](review/r33/13-lab-benchmark-authority-audit.md).
+receipts are recorded in the historical [R33 authority audit](review/r33/13-lab-benchmark-authority-audit.md),
+while the current branch disposition is in the [R33 owner-dogfood closeout](review/r33/14-owner-dogfood-closeout.md).
 
 Correctness compares token ids when both sides expose them and falls back to an
 exact UTF-8 output hash at a weaker declared level. It reports `Equivalent`,
@@ -118,6 +119,10 @@ embedded detail remain readable.
 The Evidence surface projects all records with the same durable run id into one
 top-level execution entry, without duplicating or migrating persisted truth.
 Its drill-down retains every slice, comparison, provenance link, and raw JSON.
+The execution list leads with a human result summary for failed, cancelled, or
+inconclusive runs. Technical identifiers, normalized outcomes, and raw evidence
+remain available under an explicit technical-evidence disclosure instead of
+replacing the useful outcome text.
 Prompt/output bodies and token values are omitted from exportable records.
 Cancellation preserves partial evidence and normalizes the result as
 `Cancelled` or `PartiallySucceeded`. Manual completion is deliberately explicit:
@@ -143,6 +148,13 @@ cannot become an Apply recommendation.
 **Inspect runtime recipes** builds a fixed catalogue for the selected Chat
 server. Every plan keeps the baseline, allows at most eight total launches, and
 changes one declared dimension:
+
+Inspection first validates the selected Services model and llama-server
+executable. An empty, missing, or unresolvable source returns bounded
+`Unavailable` placeholder plans with an actionable detail and does not probe
+capabilities, GGUF metadata, speculative companions, or runtime identity.
+This is separate from a configured source whose model or runtime evidence is
+present but insufficient, which can remain `Unknown`.
 
 - GPU-layer placement uses CPU, partial where model block count is known, and
   all-GPU candidates. Each candidate updates both the legacy layer value and

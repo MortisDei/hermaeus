@@ -963,6 +963,10 @@ public sealed class LabRecipeService : ILabRecipeService
 
     public async Task<IReadOnlyList<LabRecipePlan>> InspectAsync(ServerConfig source, CancellationToken ct = default)
     {
+        var sourceReadiness = ReadSourceReadiness(source);
+        if (sourceReadiness is not null)
+            return BuildUnavailablePlans(source, sourceReadiness);
+
         var capabilities = await _capabilities.ProbeAsync(source.ModelPath, source.ExecutablePath, ct: ct);
         var observations = capabilities.Observations ?? [];
         var gguf = GgufMetadataReader.TryRead(source.ModelPath);
@@ -975,6 +979,53 @@ public sealed class LabRecipeService : ILabRecipeService
                 targetIdentity, draftIdentity))
             .Select(plan => LabRecipeCatalog.ReconcileBaselineAvailability(plan, source, gguf))
             .ToArray();
+    }
+
+    private static IReadOnlyList<LabRecipePlan> BuildUnavailablePlans(ServerConfig source, string detail) =>
+        Enum.GetValues<LabRecipeKind>()
+            .Select(kind => BuildUnavailablePlan(kind, source, detail))
+            .ToArray();
+
+    private static LabRecipePlan BuildUnavailablePlan(LabRecipeKind kind, ServerConfig source, string detail)
+    {
+        var baseline = LabConfigurationMapper.FromServer(source, "baseline", "Baseline");
+        var placeholder = baseline with { Id = "unavailable-placeholder", Label = "Unavailable placeholder" };
+        return new LabRecipePlan(
+            $"{kind.ToString().ToLowerInvariant()}-unavailable",
+            kind.ToString(),
+            kind,
+            CapabilityState.Unavailable,
+            detail,
+            baseline,
+            [placeholder],
+            2,
+            false,
+            [],
+            ["prompt.tokens_per_second", "decode.tokens_per_second", "ttft.milliseconds"],
+            LabCorrectnessRequirement.ExactEquivalence);
+    }
+
+    /// <summary>
+    /// Lab inspection is a production path, not a catalogue-only operation.
+    /// Do this readiness check before capability, GGUF, or runtime identity
+    /// services see a configured path so an empty or missing Services value is
+    /// rendered as an actionable unavailable recipe instead of reaching
+    /// <see cref="FileInfo"/> or process probing with an empty path.
+    /// </summary>
+    private static string? ReadSourceReadiness(ServerConfig source)
+    {
+        if (string.IsNullOrWhiteSpace(source.ModelPath))
+            return "Select an existing Chat .gguf model in Services before inspecting Lab recipes.";
+
+        if (!File.Exists(source.ModelPath.Trim()))
+            return "The selected Chat model is missing. Choose an existing .gguf model in Services before inspecting Lab recipes.";
+
+        if (string.IsNullOrWhiteSpace(source.ExecutablePath))
+            return "Select a llama-server executable in Services before inspecting Lab recipes.";
+
+        return ExecutableResolver.Resolve(source.ExecutablePath, "llama-server").Success
+            ? null
+            : "The selected llama-server executable is not resolvable. Configure or install llama.cpp in Services before inspecting Lab recipes.";
     }
 
     public async Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source,

@@ -95,6 +95,53 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public async Task Production_recipe_inspection_reports_unconfigured_server_without_empty_path_probing()
+    {
+        using var fixture = new RecipeFixture();
+        var source = Server();
+        source.ModelPath = string.Empty;
+        source.ExecutablePath = string.Empty;
+        var logs = new RuntimeLogService(fixture.Settings);
+        var service = new LabRecipeService(
+            new LocalModelCapabilityService(fixture.Settings, logs),
+            fixture.Runner,
+            new ModelManifestStore(fixture.Settings));
+
+        var plans = await service.InspectAsync(source);
+
+        Assert.Equal(Enum.GetValues<LabRecipeKind>().Length, plans.Count);
+        Assert.All(plans, plan =>
+        {
+            Assert.Equal(CapabilityState.Unavailable, plan.Availability);
+            Assert.Contains("Select an existing Chat .gguf model", plan.AvailabilityDetail, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task Production_recipe_inspection_with_configured_source_and_no_draft_does_not_probe_an_empty_companion_path()
+    {
+        using var fixture = new RecipeFixture();
+        var modelPath = fixture.PathFor("model.gguf");
+        var executablePath = fixture.PathFor("llama-server");
+        await File.WriteAllTextAsync(modelPath, "not a GGUF fixture");
+        await File.WriteAllTextAsync(executablePath, "not an executable fixture");
+        var source = Server();
+        source.ModelPath = modelPath;
+        source.ExecutablePath = executablePath;
+        source.Speculative!.DraftModelPath = string.Empty;
+        var logs = new RuntimeLogService(fixture.Settings);
+        var service = new LabRecipeService(
+            new LocalModelCapabilityService(fixture.Settings, logs),
+            fixture.Runner,
+            new ModelManifestStore(fixture.Settings));
+
+        var plans = await service.InspectAsync(source);
+
+        Assert.Equal(Enum.GetValues<LabRecipeKind>().Length, plans.Count);
+        Assert.All(plans, plan => Assert.NotEqual(CapabilityState.Available, plan.Availability));
+    }
+
+    [Fact]
     public void Engine_recipe_changes_only_gpu_layers()
     {
         var plan = LabRecipeCatalog.Build(LabRecipeKind.EngineProfile, Server(), []);
@@ -554,6 +601,7 @@ public sealed class LabRecipeTests
         public LabExperimentService Experiments { get; }
         public LabRecipeRunner Runner { get; }
         public ServerConfig Source => Settings.Settings.ManagedServers.Single();
+        public string PathFor(string name) => _temp.PathFor(name);
 
         public RecipeFixture()
         {

@@ -1,5 +1,9 @@
 # 04. Workspace editor decision
 
+> Historical planning decision. The current continuation closed the comparison
+> by removing Monaco/WebView and retaining AvaloniaEdit as the sole editor; see
+> [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
+
 ## 4.1 Decision and evidence
 
 **P:** investigate Monaco first for a dedicated Workspace editor/diff surface,

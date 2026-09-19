@@ -8,10 +8,12 @@ public sealed class AudioFeedbackService : IAudioFeedbackService, IAsyncDisposab
 {
     private const int QueueCapacity = 4;
     private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan TtsRetryDelay = TimeSpan.FromMilliseconds(100);
     private readonly ISettingsService _settings;
     private readonly IVoiceOrchestrator? _voice;
     private readonly IRuntimeLogService? _logs;
     private readonly Func<string, CancellationToken, Task> _playback;
+    private readonly bool _usesDefaultPlayback;
     private readonly object _gate = new();
     private readonly Queue<AudioFeedbackEventKind> _queue = new();
     private readonly Dictionary<AudioFeedbackEventKind, DateTime> _lastPublished = [];
@@ -26,6 +28,7 @@ public sealed class AudioFeedbackService : IAudioFeedbackService, IAsyncDisposab
         _settings = settings;
         _voice = voice;
         _logs = logs;
+        _usesDefaultPlayback = playback is null;
         _playback = playback ?? ((path, token) => AudioPlayback.PlayAsync(path, token));
         _worker = Task.Run(() => WorkerAsync(_lifetime.Token));
     }
@@ -66,26 +69,66 @@ public sealed class AudioFeedbackService : IAudioFeedbackService, IAsyncDisposab
                 kind = _queue.Dequeue();
             }
             var settings = _settings.Settings.Tts.AudioFeedback;
-            if (settings.SuppressWhileTtsSpeaking && _voice?.IsSpeaking == true)
+            var deferredForTts = false;
+            while (settings.SuppressWhileTtsSpeaking && _voice?.IsSpeaking == true)
+            {
+                if (!deferredForTts)
+                {
+                    RecordDiagnostic(kind, "policy", "tts-speaking-deferred");
+                    deferredForTts = true;
+                }
+
+                try { await Task.Delay(TtsRetryDelay, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                settings = _settings.Settings.Tts.AudioFeedback;
+            }
+
+            if (ct.IsCancellationRequested)
+                break;
+            if (!settings.Enabled || settings.Muted || !settings.IsEnabled(kind) || settings.Volume <= 0)
                 continue;
 
             var path = Path.Combine(Path.GetTempPath(), $"hermaeus-audio-feedback-{Guid.NewGuid():N}.wav");
             try
             {
-                await File.WriteAllBytesAsync(path, AudioFeedbackAssets.CreateWav(kind, settings.Volume), ct);
-                await _playback(path, ct);
+                try
+                {
+                    var cue = AudioFeedbackAssets.Resolve(kind);
+                    var wav = AudioFeedbackAssets.CreateWav(kind, settings.Volume);
+                    await File.WriteAllBytesAsync(path, wav, ct);
+                    RecordDiagnostic(kind, "resource",
+                        $"cue={cue.Id}; pattern={string.Join(",", cue.Frequencies)}Hz; path={path}; detail=generated-pcm-wav");
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    ReportFailure(kind, "asset", ex);
+                    continue;
+                }
+
+                try
+                {
+                    if (_usesDefaultPlayback)
+                        await AudioPlayback.PlayAsync(
+                            path,
+                            ct,
+                            backend => RecordDiagnostic(kind, "backend", $"selected={backend}; fallback=false"),
+                            (backend, succeeded) => RecordDiagnostic(kind, "backend-attempt",
+                                $"backend={backend}; result={(succeeded ? "success" : "fallback")}; reason={(succeeded ? "selected" : "backend-unavailable-or-nonzero-exit")}"));
+                    else
+                    {
+                        RecordDiagnostic(kind, "backend", "selected=custom-playback; fallback=false");
+                        await _playback(path, ct);
+                    }
+                    RecordDiagnostic(kind, "result", "played");
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    ReportFailure(kind, "playback", ex);
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-            catch (Exception ex)
-            {
-                lock (_gate)
-                {
-                    if (!_reportedFailures.Add(kind)) continue;
-                }
-                _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning,
-                    RuntimeLogCategory.Service, "Audio feedback could not be played; the visual notification remains active."));
-                _ = ex;
-            }
             finally
             {
                 try { File.Delete(path); } catch { }
@@ -100,5 +143,29 @@ public sealed class AudioFeedbackService : IAudioFeedbackService, IAsyncDisposab
         try { await _worker; } catch (OperationCanceledException) { }
         _signal.Dispose();
         _lifetime.Dispose();
+    }
+
+    private void ReportFailure(AudioFeedbackEventKind kind, string stage, Exception ex)
+    {
+        lock (_gate)
+        {
+            if (!_reportedFailures.Add(kind))
+                return;
+        }
+
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Warning,
+            RuntimeLogCategory.Service,
+            $"Audio feedback failed: event={kind}; stage={stage}; error={ex.GetType().Name}: {ex.Message}"));
+    }
+
+    private void RecordDiagnostic(AudioFeedbackEventKind kind, string stage, string detail)
+    {
+        _logs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Service,
+            $"Audio feedback: event={kind}; stage={stage}; detail={detail}"));
     }
 }

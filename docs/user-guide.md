@@ -213,6 +213,9 @@ takes precedence over cached repository artwork.
 When a repository is selected, known GGUF variants appear immediately while
 fit and companion checks complete independently per row. A row remains
 download-disabled while its compatibility check is still running.
+Selecting another repository or leaving Models cancels the superseded inspection
+without publishing stale artwork or details; an expected cancellation is not
+shown as a command failure.
 
 The server card's **GPU Fit** text is a prediction for the values currently in
 the editor, including unsaved changes. It lists weights, K/V cache, runtime
@@ -387,12 +390,20 @@ action. When a run ends, **See the changes** opens the verified file ledger and
 **Open run artifacts** opens the persisted task state, transcript, trace, and
 log folder when it exists. **New task** clears the current composer, response,
 draft, selected file, and task-scoped evidence without deleting the old task.
-Workspace editing uses a local Monaco host when available and a bounded,
-functional AvaloniaEdit fallback when Monaco is unavailable or fails to become
-ready. Both remain presentation only and all writes still use the normal
-prepared mutation and approval path. The editor status tooltip exposes bounded
-attachment, dimensions, visibility, editable state, document-size, and file
-diagnostics for native troubleshooting.
+Workspace editing uses AvaloniaEdit as the sole local editor. Save or Ctrl+S
+writes the selected file directly as an owner action after comparing the
+revision hash that was loaded; the write uses atomic replacement and reports a
+conflict with a Reload action message when the file changed outside Hermaeus.
+File listings distinguish directories and show **Modified time unavailable**
+when the filesystem cannot provide a trustworthy timestamp. Equivalent Agent
+mutations are bounded as non-progress when the requested action or verified
+post-image is repeated, while legitimate iterative edits remain reviewable.
+Agent-proposed patches remain separate and use the normal prepared mutation and
+approval path. In Changes, each prepared patch's Approve, Reject, and Block
+controls act on that exact authoritative proposal and refuse stale revisions
+or content instead of silently deciding a newer patch. The editor status tooltip exposes bounded attachment,
+dimensions, visibility, editable state, document-size, and file diagnostics for
+native troubleshooting.
 Starting another top-level task is disabled while one is open. An
 orchestration parent cannot be finished or dismissed while a child is pending
 or running. If startup finds that inconsistent state, it marks the parent
@@ -435,11 +446,18 @@ The telemetry identity line uses the runtime kind/version/build/backend and a
 manifest or local model label with architecture and quantization. Stable
 identity hashes remain in the tooltip for diagnostics.
 
+When process VRAM is unavailable, the flyout keeps the value as `Unknown` and
+shows the bounded evidence reason. It does not substitute whole-device usage
+or zero for a missing process counter.
+
 Settings > Voice contains supplementary audio feedback controls for the
 explicit task/runtime/recording event list. Volume is retained when muted,
 visual notifications remain authoritative, and cues are suppressed while TTS
-speaks by default. Playback failure does not fail the operation that raised the
-visual notification.
+speaks by default. A suppressed cue waits for TTS to finish and then rechecks
+settings before playback. Playback failure does not fail the operation that
+raised the visual notification. Each event uses its own bounded generated cue
+pattern rather than one generic beep, and the trace records the cue identity,
+backend attempts, fallback reason, and result.
 
 When Recall injection is enabled, the Chat trace identifies keyword-only
 fallback retrieval separately from embedding-backed retrieval. Lexical hits
@@ -520,6 +538,9 @@ speed-only, uncontrolled, missing-correctness, or stale result is refused.
 Guided recipes select the eligible candidate from the completed result
 automatically; individual evidence slices do not need manual saving before
 review.
+The execution list leads with a human result summary for failed, cancelled, or
+inconclusive runs. Technical ids, normalized outcomes, and raw evidence are
+available under a separate technical-evidence disclosure.
 **Confirm reviewed changes** asks once more in a modal owned and positioned over
 the Hermaeus window, rechecks the selected server plus runtime/model identity,
 and saves through the normal Settings path. Review is separate from running an

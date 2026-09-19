@@ -49,6 +49,20 @@ public sealed class ModelAutoTuneLifecycleTests
     }
 
     [Fact]
+    public async Task AutoTuneModel_does_not_persist_an_estimate_without_an_exact_probe_receipt()
+    {
+        using var temp = new TempDir();
+        var fixture = CreateFixture(temp);
+        fixture.Tuning.Handler = (_, _) => Task.FromResult(
+            new ServerTuneResult(24, 32, 6, "test", "estimated", TunedContextSize: 8192));
+
+        await fixture.ViewModel.AutoTuneModelCommand.ExecuteAsync(fixture.Item);
+
+        Assert.Empty(fixture.Settings.Settings.LlamaTuneProfiles);
+        Assert.Equal(["suspend", "tune", "restore"], fixture.Events);
+    }
+
+    [Fact]
     public async Task AutoTuneModel_restores_a_loaded_source_when_cancelled_during_tuning()
     {
         using var temp = new TempDir();
@@ -163,7 +177,9 @@ public sealed class ModelAutoTuneLifecycleTests
         public ServerConfig? Probe { get; private set; }
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Func<ServerConfig, CancellationToken, Task<ServerTuneResult>> Handler { get; set; } =
-            (_, _) => Task.FromResult(new ServerTuneResult(24, 32, 6, "test", "verified", TunedContextSize: 8192));
+            (_, _) => Task.FromResult(new ServerTuneResult(
+                24, 32, 6, "test", "verified", TunedContextSize: 8192,
+                ProbeConfigurationStableId: "test-probe", ProbeContextSize: 8192));
 
         public async Task<ServerTuneResult> RunAsync(
             ServerConfig config,

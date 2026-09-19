@@ -6,6 +6,7 @@ public sealed class BenchmarkSuite
     public string Name { get; set; } = "Benchmark";
     public string Description { get; set; } = string.Empty;
     public string SuiteVersion { get; set; } = "1.1.0";
+    public string EvaluatorVersion { get; set; } = RefusalEvaluator.CurrentVersion;
     public string ScoringProfile { get; set; } = "balanced-v1";
     public string BaselineModelId { get; set; } = string.Empty;
     public string BaselineModelName { get; set; } = string.Empty;
@@ -40,6 +41,8 @@ public sealed class BenchmarkRun
     public string SuiteId { get; set; } = string.Empty;
     public string SuiteName { get; set; } = string.Empty;
     public string SuiteVersion { get; set; } = string.Empty;
+    public string EvaluatorVersion { get; set; } = string.Empty;
+    public string RerunOfRunId { get; set; } = string.Empty;
     public string ScoringProfile { get; set; } = string.Empty;
     public string ModelId { get; set; } = string.Empty;
     public string ModelName { get; set; } = string.Empty;
@@ -172,6 +175,8 @@ public sealed class BenchmarkResult
     public bool KeywordHit { get; set; }
     public bool RegexHit { get; set; }
     public bool RefusalCorrect { get; set; }
+    public string RefusalAssessment { get; set; } = string.Empty;
+    public string RefusalDetail { get; set; } = string.Empty;
     public bool Passed { get; set; }
     public double QualityScore { get; set; }
     public double ResourceScore { get; set; } = 1;

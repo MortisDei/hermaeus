@@ -183,7 +183,7 @@ public static class AgentMutationPreparation
         var rootResult = ResolveRoot(options, out var root);
         if (rootResult is not null) return AgentMutationPreparationResult.Reject(rootResult);
         if (WorkspaceCommandRecipes.TryMatch(command, root!) is null)
-            return AgentMutationPreparationResult.Reject("The requested command is not a valid fixed recipe or its argument failed workspace validation.");
+            return AgentMutationPreparationResult.Reject(WorkspaceCommandRecipes.DescribeMatchFailure(command, root!));
 
         var preparedArguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -321,6 +321,7 @@ public static class AgentMutationPreparation
             PolicyFingerprint = ComputePolicyFingerprint(policy),
             PreparedAt = DateTime.UtcNow
         };
+        pending.RequestedActionFingerprint = AgentApprovalFingerprint.Compute(toolName, pending.Arguments);
         pending.Fingerprint = AgentApprovalFingerprint.Compute(pending);
         return pending;
     }

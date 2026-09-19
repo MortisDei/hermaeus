@@ -9,6 +9,49 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [Unreleased] - 2026-09-17
+
+### Changed
+
+- R33 Workspace now uses AvaloniaEdit only. Owner Save/Ctrl+S performs a
+  revision-checked atomic write with external-conflict detection; Agent patches
+  remain approval-gated and reviewable. The embedded Monaco/WebView assets and
+  dependency were removed.
+- Agent convergence now bounds equivalent blocked, non-progress, read-only,
+  and repeated-answered-question loops without weakening command or mutation
+  safety gates.
+- Benchmark and RAG refusal scoring share the versioned provider-neutral
+  evaluator, with inspectable classifications, stale-suite refusal, and
+  explicit rerun lineage. Auto-tune validates an exact confirmation probe before
+  persisting a profile.
+- Supplementary audio cues now use bounded generated WAV resources with
+  platform backend diagnostics and default important-state events. Cues wait
+  behind active TTS instead of being silently dropped, while current settings
+  are rechecked before playback. Process telemetry preserves Unknown for
+  unsupported Windows process VRAM, exposes the bounded evidence reason, and
+  bounds expensive GPU probes. Doctor, Hugging Face, and Moss UI paths now
+  expose the intended primary action, selected details, and eye-only blinking
+  behavior.
+- Prepared patch rows now route Approve, Reject, and Block through the same
+  authoritative proposal and stale-state checks as the global Agent decision.
+  Parent-owned child questions and approvals retain source identity and reject
+  answers for superseded interactions.
+- Lab recipe inspection refuses empty or unresolved selected sources before
+  probing model paths, and Hugging Face repository replacement or navigation
+  cancels superseded inspection without publishing stale details. Semantic
+  audio events now use distinct generated cue patterns with backend and
+  fallback diagnostics.
+- Agent startup now rebuilds parent-owned child interactions from persisted
+  child state, terminalizes orphaned children, and bounds repeated equivalent
+  mutations using persisted request and post-image identity. Workspace listings
+  preserve unknown modification times, and direct owner saves retain revision
+  conflict protection.
+- Benchmark ranking empty states explain missing eligible models or unverified
+  runtime evidence. Lab evidence leads with human outcome summaries and keeps
+  technical details behind disclosure. RAG ingest and reindex reject duplicate
+  starts, while llama version probes retain a bounded budget and elapsed-time
+  diagnostics.
+
 ## [0.41.0-beta] - 2026-09-12
 
 ### Changed

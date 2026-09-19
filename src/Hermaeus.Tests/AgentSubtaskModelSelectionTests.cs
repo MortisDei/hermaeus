@@ -64,6 +64,33 @@ public sealed class AgentSubtaskModelSelectionTests
     }
 
     [Fact]
+    public async Task Legacy_display_model_reference_resolves_parent_and_child_to_stable_identity()
+    {
+        const string display = "Ternary-Bonsai-8B-Q2_0_g64 [llama.cpp]";
+        const string plan = """
+            [
+              {"goal":"Check correctness","profile":"correctness","success_criteria":"Report findings","model_id":"Ternary-Bonsai-8B-Q2_0_g64 [llama.cpp]"},
+              {"goal":"Write tests","profile":"tests","success_criteria":"Report coverage"}
+            ]
+            """;
+        using var temp = new TempDir();
+        var rig = await NewRigAsync(temp, plan);
+        var options = rig.Options with { ModelId = display };
+        var task = await rig.Agent.CreateTaskAsync("Coordinate work", options);
+
+        var proposed = await rig.Agent.RunStepAsync(task.TaskId, options);
+
+        Assert.Equal("ternary-stable", proposed.State.ModelId);
+        Assert.Equal("Ternary-Bonsai-8B-Q2_0_g64  [llama.cpp]", proposed.State.ModelDisplayName);
+        var approved = await rig.Agent.AppendApprovalAsync(proposed.State.TaskId, "test", true,
+            AgentApprovalFingerprint.Resolve(proposed.State.PendingToolAction), options);
+        Assert.True(approved.Applied);
+        var saved = await rig.Store.LoadAsync(task.TaskId);
+        Assert.Equal("ternary-stable", saved!.SubTaskPlan[0].ResolvedModelId);
+        Assert.Equal("ternary-stable", saved.SubTaskPlan[1].ResolvedModelId);
+    }
+
+    [Fact]
     public async Task Planner_context_lists_only_visible_eligible_models_and_task_identity()
     {
         using var temp = new TempDir(); var rig = await NewRigAsync(temp);
@@ -292,6 +319,7 @@ public sealed class AgentSubtaskModelSelectionTests
             new() { Id = "parent", Name = "Parent", Provider = "Test" },
             new() { Id = "child-a", Name = "Child A", Provider = "Test" },
             new() { Id = "child-b", Name = "Child B", Provider = "Test" },
+            new() { Id = "ternary-stable", Name = "Ternary-Bonsai-8B-Q2_0_g64", Provider = "llama.cpp" },
             new() { Id = "hidden", Name = "Hidden", Provider = "Test", IsVisible = false }
         ];
         public string ProviderName => "Multi";
@@ -306,7 +334,7 @@ public sealed class AgentSubtaskModelSelectionTests
         {
             Calls.Add((modelId, messages.Single().Content));
             await Task.Yield();
-            if (modelId == "parent" && _parentCalls++ == 0)
+            if ((modelId == "parent" || modelId == "ternary-stable") && _parentCalls++ == 0)
                 yield return new LlmStreamEvent(PlanResponse(plan));
             else
                 yield return new LlmStreamEvent(FinalResponse(modelId));

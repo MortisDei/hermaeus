@@ -8,7 +8,13 @@ namespace Hermaeus.Services;
 
 public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
 {
+    private static readonly TimeSpan ProcessGpuProbeMinimumInterval = TimeSpan.FromSeconds(2);
+    private const int MaximumCachedGpuProbes = 32;
     private readonly ISystemInfoService? _systemInfo;
+    private readonly object _gpuProbeGate = new();
+    private readonly Dictionary<string, GpuProbeCacheEntry> _gpuProbeCache = new(StringComparer.Ordinal);
+
+    private sealed record GpuProbeCacheEntry(DateTimeOffset StartedAt, Task<(long? Bytes, string Source)> Probe);
 
     public ProcessRuntimeTelemetrySource(ISystemInfoService? systemInfo = null) => _systemInfo = systemInfo;
 
@@ -34,7 +40,7 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
                 process.WorkingSet64, RuntimeTelemetrySourceKind.ProcessCounter,
                 RuntimeTelemetryTrustState.ProcessScoped, observedAt,
                 "process-working-set", "Operating-system working set for the matching runtime process."));
-            var (gpuMemory, gpuMemorySource) = await TryCaptureNvidiaProcessMemoryAsync(request.ProcessId, ct);
+            var (gpuMemory, gpuMemorySource) = await TryCaptureNvidiaProcessMemoryAsync(request, ct);
             samples.Add(Sample(
                 request, processInstance, RuntimeTelemetryMetric.ProcessGpuMemoryBytes,
                 gpuMemory, gpuMemory.HasValue ? RuntimeTelemetrySourceKind.ProcessCounter : RuntimeTelemetrySourceKind.Unknown,
@@ -88,7 +94,68 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         }
     }
 
-    private static async Task<(long? Bytes, string Source)> TryCaptureNvidiaProcessMemoryAsync(int processId, CancellationToken ct)
+    private async Task<(long? Bytes, string Source)> TryCaptureNvidiaProcessMemoryAsync(
+        RuntimeTelemetryRequest request,
+        CancellationToken ct)
+    {
+        var cacheKey = $"{request.ProcessId}:{request.ProcessStartedAtUtc.ToUniversalTime():O}:{request.RuntimeIdentity.StableId}";
+        GpuProbeCacheEntry entry;
+        var now = DateTimeOffset.UtcNow;
+        lock (_gpuProbeGate)
+        {
+            if (_gpuProbeCache.TryGetValue(cacheKey, out entry!)
+                && now - entry.StartedAt < ProcessGpuProbeMinimumInterval)
+            {
+                // A caller cancellation cancels only its wait. The shared probe
+                // remains bounded and can serve the next telemetry sample.
+            }
+            else
+            {
+                entry = new GpuProbeCacheEntry(
+                    now,
+                    ProbeNvidiaProcessMemoryAsync(request.ProcessId, CancellationToken.None));
+                _gpuProbeCache[cacheKey] = entry;
+                TrimGpuProbeCacheLocked();
+            }
+        }
+
+        try
+        {
+            return await entry.Probe.WaitAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Do not discard an in-flight shared probe just because this
+            // sample stopped waiting. Its result can still serve the next
+            // bounded telemetry request.
+            throw;
+        }
+        catch
+        {
+            lock (_gpuProbeGate)
+            {
+                if (_gpuProbeCache.TryGetValue(cacheKey, out var current)
+                    && ReferenceEquals(current.Probe, entry.Probe))
+                    _gpuProbeCache.Remove(cacheKey);
+            }
+            throw;
+        }
+    }
+
+    private void TrimGpuProbeCacheLocked()
+    {
+        if (_gpuProbeCache.Count <= MaximumCachedGpuProbes)
+            return;
+
+        foreach (var key in _gpuProbeCache
+            .OrderBy(item => item.Value.StartedAt)
+            .Take(_gpuProbeCache.Count - MaximumCachedGpuProbes)
+            .Select(item => item.Key)
+            .ToArray())
+            _gpuProbeCache.Remove(key);
+    }
+
+    private static async Task<(long? Bytes, string Source)> ProbeNvidiaProcessMemoryAsync(int processId, CancellationToken ct)
     {
         if (NvidiaProcessMemoryProbe.TryGetBytes(processId, out var nvmlBytes))
             return (nvmlBytes, "nvml-process-gpu-memory");

@@ -1053,6 +1053,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 return (Result: result, ContextSize: contextSize);
             }, ct);
             var effectiveContext = tuned.Result.TunedContextSize ?? tuned.ContextSize;
+            LlamaTuneProfileStore.ValidateAutoTuneResult(tuned.Result, tuned.ContextSize);
             LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, tuned.Result.GpuLayers, tuned.Result.Threads, tuned.Result);
             await _settings.SaveAsync();
             RefreshTuneSummary(item);
@@ -1155,6 +1156,7 @@ public partial class ModelManagementViewModel : ObservableObject
                         return (Result: result, ContextSize: contextSize);
                     }, _autoTuneAllCts.Token);
                     var effectiveContext = tunedResult.Result.TunedContextSize ?? tunedResult.ContextSize;
+                    LlamaTuneProfileStore.ValidateAutoTuneResult(tunedResult.Result, tunedResult.ContextSize);
                     LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, tunedResult.Result.GpuLayers, tunedResult.Result.Threads, tunedResult.Result);
                     await _settings.SaveAsync();
                     RefreshTuneSummary(item);
@@ -1930,6 +1932,15 @@ public partial class ModelManagementViewModel : ObservableObject
         {
             await SelectHfRepoCoreAsync(repo, selectionCts.Token, generation);
         }
+        catch (OperationCanceledException) when (
+            selectionCts.IsCancellationRequested
+            || generation != Interlocked.Read(ref _hfSelectionGeneration))
+        {
+            // Selection cancellation is an expected replacement/navigation
+            // event. AsyncRelayCommand must not surface it as an unhandled UI
+            // failure, while an unrelated OperationCanceledException still
+            // propagates for diagnosis.
+        }
         finally
         {
             if (ReferenceEquals(Interlocked.CompareExchange(ref _hfSelectionCts, null, selectionCts), selectionCts))
@@ -1942,7 +1953,14 @@ public partial class ModelManagementViewModel : ObservableObject
         Interlocked.Increment(ref _hfSelectionGeneration);
         try { _hfSelectionCts?.Cancel(); }
         catch (ObjectDisposedException) { }
+        IsLoadingHfFiles = false;
     }
+
+    /// <summary>
+    /// Stops repository inspection when the Models panel is no longer visible.
+    /// The generation increment also makes late metadata/artwork results stale.
+    /// </summary>
+    public void CancelHuggingFaceSelection() => CancelHfSelection();
 
     private async Task SelectHfRepoCoreAsync(HfRepoResultViewModel repo, CancellationToken ct, long generation)
     {
@@ -2101,7 +2119,8 @@ public partial class ModelManagementViewModel : ObservableObject
         }
         finally
         {
-            IsLoadingHfFiles = false;
+            if (IsCurrentHfSelection(repo, generation))
+                IsLoadingHfFiles = false;
         }
     }
 

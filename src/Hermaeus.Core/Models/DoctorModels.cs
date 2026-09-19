@@ -55,6 +55,15 @@ public sealed record DoctorCheck(
 
     public string ActionLabel => FixLabel;
 
+    public bool HasSecondaryAction => Key == "llama-server-update"
+        && ActionKind == DoctorActionKind.Fix;
+
+    public string SecondaryActionLabel => HasSecondaryAction ? "Open Services" : string.Empty;
+
+    public string SecondaryActionTooltip => HasSecondaryAction
+        ? "Open Services to review the managed llama.cpp configuration without updating it."
+        : string.Empty;
+
     public string ActionTooltip => ActionKind switch
     {
         DoctorActionKind.Fix => $"Runs the suggested fix for {Title}.",

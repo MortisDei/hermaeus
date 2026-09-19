@@ -10,6 +10,7 @@ using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Hermaeus.Services.Recall;
 using Hermaeus.ViewModels;
+using System.Net;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -24,9 +25,13 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class MainWindowViewModelStartupTests
 {
-    private sealed record Harness(MainWindowViewModel Main, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore);
+    private sealed record Harness(MainWindowViewModel Main, ModelManagementViewModel Models, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore);
 
-    private static async Task<Harness> NewHarnessAsync(TempDir temp, bool initializeRagStore, IDoctorService? doctorService = null)
+    private static async Task<Harness> NewHarnessAsync(
+        TempDir temp,
+        bool initializeRagStore,
+        IDoctorService? doctorService = null,
+        HuggingFaceClient? huggingFaceClient = null)
     {
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
@@ -65,7 +70,7 @@ public sealed class MainWindowViewModelStartupTests
 
         var servicesVm = new ServicesViewModel(settings, new RuntimeProfileService(settings), toasts, new RedactionService(), new TrustService(), logs, tts);
         var models = new ModelManagementViewModel(llm, new ModelProfileService(settings), toasts, settings, new FakeSystemInfo(), servicesVm,
-            new ModelManifestStore(settings), new HuggingFaceClient(), new ModelDownloadService());
+            new ModelManifestStore(settings), huggingFaceClient ?? new HuggingFaceClient(), new ModelDownloadService());
 
         var ragPipeline = new RagPipeline(ragStore, new FakeEmbeddingService());
         var ragEval = new RagEvalService(ragQuery, settings, new FakeEvalStore());
@@ -101,7 +106,7 @@ public sealed class MainWindowViewModelStartupTests
             convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, lab, systemOverview, doctor, memories, logsVm, wizard, projects,
             commandRegistry, palette, activity, settings, toasts, logs, new ConversationExportService(), recallIndexing);
 
-        return new Harness(main, llm, logs, toasts, convStore);
+        return new Harness(main, models, llm, logs, toasts, convStore);
     }
 
     [Fact]
@@ -468,6 +473,51 @@ public sealed class MainWindowViewModelStartupTests
         Assert.Equal("First keystroke test", saved?.Title);
         Assert.Same(item, Assert.Single(harness.Main.Conversations));
     }
+
+    [Fact]
+    public async Task Leaving_the_models_panel_cancels_hugging_face_inspection_without_a_command_failure()
+    {
+        using var temp = new TempDir();
+        var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new AsyncHuggingFaceHandler(async (url, ct) =>
+        {
+            if (url.Contains("/api/models/", StringComparison.Ordinal))
+                return Response("{\"sha\":\"abc\",\"cardData\":{\"license\":\"mit\"}}");
+            if (url.Contains("/tree/", StringComparison.Ordinal))
+                return Response("[{\"path\":\"model.gguf\",\"size\":1,\"lfs\":{\"oid\":\"hash\"}}]");
+
+            started.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return Response("{}");
+        });
+        var harness = await NewHarnessAsync(
+            temp,
+            initializeRagStore: true,
+            huggingFaceClient: new HuggingFaceClient(new HttpClient(handler)));
+
+        harness.Main.ActivePanel = "models";
+        var selection = harness.Models.SelectHfRepoCommand.ExecuteAsync(new HfRepoResultViewModel("org/repo", 10));
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        harness.Main.ActivePanel = "chat";
+        await selection;
+
+        Assert.False(harness.Models.IsLoadingHfFiles);
+    }
+
+    private sealed class AsyncHuggingFaceHandler(
+        Func<string, CancellationToken, Task<HttpResponseMessage>> route) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            route(request.RequestUri!.ToString(), cancellationToken);
+    }
+
+    private static HttpResponseMessage Response(string json) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+    };
 
     private sealed class ControlledEmbeddingInstallDoctorService : IDoctorService
     {

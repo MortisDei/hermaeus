@@ -24,6 +24,7 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
     [ObservableProperty] private string _decodeRate = "Unknown";
     [ObservableProperty] private string _processRam = "Unknown";
     [ObservableProperty] private string _processGpuMemory = "Unknown";
+    [ObservableProperty] private string _processGpuMemoryDetail = "Per-process VRAM evidence is unavailable until a trustworthy process counter is supplied.";
     [ObservableProperty] private string _promptThroughput = "Unknown";
     [ObservableProperty] private string _timeToFirstToken = "Unknown";
     [ObservableProperty] private string _tokensServed = "Unknown";
@@ -108,6 +109,7 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
         OnPropertyChanged(nameof(ModelIdentityTooltip));
         ProcessRam = "Unknown";
         ProcessGpuMemory = "Unknown";
+        ProcessGpuMemoryDetail = "Per-process VRAM evidence is unavailable until a trustworthy process counter is supplied.";
         OnPropertyChanged(nameof(Samples));
         OnPropertyChanged(nameof(UnknownNote));
     }
@@ -119,7 +121,12 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
         {
             _series = series;
             ProcessRam = FormatBytes(series.Current(RuntimeTelemetryMetric.ProcessWorkingSetBytes)?.ValueBytes);
-            ProcessGpuMemory = FormatBytes(series.Current(RuntimeTelemetryMetric.ProcessGpuMemoryBytes)?.ValueBytes);
+            var gpuSample = series.Samples
+                .Where(sample => sample.Metric == RuntimeTelemetryMetric.ProcessGpuMemoryBytes)
+                .OrderByDescending(sample => sample.ObservedAtUtc)
+                .FirstOrDefault();
+            ProcessGpuMemory = FormatBytes(gpuSample?.ValueBytes);
+            ProcessGpuMemoryDetail = FormatGpuDetail(gpuSample);
             Status = $"Captured {series.Samples.Count} bounded sample(s).";
             OnPropertyChanged(nameof(Samples));
             OnPropertyChanged(nameof(UnknownNote));
@@ -129,6 +136,10 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
     private static string FormatBytes(long? value) => value is null
         ? "Unknown"
         : $"{value.Value / (1024d * 1024d):N1} MB";
+
+    private static string FormatGpuDetail(RuntimeTelemetrySample? sample) => sample is null
+        ? "Per-process VRAM evidence is unavailable until a trustworthy process counter is supplied."
+        : $"{sample.EvidenceCode}: {sample.Detail}";
 
     public async ValueTask DisposeAsync()
     {

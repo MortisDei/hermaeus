@@ -174,4 +174,18 @@ public sealed class AudioPlaybackTests
 
         Assert.Equal("first", selected);
     }
+
+    [Fact]
+    public async Task Failed_players_report_the_fallback_reason_before_the_next_backend()
+    {
+        var attempts = new List<(string Command, bool Succeeded)>();
+
+        await AudioPlayback.PlayCandidatesAsync(
+            [("first", (IReadOnlyList<string>)["tone.wav"]), ("fallback", (IReadOnlyList<string>)["tone.wav"])],
+            (command, _, _) => Task.FromResult(command == "fallback"),
+            CancellationToken.None,
+            onBackendAttempt: (command, succeeded) => attempts.Add((command, succeeded)));
+
+        Assert.Equal([("first", false), ("fallback", true)], attempts);
+    }
 }

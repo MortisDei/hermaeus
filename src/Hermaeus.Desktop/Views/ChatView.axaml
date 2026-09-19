@@ -321,6 +321,7 @@
                                 <TextBlock Text="{Binding Telemetry.TokensServed, StringFormat='Tokens served: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.ProcessRam, StringFormat='Process RAM: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.ProcessGpuMemory, StringFormat='Process VRAM: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.ProcessGpuMemoryDetail}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding Telemetry.UnknownNote}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
                             </StackPanel>
                         </Flyout>

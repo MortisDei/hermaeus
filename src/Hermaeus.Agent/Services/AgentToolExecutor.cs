@@ -368,7 +368,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
     {
         var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
         var recipe = WorkspaceCommandRecipes.TryMatch(command, root)
-            ?? throw new InvalidOperationException($"'{command}' is not one of the fixed, safe executable template families, or its argument failed validation.");
+            ?? throw new InvalidOperationException(WorkspaceCommandRecipes.DescribeMatchFailure(command, root));
 
         var psi = new ProcessStartInfo
         {

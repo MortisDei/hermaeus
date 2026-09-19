@@ -23,6 +23,12 @@ public sealed class PetSprite : Control
     private const int AtlasWidth = 1536;
     private const int AtlasHeight = 2288;
     private const int AnimationFrameMilliseconds = 220;
+    private const int BlinkFrameIndex = 2;
+    private const int BlinkPeriodMilliseconds = 4000;
+    private const int BlinkDurationMilliseconds = 180;
+    // The blink atlas frame is used only as an eye-band overlay. Drawing this
+    // small rectangle keeps the body and its current animation frame intact.
+    private static readonly Rect BlinkEyeBand = new(43, 83, 106, 31);
     private static readonly int[] IdleFrameIndices = [0, 1, 3, 4, 5, 6, 7];
 
     private readonly DispatcherTimer _animationTimer;
@@ -31,6 +37,9 @@ public sealed class PetSprite : Control
     private int _row;
     private bool _moving;
     private bool _movingRight = true;
+    private bool _blinkActive;
+    private DateTime _nextBlinkAtUtc = DateTime.UtcNow.AddMilliseconds(BlinkPeriodMilliseconds);
+    private DateTime _blinkUntilUtc;
 
     public PetSprite()
     {
@@ -59,6 +68,8 @@ public sealed class PetSprite : Control
 
     public void SetDragging(bool moving, bool movingRight)
     {
+        if (moving != _moving)
+            ResetBlinkSchedule();
         if (moving != _moving || (moving && movingRight != _movingRight))
             _frame = 0;
         _moving = moving;
@@ -82,6 +93,25 @@ public sealed class PetSprite : Control
             AtlasHeight / AtlasRows);
         var destination = new Rect(0, 0, Bounds.Width, Bounds.Height);
         context.DrawImage(_spritesheet, source, destination);
+
+        if (_blinkActive && !_moving)
+        {
+            var cellWidth = AtlasWidth / AtlasColumns;
+            var cellHeight = AtlasHeight / AtlasRows;
+            var blinkSource = new Rect(
+                BlinkFrameIndex * cellWidth + BlinkEyeBand.X,
+                BlinkEyeBand.Y,
+                BlinkEyeBand.Width,
+                BlinkEyeBand.Height);
+            var scaleX = Bounds.Width / cellWidth;
+            var scaleY = Bounds.Height / cellHeight;
+            var blinkDestination = new Rect(
+                BlinkEyeBand.X * scaleX,
+                BlinkEyeBand.Y * scaleY,
+                BlinkEyeBand.Width * scaleX,
+                BlinkEyeBand.Height * scaleY);
+            context.DrawImage(_spritesheet, blinkSource, blinkDestination);
+        }
     }
 
     private void LoadPackage(PetPackage? package)
@@ -91,6 +121,7 @@ public sealed class PetSprite : Control
         _spritesheet = null;
         _frame = 0;
         _row = 0;
+        ResetBlinkSchedule();
 
         if (package is null || !File.Exists(package.SpritesheetPath))
         {
@@ -122,6 +153,7 @@ public sealed class PetSprite : Control
     {
         if (_spritesheet is null || !IsVisible)
             return;
+        UpdateBlinkState(DateTime.UtcNow);
         _frame = _moving
             ? (_frame + 1) % AtlasColumns
             : (_frame + 1) % IdleFrameIndices.Length;
@@ -138,5 +170,37 @@ public sealed class PetSprite : Control
             _animationTimer.Start();
         else
             _animationTimer.Stop();
+    }
+
+    private void UpdateBlinkState(DateTime nowUtc)
+    {
+        if (_moving)
+        {
+            _blinkActive = false;
+            return;
+        }
+
+        if (_blinkActive)
+        {
+            if (nowUtc >= _blinkUntilUtc)
+            {
+                _blinkActive = false;
+                _nextBlinkAtUtc = nowUtc.AddMilliseconds(BlinkPeriodMilliseconds);
+            }
+            return;
+        }
+
+        if (nowUtc >= _nextBlinkAtUtc)
+        {
+            _blinkActive = true;
+            _blinkUntilUtc = nowUtc.AddMilliseconds(BlinkDurationMilliseconds);
+        }
+    }
+
+    private void ResetBlinkSchedule()
+    {
+        _blinkActive = false;
+        _nextBlinkAtUtc = DateTime.UtcNow.AddMilliseconds(BlinkPeriodMilliseconds);
+        _blinkUntilUtc = default;
     }
 }

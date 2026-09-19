@@ -111,6 +111,10 @@ dataset generation.
 - Adding documents to an existing dataset that was embedded with a different
   model than the one currently configured is blocked with a message naming
   both models. Use **Reindex** (below) first.
+- Manual ingest and reindex are single-flight operations. A second request
+  while either operation is active does not start a competing generation; the
+  existing overall and current-stage progress remains the operation the UI
+  reports.
 
 Long ingest progress remains stage- and batch-based rather than ETA-based:
 failure messages and cancellation state are shown directly, and the pipeline

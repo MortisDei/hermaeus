@@ -45,6 +45,18 @@ public static partial class RuntimeIdentityFactory
 
     public static ModelIdentityV2 CreateModelIdentity(string modelPath, GgufModelInfo? gguf, string? verifiedSha256 = null, string? manifestIdentity = null, string? companionIdentity = null)
     {
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return new ModelIdentityV2(
+                manifestIdentity?.Trim() ?? string.Empty,
+                verifiedSha256?.Trim().ToLowerInvariant() ?? string.Empty,
+                null,
+                null,
+                gguf?.Architecture ?? string.Empty,
+                gguf?.Quantization ?? string.Empty,
+                companionIdentity?.Trim() ?? string.Empty,
+                ModelIdentityStrength.Unknown,
+                IdentityCompleteness.Incomplete);
+
         var file = new FileInfo(modelPath);
         var hasHash = !string.IsNullOrWhiteSpace(verifiedSha256);
         var hasManifest = !string.IsNullOrWhiteSpace(manifestIdentity);

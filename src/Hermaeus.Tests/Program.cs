@@ -2936,8 +2936,13 @@ internal static class AgentTests
     var parentAfterPause = await store.LoadAsync(state.TaskId);
     Equal(AgentTaskStatus.WaitingForUser, parentAfterPause!.Status, "the parent must truthfully mirror its paused child's status instead of sitting Running forever (1.6)");
     True(parentAfterPause.ActiveStep.Contains("Waiting on sub-task 1/2", StringComparison.Ordinal), "the parent's ActiveStep should name which sub-task it is waiting on (1.6)");
+    var mirroredInteraction = parentAfterPause.PendingOwnerInteractions.Single();
+    Equal(paused.State.TaskId, mirroredInteraction.SourceTaskId, "the parent should retain the paused child's owner interaction identity");
+    Equal(AgentOwnerInteractionKind.Approval, mirroredInteraction.Kind, "a paused child edit should remain an approval in the parent-owned queue");
+    Equal(await PendingFingerprintAsync(store, paused.State.TaskId), mirroredInteraction.Fingerprint, "the parent mirror should carry the child's current approval fingerprint");
 
-    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, await PendingFingerprintAsync(store, paused.State.TaskId), options);
+    var parentApproval = await service.AppendApprovalAsync(state.TaskId, "edit_file", approved: true, mirroredInteraction.Fingerprint, options);
+    True(parentApproval.Applied, "approving from the parent-owned interaction should execute the child authority");
     var resumed = await service.RunAsync(state.TaskId, options);
     Equal(AgentTaskStatus.Complete, resumed.State.Status, "resuming the parent (whose own status was WaitingForUser, not Running) should still complete the run (1.6)");
     }

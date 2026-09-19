@@ -84,7 +84,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <StackPanel Spacing="6" IsVisible="{Binding SelectedHfRepo, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                    <StackPanel x:Name="SelectedHfRepoPanel" Spacing="6" IsVisible="{Binding SelectedHfRepo, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
                         <TextBlock Text="2. Review repository evidence" FontSize="13" FontWeight="SemiBold" Opacity="0.8" />
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
                             <Border Grid.Column="0" Width="42" Height="42" CornerRadius="6"
