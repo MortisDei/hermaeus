@@ -682,6 +682,16 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         foreach (var entry in states.Values)
         {
             var parent = entry.State;
+            // A valid child interaction is projected into its persisted parent.
+            // The child remains directly routable through its indexed queue row,
+            // but its own PendingOwnerInteractions list is not an independent
+            // owner-facing projection. The first pass has already closed
+            // orphaned children, so do not rebuild a valid child as standalone
+            // owner work here. This must not depend on task-file enumeration
+            // order across filesystems.
+            if (!string.IsNullOrWhiteSpace(parent.ParentTaskId))
+                continue;
+
             var desired = new List<AgentOwnerInteraction>();
             if (parent.SubTaskPlan.Count > 0)
             {
