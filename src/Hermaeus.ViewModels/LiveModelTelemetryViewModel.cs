@@ -13,6 +13,7 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
 {
     private readonly LiveModelTelemetrySampler _sampler;
     private RuntimeTelemetrySeries? _series;
+    private long _generation;
     private readonly RuntimeHealthNotificationGate _healthGate = new();
 
     [ObservableProperty] private bool _isOpen;
@@ -85,6 +86,7 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
 
     public async Task OpenAsync(RuntimeTelemetryRequest request, CancellationToken ct = default)
     {
+        var generation = ++_generation;
         IsOpen = true;
         Status = "Sampling the active runtime.";
         RuntimeIdentity = RuntimeTelemetryIdentityText.RuntimeLabel(request.RuntimeIdentity);
@@ -94,14 +96,20 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
         OnPropertyChanged(nameof(RuntimeIdentityTooltip));
         OnPropertyChanged(nameof(ModelIdentityTooltip));
         await _sampler.StartAsync(request, ct);
-        OnSeriesChanged(_sampler.CurrentSeries);
+        await RunOnUiAsync(() =>
+        {
+            ApplySeries(_sampler.CurrentSeries, generation);
+            return Task.CompletedTask;
+        });
     }
 
     public async Task CloseAsync()
     {
+        var generation = ++_generation;
         IsOpen = false;
         Status = "Telemetry is closed.";
         await _sampler.StopAsync();
+        if (generation != _generation) return;
         _series = null;
         RuntimeIdentityStableId = string.Empty;
         ModelIdentityStableId = string.Empty;
@@ -116,21 +124,25 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
 
     private void OnSeriesChanged(RuntimeTelemetrySeries? series)
     {
-        if (series is null) return;
-        RunOnUi(() =>
-        {
-            _series = series;
-            ProcessRam = FormatBytes(series.Current(RuntimeTelemetryMetric.ProcessWorkingSetBytes)?.ValueBytes);
-            var gpuSample = series.Samples
-                .Where(sample => sample.Metric == RuntimeTelemetryMetric.ProcessGpuMemoryBytes)
-                .OrderByDescending(sample => sample.ObservedAtUtc)
-                .FirstOrDefault();
-            ProcessGpuMemory = FormatBytes(gpuSample?.ValueBytes);
-            ProcessGpuMemoryDetail = FormatGpuDetail(gpuSample);
-            Status = $"Captured {series.Samples.Count} bounded sample(s).";
-            OnPropertyChanged(nameof(Samples));
-            OnPropertyChanged(nameof(UnknownNote));
-        });
+        var generation = _generation;
+        RunOnUi(() => ApplySeries(series, generation));
+    }
+
+    private void ApplySeries(RuntimeTelemetrySeries? series, long generation)
+    {
+        if (series is null || !IsOpen || generation != _generation
+            || !ReferenceEquals(series, _sampler.CurrentSeries)) return;
+        _series = series;
+        ProcessRam = FormatBytes(series.Current(RuntimeTelemetryMetric.ProcessWorkingSetBytes)?.ValueBytes);
+        var gpuSample = series.Samples
+            .Where(sample => sample.Metric == RuntimeTelemetryMetric.ProcessGpuMemoryBytes)
+            .OrderByDescending(sample => sample.ObservedAtUtc)
+            .FirstOrDefault();
+        ProcessGpuMemory = FormatBytes(gpuSample?.ValueBytes);
+        ProcessGpuMemoryDetail = FormatGpuDetail(gpuSample);
+        Status = $"Captured {series.Samples.Count} bounded sample(s).";
+        OnPropertyChanged(nameof(Samples));
+        OnPropertyChanged(nameof(UnknownNote));
     }
 
     private static string FormatBytes(long? value) => value is null
@@ -143,6 +155,8 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
 
     public async ValueTask DisposeAsync()
     {
+        ++_generation;
+        IsOpen = false;
         _sampler.SeriesChanged -= OnSeriesChanged;
         await _sampler.DisposeAsync();
     }

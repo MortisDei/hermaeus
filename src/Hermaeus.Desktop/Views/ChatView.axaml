@@ -308,7 +308,7 @@
                     <PathIcon Data="M3 13h2v8H3v-8zm4-6h2v14H7V7zm4 3h2v11h-2V10zm4-7h2v18h-2V3z"
                               Width="16" Height="16" />
                     <Button.Flyout>
-                        <Flyout Placement="Bottom">
+                        <Flyout Placement="Bottom" Closed="OnTelemetryClosed">
                             <StackPanel Width="300" Spacing="7">
                                 <TextBlock Text="Live model telemetry" FontSize="14" FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding Telemetry.RuntimeIdentity, StringFormat='Runtime: {0}'}" FontSize="11" TextWrapping="Wrap"

@@ -1,5 +1,9 @@
 # Voice
 
+Native Kokoro serializes model loading, inference, asset replacement, and
+disposal through the same model lifetime gate. Async disposal waits for an
+active model operation before freeing its ONNX session.
+
 Text-to-speech (output) and speech-to-text (input) are optional, local-first by
 default, and never persist audio beyond the moment they need it.
 

@@ -11,7 +11,7 @@ namespace Hermaeus.Voice;
 /// in Hermaeus.Services) remains available as an advanced/fallback path. See
 /// docs/review/archived/r1/07-roadmap.md item 5.
 /// </summary>
-public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDisposable
+public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDisposable, IAsyncDisposable
 {
     private static readonly string[] SupportedVoices =
     [
@@ -326,4 +326,5 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     }
 
     public void Dispose() => _model.Dispose();
+    public ValueTask DisposeAsync() => _model.DisposeAsync();
 }

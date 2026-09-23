@@ -232,7 +232,7 @@ public sealed class ServicesViewModelModelDefaultsTests
         var install = Path.Combine(assets, "llama-server", "b123");
         Directory.CreateDirectory(install);
         var executable = Path.Combine(install, OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server");
-        File.WriteAllText(executable, "fake executable");
+        WriteRunnableLlamaProbeFixture(executable);
         settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
         settings.Settings.ManagedServers.Clear();
 

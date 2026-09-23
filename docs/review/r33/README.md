@@ -208,3 +208,9 @@ the `v0.41.0-beta` target. Archived R32/R33 planning evidence and the central
 deferred ledger remain intact; JSONL/runtime experiments and Agent HTTP
 execution remain deferred, while native desktop rendering, playback, managed
 runtime, GPU, and ChatGPT Pet owner gates remain explicit in doc 14.
+
+## Windows native crash investigation, 2026-09-22
+
+See [15-windows-native-crash-investigation.md](15-windows-native-crash-investigation.md)
+for the reproduced NVML ABI overwrite, bounded repairs, evidence limits, and
+Windows dump collection. Historical closeout evidence above is unchanged.

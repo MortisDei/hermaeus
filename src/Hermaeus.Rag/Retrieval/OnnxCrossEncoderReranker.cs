@@ -9,7 +9,7 @@ using System.Security.Cryptography;
 
 namespace Hermaeus.Rag.Retrieval;
 
-public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
+public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable, IAsyncDisposable
 {
     public const int MaximumExperimentBatchSize = 8;
     public const int MaximumExperimentCandidates = 20;
@@ -28,6 +28,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
     private readonly AppLifecycleJournalService? _journal;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private InferenceSession? _session;
+    private bool _disposed;
     private BertTokenizer? _tokenizer;
     private string? _loadedAssetKey;
     private string? _unavailableAssetKey;
@@ -55,35 +56,40 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         if (!_settings.Settings.Rag.RerankerEnabled || candidates.Count == 0)
             return candidates.Take(topK).ToList();
 
-        var loaded = await EnsureLoadedAsync(ct);
-        if (!loaded || _session is null || _tokenizer is null)
-            return candidates.Take(topK).ToList();
-
-        var maxCandidates = Math.Clamp(_settings.Settings.Rag.RerankerMaxCandidates, topK, 100);
-        var maxLength = Math.Clamp(_settings.Settings.Rag.RerankerMaxLength, 64, 512);
-        var reranked = new List<ScoredChunk>();
-
-        foreach (var candidate in candidates.Take(maxCandidates))
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            var score = ScorePair(query, candidate.Chunk.Content, maxLength);
-            reranked.Add(candidate with { Score = score, Source = ScoreSource.Reranker });
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var loaded = await EnsureLoadedUnderGateAsync(ct).ConfigureAwait(false);
+            if (!loaded || _session is null || _tokenizer is null)
+                return candidates.Take(topK).ToList();
+
+            var maxCandidates = Math.Clamp(_settings.Settings.Rag.RerankerMaxCandidates, topK, 100);
+            var maxLength = Math.Clamp(_settings.Settings.Rag.RerankerMaxLength, 64, 512);
+            var reranked = new List<ScoredChunk>();
+
+            foreach (var candidate in candidates.Take(maxCandidates))
+            {
+                ct.ThrowIfCancellationRequested();
+                var score = ScorePair(query, candidate.Chunk.Content, maxLength);
+                reranked.Add(candidate with { Score = score, Source = ScoreSource.Reranker });
+            }
+
+            var originalRanks = candidates
+                .Select((candidate, index) => new { candidate.Chunk.Id, index })
+                .ToDictionary(x => x.Id, x => x.index);
+
+            return reranked
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => originalRanks.GetValueOrDefault(x.Chunk.Id, int.MaxValue))
+                .Take(topK)
+                .ToList();
         }
-
-        var originalRanks = candidates
-            .Select((candidate, index) => new { candidate.Chunk.Id, index })
-            .ToDictionary(x => x.Id, x => x.index);
-
-        return reranked
-            .OrderByDescending(x => x.Score)
-            .ThenBy(x => originalRanks.GetValueOrDefault(x.Chunk.Id, int.MaxValue))
-            .Take(topK)
-            .ToList();
+        finally { _gate.Release(); }
     }
 
-    private async Task<bool> EnsureLoadedAsync(CancellationToken ct)
+    private async Task<bool> EnsureLoadedUnderGateAsync(CancellationToken ct)
     {
-        await _gate.WaitAsync(ct);
         string? assetKey = null;
         try
         {
@@ -109,14 +115,14 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
                 return false;
             }
 
-            if (!await VerifyFileSha256Async(modelPath, ModelSha256, ct)
-                || !await VerifyFileSha256Async(vocabPath, VocabSha256, ct))
+            if (!await VerifyFileSha256Async(modelPath, ModelSha256, ct).ConfigureAwait(false)
+                || !await VerifyFileSha256Async(vocabPath, VocabSha256, ct).ConfigureAwait(false))
             {
                 _unavailableAssetKey = assetKey;
                 return false;
             }
 
-            if (!await LoadSessionAsync(modelPath, vocabPath, ct))
+            if (!await LoadSessionAsync(modelPath, vocabPath, ct).ConfigureAwait(false))
             {
                 _unavailableAssetKey = assetKey;
                 return false;
@@ -137,36 +143,34 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             ReleaseLoadedSession();
             return false;
         }
-        finally
-        {
-            _gate.Release();
-        }
     }
 
     // Install model assets explicitly. This method performs heavy downloads and should be
     // invoked from a setup or doctor action rather than the query path.
     public async Task<bool> InstallAssetsAsync(IProgress<string>? progress = null, CancellationToken ct = default)
     {
-        await _gate.WaitAsync(ct);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             var modelDir = ResolveModelDirectory(_settings.Settings);
             var modelPath = Path.Combine(modelDir, ModelFileName);
             var vocabPath = Path.Combine(modelDir, VocabFileName);
             Directory.CreateDirectory(modelDir);
             progress?.Report("Downloading reranker model...");
-            await DownloadIfMissingAsync(modelPath, ModelUrl, ModelSha256, progress, ct);
+            await DownloadIfMissingAsync(modelPath, ModelUrl, ModelSha256, progress, ct).ConfigureAwait(false);
             progress?.Report("Downloading reranker vocabulary...");
-            await DownloadIfMissingAsync(vocabPath, VocabUrl, VocabSha256, progress, ct);
+            await DownloadIfMissingAsync(vocabPath, VocabUrl, VocabSha256, progress, ct).ConfigureAwait(false);
             progress?.Report("Loading reranker model...");
             ReleaseLoadedSession();
-            if (!await LoadSessionAsync(modelPath, vocabPath, ct))
+            if (!await LoadSessionAsync(modelPath, vocabPath, ct).ConfigureAwait(false))
                 throw new InvalidOperationException("Reranker assets were present but the ONNX session was not admitted.");
             _loadedAssetKey = CreateAssetIdentityKey(modelPath, vocabPath);
             _unavailableAssetKey = null;
             progress?.Report("Reranker installed");
             return true;
         }
+        catch (ObjectDisposedException) when (_disposed) { throw; }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             ReleaseLoadedSession();
@@ -189,7 +193,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         IResourceAdmissionLease? lease = null;
         try
         {
-            lease = await AcquireAdmissionAsync(ct);
+            lease = await AcquireAdmissionAsync(ct).ConfigureAwait(false);
             _tokenizer = BertTokenizer.Create(vocabPath);
             _journal?.RecordOperation("loading reranker ONNX session (EnsureLoadedAsync)");
             _session = new InferenceSession(modelPath);
@@ -208,7 +212,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
                     proposal.ProcessIdentity,
                     proposal.Components,
                     DateTime.UtcNow,
-                    proposal.Evidence));
+                    proposal.Evidence)).ConfigureAwait(false);
             }
             return true;
         }
@@ -229,7 +233,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         finally
         {
             if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
-                await lease.DisposeAsync();
+                await lease.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -270,7 +274,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             consumerId,
             proposal,
             callerId: "rag.reranker.load",
-            allowUnknown: true), ct);
+            allowUnknown: true), ct).ConfigureAwait(false);
     }
 
     private float ScorePair(string query, string passage, int maxLength)
@@ -347,73 +351,79 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
                 "reranker-batch-input",
                 "At least two candidates are required for a batch comparison.");
 
-        if (!await EnsureLoadedAsync(ct) || _session is null || _tokenizer is null)
-            return RerankerBatchExperimentResult.Unknown(
-                "reranker-batch-assets-unknown",
-                "A verified pinned ONNX session is not available in the selected asset set.");
-
-        if (!HasDynamicBatchGraph(_session, maxLength, out var graphDetail))
-            return RerankerBatchExperimentResult.Unavailable("reranker-batch-fixed-graph", graphDetail);
-
-        var pairs = candidates
-            .Take(MaximumExperimentCandidates)
-            .Select(candidate => EncodePair(query, candidate.Chunk.Content, maxLength))
-            .ToArray();
-        var maximumTensorBytes = checked((long)batchSize * maxLength * sizeof(long) * 3);
-
-        var sequentialScores = new float[pairs.Length];
-        var sequentialStart = Stopwatch.GetTimestamp();
-        for (var index = 0; index < pairs.Length; index++)
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            sequentialScores[index] = ScorePair(query, candidates[index].Chunk.Content, maxLength);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!await EnsureLoadedUnderGateAsync(ct).ConfigureAwait(false) || _session is null || _tokenizer is null)
+                return RerankerBatchExperimentResult.Unknown(
+                    "reranker-batch-assets-unknown",
+                    "A verified pinned ONNX session is not available in the selected asset set.");
+
+            if (!HasDynamicBatchGraph(_session, maxLength, out var graphDetail))
+                return RerankerBatchExperimentResult.Unavailable("reranker-batch-fixed-graph", graphDetail);
+
+            var pairs = candidates
+                .Take(MaximumExperimentCandidates)
+                .Select(candidate => EncodePair(query, candidate.Chunk.Content, maxLength))
+                .ToArray();
+            var maximumTensorBytes = checked((long)batchSize * maxLength * sizeof(long) * 3);
+
+            var sequentialScores = new float[pairs.Length];
+            var sequentialStart = Stopwatch.GetTimestamp();
+            for (var index = 0; index < pairs.Length; index++)
+            {
+                ct.ThrowIfCancellationRequested();
+                sequentialScores[index] = ScorePair(query, candidates[index].Chunk.Content, maxLength);
+            }
+            var sequentialDuration = Stopwatch.GetElapsedTime(sequentialStart);
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var batchedScores = new float[pairs.Length];
+            var batchedStart = Stopwatch.GetTimestamp();
+            for (var offset = 0; offset < pairs.Length; offset += batchSize)
+            {
+                ct.ThrowIfCancellationRequested();
+                var count = Math.Min(batchSize, pairs.Length - offset);
+                var batch = pairs.AsSpan(offset, count).ToArray();
+                var scores = ScoreBatch(batch);
+                Array.Copy(scores, 0, batchedScores, offset, count);
+            }
+            var batchedDuration = Stopwatch.GetElapsedTime(batchedStart);
+            var allocatedBytes = Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+
+            var maximumDifference = sequentialScores
+                .Zip(batchedScores, (sequential, batched) => MathF.Abs(sequential - batched))
+                .DefaultIfEmpty()
+                .Max();
+            var orderEquivalent = RankingOrder(sequentialScores).SequenceEqual(RankingOrder(batchedScores));
+            var equivalent = maximumDifference <= ScoreEquivalenceTolerance && orderEquivalent;
+            var benefitObserved = batchedDuration < sequentialDuration;
+            var evidenceCode = equivalent
+                ? benefitObserved ? "reranker-batch-equivalent-benefit" : "reranker-batch-equivalent-no-benefit"
+                : "reranker-batch-equivalence-failed";
+            var state = equivalent ? CapabilityState.Available : CapabilityState.Unavailable;
+            var detail = $"Dynamic batch graph; {pairs.Length} pairs; max batch {batchSize}; "
+                + $"score delta {maximumDifference:R}; ordering equivalent={orderEquivalent}; "
+                + $"batch benefit observed={benefitObserved}; tensor working-set cap={maximumTensorBytes} bytes.";
+
+            return new RerankerBatchExperimentResult(
+                state,
+                evidenceCode,
+                detail,
+                pairs.Length,
+                batchSize,
+                maxLength,
+                true,
+                orderEquivalent,
+                maximumDifference,
+                sequentialDuration,
+                batchedDuration,
+                allocatedBytes,
+                maximumTensorBytes,
+                benefitObserved);
         }
-        var sequentialDuration = Stopwatch.GetElapsedTime(sequentialStart);
-
-        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        var batchedScores = new float[pairs.Length];
-        var batchedStart = Stopwatch.GetTimestamp();
-        for (var offset = 0; offset < pairs.Length; offset += batchSize)
-        {
-            ct.ThrowIfCancellationRequested();
-            var count = Math.Min(batchSize, pairs.Length - offset);
-            var batch = pairs.AsSpan(offset, count).ToArray();
-            var scores = ScoreBatch(batch);
-            Array.Copy(scores, 0, batchedScores, offset, count);
-        }
-        var batchedDuration = Stopwatch.GetElapsedTime(batchedStart);
-        var allocatedBytes = Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
-
-        var maximumDifference = sequentialScores
-            .Zip(batchedScores, (sequential, batched) => MathF.Abs(sequential - batched))
-            .DefaultIfEmpty()
-            .Max();
-        var orderEquivalent = RankingOrder(sequentialScores).SequenceEqual(RankingOrder(batchedScores));
-        var equivalent = maximumDifference <= ScoreEquivalenceTolerance && orderEquivalent;
-        var benefitObserved = batchedDuration < sequentialDuration;
-        var evidenceCode = equivalent
-            ? benefitObserved ? "reranker-batch-equivalent-benefit" : "reranker-batch-equivalent-no-benefit"
-            : "reranker-batch-equivalence-failed";
-        var state = equivalent ? CapabilityState.Available : CapabilityState.Unavailable;
-        var detail = $"Dynamic batch graph; {pairs.Length} pairs; max batch {batchSize}; "
-            + $"score delta {maximumDifference:R}; ordering equivalent={orderEquivalent}; "
-            + $"batch benefit observed={benefitObserved}; tensor working-set cap={maximumTensorBytes} bytes.";
-
-        return new RerankerBatchExperimentResult(
-            state,
-            evidenceCode,
-            detail,
-            pairs.Length,
-            batchSize,
-            maxLength,
-            true,
-            orderEquivalent,
-            maximumDifference,
-            sequentialDuration,
-            batchedDuration,
-            allocatedBytes,
-            maximumTensorBytes,
-            benefitObserved);
+        finally { _gate.Release(); }
     }
 
     internal static string CreateAssetIdentityKey(string modelPath, string vocabPath) =>
@@ -504,17 +514,17 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 
     private async Task DownloadIfMissingAsync(string path, string url, string expectedSha256, IProgress<string>? progress, CancellationToken ct)
     {
-        if (File.Exists(path) && await VerifyFileSha256Async(path, expectedSha256, ct))
+        if (File.Exists(path) && await VerifyFileSha256Async(path, expectedSha256, ct).ConfigureAwait(false))
             return;
 
         var temp = $"{path}.download";
         progress?.Report($"Starting download: {Path.GetFileName(path)}");
-        using var response = await _http.GetAsync(url, ct);
+        using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        await using (var source = await response.Content.ReadAsStreamAsync(ct))
+        await using (var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
         await using (var target = File.Create(temp))
-            await source.CopyToAsync(target, ct);
-        if (!await VerifyFileSha256Async(temp, expectedSha256, ct))
+            await source.CopyToAsync(target, ct).ConfigureAwait(false);
+        if (!await VerifyFileSha256Async(temp, expectedSha256, ct).ConfigureAwait(false))
         {
             File.Delete(temp);
             if (File.Exists(path))
@@ -532,7 +542,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             return false;
 
         await using var stream = File.OpenRead(path);
-        var hash = await SHA256.HashDataAsync(stream, ct);
+        var hash = await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
         var actual = Convert.ToHexString(hash).ToLowerInvariant();
         return string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase);
     }
@@ -596,11 +606,20 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         return neg / (1f + neg);
     }
 
-    public void Dispose()
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public async ValueTask DisposeAsync()
     {
-        ReleaseLoadedSession();
-        _gate.Dispose();
-        // HttpClient is static and shared; do not dispose
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return;
+            _disposed = true;
+            ReleaseLoadedSession();
+        }
+        finally { _gate.Release(); }
+        // Queued callers must still acquire the gate and observe disposal.
+        // HttpClient is static and shared; do not dispose.
     }
 
     private void ReleaseLoadedSession()

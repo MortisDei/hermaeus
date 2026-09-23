@@ -13,6 +13,15 @@ limit.
 
 ### Changed
 
+- Fixed the Windows NVML v2 process-record ABI mismatch that could overwrite
+  the telemetry buffer. Telemetry polling now stops on flyout dismissal and
+  rejects late captures/UI callbacks. Added opt-in native probe diagnostics and
+  a safe Windows reproduction procedure; historical crash attribution remains
+  subject to dump evidence.
+- Native Kokoro and ONNX reranker session use, replacement, and disposal now
+  share their lifetime gates. System snapshots tolerate disappearing SQLite
+  journals during database-size measurement.
+
 - R33 Workspace now uses AvaloniaEdit only. Owner Save/Ctrl+S performs a
   revision-checked atomic write with external-conflict detection; Agent patches
   remain approval-gated and reviewable. The embedded Monaco/WebView assets and

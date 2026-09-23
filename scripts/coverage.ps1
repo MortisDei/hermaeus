@@ -4,7 +4,7 @@ param(
     # the suite. A ratchet that cannot catch a regression is decoration. 60 is
     # just under the real number: a genuine regression trips it, ordinary
     # variance does not.
-    [double]$Threshold = 60
+    [ValidateRange(0, 100)][double]$Threshold = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,13 +15,31 @@ $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) "hermaeus-coverage-$([
 try {
     New-Item -ItemType Directory -Force $resultsDir | Out-Null
 
-    dotnet test $project --no-restore --collect:"XPlat Code Coverage" --results-directory $resultsDir `
-        "-p:CoverletOutputFormat=cobertura" "-p:Threshold=$Threshold" "-p:ThresholdType=line" "-p:ThresholdStat=total"
+    dotnet test $project --no-restore --collect:"XPlat Code Coverage" --results-directory $resultsDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Coverage tests failed with exit code $LASTEXITCODE."
+    }
 
     $reportFile = Get-ChildItem -Path $resultsDir -Filter "coverage.cobertura.xml" -Recurse | Select-Object -First 1
-    if ($reportFile) {
-        Write-Host "Coverage report: $($reportFile.FullName)"
+    if (-not $reportFile) {
+        throw "Coverage test run produced no Cobertura report."
     }
+
+    [xml]$report = Get-Content -LiteralPath $reportFile.FullName -Raw
+    $covered = 0L
+    $valid = 0L
+    if (-not [long]::TryParse($report.DocumentElement.GetAttribute("lines-covered"), [ref]$covered) -or
+        -not [long]::TryParse($report.DocumentElement.GetAttribute("lines-valid"), [ref]$valid) -or
+        $valid -le 0 -or $covered -lt 0 -or $covered -gt $valid) {
+        throw "Coverage report has invalid line counts."
+    }
+
+    $percent = 100.0 * $covered / $valid
+    Write-Host ("Line coverage: {0:F2}% ({1}/{2}); floor {3}%." -f $percent, $covered, $valid, $Threshold)
+    if ($percent -lt $Threshold) {
+        throw "Line coverage is below the $Threshold% floor."
+    }
+    Write-Host "Coverage report: $($reportFile.FullName)"
 }
 finally {
     if (Test-Path -LiteralPath $resultsDir) {

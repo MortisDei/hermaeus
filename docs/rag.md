@@ -1,5 +1,9 @@
 # RAG Workflow
 
+The in-process ONNX reranker holds its model lifetime gate throughout loading
+and scoring, including batch experiments. Replacement and async disposal wait
+for active inference before freeing the native session.
+
 ## Overview
 
 Hermaeus includes a local RAG: structure-aware chunking, query planning,

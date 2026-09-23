@@ -201,7 +201,7 @@ public partial class ChatViewModel : ViewModelBase
     private bool _suppressModelProfileDefaults;
 
     [RelayCommand]
-    private async Task OpenTelemetryAsync()
+    private async Task OpenTelemetryAsync(CancellationToken ct)
     {
         if (Telemetry is null)
             return;
@@ -213,18 +213,30 @@ public partial class ChatViewModel : ViewModelBase
 
         try
         {
-            var request = await ManagedTelemetryRequestFactory(SelectedModel?.Id ?? string.Empty, CancellationToken.None);
+            var request = await ManagedTelemetryRequestFactory(SelectedModel?.Id ?? string.Empty, ct);
+            ct.ThrowIfCancellationRequested();
             if (request is null)
             {
                 Telemetry.Status = "No matching managed local Chat process is running.";
                 return;
             }
-            await Telemetry.OpenAsync(request);
+            await Telemetry.OpenAsync(request, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            Telemetry.Status = $"Telemetry unavailable: {ex.Message}";
+            if (!ct.IsCancellationRequested)
+                Telemetry.Status = $"Telemetry unavailable: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task CloseTelemetryAsync()
+    {
+        OpenTelemetryCommand.Cancel();
+        if (Telemetry is null) return;
+        try { await Telemetry.CloseAsync(); }
+        catch (Exception ex) { Telemetry.Status = $"Telemetry stopped: {ex.Message}"; }
     }
 
     /// <summary>

@@ -491,7 +491,8 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   process RAM and per-process GPU readings are tied to that process identity;
   missing counters remain Unknown, and the telemetry flyout exposes the
   evidence code and bounded source detail explaining an unavailable process
-  counter.
+  counter. Closing the flyout or leaving its view stops its polling session;
+  late samples cannot repopulate a closed view.
 - Telemetry identifies the selected runtime by kind, version, build, and
   backend, and the model by manifest or local identity plus architecture and
   quantization. Stable identifiers remain available as secondary diagnostic

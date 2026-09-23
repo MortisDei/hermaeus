@@ -433,6 +433,8 @@ tokens cannot create, start, steer, continue, approve, or deny Agent work.
 
 Chat's bar includes a compact telemetry flyout for request-level timing and
 matching process counters when a local runtime sampling session is available.
+Closing the flyout or leaving Chat stops its polling session. An already-running
+shared native GPU probe may finish, but it cannot repopulate the closed view.
 The flyout does not replace Chat with a dashboard. `Unknown` means the current
 runtime has not supplied trustworthy evidence, not zero. Health conditions are
 restrained and deduplicated; high GPU use by itself is normal and produces no

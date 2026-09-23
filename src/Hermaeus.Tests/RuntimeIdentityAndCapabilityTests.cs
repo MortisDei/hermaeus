@@ -359,7 +359,7 @@ public sealed class RuntimeIdentityAndCapabilityTests
         var modelPath = temp.PathFor("model.gguf");
         var executablePath = temp.PathFor("llama-server.exe");
         File.WriteAllText(modelPath, "model fixture");
-        File.WriteAllText(executablePath, "runtime fixture");
+        Helpers.WriteRunnableLlamaProbeFixture(executablePath);
 
         var writer = new SettingsService(settingsPath);
         var candidate = writer.Settings.Clone();
@@ -455,7 +455,7 @@ public sealed class RuntimeIdentityAndCapabilityTests
         var modelPath = temp.PathFor("model.gguf");
         var executablePath = temp.PathFor("llama-server.exe");
         File.WriteAllText(modelPath, "model fixture");
-        File.WriteAllText(executablePath, "runtime fixture");
+        Helpers.WriteRunnableLlamaProbeFixture(executablePath);
         var logs = new RuntimeLogService(settings);
         var capability = new LocalModelCapabilityService(settings, logs);
 
@@ -481,7 +481,7 @@ public sealed class RuntimeIdentityAndCapabilityTests
         var modelPath = temp.PathFor("model.gguf");
         var executablePath = temp.PathFor("llama-server.exe");
         await File.WriteAllTextAsync(modelPath, "model fixture");
-        await File.WriteAllTextAsync(executablePath, "runtime fixture");
+        Helpers.WriteRunnableLlamaProbeFixture(executablePath);
         var capability = new LocalModelCapabilityService(settings, new RuntimeLogService(settings));
 
         var result = await capability.ProbeWithDriftAsync(modelPath, executablePath, "{}");

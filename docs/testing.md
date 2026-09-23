@@ -159,6 +159,9 @@ platform-detected renderer.
 
 Floor: **60%** line coverage, set in `scripts/coverage.sh`,
 `scripts/coverage.ps1` and stated in `AGENTS.md`. All four must agree.
+The scripts compare the Cobertura report's covered and valid line counts to this
+floor and fail if the report is missing or below it. Coverlet's VSTest collector
+[does not enforce MSBuild threshold properties](https://github.com/coverlet-coverage/coverlet/blob/master/Documentation/VSTestIntegration.md).
 
 Measured at r29: **61.6%** overall (29,438 / 47,807 lines). Excluding
 `Hermaeus.Desktop`, which is views and compiled XAML and is not meaningfully

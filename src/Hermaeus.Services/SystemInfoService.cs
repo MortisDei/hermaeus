@@ -21,12 +21,24 @@ public sealed class SystemInfoService : ISystemInfoService
         _secrets = secrets;
     }
 
+    internal static long SumDatabaseBytes(IEnumerable<string> paths)
+    {
+        long bytes = 0;
+        foreach (var path in paths)
+        {
+            try { bytes += new FileInfo(path).Length; }
+            // SQLite can remove a journal between enumeration and stat.
+            catch (FileNotFoundException) { }
+        }
+        return bytes;
+    }
+
     public async Task<SystemSnapshot> CaptureAsync(CancellationToken ct = default)
     {
         var dataRoot = SettingsService.ResolveDataRoot(_settings.Settings);
         Directory.CreateDirectory(dataRoot);
         var drive = new DriveInfo(Path.GetPathRoot(dataRoot)!);
-        var process = Process.GetCurrentProcess();
+        using var process = Process.GetCurrentProcess();
         var snapshot = new SystemSnapshot
         {
             CapturedAt = DateTime.UtcNow,
@@ -42,8 +54,7 @@ public sealed class SystemInfoService : ISystemInfoService
             DataRoot = dataRoot,
             DataRootTotalBytes = drive.TotalSize,
             DataRootFreeBytes = drive.AvailableFreeSpace,
-            DatabaseBytes = Directory.EnumerateFiles(dataRoot, "*.db*", SearchOption.TopDirectoryOnly)
-                .Sum(f => new FileInfo(f).Length)
+            DatabaseBytes = SumDatabaseBytes(Directory.EnumerateFiles(dataRoot, "*.db*", SearchOption.TopDirectoryOnly))
         };
 
         (snapshot.TotalMemoryBytes, snapshot.AvailableMemoryBytes) = GetMemoryBytes();

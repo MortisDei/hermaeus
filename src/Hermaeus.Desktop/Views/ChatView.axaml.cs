@@ -26,10 +26,17 @@ public partial class ChatView : UserControl
     // away, so their position is never fought mid-stream.
     private bool _pinnedToBottom = true;
 
+    private async void OnTelemetryClosed(object? sender, EventArgs e)
+    {
+        if (_vm is { } vm)
+            await vm.CloseTelemetryCommand.ExecuteAsync(null);
+    }
+
     public ChatView()
     {
         InitializeComponent();
         AttachedToVisualTree += (_, _) => ScheduleInputFocus();
+        DetachedFromVisualTree += OnTelemetryClosed;
 
         // Ctrl+V (or right-click Paste) with an image on the clipboard attaches it the
         // same way a dragged-in or browsed-for image file would, instead of doing
@@ -52,6 +59,7 @@ public partial class ChatView : UserControl
                 previousScroll.ScrollChanged -= _scrollChangedHandler;
             if (_vm is not null)
             {
+                _ = _vm.CloseTelemetryCommand.ExecuteAsync(null);
                 _vm.RequestCopyToClipboard = null;
                 _vm.RequestInputFocus = null;
                 _vm.RequestContextFilePicker = null;

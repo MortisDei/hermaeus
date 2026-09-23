@@ -21,6 +21,21 @@ namespace Hermaeus.Tests
 {
     internal static class Helpers
     {
+        public static void WriteRunnableLlamaProbeFixture(string path)
+        {
+            // Tests that call the real --help probe need an executable, not a text file
+            // with an .exe extension (which raises a modal Windows loader error).
+            if (OperatingSystem.IsWindows())
+            {
+                File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "where.exe"), path);
+            }
+            else
+            {
+                File.WriteAllText(path, "#!/bin/sh\nexit 0\n");
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+
         public static SettingsService NewSettings(TempDir temp, string relativeSettingsPath = "settings/settings.json")
         {
             var settings = new SettingsService(temp.PathFor(relativeSettingsPath));

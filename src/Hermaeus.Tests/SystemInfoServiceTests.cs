@@ -8,6 +8,19 @@ namespace Hermaeus.Tests;
 // r13 01-system-truth.md: Windows RAM/OS/CPU/GPU truth fixes.
 public sealed class SystemInfoServiceTests
 {
+    [Fact]
+    public void Database_size_tolerates_journal_removed_after_enumeration()
+    {
+        using var temp = new TempDir();
+        var database = temp.PathFor("traces.db");
+        var journal = database + "-journal";
+        File.WriteAllBytes(database, new byte[13]);
+        File.WriteAllBytes(journal, new byte[7]);
+        var paths = new[] { database, journal };
+        File.Delete(journal);
+        Assert.Equal(13, SystemInfoService.SumDatabaseBytes(paths));
+    }
+
     // ── 1.2 OsNameFormatter (pure mapper) ────────────────────────────────
     [Fact]
     public void OsNameFormatter_maps_high_builds_to_windows_11()
