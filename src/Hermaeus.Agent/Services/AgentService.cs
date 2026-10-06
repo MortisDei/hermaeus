@@ -1269,13 +1269,14 @@ public sealed class AgentService : IAgentService
             parent = await _store.LoadAsync(parent.TaskId, ct) ?? parent;
             parent.OrchestrationStepsUsed += childStepsUsed;
 
-            if (childResult.State.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted)
+            if (childResult.State.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted or AgentTaskStatus.Cancelled)
             {
                 var spec = parent.SubTaskPlan.First(s => s.TaskId == childTaskId);
                 spec.Status = childResult.State.Status switch
                 {
                     AgentTaskStatus.Complete => AgentSubTaskStatus.Complete,
                     AgentTaskStatus.Interrupted => AgentSubTaskStatus.Interrupted,
+                    AgentTaskStatus.Cancelled => AgentSubTaskStatus.Skipped,
                     _ => AgentSubTaskStatus.Failed
                 };
                 var combined = string.Join(" ", new[] { childResult.State.Summary, childResult.PlannerResponse.UserMessage }
@@ -1324,12 +1325,13 @@ public sealed class AgentService : IAgentService
                 continue;
 
             if (spec.Status == AgentSubTaskStatus.Running
-                && child.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted)
+                && child.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Interrupted or AgentTaskStatus.Cancelled)
             {
                 spec.Status = child.Status switch
                 {
                     AgentTaskStatus.Complete => AgentSubTaskStatus.Complete,
                     AgentTaskStatus.Interrupted => AgentSubTaskStatus.Interrupted,
+                    AgentTaskStatus.Cancelled => AgentSubTaskStatus.Skipped,
                     _ => AgentSubTaskStatus.Failed
                 };
                 var summary = string.IsNullOrWhiteSpace(child.InterruptionReason) ? child.Summary : child.InterruptionReason;
@@ -2710,10 +2712,59 @@ public sealed class AgentService : IAgentService
         if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
             return new AgentApprovalResult(false, "This is a sub-task. Dismiss its parent task instead.");
 
-        if (state.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
-            return new AgentApprovalResult(false,
-                "This parent still has unfinished sub-tasks. Stop or finish the child work before dismissing the parent.");
+        // Validate ownership before changing any child. The parent gate excludes
+        // orchestration, and each child gate waits for independent work to reach
+        // a safe boundary before discarding its pending action.
+        foreach (var spec in state.SubTaskPlan.Where(spec => !string.IsNullOrWhiteSpace(spec.TaskId)))
+        {
+            var child = await _store.LoadAsync(spec.TaskId!, ct);
+            if (child is not null && child.ParentTaskId != state.TaskId)
+                return new AgentApprovalResult(false,
+                    "A sub-task no longer belongs to this parent. No task was dismissed.");
+        }
 
+        foreach (var spec in state.SubTaskPlan)
+        {
+            AgentTaskState? child = null;
+            if (!string.IsNullOrWhiteSpace(spec.TaskId))
+            {
+                child = await _commandOwner.ExecuteTaskAsync(spec.TaskId, async childToken =>
+                {
+                    var ownedChild = await _store.LoadAsync(spec.TaskId, childToken);
+                    if (ownedChild is null) return null;
+                    if (ownedChild.ParentTaskId != state.TaskId)
+                        throw new InvalidOperationException("The sub-task's parent changed during dismissal.");
+                    if (ownedChild.Status is not (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled or AgentTaskStatus.Interrupted))
+                        await DismissLoadedTaskAsync(ownedChild, childToken);
+                    return ownedChild;
+                }, ct);
+            }
+
+            if (child is not null)
+            {
+                spec.Status = child.Status switch
+                {
+                    AgentTaskStatus.Complete => AgentSubTaskStatus.Complete,
+                    AgentTaskStatus.Failed => AgentSubTaskStatus.Failed,
+                    AgentTaskStatus.Interrupted => AgentSubTaskStatus.Interrupted,
+                    _ => AgentSubTaskStatus.Skipped
+                };
+            }
+            else if (spec.Status is not (AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
+                continue;
+            else
+                spec.Status = AgentSubTaskStatus.Skipped;
+
+            if (spec.Status == AgentSubTaskStatus.Skipped)
+                spec.ResultSummary = "Dismissed with the parent; pending work was not executed.";
+        }
+
+        await DismissLoadedTaskAsync(state, ct);
+        return new AgentApprovalResult(true, string.Empty);
+    }
+
+    private async Task DismissLoadedTaskAsync(AgentTaskState state, CancellationToken ct)
+    {
         // Discarding, not deciding: no approval record is written, because the
         // user did not approve or reject the action, they walked away from it.
         // The trace records that so the history stays readable.
@@ -2726,20 +2777,20 @@ public sealed class AgentService : IAgentService
         state.PendingOwnerInteractionTaskId = string.Empty;
         state.PendingOwnerInteractionId = string.Empty;
         state.Status = AgentTaskStatus.Cancelled;
+        state.LastUserMessage = string.Empty;
+        state.ActiveStep = "Dismissed by user.";
         await _store.SaveAsync(state, ct);
 
-        await _store.AppendTraceAsync(taskId, new
+        await _store.AppendTraceAsync(state.TaskId, new
         {
-            task_id = taskId,
+            task_id = state.TaskId,
             type = "task_dismissed",
             tool = dismissedTool,
             logged_at = DateTime.UtcNow
         }, ct);
-        await _store.AppendLogAsync(taskId, dismissedTool.Length > 0
+        await _store.AppendLogAsync(state.TaskId, dismissedTool.Length > 0
             ? $"task dismissed by user; pending {dismissedTool} discarded without executing"
             : "task dismissed by user", ct);
-
-        return new AgentApprovalResult(true, string.Empty);
     }
 
     public Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default) =>

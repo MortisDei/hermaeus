@@ -151,6 +151,107 @@ public sealed class AgentViewModelWorkspaceTests
         Assert.Empty(vm.WorkspaceFiles);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Workspace_listing_recovery_clears_its_previous_error(bool restoreSameRoot)
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var missingRoot = temp.PathFor("missing-workspace");
+        vm.WorkspaceRoot = missingRoot;
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+        Assert.True(vm.IsError);
+        Assert.Contains("Could not list workspace files", vm.StatusMessage);
+
+        var recoveredRoot = restoreSameRoot ? missingRoot : temp.PathFor("valid-workspace");
+        Directory.CreateDirectory(recoveredRoot);
+        await File.WriteAllTextAsync(Path.Combine(recoveredRoot, "note.txt"), "recovered");
+        if (restoreSameRoot)
+        {
+            await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+        }
+        else
+        {
+            await ObserveWorkspaceChangeAsync(vm,
+                () => vm.WorkspaceFiles.Any(file => file.RelativePath == "note.txt") && !vm.IsError,
+                () => vm.WorkspaceRoot = recoveredRoot);
+        }
+
+        Assert.Contains(vm.WorkspaceFiles, file => file.RelativePath == "note.txt");
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Empty(vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Workspace_listing_recovery_preserves_a_newer_unrelated_error()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var workspace = temp.PathFor("workspace");
+        vm.WorkspaceRoot = workspace;
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+        Assert.True(vm.IsError);
+
+        vm.StatusMessage = "Task execution failed.";
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "note.txt"), "recovered");
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.WorkspaceFiles);
+        Assert.True(vm.IsError);
+        Assert.Equal("Task execution failed.", vm.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Workspace_file_load_recovery_clears_only_its_own_error(bool newerUnrelatedError)
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        vm.WorkspaceRoot = workspace;
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+
+        await ObserveWorkspaceChangeAsync(vm,
+            () => vm.IsError && vm.StatusMessage.StartsWith("Could not load missing.txt:", StringComparison.Ordinal),
+            () => vm.SelectedWorkspaceFile = new AgentWorkspaceFileViewModel("missing.txt", "", null));
+        Assert.Equal("Load failed.", vm.WorkspaceEditorStatus);
+
+        if (newerUnrelatedError)
+            vm.StatusMessage = "Task execution failed.";
+        await File.WriteAllTextAsync(Path.Combine(workspace, "note.txt"), "recovered");
+        await ObserveWorkspaceChangeAsync(vm,
+            () => vm.DraftProposedContent == "recovered",
+            () => vm.SelectedWorkspaceFile = new AgentWorkspaceFileViewModel("note.txt", "", null));
+
+        Assert.Equal("recovered", vm.WorkspaceFilePreview);
+        Assert.Equal(newerUnrelatedError, vm.IsError);
+        Assert.Equal(newerUnrelatedError ? "Task execution failed." : string.Empty, vm.StatusMessage);
+    }
+
+    private static async Task ObserveWorkspaceChangeAsync(AgentViewModel vm, Func<bool> ready, Action action)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Changed(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+        {
+            if (ready()) completion.TrySetResult();
+        }
+        vm.PropertyChanged += Changed;
+        try
+        {
+            action();
+            if (ready()) completion.TrySetResult();
+            await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            vm.PropertyChanged -= Changed;
+        }
+    }
+
     // ── 2.5: overlapping LoadAsync calls must not duplicate models ──
 
     [Fact]

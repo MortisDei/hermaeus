@@ -70,6 +70,8 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     private bool _lastRenderedIsError;
     private double _lastRenderedFontSize;
     private int _renderVersion;
+    private bool _isAttached;
+    private bool _isDisposed;
 
     // Incremental re-render (r8 03-performance.md 3.5): each top-level block's
     // exact source text is remembered alongside the control it produced, so a
@@ -217,6 +219,8 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
+        if (!_isAttached || _isDisposed)
+            return;
         if (change.Property == MarkdownProperty || change.Property == IsErrorProperty
             || change.Property == FontSizeProperty)
         {
@@ -238,14 +242,27 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         }
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _isAttached = true;
+        if (!_isDisposed)
+            _renderTimer.Start();
+    }
+
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
-        Dispose();
+        // Tabs reuse their content. Detachment pauses rendering, not ownership.
+        _isAttached = false;
+        _renderTimer.Stop();
+        ++_renderVersion;
     }
 
     public void Dispose()
     {
+        _isDisposed = true;
+        ++_renderVersion;
         _renderTimer.Stop();
         _renderTimer.Tick -= OnRenderTimerTick;
     }
@@ -263,6 +280,8 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
 
     private async Task RenderAsync()
     {
+        if (!_isAttached || _isDisposed)
+            return;
         var md = Markdown ?? string.Empty;
         if (md == _lastRenderedMarkdown
             && IsError == _lastRenderedIsError
@@ -271,14 +290,12 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             return;
         }
 
-        _lastRenderedMarkdown = md;
-        _lastRenderedIsError = IsError;
-        _lastRenderedFontSize = FontSize;
         var version = ++_renderVersion;
 
         if (string.IsNullOrEmpty(md))
         {
             Content = null;
+            RememberRenderedContent(md);
             return;
         }
 
@@ -291,6 +308,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
                 FontSize = FontSize,
                 Foreground = new SolidColorBrush(Color.Parse("#EF5350"))
             };
+            RememberRenderedContent(md);
             return;
         }
 
@@ -313,6 +331,15 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             };
             _lastRenderedBlocks.Clear();
         }
+        // Only completed rendering may suppress a later reattach refresh.
+        RememberRenderedContent(md);
+    }
+
+    private void RememberRenderedContent(string markdown)
+    {
+        _lastRenderedMarkdown = markdown;
+        _lastRenderedIsError = IsError;
+        _lastRenderedFontSize = FontSize;
     }
 
     // A markdown rendering bug must never be fatal to the whole app; this is

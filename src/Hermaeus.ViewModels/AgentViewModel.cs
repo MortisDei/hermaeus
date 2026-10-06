@@ -627,6 +627,8 @@ public partial class AgentViewModel : ViewModelBase
     private CancellationTokenSource? _workspaceFileQueryCts;
     private int _workspaceFilesGeneration;
     private int _workspaceFileSelectionGeneration;
+    private string? _workspaceFilesErrorMessage;
+    private string? _workspaceFileLoadErrorMessage;
     private int _taskViewGeneration;
     private bool _preserveWorkspaceEditorOnRefresh;
     private string _workspaceFileRevisionHash = string.Empty;
@@ -2121,7 +2123,10 @@ public partial class AgentViewModel : ViewModelBase
         }
 
         if (string.IsNullOrWhiteSpace(options.WorkspaceRoot))
+        {
+            ClearWorkspaceError(ref _workspaceFilesErrorMessage);
             return;
+        }
 
         try
         {
@@ -2149,6 +2154,8 @@ public partial class AgentViewModel : ViewModelBase
             foreach (var file in files)
                 WorkspaceFiles.Add(file);
 
+            ClearWorkspaceError(ref _workspaceFilesErrorMessage);
+
             if (!string.IsNullOrWhiteSpace(selectedPath))
             {
                 var refreshedSelection = WorkspaceFiles.FirstOrDefault(file =>
@@ -2175,7 +2182,10 @@ public partial class AgentViewModel : ViewModelBase
         catch (Exception ex)
         {
             if (generation == _workspaceFilesGeneration)
-                SetError($"Could not list workspace files: {ex.Message}");
+            {
+                _workspaceFilesErrorMessage = $"Could not list workspace files: {ex.Message}";
+                SetError(_workspaceFilesErrorMessage);
+            }
         }
     }
 
@@ -2191,6 +2201,7 @@ public partial class AgentViewModel : ViewModelBase
         if (file is null || string.IsNullOrWhiteSpace(WorkspaceRoot))
         {
             if (generation != _workspaceFileSelectionGeneration) return;
+            ClearWorkspaceError(ref _workspaceFileLoadErrorMessage);
             WorkspaceFilePreview = string.Empty;
             WorkspaceFileSummary = string.Empty;
             _workspaceFileRevisionHash = string.Empty;
@@ -2209,6 +2220,7 @@ public partial class AgentViewModel : ViewModelBase
             if (generation != _workspaceFileSelectionGeneration)
                 return;
 
+            ClearWorkspaceError(ref _workspaceFileLoadErrorMessage);
             WorkspaceFilePreview = preview.Content;
             WorkspaceFileSummary = summary.Summary;
             _workspaceFileRevisionHash = AgentMutationPreparation.ComputeContentSha256(preview.Content);
@@ -2223,7 +2235,8 @@ public partial class AgentViewModel : ViewModelBase
             if (generation == _workspaceFileSelectionGeneration)
             {
                 WorkspaceEditorStatus = "Load failed.";
-                SetError($"Could not load {file.RelativePath}: {ex.Message}");
+                _workspaceFileLoadErrorMessage = $"Could not load {file.RelativePath}: {ex.Message}";
+                SetError(_workspaceFileLoadErrorMessage);
             }
         }
     }
@@ -3173,6 +3186,17 @@ public partial class AgentViewModel : ViewModelBase
         IsError = true;
         StatusMessage = message;
         _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Agent, message));
+    }
+
+    private void ClearWorkspaceError(ref string? errorMessage)
+    {
+        // Recovery owns only its earlier read error, never a newer task or save failure.
+        if (errorMessage is not null && IsError && StatusMessage == errorMessage)
+        {
+            IsError = false;
+            StatusMessage = string.Empty;
+        }
+        errorMessage = null;
     }
 
     partial void OnGoalTextChanged(string value) => StartCommand.NotifyCanExecuteChanged();

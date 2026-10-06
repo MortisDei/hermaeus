@@ -39,7 +39,10 @@ explicit user approval before it executes.
   `cancelled`, so the row leaves the queue for good; the task stays in Recent
   Tasks with its run ledger, approval history and transcript intact, and the
   Continue box can still reopen it. Dismiss records no approval, because
-  walking away from a decision is not making one. It is refused on a task that
+  walking away from a decision is not making one. Dismissing a paused parent
+  also cancels its owned unfinished children, discards their pending actions
+  and questions, and skips unstarted work. Completed child evidence is retained.
+  It is refused on a task that
   is still running (stop it first) and on a sub-task child (dismiss the parent,
   or its orchestration would wait forever on a child that never finished).
 - Shows a Recent Tasks list (status chip, goal, relative time, pending step
@@ -255,6 +258,10 @@ response".
 The Workspace tab includes a workspace file browser with query, list, preview,
 and summary support so you can inspect local workspace files without leaving
 the workbench.
+
+Successful listings and selected-file loads clear their own earlier read
+error without hiding a newer task or owner-save failure. Markdown responses
+continue updating when the view is revisited after tab navigation.
 
 Draft patch proposals are also available from the workspace file browser. You
 can enter a rationale, review the generated patch preview, queue the patch for

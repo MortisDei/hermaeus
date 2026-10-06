@@ -410,7 +410,7 @@ public sealed class AgentReviewQueueTests
     }
 
     [Fact]
-    public async Task Dismissing_a_parent_with_unfinished_children_is_refused()
+    public async Task Dismissing_a_paused_parent_skips_unstarted_children()
     {
         using var temp = new TempDir();
         var (agent, store, _) = await BuildAsync(temp);
@@ -419,8 +419,7 @@ public sealed class AgentReviewQueueTests
         [
             new AgentSubTaskSpec
             {
-                TaskId = "child-pending",
-                Goal = "still running",
+                Goal = "not started",
                 Status = AgentSubTaskStatus.Pending
             }
         ];
@@ -428,9 +427,122 @@ public sealed class AgentReviewQueueTests
 
         var result = await agent.DismissTaskAsync("parent-with-child");
 
+        Assert.True(result.Applied);
+        var dismissed = (await store.LoadAsync("parent-with-child"))!;
+        Assert.Equal(AgentTaskStatus.Cancelled, dismissed.Status);
+        Assert.Equal(AgentSubTaskStatus.Skipped, Assert.Single(dismissed.SubTaskPlan).Status);
+        Assert.DoesNotContain(await store.ListReviewQueueAsync(), item => item.TaskId == dismissed.TaskId);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Dismissing_a_paused_parent_discards_child_actions_and_questions_across_restart(bool pendingAction)
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp);
+        var child = await agent.CreateTaskAsync("Child work", options);
+        child = (await agent.RunStepAsync(child.TaskId, options)).State;
+        child.ParentTaskId = "paused-parent";
+        child.LastUserMessage = "Child question";
+        if (!pendingAction) child.PendingToolAction = null;
+        await store.SaveAsync(child);
+        var completed = TaskWithApprovals("completed-child", AgentTaskStatus.Complete, 1);
+        completed.ParentTaskId = "paused-parent";
+        completed.Summary = "Earlier work remains available.";
+        await store.SaveAsync(completed);
+        var parent = TaskWithApprovals("paused-parent", AgentTaskStatus.WaitingForUser, 1);
+        parent.LastUserMessage = child.LastUserMessage;
+        parent.PendingOwnerInteractionTaskId = child.TaskId;
+        parent.PendingOwnerInteractions.Add(new AgentOwnerInteraction { SourceTaskId = child.TaskId });
+        parent.SubTaskPlan =
+        [
+            new() { TaskId = child.TaskId, Status = AgentSubTaskStatus.Running },
+            new() { TaskId = completed.TaskId, Status = AgentSubTaskStatus.Complete, ResultSummary = completed.Summary },
+            new() { Status = AgentSubTaskStatus.Pending }
+        ];
+        await store.SaveAsync(parent);
+
+        var result = await agent.DismissTaskAsync(parent.TaskId);
+
+        Assert.True(result.Applied);
+        var dismissedChild = (await store.LoadAsync(child.TaskId))!;
+        Assert.Equal(AgentTaskStatus.Cancelled, dismissedChild.Status);
+        Assert.Null(dismissedChild.PendingToolAction);
+        Assert.Empty(dismissedChild.PendingOwnerInteractions);
+        Assert.Empty(dismissedChild.LastUserMessage);
+        Assert.Empty(dismissedChild.ApprovalHistory);
+        if (pendingAction)
+            Assert.Equal(AgentDraftPatchStatus.Blocked, Assert.Single(dismissedChild.DraftPatches).Status);
+        Assert.False(File.Exists(Path.Combine(options.WorkspaceRoot, "notes.md")));
+        var dismissedParent = (await store.LoadAsync(parent.TaskId))!;
+        Assert.Equal(AgentTaskStatus.Cancelled, dismissedParent.Status);
+        Assert.Empty(dismissedParent.PendingOwnerInteractions);
+        Assert.Empty(dismissedParent.PendingOwnerInteractionTaskId);
+        Assert.Single(dismissedParent.ApprovalHistory);
+        Assert.Equal([AgentSubTaskStatus.Skipped, AgentSubTaskStatus.Complete, AgentSubTaskStatus.Skipped],
+            dismissedParent.SubTaskPlan.Select(spec => spec.Status));
+        var retained = (await store.LoadAsync(completed.TaskId))!;
+        Assert.Equal(AgentTaskStatus.Complete, retained.Status);
+        Assert.Equal(completed.Summary, retained.Summary);
+        Assert.Single(retained.ApprovalHistory);
+
+        var restartSettings = NewSettings(temp);
+        restartSettings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var reopenedStore = new FileAgentTaskStateStore(restartSettings);
+        await reopenedStore.InitializeAsync();
+        var queue = await reopenedStore.ListReviewQueueAsync();
+        Assert.DoesNotContain(queue, item => item.TaskId == parent.TaskId || item.TaskId == child.TaskId);
+        Assert.Equal(AgentTaskStatus.Cancelled, (await reopenedStore.LoadAsync(parent.TaskId))!.Status);
+        Assert.Equal(AgentTaskStatus.Cancelled, (await reopenedStore.LoadAsync(child.TaskId))!.Status);
+    }
+
+    [Fact]
+    public async Task Resuming_a_partially_dismissed_parent_does_not_run_its_cancelled_child()
+    {
+        using var temp = new TempDir();
+        var finalResponse = FalseFinalResponse.Replace("The patch was applied and verified.", "No child work was executed.");
+        var (agent, store, options) = await BuildAsync(temp, new FakeSequencedAgentLlm([finalResponse]));
+        var parent = TaskWithApprovals("partial-parent", AgentTaskStatus.WaitingForUser, 0);
+        var child = TaskWithApprovals("cancelled-child", AgentTaskStatus.Cancelled, 0);
+        child.ParentTaskId = parent.TaskId;
+        parent.SubTaskPlan = [new() { TaskId = child.TaskId, Status = AgentSubTaskStatus.Running }];
+        await store.SaveAsync(child);
+        await store.SaveAsync(parent);
+
+        await agent.RunAsync(parent.TaskId, options);
+
+        var reconciled = (await store.LoadAsync(parent.TaskId))!;
+        Assert.Equal(AgentSubTaskStatus.Skipped, Assert.Single(reconciled.SubTaskPlan).Status);
+        var retainedChild = (await store.LoadAsync(child.TaskId))!;
+        Assert.Equal(AgentTaskStatus.Cancelled, retainedChild.Status);
+        Assert.Equal(0, retainedChild.StepCount);
+        Assert.Empty(retainedChild.ToolResults);
+        Assert.False(File.Exists(Path.Combine(options.WorkspaceRoot, "notes.md")));
+    }
+
+    [Fact]
+    public async Task Dismissal_refuses_a_foreign_child_before_changing_any_owned_work()
+    {
+        using var temp = new TempDir();
+        var (agent, store, _) = await BuildAsync(temp);
+        var parent = TaskWithApprovals("parent", AgentTaskStatus.WaitingForUser, 0);
+        var child = TaskWithApprovals("owned-child", AgentTaskStatus.WaitingForUser, 0);
+        child.ParentTaskId = parent.TaskId;
+        var foreign = TaskWithApprovals("foreign-child", AgentTaskStatus.WaitingForUser, 0);
+        foreign.ParentTaskId = "another-parent";
+        parent.SubTaskPlan = [new() { TaskId = child.TaskId }, new() { TaskId = foreign.TaskId }];
+        await store.SaveAsync(parent);
+        await store.SaveAsync(child);
+        await store.SaveAsync(foreign);
+
+        var result = await agent.DismissTaskAsync(parent.TaskId);
+
         Assert.False(result.Applied);
-        Assert.Contains("unfinished", result.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync("parent-with-child"))!.Status);
+        Assert.Contains("no longer belongs", result.Message);
+        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync(parent.TaskId))!.Status);
+        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync(child.TaskId))!.Status);
+        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync(foreign.TaskId))!.Status);
     }
 
     [Fact]
