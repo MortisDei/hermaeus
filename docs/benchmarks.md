@@ -46,6 +46,9 @@ Runs record the following metrics and metadata:
 - A shared runtime evidence envelope with requested, resolved, and launched
   configuration identities, the effective launch receipt, process identity,
   telemetry binding, evidence status, and comparison eligibility
+- Effective context records total runtime capacity, using reported slot counts
+  for per-slot fields. Generation parameters cannot prove loaded capacity.
+  Parser v3 keeps this correction separate from historical launch receipts.
 - Persistent empirical profile fingerprints over the material model and
   inference configuration, plus a shared direct-observation source reference.
   The historical v1 fingerprint remains readable. New runs also carry a v2

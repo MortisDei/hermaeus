@@ -78,9 +78,13 @@ count, and source. There is no universal score or statistical-significance
 claim.
 Each comparison also carries the isolated runtime's effective launch
 observation. Lab enables the transient local properties endpoint for the owned
-runtime. Context and slots are read from the structured receipt, including the
-nested `default_generation_settings.params.n_ctx` and `total_slots` shape used
-by current b10930 runtimes. When a runtime omits a scalar from `/props`, the
+runtime. Total context is read from a top-level capacity field or derived from
+`default_generation_settings.n_ctx` and a reported slot count. The nested
+`params.n_ctx` generation parameter does not prove loaded context. Startup
+`n_ctx` is total capacity; `n_ctx_slot` needs the reported slot count and cannot
+overwrite a total-capacity observation. Parser v3 records this corrected
+meaning; historical receipts retain their original parser identity.
+When a runtime omits a scalar from `/props`, the
 parser may use the matching bounded startup line from that same PID-associated
 launch receipt, including context, thread, slot, KV-cache, and Flash Attention
 observations. GPU placement is read from the startup receipt, for example

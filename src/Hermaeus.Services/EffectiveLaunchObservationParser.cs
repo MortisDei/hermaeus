@@ -14,9 +14,9 @@ namespace Hermaeus.Services;
 public static class EffectiveLaunchObservationParser
 {
     // This identifies the parser and receipt schema, not a product release.
-    // Keep it stable across rounds so receipts remain reusable by later
-    // adaptive, diagnostics, and benchmark workflows.
-    public const string ParserVersion = "llama-effective-runtime-v2";
+    // A change in field meaning needs a new identity; historical receipts keep
+    // their original parser identity rather than being silently reclassified.
+    public const string ParserVersion = "llama-effective-runtime-v3";
 
     private static readonly Regex ContextLogRegex =
         new(@"\bn_ctx\s*=\s*(?<value>\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -75,15 +75,17 @@ public static class EffectiveLaunchObservationParser
                     Add(root, effective, "speculative_pmin", "spec_p_min", "p_min");
                     Add(root, effective, "speculative_draft_gpu_layers", "spec_draft_ngl", "draft_gpu_layers");
 
-                    if (root.TryGetProperty("default_generation_settings", out var generation)
-                        && generation.ValueKind == JsonValueKind.Object
-                        && generation.TryGetProperty("params", out var parameters)
-                        && parameters.ValueKind == JsonValueKind.Object)
-                    {
-                        Add(parameters, effective, "context", "ctx_size", "n_ctx", "context_size");
-                    }
-
                     Add(root, effective, "slots", "total_slots");
+                    if (!effective.ContainsKey("context")
+                        && root.TryGetProperty("default_generation_settings", out var generation)
+                        && generation.ValueKind == JsonValueKind.Object
+                        && generation.TryGetProperty("n_ctx", out var perSlot)
+                        && TotalContext(perSlot.ToString(), effective.GetValueOrDefault("slots")) is { } total)
+                    {
+                        // This field is runtime per-slot capacity. params.n_ctx is
+                        // a generation parameter and cannot prove loaded capacity.
+                        effective["context"] = total;
+                    }
                 }
                 else
                 {
@@ -244,6 +246,7 @@ public static class EffectiveLaunchObservationParser
         if (string.IsNullOrWhiteSpace(runtimeLog))
             return values;
 
+        string? perSlotContext = null;
         foreach (var line in runtimeLog.Split('\n'))
         {
             var context = ContextLogRegex.Match(line);
@@ -253,7 +256,7 @@ public static class EffectiveLaunchObservationParser
             {
                 var contextSlot = ContextSlotLogRegex.Match(line);
                 if (contextSlot.Success)
-                    values["context"] = contextSlot.Groups["value"].Value;
+                    perSlotContext = contextSlot.Groups["value"].Value;
             }
 
             var threads = ThreadsLogRegex.Match(line);
@@ -283,6 +286,18 @@ public static class EffectiveLaunchObservationParser
                     : "off";
         }
 
+        if (!values.ContainsKey("context")
+            && TotalContext(perSlotContext, values.GetValueOrDefault("slots")) is { } total)
+            values["context"] = total;
         return values;
+    }
+
+    private static string? TotalContext(string? perSlot, string? slots)
+    {
+        if (!int.TryParse(perSlot, NumberStyles.None, CultureInfo.InvariantCulture, out var capacity) || capacity <= 0
+            || !int.TryParse(slots, NumberStyles.None, CultureInfo.InvariantCulture, out var count) || count <= 0)
+            return null;
+        var total = (long)capacity * count;
+        return total <= int.MaxValue ? total.ToString(CultureInfo.InvariantCulture) : null;
     }
 }

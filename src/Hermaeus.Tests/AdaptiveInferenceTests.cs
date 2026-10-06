@@ -255,7 +255,7 @@ public sealed class AdaptiveInferenceTests
     }
 
     [Fact]
-    public void Effective_parser_reads_b10930_nested_props_and_process_bound_gpu_receipt()
+    public void Effective_parser_reads_nested_props_and_process_bound_gpu_receipt()
     {
         var config = Config(GpuPlacementIntent.Exact(17), new AdaptiveInferenceEnvelope
         {
@@ -271,7 +271,7 @@ public sealed class AdaptiveInferenceTests
         };
 
         var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
-            """{"default_generation_settings":{"params":{"n_ctx":4096}},"total_slots":1}""",
+            """{"default_generation_settings":{"n_ctx":4096,"params":{"n_ctx":512}},"total_slots":1}""",
             process,
             "load_tensors: offloaded 17/36 layers to GPU");
 
@@ -302,7 +302,7 @@ public sealed class AdaptiveInferenceTests
             ["--ctx-size", "4096", "--n-gpu-layers", "all"]);
 
         var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
-            """{"default_generation_settings":{"params":{"n_ctx":4096}},"total_slots":4}""",
+            """{"n_ctx":4096,"default_generation_settings":{"n_ctx":1024,"params":{"n_ctx":512}},"total_slots":4}""",
             process,
             """
             system_info: n_threads = 4
@@ -310,7 +310,7 @@ public sealed class AdaptiveInferenceTests
             llama_context: n_ctx = 4096
             llama_kv_cache: ... K (f16), V (f16)
             resolve_fused_ops: Flash Attention enabled
-            load_model: initializing n_slots = 4, n_ctx_slot = 4096
+            load_model: initializing n_slots = 4, n_ctx_slot = 1024
             """);
 
         Assert.True(observation.IsAuditable);
@@ -325,6 +325,38 @@ public sealed class AdaptiveInferenceTests
                 "f16", "f16", "auto", "", "", "", 0,
                 new Dictionary<string, string>(), IdentityCompleteness.Complete),
             ["flash_attention"]).Keys);
+    }
+
+    [Theory]
+    [InlineData("{\"n_ctx\":4096,\"total_slots\":4,\"default_generation_settings\":{\"n_ctx\":1024,\"params\":{\"n_ctx\":512}}}")]
+    [InlineData("{\"total_slots\":4,\"default_generation_settings\":{\"n_ctx\":1024,\"params\":{\"n_ctx\":512}}}")]
+    public void Effective_context_uses_runtime_capacity_instead_of_generation_parameters(string props)
+    {
+        var observation = EffectiveLaunchObservationParser.Parse(Config(GpuPlacementIntent.All(), new()), Runtime(), props);
+        Assert.Equal("4096", Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+    }
+
+    [Theory]
+    [InlineData("llama_context: n_ctx = 4096\nload_model: initializing n_slots = 4, n_ctx_slot = 1024")]
+    [InlineData("load_model: initializing n_slots = 4, n_ctx_slot = 1024")]
+    public void Effective_context_log_fallback_reports_total_capacity(string log)
+    {
+        var observation = EffectiveLaunchObservationParser.Parse(Config(GpuPlacementIntent.All(), new()), Runtime(),
+            """{"default_generation_settings":{"params":{"n_ctx":512}}}""", runtimeLog: log);
+        Assert.Equal("4096", Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+        Assert.Contains("runtime.log.context", observation.EvidenceIds);
+    }
+
+    [Theory]
+    [InlineData("{\"default_generation_settings\":{\"params\":{\"n_ctx\":512}}}")]
+    [InlineData("{\"default_generation_settings\":{\"n_ctx\":1024}}")]
+    [InlineData("{\"total_slots\":0,\"default_generation_settings\":{\"n_ctx\":1024}}")]
+    [InlineData("{\"total_slots\":2,\"default_generation_settings\":{\"n_ctx\":2147483647}}")]
+    public void Incomplete_or_non_capacity_props_do_not_prove_effective_context(string props)
+    {
+        var observation = EffectiveLaunchObservationParser.Parse(Config(GpuPlacementIntent.All(), new()), Runtime(), props);
+        Assert.Null(Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+        Assert.False(observation.IsAuditable);
     }
 
     [Fact]
