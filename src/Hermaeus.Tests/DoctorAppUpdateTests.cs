@@ -71,7 +71,7 @@ public sealed class DoctorAppUpdateTests
 
     [Theory]
     [InlineData(HttpStatusCode.NotFound, "RepositoryNotFound")]
-    [InlineData(HttpStatusCode.Forbidden, "RateLimited")]
+    [InlineData(HttpStatusCode.Forbidden, "GitHubRejected")]
     [InlineData(HttpStatusCode.TooManyRequests, "RateLimited")]
     [InlineData(HttpStatusCode.BadGateway, "GitHubRejected")]
     public async Task App_update_request_classifies_github_http_failures(HttpStatusCode status, string expected)
@@ -83,6 +83,23 @@ public sealed class DoctorAppUpdateTests
         Assert.Equal(Enum.Parse<GitHubReleaseFetchStatus>(expected), result.Status);
         Assert.Equal((int)status, result.HttpStatusCode);
         Assert.Null(result.Release);
+    }
+
+    [Fact]
+    public async Task App_update_request_reports_a_header_confirmed_403_rate_limit()
+    {
+        using var http = new HttpClient(new RecordingHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
+            response.Headers.Add("X-RateLimit-Remaining", "0");
+            return response;
+        }));
+
+        var result = await DoctorService.FetchLatestHermaeusReleaseAsync(http, CancellationToken.None);
+
+        Assert.Equal(GitHubReleaseFetchStatus.RateLimited, result.Status);
+        Assert.Contains("HTTP 403", result.Detail);
+        Assert.Contains("reset", result.Detail);
     }
 
     [Fact]

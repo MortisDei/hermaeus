@@ -126,7 +126,8 @@ public sealed partial class DoctorService
                 "Runtime");
         }
 
-        var latest = await TryGetLatestLlamaReleaseAsync(ct);
+        var lookup = await TryGetLatestLlamaReleaseAsync(ct);
+        var latest = lookup.Release;
         if (latest is null)
         {
             return BuildCheck(
@@ -134,10 +135,10 @@ public sealed partial class DoctorService
                 "llama.cpp update check",
                 DoctorCheckStatus.Info,
                 $"Installed {local.Label}",
-                "Installed identity is known. Latest release: Unknown because GitHub release metadata was unavailable. Comparison: Unknown; no update or current-state claim is made.",
+                "Installed identity is known. Latest release: Unknown because GitHub release metadata was unavailable. Comparison: Unknown; no update or current-state claim is made. " + lookup.Error,
                 "Open Services",
                 true,
-                $"Executable: {resolved}\nVersion output: {local.Raw}\nInstalled: {local.Label}\nLatest: Unknown\nComparison: Unknown",
+                $"Executable: {resolved}\nVersion output: {local.Raw}\nInstalled: {local.Label}\nLatest: Unknown\nComparison: Unknown\nRelease lookup: {lookup.Error}",
                 "Runtime");
         }
 
@@ -953,37 +954,41 @@ public sealed partial class DoctorService
                 ? LlamaVersionComparison.Outdated
                 : LlamaVersionComparison.Current;
 
-    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
+    private Task<LlamaReleaseLookup> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
     {
         var shared = LlamaServerSetupService.LastSuccessfulRelease;
         if (shared is { } cached)
         {
-            return Task.FromResult<LlamaLatestRelease?>(new(
+            return Task.FromResult(new LlamaReleaseLookup(new(
                 cached.Download.TagName,
                 TryParseLlamaBuild(cached.Download.TagName),
                 cached.Download.PublishedAt ?? cached.CachedAt,
                 cached.CachedAt,
-                true));
+                true), string.Empty));
         }
 
-        return GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", FetchLatestLlamaReleaseAsync, ct);
+        return GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", token => FetchLatestLlamaReleaseAsync(_llamaSetup, token), ct);
     }
 
-    private async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
+    internal static async Task<LlamaReleaseLookup> FetchLatestLlamaReleaseAsync(LlamaServerSetupService setup, CancellationToken ct)
     {
         try
         {
-            var release = await _llamaSetup.GetLatestDownloadInfoAsync(ct);
-            return new LlamaLatestRelease(
+            var release = await setup.GetLatestDownloadInfoAsync(ct);
+            return new(new LlamaLatestRelease(
                 release.TagName,
                 TryParseLlamaBuild(release.TagName),
                 release.PublishedAt ?? DateTimeOffset.MinValue,
                 DateTimeOffset.UtcNow,
-                false);
+                false), string.Empty);
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return null;
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new(null, ex.Message);
         }
     }
 
@@ -1034,7 +1039,8 @@ public sealed partial class DoctorService
         string Error,
         LlamaProbeFailureKind FailureKind,
         long ElapsedMilliseconds);
-    private sealed record LlamaLatestRelease(
+    internal sealed record LlamaReleaseLookup(LlamaLatestRelease? Release, string Error);
+    internal sealed record LlamaLatestRelease(
         string TagName,
         int? BuildNumber,
         DateTimeOffset PublishedAt,

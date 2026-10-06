@@ -137,8 +137,15 @@ public sealed partial class DoctorService
                 return new(null, GitHubReleaseFetchStatus.RepositoryNotFound,
                     $"GitHub returned 404 for the Hermaeus repository {UpdateRepoSlug}.", statusCode);
             if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests)
-                return new(null, GitHubReleaseFetchStatus.RateLimited,
-                    "GitHub rate-limited or rejected the anonymous releases request. Try again later.", statusCode);
+            {
+                var rateLimited = response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+                    || (response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining)
+                        && remaining.FirstOrDefault() == "0");
+                return new(null, rateLimited ? GitHubReleaseFetchStatus.RateLimited : GitHubReleaseFetchStatus.GitHubRejected,
+                    rateLimited
+                        ? $"GitHub rate-limited the anonymous releases request (HTTP {statusCode}). Wait for the limit to reset and try again."
+                        : "GitHub rejected the anonymous releases request (HTTP 403). A rate limit or access restriction may be responsible; try again later.", statusCode);
+            }
             if (!response.IsSuccessStatusCode)
                 return new(null, GitHubReleaseFetchStatus.GitHubRejected,
                     $"GitHub rejected the releases request with HTTP {statusCode}.", statusCode);
