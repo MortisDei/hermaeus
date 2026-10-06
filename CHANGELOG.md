@@ -13,6 +13,9 @@ limit.
 
 ### Changed
 
+- Avalonia, Desktop, Fluent and Inter framework packages move together from
+  12.1.2 to 12.1.3, consolidating the overlapping Dependabot updates into R33.
+  AvaloniaEdit remains on its separate 12.0.0 package line.
 - Dismissing a paused Agent parent also discards its unfinished child work,
   clearing the whole run from the review queue without executing pending tools
   or losing completed child evidence. Cancelled children reconcile as skipped.
