@@ -239,6 +239,7 @@ public static class HarnessCases
         [new HarnessCase("RAG genuinely empty dataset is distinguished from an uncached one", RagCacheCeilingTests.GenuinelyEmptyDatasetIsDistinguishedFromAnUncachedOne)],
         [new HarnessCase("RAG scan index info reports the budget it was measured against", RagCacheCeilingTests.ScanIndexInfoReportsTheBudgetItWasMeasuredAgainst)],
         [new HarnessCase("RAG FTS candidate generation returns chunks containing the query terms", RagScanIndexTests.FtsCandidateGenerationReturnsChunksContainingTheQueryTerms)],
+        [new HarnessCase("RAG FTS candidate limit retains relevant matches beyond the storage prefix", RagScanIndexTests.FtsCandidateLimitRetainsRelevantMatchesBeyondTheStoragePrefix)],
         [new HarnessCase("RAG malformed MATCH input falls back rather than throwing", RagScanIndexTests.MalformedMatchInputFallsBackRatherThanThrowing)],
         [new HarnessCase("RAG FTS backfill is idempotent and does not duplicate rows", RagScanIndexTests.TheFtsBackfillIsIdempotentAndDoesNotDuplicateRows)],
         [new HarnessCase("RAG re-ingesting the same chunk replaces its search row", RagScanIndexTests.ReIngestingTheSameChunkReplacesItsSearchRowRatherThanAddingOne)],

@@ -42,6 +42,38 @@ namespace Hermaeus.Tests
                 "a chunk sharing no query term should not be a candidate");
         }
 
+        public static async Task FtsCandidateLimitRetainsRelevantMatchesBeyondTheStoragePrefix()
+        {
+            using var temp = new TempDir();
+            var (store, settings) = await NewStoreAsync(temp);
+            var files = new Dictionary<string, string>();
+            for (var i = 0; i < 430; i++)
+                files[$"a-{i:D2}.txt"] = $"Skyrim gardening notes number {i}.";
+            files["z-relevant.txt"] = "Solitude is a city in Skyrim. Solitude is its capital.";
+            var dataset = await IngestAsync(store, temp, "fts-bounded-relevance", files);
+
+            var ids = await store.SearchChunkIdsAsync(dataset.Id, "Solitude Skyrim", 5);
+            var chunks = await store.GetChunksByIdsAsync(ids);
+
+            Equal(5, ids.Count, "candidate generation should remain bounded");
+            True(chunks.Any(chunk => chunk.SourceFile == "z-relevant.txt"),
+                "a rare relevant term must survive the cap even when common-term matches were stored first");
+
+            dataset.Config.EmbeddingModel = "previous-model";
+            await store.SaveDatasetAsync(dataset);
+            settings.Settings.Rag.EmbeddingModel = "current-model";
+            var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+            var retrieval = await query.RetrieveAsync(dataset.Id, "Solitude Skyrim", new RagQueryOptions(TopK: 5));
+            Equal(0, retrieval.SemanticCandidates.Count, "the mismatch must exercise keyword-only retrieval");
+            True(retrieval.Selected.Any(chunk => chunk.Chunk.SourceFile == "z-relevant.txt"),
+                "the real 400-candidate query path must retain the relevant passage beyond the storage prefix");
+
+            var recall = await new Hermaeus.Services.Recall.DocumentRecallSource(store)
+                .SearchAsync("Solitude Skyrim", string.Empty, System.Threading.CancellationToken.None);
+            True(recall.Any(hit => hit.Snippet.Contains("Solitude", StringComparison.Ordinal)),
+                "document Recall's shared bounded keyword path must also retain the relevant passage");
+        }
+
         public static async Task MalformedMatchInputFallsBackRatherThanThrowing()
         {
             using var temp = new TempDir();

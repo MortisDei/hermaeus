@@ -371,11 +371,13 @@ larger limit only moves the point at which a corpus no longer fits.
 ## Keyword candidates
 
 BM25 scoring uses an FTS5 index over chunk content rather than tokenising every
-chunk in the dataset once per query variant. FTS5 finds a few hundred candidates
-and `Bm25Scorer` ranks them. The only chunks that stop being scored are ones
-that share no query term at all and therefore score essentially zero; a
-regression test asserts that scoring the candidate set produces the same ranked
-ids, in the same order, as scoring the whole corpus.
+chunk in the dataset once per query variant. FTS5 ranks matching chunks before
+the candidate cap, then `Bm25Scorer` scores that bounded set using dataset
+statistics. Relevant rare-term matches can therefore survive a large number
+of earlier common-term matches. Small sets below the cap retain the same
+ranking as whole-corpus scoring; capped retrieval does not promise exact
+whole-corpus equivalence. The shared candidate path also serves Recall's
+Documents source.
 
 The index is maintained inside the same transaction as the chunk rows it
 mirrors, and is backfilled once, lazily, on the first search of an existing
