@@ -5,6 +5,16 @@ namespace Hermaeus.Tests;
 
 public sealed class AudioPlaybackTests
 {
+    [WindowsOnlyFact]
+    public async Task Windows_player_rejects_a_lost_wav_without_substituting_a_system_beep()
+    {
+        using var temp = new TempDir();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AudioPlayback.PlayWindowsAsync(temp.PathFor("lost-after-validation.wav"), CancellationToken.None));
+
+        Assert.Contains("default system-sound fallback is disabled", error.Message);
+    }
+
     /// <summary>r11 4.2: Windows uses the native winmm player and does not depend on a media-player file association.</summary>
     [Fact]
     public void SelectPlayerCommand_uses_native_winmm_on_windows()

@@ -180,13 +180,17 @@ reviewed task, runtime, long-operation, and recording events, with per-event
 defaults, volume, mute, visual equivalents, and suppression while TTS speaks.
 It never cues ordinary token arrival, clicks, navigation, or high GPU use.
 Windows playback uses the native winmm `PlaySound` API directly, so a preview
-does not open a media player or depend on the WAV file association. Temporary
-cue files are deleted after playback. Approval, task-complete, task-failed, and
+does not open a media player or depend on the WAV file association. Default
+Windows sound substitution is disabled: a rejected WAV reports a playback
+failure rather than a successful generic beep. Temporary cue files are deleted
+after playback. Approval, task-complete, task-failed, and
 managed-runtime-failed cues are enabled by default; other event kinds remain
 opt-in. Each event resolves to a distinct bounded multi-tone generated WAV
 pattern, so approval, completion, failure, and runtime events are not one
-generic beep. The service logs the cue identity and pattern, generated PCM
-resource, every backend attempt, fallback reason, policy decision, and playback
+generic beep. Semantic notes last 250 to 300 ms with 150 ms pauses so their
+patterns remain distinguishable on laptop speakers; recording cues deliberately
+remain short single tones. The service logs the cue identity and pattern,
+generated PCM resource, every backend attempt, fallback reason, policy decision, and playback
 result. When suppression is enabled and
 TTS is speaking, a cue waits for the speaking state to clear and then rechecks
 the current settings; it is not silently dropped or played over speech. A

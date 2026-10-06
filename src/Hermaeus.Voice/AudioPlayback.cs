@@ -120,15 +120,18 @@ public static class AudioPlayback
         }
     }
 
-    private static async Task PlayWindowsAsync(string wavFilePath, CancellationToken ct)
+    internal static async Task PlayWindowsAsync(string wavFilePath, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var played = await Task.Run(
-            () => PlaySound(wavFilePath, IntPtr.Zero, SoundFilename | SoundSync),
+            // A substituted system beep is not successful playback of our WAV.
+            () => PlaySound(wavFilePath, IntPtr.Zero, SoundFilename | SoundSync | SoundNoDefault),
             CancellationToken.None);
         ct.ThrowIfCancellationRequested();
         if (!played)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows audio playback failed.");
+            // PlaySound does not promise a last-error code, and this continuation
+            // may run on a different thread from the native call.
+            throw new InvalidOperationException("Windows could not play the generated WAV file; default system-sound fallback is disabled.");
     }
 
     [DllImport("winmm.dll", EntryPoint = "PlaySoundW", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -136,6 +139,7 @@ public static class AudioPlayback
     private static extern bool PlaySound(string? sound, IntPtr module, uint flags);
 
     private const uint SoundSync = 0x0000;
+    private const uint SoundNoDefault = 0x0002;
     private const uint SoundFilename = 0x20000;
 
     internal static ProcessStartInfo BuildStartInfo(string command, IReadOnlyList<string> args)

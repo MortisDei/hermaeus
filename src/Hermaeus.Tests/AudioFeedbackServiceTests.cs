@@ -1,12 +1,48 @@
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using Hermaeus.Voice;
 using Xunit;
 
 namespace Hermaeus.Tests;
 
 public sealed class AudioFeedbackServiceTests
 {
+    [Theory]
+    [InlineData(AudioFeedbackEventKind.TaskNeedsApproval)]
+    [InlineData(AudioFeedbackEventKind.TaskCompleted)]
+    [InlineData(AudioFeedbackEventKind.TaskFailed)]
+    [InlineData(AudioFeedbackEventKind.ManagedRuntimeReady)]
+    [InlineData(AudioFeedbackEventKind.ManagedRuntimeFailed)]
+    [InlineData(AudioFeedbackEventKind.LongOperationCompleted)]
+    public void Semantic_wav_contains_separated_audible_notes_at_the_declared_pitches(AudioFeedbackEventKind kind)
+    {
+        var cue = AudioFeedbackAssets.Resolve(kind);
+        using var stream = new MemoryStream(AudioFeedbackAssets.CreateWav(kind, 25));
+        var audio = WavFile.Read(stream);
+        var toneSamples = audio.SampleRate * cue.ToneMilliseconds / 1000;
+        var gapSamples = audio.SampleRate * cue.GapMilliseconds / 1000;
+
+        Assert.InRange(cue.ToneMilliseconds, 250, 300);
+        Assert.InRange(cue.GapMilliseconds, 150, 200);
+        Assert.InRange(audio.Samples.Length / (double)audio.SampleRate, 0.65, 1.1);
+        Assert.Equal(cue.Frequencies.Count * toneSamples + (cue.Frequencies.Count - 1) * gapSamples, audio.Samples.Length);
+        for (var note = 0; note < cue.Frequencies.Count; note++)
+        {
+            var offset = note * (toneSamples + gapSamples);
+            // Count rising zero crossings in the central, unfaded 100 ms.
+            var start = offset + audio.SampleRate / 20;
+            var length = audio.SampleRate / 10;
+            var crossings = 0;
+            for (var i = start; i < start + length; i++)
+                if (audio.Samples[i] <= 0 && audio.Samples[i + 1] > 0)
+                    crossings++;
+            Assert.InRange(crossings * 10, cue.Frequencies[note] - 10, cue.Frequencies[note] + 10);
+            if (note < cue.Frequencies.Count - 1)
+                Assert.All(audio.Samples.Skip(offset + toneSamples).Take(gapSamples), sample => Assert.Equal(0f, sample));
+        }
+    }
+
     [Fact]
     public void Default_policy_enables_task_notifications_and_keeps_ambient_events_off()
     {
