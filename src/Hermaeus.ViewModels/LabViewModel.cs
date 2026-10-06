@@ -819,9 +819,12 @@ public partial class LabViewModel : ViewModelBase
     public bool CanUndoAppliedRecommendation => _recommendationApplication is not null
         && !string.IsNullOrWhiteSpace(AppliedRecommendationId);
 
-    partial void OnSelectedServerChanged(ServerConfig? value)
+    partial void OnSelectedServerChanged(ServerConfig? oldValue, ServerConfig? newValue)
     {
-        if (value is not null) CandidateContextSize = value.ContextSize;
+        // Availability refreshes rebuild snapshots of the same server. They must
+        // not replace the candidate the owner is about to run.
+        if (newValue is not null && !string.Equals(oldValue?.Id, newValue.Id, StringComparison.Ordinal))
+            CandidateContextSize = newValue.ContextSize;
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));
         NotifyRunCommands();
     }
@@ -1055,6 +1058,9 @@ public partial class LabViewModel : ViewModelBase
             StatusMessage = "Another Lab run is already active.";
             return;
         }
+        var source = SelectedServer;
+        var plan = SelectedRecipe.Plan;
+        var prompt = RecipePrompt;
         _recipeCts = new CancellationTokenSource();
         _recipeCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         IsRecipeRunning = true;
@@ -1063,9 +1069,9 @@ public partial class LabViewModel : ViewModelBase
         {
             if (_suspendedSourceServers.Count == 0)
                 RestoreStatus = "Not required";
-            await SuspendSelectedSourceAsync();
+            await SuspendSelectedSourceAsync(source);
             var progress = new Progress<LabRunProgress>(value => RunOnUi(() => ApplyRunProgress(value)));
-            _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt,
+            _currentRun = await _recipes.RunAsync(plan, source, prompt,
                 _recipeCts.Token, progress);
             ShowCompletedRun(_currentRun);
             TradeoffSummary = BuildTradeoffSummary(_currentRun);
@@ -1163,19 +1169,21 @@ public partial class LabViewModel : ViewModelBase
             StatusMessage = "Another Lab run is already active.";
             return;
         }
+        var source = SelectedServer;
+        var baseline = ConfigurationFrom(source, "baseline", "Baseline");
+        var candidate = baseline with { Id = "candidate-1", Label = "Candidate", ContextSize = CandidateContextSize };
+        var experimentName = ExperimentName;
         IsBusy = true;
         try
         {
             if (_suspendedSourceServers.Count == 0)
                 RestoreStatus = "Not required";
-            await SuspendSelectedSourceAsync();
-            var baseline = ConfigurationFrom(SelectedServer, "baseline", "Baseline");
-            var candidate = baseline with { Id = "candidate-1", Label = "Candidate", ContextSize = CandidateContextSize };
+            await SuspendSelectedSourceAsync(source);
             var definition = await _experiments.CreateDefinitionAsync(
-                ExperimentName, "isolated-runtime-v1", SelectedServer, baseline, [candidate], 1,
+                experimentName, "isolated-runtime-v1", source, baseline, [candidate], 1,
                 LabCorrectnessRequirement.ExactEquivalence);
             DefinitionPreview = definition.CanonicalJson();
-            _currentRun = await _experiments.StartAsync(definition, SelectedServer);
+            _currentRun = await _experiments.StartAsync(definition, source);
             RunStatus = _currentRun.Status.ToString();
             IsRunActive = _currentRun.Status == LabRunStatus.Running;
             RuntimeIsolation = _currentRun.TemporaryPort is int port
@@ -1582,17 +1590,17 @@ public partial class LabViewModel : ViewModelBase
     private static LabConfiguration ConfigurationFrom(ServerConfig source, string id, string label)
         => LabConfigurationMapper.FromServer(source, id, label);
 
-    private async Task SuspendSelectedSourceAsync()
+    private async Task SuspendSelectedSourceAsync(ServerConfig sourceConfiguration)
     {
-        if (_services is null || SelectedServer is null || _suspendedSourceServers.Count > 0)
+        if (_services is null || _suspendedSourceServers.Count > 0)
             return;
 
-        var source = _services.Servers.FirstOrDefault(server => server.Id == SelectedServer.Id);
+        var source = _services.Servers.FirstOrDefault(server => server.Id == sourceConfiguration.Id);
         if (source is null)
             return;
 
         _suspendedSourceConfigurationFingerprints[source.Id] = JsonSerializer.Serialize(source.BuildConfig());
-        _suspendedSourceServers = await _services.SuspendRunningServersAsync([SelectedServer.Id]);
+        _suspendedSourceServers = await _services.SuspendRunningServersAsync([sourceConfiguration.Id]);
         if (_suspendedSourceServers.Count > 0)
         {
             RestoreStatus = "Pending";

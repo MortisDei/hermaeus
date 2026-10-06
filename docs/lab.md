@@ -24,6 +24,12 @@ messages remain separate, so a recommendation is not presented as the
 effective loaded runtime state. Recipe prompt detail and evidence filters are
 secondary disclosures, and action groups wrap when the window is narrow.
 
+The Experiment tab captures the selected source, name, baseline and candidate
+before awaiting source suspension. A status refresh of the same server retains
+the candidate draft; choosing a different server resets it to that server's
+context baseline. Guided runs likewise capture their source, recipe and prompt
+before suspension.
+
 The Experiment tab freezes one immutable definition before it starts anything.
 The definition names the protocol, exact v2 runtime/model/hardware/configuration
 fingerprint, target Services server, baseline, bounded candidates, workload,
