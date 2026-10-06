@@ -184,6 +184,9 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
   generation, source revision, and content hash that supplied the chunk.
 - Chat Knowledge injection is bounded and cited. Weak retrieval adds nothing
   rather than forcing unrelated chunks into a response.
+- RAG and document Recall rank FTS keyword matches before applying their
+  candidate limits, then score the bounded candidate set with dataset BM25
+  statistics. Candidate selection no longer favours the storage-order prefix.
 - The RAG question panel can include an explicit combination of datasets per
   question. Its multi-select scope is separate from the single-dataset
   manager controls used for ingest, reindex, and evaluation.
@@ -277,7 +280,8 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   source identity and reject stale answers or decisions.
 - The workbench exposes the current decision, live progress, plan, response,
   changes, approvals, reservations, commands, and unfinished work. Responses
-  are selectable Markdown with an explicit copy action. Continue planned work,
+  are selectable Markdown with an explicit copy action and continue rendering
+  current content after tab navigation. Continue planned work,
   continue with an instruction, Finish run, and Stop are distinct persisted
   lifecycle transitions. A run ledger supports per-file Rewind with staleness
   checks.
@@ -293,6 +297,8 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   persisted state/transcript/trace/log folder. New Task clears task-scoped
   composer, response, draft, selection, and evidence projections without
   deleting the persisted task.
+- Successful workspace listings and file loads clear only the error from their
+  earlier failed read, preserving any newer task or owner-save failure.
 - Workspace file listings distinguish directories and preserve nullable
   modification times. When the filesystem cannot provide a trustworthy time,
   the UI says **Modified time unavailable** instead of displaying a fabricated
@@ -303,8 +309,10 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   preserves routable child queue rows, and terminalizes orphaned children as
   interrupted rather than leaving phantom approval rows.
 - A second top-level task cannot start while another task is open. An
-  orchestration parent cannot be finished or dismissed while a child is still
-  pending or running; startup recovery marks that inconsistent terminal state
+  orchestration parent cannot be finished while a child is still pending or
+  running. Dismissing a paused parent cancels its unfinished children without
+  executing pending tools, skips unstarted work and preserves completed evidence.
+  Startup recovery marks an inconsistent completed parent state
   as blocked for explicit continuation. A suggested workspace `AGENTS.md` is
   previewed and queued through the same approval path as every other write.
 - Scenario Evals supports both suite execution and an individual row Run
@@ -362,9 +370,11 @@ manual or guided run may be active at a time. A running
 selected Chat source is fully stopped and awaited before the isolated process
 starts, then restored only if its complete configuration is unchanged. Lab does
 not change saved settings or select a winner automatically. Definitions are
-frozen, candidates are bounded, valid recipe evidence flows directly into
-candidate review, missing measurements remain missing, and output correctness
-gates comparisons and Apply review. Failures retain their useful operation
+frozen before source suspension, candidate drafts survive status refreshes of
+the same server, and choosing another server resets the candidate to its
+context baseline. Candidates are bounded, valid recipe evidence flows directly
+into candidate review, missing measurements remain missing, and output
+correctness gates comparisons and Apply review. Failures retain their useful operation
 detail. One Lab execution is one top-level Evidence entry keyed by its durable
 run id. Its drill-down retains the completion result, configuration slices,
 provenance, and raw detail. Completion summaries name the eligible candidate or
@@ -456,13 +466,19 @@ action; a healthy native provider is not offered as an install action.
 
 Audio feedback is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
-speaks. Event kinds resolve to distinct bounded generated cue patterns, and
+speaks. Event kinds resolve to distinct bounded generated cue patterns with
+clearly separated notes. Windows playback refuses default-beep substitution, and
 diagnostics identify the resource, backend attempts, fallback, and result. It
 does not cue ordinary clicks, token arrival, navigation, or high GPU use.
 
 See the [Voice reference](voice.md).
 
 ## Doctor and Setup
+
+Unavailable llama.cpp release metadata retains its lookup error in Doctor's
+details and copied diagnostics. GitHub rate limits require HTTP 429 or exhausted
+quota evidence; an unqualified HTTP 403 remains a rejected request with an
+uncertain cause. An unavailable comparison never means the runtime is current.
 
 The setup wizard makes Data Root, AI Assets, runtime, model, and optional voice
 choices explicit. Doctor checks actual paths, executable readiness, runtimes,

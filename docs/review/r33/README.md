@@ -1,12 +1,25 @@
 # Review round 33: Hermaeus beyond the desktop
 
-Status: **R33 continuation is closed locally on `r33/round`; owner validation
-remains**. `HEAD` is `b620944`; the current working-tree implementation and
-evidence are recorded in [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md).
-This current closeout supersedes implementation claims in the older planning
-snapshots below without rewriting their historical evidence.
-The implementation remains uncommitted; push, PR, merge, tag, release, settings,
-and other publication actions remain owner-only.
+Status: **R33 implementation is committed on `r33/round`; release validation
+remains open**. The repair closeout is recorded in
+[14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md), followed by the
+native telemetry and resource-lifetime repairs in
+[15-windows-native-crash-investigation.md](15-windows-native-crash-investigation.md).
+These records supersede implementation claims in the older planning snapshots
+without rewriting their historical evidence. Their commit identities, test
+counts, package hashes, and uncommitted-tree accounting describe those earlier
+passes, not the current checkout.
+
+The current release-readiness evidence is recorded in
+[16-release-readiness.md](16-release-readiness.md). Native desktop, installed
+runtime, device, and Linux/COSMIC gates remain open unless a later receipt
+explicitly closes them. PR, merge, tag, release, repository settings, and other
+publication actions remain owner-controlled.
+
+The 2026-10-06 desktop continuation found additional Agent dismissal,
+Workspace, Markdown, Lab, keyword-candidate, effective-context, audio-cue and
+update-diagnostic defects. Their bounded repairs, automated verification and
+remaining packaged owner checks are recorded in that receipt.
 
 The earlier `r33/planning` baseline remains historical. Production and
 regression-test changes are scoped to the batches below. No new runtime
@@ -108,6 +121,8 @@ scenario, owner defect, and conditional branch are recorded in
 | [12-completion-audit.md](12-completion-audit.md) | Strict batch, scenario, defect, conditional, and owner-gate audit |
 | [13-lab-benchmark-authority-audit.md](13-lab-benchmark-authority-audit.md) | Complete Lab recipe matrix, shared runtime evidence contract, Benchmark eligibility, and native Linux receipts |
 | [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md) | Current r33/round A-T disposition, automated evidence, and staged owner dogfood checklist |
+| [15-windows-native-crash-investigation.md](15-windows-native-crash-investigation.md) | Proven NVML ABI defect, telemetry and native-resource lifetime repairs, and historical crash attribution limits |
+| [16-release-readiness.md](16-release-readiness.md) | Current checkout verification, package identity, desktop access, and remaining release gates |
 
 ## Evidence vocabulary
 

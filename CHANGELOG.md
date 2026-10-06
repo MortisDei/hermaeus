@@ -13,6 +13,23 @@ limit.
 
 ### Changed
 
+- Dismissing a paused Agent parent also discards its unfinished child work,
+  clearing the whole run from the review queue without executing pending tools
+  or losing completed child evidence. Cancelled children reconcile as skipped.
+- Supplementary audio cues use clearly separated notes on laptop speakers.
+  Windows WAV playback refuses default system-beep substitution on failure.
+- Doctor retains llama.cpp release-lookup errors in its details and diagnostics.
+  Both update checks distinguish confirmed GitHub rate limits from unqualified
+  HTTP 403 rejections; cancelled llama.cpp scans stay cancelled.
+- Recovered Workspace reads clear their own stale error without hiding newer
+  task or save failures. Markdown responses keep updating after tab navigation.
+  Lab preserves candidate drafts across source-status refreshes and freezes
+  manual and recipe inputs before suspending the selected source.
+- RAG and document Recall rank FTS keyword matches before limiting candidates,
+  preserving relevant passages beyond the earlier storage-order prefix.
+- Effective launch evidence uses runtime context capacity instead of nested
+  generation parameters, preserves total capacity over per-slot startup lines,
+  and derives totals only from reported slot counts. New receipts use parser v3.
 - Fixed the Windows NVML v2 process-record ABI mismatch that could overwrite
   the telemetry buffer. Telemetry polling now stops on flyout dismissal and
   rejects late captures/UI callbacks. Added opt-in native probe diagnostics and

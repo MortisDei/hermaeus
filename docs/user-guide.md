@@ -258,6 +258,12 @@ provider into a local one merely because the desktop app itself is local.
 
 ## Doctor and remediation
 
+If the llama.cpp update check reports **Latest: Unknown**, its details and copied
+diagnostics include the failed lookup reason. A confirmed GitHub rate limit
+requires waiting for the quota to reset. An HTTP 403 without exhausted-quota
+evidence may be a rate limit or access restriction; it does not establish a
+GitHub outage or prove the installed build is current.
+
 **Doctor** checks real paths, executable runnability, services, models, storage,
 RAG, and voice readiness. A failed check does not silently change the machine.
 Where Hermaeus can remediate a problem, inspect the plan and explicitly approve
@@ -341,6 +347,11 @@ ingestion, watched folders, reindexing, and deletion. The dataset scope in
 **Ask** remains question-specific and does not change the selected dataset used
 by management actions.
 
+Keyword fallback ranks matches before its candidate limit. If Diagnostics
+reports an embedding-model mismatch, reindex the dataset with the intended
+current model to restore semantic retrieval; unrelated retrieved passages do
+not establish an answer.
+
 **Memories** are durable, reviewable facts stored under Data Root. Settings
 control whether memory and Recall context may be injected into Chat. The Chat
 environment description reports only enabled context sources. The command
@@ -395,8 +406,10 @@ writes the selected file directly as an owner action after comparing the
 revision hash that was loaded; the write uses atomic replacement and reports a
 conflict with a Reload action message when the file changed outside Hermaeus.
 File listings distinguish directories and show **Modified time unavailable**
-when the filesystem cannot provide a trustworthy timestamp. Equivalent Agent
-mutations are bounded as non-progress when the requested action or verified
+when the filesystem cannot provide a trustworthy timestamp. A successful
+workspace or file reload clears its earlier read error; newer task and save
+errors remain visible. Agent responses continue updating after tab changes.
+Equivalent Agent mutations are bounded as non-progress when the requested action or verified
 post-image is repeated, while legitimate iterative edits remain reviewable.
 Agent-proposed patches remain separate and use the normal prepared mutation and
 approval path. In Changes, each prepared patch's Approve, Reject, and Block
@@ -405,8 +418,11 @@ or content instead of silently deciding a newer patch. The editor status tooltip
 dimensions, visibility, editable state, document-size, and file diagnostics for
 native troubleshooting.
 Starting another top-level task is disabled while one is open. An
-orchestration parent cannot be finished or dismissed while a child is pending
-or running. If startup finds that inconsistent state, it marks the parent
+orchestration parent cannot be finished while a child is pending or running.
+**Dismiss** on a paused parent cancels its unfinished children and discards
+their pending tools and questions, skips unstarted work, and keeps completed
+work and approval history. A running parent must be stopped first. If startup
+finds an inconsistent completed parent state, it marks the parent
 blocked so **Continue** can reconcile it. When a workspace is missing its
 `AGENTS.md`, **Review and create AGENTS.md** previews the file and places a
 normal prepared mutation in the approval queue; it does not write the file
@@ -458,8 +474,9 @@ visual notifications remain authoritative, and cues are suppressed while TTS
 speaks by default. A suppressed cue waits for TTS to finish and then rechecks
 settings before playback. Playback failure does not fail the operation that
 raised the visual notification. Each event uses its own bounded generated cue
-pattern rather than one generic beep, and the trace records the cue identity,
-backend attempts, fallback reason, and result.
+pattern with clearly separated notes rather than one generic beep. Windows
+does not substitute a default beep for a failed WAV. The trace records the cue
+identity, backend attempts, fallback reason, and result.
 
 When Recall injection is enabled, the Chat trace identifies keyword-only
 fallback retrieval separately from embedding-backed retrieval. Lexical hits
