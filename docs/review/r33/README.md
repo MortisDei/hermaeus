@@ -1,7 +1,7 @@
 # Review round 33: Hermaeus beyond the desktop
 
-Status: **R33 implementation is committed on `r33/round`; release validation
-remains open**. The repair closeout is recorded in
+Status: **R33 repairs include audio and dependency follow-ups on `r33/round`;
+packaged release validation remains open**. The repair closeout is recorded in
 [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md), followed by the
 native telemetry and resource-lifetime repairs in
 [15-windows-native-crash-investigation.md](15-windows-native-crash-investigation.md).
@@ -122,7 +122,7 @@ scenario, owner defect, and conditional branch are recorded in
 | [13-lab-benchmark-authority-audit.md](13-lab-benchmark-authority-audit.md) | Complete Lab recipe matrix, shared runtime evidence contract, Benchmark eligibility, and native Linux receipts |
 | [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md) | Current r33/round A-T disposition, automated evidence, and staged owner dogfood checklist |
 | [15-windows-native-crash-investigation.md](15-windows-native-crash-investigation.md) | Proven NVML ABI defect, telemetry and native-resource lifetime repairs, and historical crash attribution limits |
-| [16-release-readiness.md](16-release-readiness.md) | Current checkout verification, package identity, desktop access, and remaining release gates |
+| [16-release-readiness.md](16-release-readiness.md) | Current automated and owner evidence, audio and dependency follow-ups, and remaining release gates |
 
 ## Evidence vocabulary
 
