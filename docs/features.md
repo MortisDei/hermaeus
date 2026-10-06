@@ -466,8 +466,10 @@ action; a healthy native provider is not offered as an install action.
 
 Audio feedback is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
-speaks. Event kinds resolve to distinct bounded generated cue patterns with
-clearly separated notes. Windows playback refuses default-beep substitution, and
+speaks. Semantic events use distinct generated patterns with 400 ms notes and
+300 ms pauses, with three-note cues bounded to 1.8 seconds. Recording cues
+remain short single tones.
+Windows playback refuses default-beep substitution, and
 diagnostics identify the resource, backend attempts, fallback, and result. It
 does not cue ordinary clicks, token arrival, navigation, or high GPU use.
 

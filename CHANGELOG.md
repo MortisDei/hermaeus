@@ -17,6 +17,8 @@ limit.
   clearing the whole run from the review queue without executing pending tools
   or losing completed child evidence. Cancelled children reconcile as skipped.
 - Supplementary audio cues use clearly separated notes on laptop speakers.
+  Semantic cues use the owner-audible 400 ms notes and 300 ms pauses, after
+  the shorter production pattern was still heard as only two notes.
   Windows WAV playback refuses default system-beep substitution on failure.
 - Doctor retains llama.cpp release-lookup errors in its details and diagnostics.
   Both update checks distinguish confirmed GitHub rate limits from unqualified

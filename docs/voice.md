@@ -187,9 +187,10 @@ after playback. Approval, task-complete, task-failed, and
 managed-runtime-failed cues are enabled by default; other event kinds remain
 opt-in. Each event resolves to a distinct bounded multi-tone generated WAV
 pattern, so approval, completion, failure, and runtime events are not one
-generic beep. Semantic notes last 250 to 300 ms with 150 ms pauses so their
-patterns remain distinguishable on laptop speakers; recording cues deliberately
-remain short single tones. The service logs the cue identity and pattern,
+generic beep. Semantic notes last 400 ms with 300 ms pauses, using the spacing
+confirmed by the owner's laptop listening check. Three-note cues last 1.8 seconds;
+recording cues deliberately remain short single tones. The service logs the cue
+identity and pattern,
 generated PCM resource, every backend attempt, fallback reason, policy decision, and playback
 result. When suppression is enabled and
 TTS is speaking, a cue waits for the speaking state to clear and then rechecks

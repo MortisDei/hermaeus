@@ -10,15 +10,15 @@ internal static class AudioFeedbackAssets
 {
     // Keep separate notes perceptible on laptop speakers, rather than merging
     // the whole pattern into one brief notification beep.
-    internal sealed record Cue(string Id, IReadOnlyList<int> Frequencies, int ToneMilliseconds = 250, int GapMilliseconds = 150);
+    internal sealed record Cue(string Id, IReadOnlyList<int> Frequencies, int ToneMilliseconds = 400, int GapMilliseconds = 300);
 
     public static Cue Resolve(AudioFeedbackEventKind kind) => kind switch
     {
         AudioFeedbackEventKind.TaskNeedsApproval => new("task-needs-approval-ascending", [660, 880]),
         AudioFeedbackEventKind.TaskCompleted => new("task-completed-triad", [523, 659, 784]),
-        AudioFeedbackEventKind.TaskFailed => new("task-failed-descending", [440, 330], 300, 150),
+        AudioFeedbackEventKind.TaskFailed => new("task-failed-descending", [440, 330]),
         AudioFeedbackEventKind.ManagedRuntimeReady => new("runtime-ready-ascending", [440, 660, 880]),
-        AudioFeedbackEventKind.ManagedRuntimeFailed => new("runtime-failed-descending", [440, 220], 300, 150),
+        AudioFeedbackEventKind.ManagedRuntimeFailed => new("runtime-failed-descending", [440, 220]),
         AudioFeedbackEventKind.LongOperationCompleted => new("long-operation-completed-triad", [392, 523, 659]),
         AudioFeedbackEventKind.RecordingStarted => new("recording-started-short", [880], 90, 20),
         AudioFeedbackEventKind.RecordingStopped => new("recording-stopped-short", [660], 90, 20),

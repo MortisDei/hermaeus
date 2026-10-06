@@ -23,9 +23,9 @@ public sealed class AudioFeedbackServiceTests
         var toneSamples = audio.SampleRate * cue.ToneMilliseconds / 1000;
         var gapSamples = audio.SampleRate * cue.GapMilliseconds / 1000;
 
-        Assert.InRange(cue.ToneMilliseconds, 250, 300);
-        Assert.InRange(cue.GapMilliseconds, 150, 200);
-        Assert.InRange(audio.Samples.Length / (double)audio.SampleRate, 0.65, 1.1);
+        Assert.InRange(cue.ToneMilliseconds, 400, 500);
+        Assert.InRange(cue.GapMilliseconds, 300, 400);
+        Assert.InRange(audio.Samples.Length / (double)audio.SampleRate, 1.1, 1.8);
         Assert.Equal(cue.Frequencies.Count * toneSamples + (cue.Frequencies.Count - 1) * gapSamples, audio.Samples.Length);
         for (var note = 0; note < cue.Frequencies.Count; note++)
         {

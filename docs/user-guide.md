@@ -473,9 +473,10 @@ explicit task/runtime/recording event list. Volume is retained when muted,
 visual notifications remain authoritative, and cues are suppressed while TTS
 speaks by default. A suppressed cue waits for TTS to finish and then rechecks
 settings before playback. Playback failure does not fail the operation that
-raised the visual notification. Each event uses its own bounded generated cue
-pattern with clearly separated notes rather than one generic beep. Windows
-does not substitute a default beep for a failed WAV. The trace records the cue
+raised the visual notification. Semantic events use their own bounded generated
+patterns with 400 ms notes and 300 ms pauses. Recording cues remain short
+single tones. Windows does not substitute a default beep for a failed WAV.
+The trace records the cue
 identity, backend attempts, fallback reason, and result.
 
 When Recall injection is enabled, the Chat trace identifies keyword-only
