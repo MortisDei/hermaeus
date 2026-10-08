@@ -9,6 +9,203 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.41.0-beta] - 2026-10-08
+
+### Changed
+
+- Backup restoration checks final, staging and rollback paths through the same
+  canonical containment and reparse-point boundary before filesystem writes.
+- Supplementary audio feedback defaults off for new or missing settings;
+  explicit saved choices are retained.
+- Tray icons are attached to Avalonia's application collection, fixing the
+  missing Linux icon. Close/minimize only hide with an available tray; Linux
+  also requires a tray interaction in the current session. Disabling the tray
+  restores a hidden window, and a second launch requests restoration of the
+  existing window without starting another desktop or touching its data stores.
+- Refreshing Chat's bound model picker no longer resets conversation sampling
+  overrides or replaces provider-reported token usage with a transcript-only
+  estimate when the same model remains selected. Genuine model changes still
+  apply profile defaults, including fallback when a model disappears. A model
+  choice made while discovery is pending is retained when the list arrives.
+- Lab preserves the displayed candidate context when its source server is
+  suspended or restored. Rebuilding the bound server picker no longer resets
+  the field to the source's baseline context while the frozen candidate differs.
+- Avalonia, Desktop, Fluent and Inter framework packages move together from
+  12.1.2 to 12.1.3, consolidating the overlapping Dependabot updates into R33.
+  AvaloniaEdit remains on its separate 12.0.0 package line.
+- Dismissing a paused Agent parent also discards its unfinished child work,
+  clearing the whole run from the review queue without executing pending tools
+  or losing completed child evidence. Cancelled children reconcile as skipped.
+- Supplementary audio cues use clearly separated notes on laptop speakers.
+  Semantic cues use the owner-audible 400 ms notes and 300 ms pauses, after
+  the shorter production pattern was still heard as only two notes.
+  Windows WAV playback refuses default system-beep substitution on failure.
+- Doctor retains llama.cpp release-lookup errors in its details and diagnostics.
+  Both update checks distinguish confirmed GitHub rate limits from unqualified
+  HTTP 403 rejections; cancelled llama.cpp scans stay cancelled.
+- Recovered Workspace reads clear their own stale error without hiding newer
+  task or save failures. Markdown responses keep updating after tab navigation.
+  Lab preserves candidate drafts across source-status refreshes and freezes
+  manual and recipe inputs before suspending the selected source.
+- RAG and document Recall rank FTS keyword matches before limiting candidates,
+  preserving relevant passages beyond the earlier storage-order prefix.
+- Effective launch evidence uses runtime context capacity instead of nested
+  generation parameters, preserves total capacity over per-slot startup lines,
+  and derives totals only from reported slot counts. New receipts use parser v3.
+- Fixed the Windows NVML v2 process-record ABI mismatch that could overwrite
+  the telemetry buffer. Telemetry polling now stops on flyout dismissal and
+  rejects late captures/UI callbacks. Added opt-in native probe diagnostics and
+  a safe Windows reproduction procedure; historical crash attribution remains
+  subject to dump evidence.
+- Native Kokoro and ONNX reranker session use, replacement, and disposal now
+  share their lifetime gates. System snapshots tolerate disappearing SQLite
+  journals during database-size measurement.
+
+- R33 Workspace now uses AvaloniaEdit only. Owner Save/Ctrl+S performs a
+  revision-checked atomic write with external-conflict detection; Agent patches
+  remain approval-gated and reviewable. The embedded Monaco/WebView assets and
+  dependency were removed.
+- Agent convergence now bounds equivalent blocked, non-progress, read-only,
+  and repeated-answered-question loops without weakening command or mutation
+  safety gates.
+- Benchmark and RAG refusal scoring share the versioned provider-neutral
+  evaluator, with inspectable classifications, stale-suite refusal, and
+  explicit rerun lineage. Auto-tune validates an exact confirmation probe before
+  persisting a profile.
+- Supplementary audio cues now use bounded generated WAV resources with
+  platform backend diagnostics and default important-state events. Cues wait
+  behind active TTS instead of being silently dropped, while current settings
+  are rechecked before playback. Process telemetry preserves Unknown for
+  unsupported Windows process VRAM, exposes the bounded evidence reason, and
+  bounds expensive GPU probes. Doctor, Hugging Face, and Moss UI paths now
+  expose the intended primary action, selected details, and eye-only blinking
+  behavior.
+- Prepared patch rows now route Approve, Reject, and Block through the same
+  authoritative proposal and stale-state checks as the global Agent decision.
+  Parent-owned child questions and approvals retain source identity and reject
+  answers for superseded interactions.
+- Lab recipe inspection refuses empty or unresolved selected sources before
+  probing model paths, and Hugging Face repository replacement or navigation
+  cancels superseded inspection without publishing stale details. Semantic
+  audio events now use distinct generated cue patterns with backend and
+  fallback diagnostics.
+- Agent startup now rebuilds parent-owned child interactions from persisted
+  child state, terminalizes orphaned children, and bounds repeated equivalent
+  mutations using persisted request and post-image identity. Workspace listings
+  preserve unknown modification times, and direct owner saves retain revision
+  conflict protection.
+- Benchmark ranking empty states explain missing eligible models or unverified
+  runtime evidence. Lab evidence leads with human outcome summaries and keeps
+  technical details behind disclosure. RAG ingest and reindex reject duplicate
+  starts, while llama version probes retain a bounded budget and elapsed-time
+  diagnostics.
+
+- Temporary test, scenario, driver, clipboard-image, Python-health, voice,
+  and failed-package artifacts now have explicit source owners and cleanup
+  boundaries. Implicit generated audio is removed after playback, failure, or
+  cancellation, while explicit output paths remain caller-owned.
+- Verification drivers now share a namespace-scoped scratch-root helper with
+  bounded stale-run recovery and success, failure, and cancellation cleanup;
+  the R33 script remains only a driver-specific adapter.
+- Lab completion now stores comparison and effective-launch evidence as separate
+  bounded records referenced by a compact completion summary. Recipe runs expose
+  named candidate progress, preserve truthful completed and remaining counts,
+  and do not retry finalization after a completion persistence failure.
+- Benchmark run lists and detail now show bounded runtime-evidence reasons plus
+  requested, resolved, launched, effective, and telemetry reconciliation.
+  Switching Services models now restores each model's unsaved runtime draft or
+  starts from target-only defaults, so companions and model-specific options do
+  not leak between models. Empty model metadata uses a stable filename or id.
+- Agent workspace analysis exposes the suggested `AGENTS.md` action before a
+  task exists, creates an explicit task only after preview approval, and queues
+  the write through the normal prepared-mutation gate. History uses compact goal
+  cards while retaining the full goal, and the local editor reports bounded
+  Monaco/fallback attachment and layout diagnostics.
+- Owned desktop modals use a shared client-size, DPI-aware, working-area-clamped
+  placement correction. Long confirmation content scrolls above pinned actions
+  and supports Escape cancellation.
+
+- Lab isolated launches now capture a redacted PID and exact argv with bounded
+  startup evidence, parse current b10930 nested `/props` context/slot fields,
+  and parse the runtime's explicit offloaded-layer receipt. Stale typed GPU
+  placement can no longer collapse engine candidates, and missing or mismatched
+  effective evidence, including missing process association, finishes as
+  Inconclusive with no recommendation or Apply.
+- Lab and Benchmarks now share a fail-closed runtime evidence envelope that
+  separates requested, resolved, launched, effective, and process-bound
+  telemetry identity. Completed but unverified benchmark runs remain visible
+  with an evidence caveat and are excluded from rankings, Insights, and Speed
+  Check; every shipped Lab recipe requires proof of its varied effective field.
+- Shared application lifecycle now owns startup, recovery, and bounded shutdown
+  across Desktop, Local API, and the R33 headless driver. Partial startup can
+  retry, shutdown drains owners in reverse registration order, and shutdown
+  records an incomplete phase when an owner exceeds its deadline instead of
+  pretending it stopped cleanly. Settings-triggered restart now uses the same
+  owner drain and a bounded single-instance handoff.
+- Window close and tray service stopping now use the bounded managed-process
+  stop boundary and hand the completed drain to the Avalonia application
+  lifetime, avoiding a re-entrant cancelled window close. Shutdown logs owner
+  start/completion and the final clean or timed-out result. Agent refuses a
+  second top-level task and refuses to finish or dismiss an orchestration parent
+  with a live child; inconsistent recovered parents are blocked for explicit
+  continuation. Missing workspace `AGENTS.md` suggestions enter the normal
+  prepared-mutation review queue.
+- Agent task commands and prepared workspace mutations now use one task and
+  target ownership boundary. Mutating proposals carry typed arguments,
+  workspace policy, target identity, preimage, and proposed output before
+  review. Approval revalidates those facts, persists a durable receipt before
+  execution, and reports readback-verified `Applied`, distinct
+  `AlreadySatisfied`, or a blocked outcome. Queued workspace patches use the
+  same path, and stale task views no longer overwrite the active task.
+- The repository includes an isolated whole-product R33 driver that uses the
+  production composition graph to create, approve, execute, and verify a real
+  Agent file mutation without using owner settings, data, or workspace paths.
+- Backup restore now preflights every archive file with duplicate-target,
+  per-entry, and total uncompressed-size limits, then expands into a temporary
+  data-root staging directory with actual-byte checks before a rollback-safe
+  commit. Cancellation and reparse-point checks remain part of the restore
+  boundary.
+- Services AutoTune probes clone the complete managed-server configuration and
+  preserve configured runtime fields while applying only the candidate axes.
+  Models-card AutoTune builds an isolated target configuration from the selected
+  model and verified target companions, so it cannot inherit another loaded
+  model's draft, projector, or extra arguments. Running managed servers are
+  suspended and restored around the Models-card operation, and a profile is
+  saved only after restoration. Local GGUF metadata and the current hardware
+  profile are used when available, and transient probe settings are not saved.
+  Services and Models share operation cancellation; a cancelled individual or
+  bulk tune reports cancellation, restores the source services, and does not
+  save a profile after the cancellation boundary. Candidate failure, admission
+  refusal, and cancellation retain path-free adaptive evidence when their
+  workload identity is available.
+- Lab recipe availability now reconciles the selected baseline's model, GGUF,
+  and exact executable identity before offering a run. Doctor actions carry
+  typed panel, section, entity, and control targets, with an explicit missing
+  entity explanation and focus request. Lab comparisons now retain auditable
+  effective context, GPU placement, and slot evidence from the isolated
+  runtime, and Apply reads back the saved Services projection before reporting
+  success.
+- Agent, RAG, and Lab views now project lifecycle, evidence, capability, and
+  next-action state in user-facing terms. Agent's New Task clears task-scoped
+  projections without deleting history, Changes distinguishes verified and
+  conflicted outcomes, run artifacts can be opened directly, and narrow action
+  groups wrap. RAG labels Local files versus Remote web, clears stale query
+  evidence, and keeps citation/trace inspection secondary. Lab explains
+  unavailable recipes and keeps run, restore, Apply, and recovery state
+  separate.
+- Generic ChatGPT Pet v2 data packages can be validated and imported from
+  Settings. The bundled Moss asset is disabled by default; enabled overlays
+  use persisted, clamped positions and current-pointer walking direction, with
+  no scripts, filesystem access, network access, or chat-content access.
+- Benchmark preparation and execution now persist operation evidence before
+  work begins, retain a truthful cancelled or partial result, and make final
+  evidence persistence independent of caller cancellation. The Linux desktop
+  installer also safely escapes package paths containing spaces.
+- The R33 driver now exercises production-composed RAG generation and query,
+  Chat retrieval context, deterministic voice orchestration, Lab failure
+  cleanup, Lab Apply, settings reopen, and shared shutdown in addition to the
+  Agent mutation receipt.
+
 ## [0.40.0-beta] - 2026-09-05
 
 ### Changed

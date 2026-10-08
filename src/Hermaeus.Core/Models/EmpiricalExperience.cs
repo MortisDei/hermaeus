@@ -139,6 +139,8 @@ public static class ExperienceJson
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
             WriteCanonical(writer, parsed.RootElement);
+        if (stream.Length > MaxDocumentBytes)
+            throw new InvalidOperationException($"Experience document exceeds {MaxDocumentBytes} bytes.");
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 

@@ -94,6 +94,10 @@ public sealed class HuggingFaceClient
 
             return new HfModelCard(sha, lastModified, license, downloads, thumbnail, author);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch
         {
             return null;
@@ -117,6 +121,10 @@ public sealed class HuggingFaceClient
 
             using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
             return ParseTree(doc.RootElement).Select(entry => entry with { Revision = revision }).ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {

@@ -36,7 +36,11 @@ public sealed class AgentContinueTaskTests
           "next_action": {
             "type": "tool",
             "tool_name": "draft_patch",
-            "arguments": { "path": "notes.md" },
+            "arguments": {
+              "relative_path": "notes.md",
+              "rationale": "Add the requested notes file.",
+              "proposed_content": "notes"
+            },
             "requires_approval": true,
             "risk_level": "medium"
           },
@@ -152,6 +156,35 @@ public sealed class AgentContinueTaskTests
         Assert.Equal(AgentTaskTransitionKind.FinishRun, Assert.Single(finished.UserTransitions).Kind);
         Assert.Null(finished.PendingToolAction);
         Assert.True((await store.LoadTranscriptAsync(created.TaskId)).Count > before.Count);
+    }
+
+    [Fact]
+    public async Task FinishTaskAsync_refuses_a_parent_with_unfinished_children()
+    {
+        using var temp = new TempDir();
+        var llm = new FakeSequencedAgentLlmForContinue([FinalResponse]);
+        var (agent, store, _, options) = await BuildAsync(temp, llm);
+        await store.SaveAsync(new AgentTaskState
+        {
+            TaskId = "parent-with-child",
+            Goal = "parent",
+            Status = AgentTaskStatus.WaitingForUser,
+            SubTaskPlan =
+            [
+                new AgentSubTaskSpec
+                {
+                    TaskId = "child-pending",
+                    Goal = "still running",
+                    Status = AgentSubTaskStatus.Running
+                }
+            ]
+        });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => agent.FinishTaskAsync("parent-with-child"));
+
+        Assert.Contains("unfinished", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync("parent-with-child"))!.Status);
     }
 
     [Fact]

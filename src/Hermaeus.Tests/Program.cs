@@ -1537,8 +1537,8 @@ internal static class AgentTests
     await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     var transcript = await store.LoadTranscriptAsync(state.TaskId);
-    True(transcript.Any(e => e.Role == "tool" && e.ToolName == "draft_patch"),
-        "the approved tool's result should reach the transcript, not just ToolResults' last-five window");
+    True(transcript.Any(e => e.Role == "tool" && e.ToolName == "apply_draft_patch"),
+        "the approved patch application result should reach the transcript, not just ToolResults' last-five window");
     }
 
     private const string CreateFileToolResponse = """
@@ -2102,7 +2102,7 @@ internal static class AgentTests
     }
 
     private static async Task<(FileAgentTaskStateStore Store, AgentService Service, AgentWorkspaceOptions Options, AgentTaskState State)> CreateApprovedTwoSubtaskPlanAsync(
-        TempDir temp, ILlmService llm, string goal = "Fix the bug and add coverage")
+        TempDir temp, ILlmService llm, string goal = "Fix the bug and add coverage", bool approve = true)
     {
     var root = temp.PathFor("workspace");
     Directory.CreateDirectory(root);
@@ -2119,6 +2119,8 @@ internal static class AgentTests
 
     var state = await service.CreateTaskAsync(goal, options);
     var proposed = await service.RunStepAsync(state.TaskId, options);
+    if (!approve)
+        return (store, service, options, state);
     Equal(AgentTaskStatus.WaitingForUser, proposed.State.Status, "plan_subtasks should always pause for approval");
     await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
@@ -2129,14 +2131,16 @@ internal static class AgentTests
     {
     using var temp = new TempDir();
     var llm = new FakeSequencedAgentLlm([OneSubtaskResponse]);
-    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm, approve: false);
 
     var afterApproval = await store.LoadAsync(state.TaskId);
-    Equal(AgentTaskStatus.WaitingForUser, afterApproval!.Status, "an invalid plan (too few entries) should not materialize and should return to WaitingForUser");
+    Equal(AgentTaskStatus.Blocked, afterApproval!.Status, "an invalid plan should be refused before it becomes approvable");
     True(afterApproval.SubTaskPlan.Count == 0, "an invalid plan should never be materialized");
-    True(afterApproval.PendingToolAction is null, "the rejected pending action should be cleared");
-    True(afterApproval.ToolResults.Any(t => t.Tool == "plan_subtasks" && t.ResultSummary.Contains("between 2 and 6", StringComparison.Ordinal)),
-        "the rejection should explain why via a tool result");
+    True(afterApproval.PendingToolAction is null, "an invalid plan should never create a pending action");
+    True(afterApproval.ToolResults.Any(t => t.Tool == "safety_gate"
+        && t.ResultSummary.Contains("mutation proposal refused before review", StringComparison.Ordinal)
+        && t.ResultSummary.Contains("between 2 and 6", StringComparison.Ordinal)),
+        "the pre-review refusal should explain why via the safety-gate result");
     }
 
     public static async Task AgentOrchestrationRunsChildrenSequentiallyThenSynthesizes()
@@ -2932,8 +2936,13 @@ internal static class AgentTests
     var parentAfterPause = await store.LoadAsync(state.TaskId);
     Equal(AgentTaskStatus.WaitingForUser, parentAfterPause!.Status, "the parent must truthfully mirror its paused child's status instead of sitting Running forever (1.6)");
     True(parentAfterPause.ActiveStep.Contains("Waiting on sub-task 1/2", StringComparison.Ordinal), "the parent's ActiveStep should name which sub-task it is waiting on (1.6)");
+    var mirroredInteraction = parentAfterPause.PendingOwnerInteractions.Single();
+    Equal(paused.State.TaskId, mirroredInteraction.SourceTaskId, "the parent should retain the paused child's owner interaction identity");
+    Equal(AgentOwnerInteractionKind.Approval, mirroredInteraction.Kind, "a paused child edit should remain an approval in the parent-owned queue");
+    Equal(await PendingFingerprintAsync(store, paused.State.TaskId), mirroredInteraction.Fingerprint, "the parent mirror should carry the child's current approval fingerprint");
 
-    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, await PendingFingerprintAsync(store, paused.State.TaskId), options);
+    var parentApproval = await service.AppendApprovalAsync(state.TaskId, "edit_file", approved: true, mirroredInteraction.Fingerprint, options);
+    True(parentApproval.Applied, "approving from the parent-owned interaction should execute the child authority");
     var resumed = await service.RunAsync(state.TaskId, options);
     Equal(AgentTaskStatus.Complete, resumed.State.Status, "resuming the parent (whose own status was WaitingForUser, not Running) should still complete the run (1.6)");
     }

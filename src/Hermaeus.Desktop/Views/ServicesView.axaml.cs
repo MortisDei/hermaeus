@@ -6,8 +6,11 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Hermaeus.Core.Models;
 using Hermaeus.ViewModels;
+using System.ComponentModel;
 using System.Globalization;
 
 namespace Hermaeus.Desktop.Views;
@@ -17,6 +20,7 @@ public partial class ServicesView : UserControl
     public static readonly IValueConverter StatusColor = new StatusColorConverter();
     private System.Collections.Specialized.NotifyCollectionChangedEventHandler? _collectionChangedHandler;
     private ServicesViewModel? _wiredViewModel;
+    private PropertyChangedEventHandler? _propertyChangedHandler;
 
     public ServicesView()
     {
@@ -31,8 +35,13 @@ public partial class ServicesView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (_wiredViewModel is not null && _collectionChangedHandler is not null)
-            _wiredViewModel.Servers.CollectionChanged -= _collectionChangedHandler;
+        if (_wiredViewModel is not null)
+        {
+            if (_collectionChangedHandler is not null)
+                _wiredViewModel.Servers.CollectionChanged -= _collectionChangedHandler;
+            if (_propertyChangedHandler is not null)
+                _wiredViewModel.PropertyChanged -= _propertyChangedHandler;
+        }
 
         if (DataContext is not ServicesViewModel vm) return;
         _wiredViewModel = vm;
@@ -54,6 +63,13 @@ public partial class ServicesView : UserControl
         };
         
         vm.Servers.CollectionChanged += _collectionChangedHandler;
+        _propertyChangedHandler = (_, args) =>
+        {
+            if (args.PropertyName == nameof(ServicesViewModel.PendingDoctorTarget))
+                Dispatcher.UIThread.Post(FocusPendingDoctorTarget);
+        };
+        vm.PropertyChanged += _propertyChangedHandler;
+        Dispatcher.UIThread.Post(FocusPendingDoctorTarget);
     }
 
     private void OnUnloaded(object? sender, RoutedEventArgs e)
@@ -61,9 +77,45 @@ public partial class ServicesView : UserControl
         // Clean up event subscriptions when view is unloaded
         if (_wiredViewModel is not null && _collectionChangedHandler is not null)
             _wiredViewModel.Servers.CollectionChanged -= _collectionChangedHandler;
+        if (_wiredViewModel is not null && _propertyChangedHandler is not null)
+            _wiredViewModel.PropertyChanged -= _propertyChangedHandler;
 
         _wiredViewModel = null;
         _collectionChangedHandler = null;
+        _propertyChangedHandler = null;
+    }
+
+    private void FocusPendingDoctorTarget()
+    {
+        var vm = _wiredViewModel;
+        var target = vm?.PendingDoctorTarget;
+        var server = vm?.SelectedServer;
+        if (target is null || server is null
+            || !string.Equals(target.Area, "services", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(target.ItemId, server.Id, StringComparison.Ordinal))
+            return;
+
+        ServerList.ScrollIntoView(server);
+        Dispatcher.UIThread.Post(() =>
+        {
+            var container = ServerList.ContainerFromItem(server);
+            if (container is null)
+                return;
+
+            var className = target.Focus switch
+            {
+                "context-size" => "doctor-context-size",
+                "gpu-placement" => "doctor-gpu-placement",
+                "draft-model" => "doctor-draft-model",
+                _ => string.Empty
+            };
+            var focus = string.IsNullOrEmpty(className)
+                ? container
+                : container.GetVisualDescendants()
+                    .OfType<Control>()
+                    .FirstOrDefault(control => control.Classes.Contains(className));
+            focus?.Focus();
+        }, DispatcherPriority.Background);
     }
 
     private void WireFilePickers(ServerProcessViewModel srv)

@@ -107,7 +107,10 @@ public sealed class RuntimeTelemetryTests
     public async Task Process_source_samples_matching_process_working_set()
     {
         using var process = Process.GetCurrentProcess();
-        var fingerprint = ModelFitPredictionTests.Fingerprint();
+        var baseFingerprint = ModelFitPredictionTests.Fingerprint();
+        var runtime = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(
+            process.MainModule?.FileName ?? throw new InvalidOperationException("The test process path was unavailable."), null);
+        var fingerprint = baseFingerprint with { Runtime = runtime };
         var request = new RuntimeTelemetryRequest(
             "live", process.Id, process.StartTime.ToUniversalTime(), fingerprint.Runtime, fingerprint);
         var source = new ProcessRuntimeTelemetrySource();

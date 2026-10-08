@@ -13,7 +13,7 @@ namespace Hermaeus.Voice;
 /// path, only loads assets that are already present and SHA256-verified;
 /// downloading is an explicit, separate install step.
 /// </summary>
-internal sealed class KokoroOnnxModel : IDisposable
+internal sealed class KokoroOnnxModel : IDisposable, IAsyncDisposable
 {
     // onnx-community/Kokoro-82M-v1.0-ONNX, quantized fp16 variant: small
     // enough for a default download, still full quality voices/style vectors.
@@ -36,6 +36,7 @@ internal sealed class KokoroOnnxModel : IDisposable
     private string? _stateAssetsRoot;
     private readonly Dictionary<string, float[]> _voiceStyleCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _unavailable;
+    private bool _disposed;
     private readonly IResourceCoordinator? _resourceCoordinator;
 
     /// <summary>Stable, user-facing reason for the most recent admission failure.</summary>
@@ -69,9 +70,10 @@ internal sealed class KokoroOnnxModel : IDisposable
 
     public async Task<bool> EnsureLoadedAsync(string voice, CancellationToken ct)
     {
-        await _gate.WaitAsync(ct);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             InvalidateIfRootChanged();
 
             if (_session is not null)
@@ -90,15 +92,16 @@ internal sealed class KokoroOnnxModel : IDisposable
                 _unavailable = true;
                 return false;
             }
-            if (!await VerifySha256Async(modelPath, ModelSha256, ct))
+            if (!await VerifySha256Async(modelPath, ModelSha256, ct).ConfigureAwait(false))
             {
                 LastAdmissionFailure = "model_sha256_mismatch";
                 _unavailable = true;
                 return false;
             }
 
-            return await LoadSessionAsync(modelPath, ct);
+            return await LoadSessionAsync(modelPath, ct).ConfigureAwait(false);
         }
+        catch (ObjectDisposedException) when (_disposed) { throw; }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
@@ -124,9 +127,10 @@ internal sealed class KokoroOnnxModel : IDisposable
     /// </summary>
     public async Task InstallAssetsAsync(IReadOnlyList<string> voices, IProgress<string>? progress, CancellationToken ct)
     {
-        await _gate.WaitAsync(ct);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             InvalidateIfRootChanged();
 
             Directory.CreateDirectory(AssetsRoot);
@@ -134,7 +138,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             LogPreflight("install starting");
 
             progress?.Report("Downloading Kokoro ONNX model...");
-            await DownloadIfMissingAsync(ModelPath(AssetsRoot), ModelUrl, ModelSha256, progress, ct);
+            await DownloadIfMissingAsync(ModelPath(AssetsRoot), ModelUrl, ModelSha256, progress, ct).ConfigureAwait(false);
             LogPreflight("model download+verify complete");
 
             foreach (var voice in voices)
@@ -148,7 +152,7 @@ internal sealed class KokoroOnnxModel : IDisposable
                     $"{RepoBaseUrl}/voices/{voice}.bin",
                     expectedHash,
                     progress,
-                    ct);
+                    ct).ConfigureAwait(false);
                 LogPreflight($"voice download+verify complete: {voice}");
             }
 
@@ -158,7 +162,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             // managed exception handling and kills the process; this line is flushed
             // to disk immediately before the risky call so a crash still leaves a
             // record of exactly where it happened.
-            if (!await LoadSessionAsync(ModelPath(AssetsRoot), ct))
+            if (!await LoadSessionAsync(ModelPath(AssetsRoot), ct).ConfigureAwait(false))
                 throw new InvalidOperationException($"Kokoro ONNX session was not admitted: {LastAdmissionFailure}.");
             _unavailable = false;
             progress?.Report("Kokoro native voice assets installed.");
@@ -184,7 +188,7 @@ internal sealed class KokoroOnnxModel : IDisposable
         IResourceAdmissionLease? lease = null;
         try
         {
-            lease = await AcquireAdmissionAsync(ct);
+            lease = await AcquireAdmissionAsync(ct).ConfigureAwait(false);
             LogPreflight("about to load InferenceSession");
             _journal?.RecordOperation("loading Kokoro native ONNX session (EnsureLoadedAsync)");
             _session = new InferenceSession(modelPath, BuildSessionOptions());
@@ -211,7 +215,7 @@ internal sealed class KokoroOnnxModel : IDisposable
                     proposal.ProcessIdentity,
                     proposal.Components,
                     DateTime.UtcNow,
-                    proposal.Evidence));
+                    proposal.Evidence)).ConfigureAwait(false);
             }
             _journal?.RecordOperation("Kokoro native ONNX session loaded");
             LastAdmissionFailure = string.Empty;
@@ -231,7 +235,7 @@ internal sealed class KokoroOnnxModel : IDisposable
         finally
         {
             if (lease is not null && !lease.IsCompleted && !lease.IsReleased)
-                await lease.DisposeAsync();
+                await lease.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -278,7 +282,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             consumerId,
             proposal,
             callerId: $"{ResourceConsumerIds.NativeKokoro}.load",
-            allowUnknown: true), ct);
+            allowUnknown: true), ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -287,28 +291,34 @@ internal sealed class KokoroOnnxModel : IDisposable
     /// </summary>
     public float[] Synthesize(int[] tokenIds, string voice, double speed)
     {
-        if (_session is null)
-            throw new InvalidOperationException("Kokoro ONNX session is not loaded.");
-
-        // The style/voice row is indexed by the phoneme count *before* the
-        // two boundary pad tokens were added (matches the model card's
-        // reference Python: `ref_s = voices[len(tokens)]` where `tokens`
-        // excludes the pad wrapper added just before inference).
-        var coreTokenCount = Math.Max(0, tokenIds.Length - 2);
-        var style = LoadStyleVector(voice, coreTokenCount);
-        var inputIds = new DenseTensor<long>(tokenIds.Select(id => (long)id).ToArray(), new[] { 1, tokenIds.Length });
-        var styleTensor = new DenseTensor<float>(style, new[] { 1, style.Length });
-        var speedTensor = new DenseTensor<float>(new[] { (float)speed }, new[] { 1 });
-
-        var inputs = new List<NamedOnnxValue>
+        _gate.Wait();
+        try
         {
-            NamedOnnxValue.CreateFromTensor("input_ids", inputIds),
-            NamedOnnxValue.CreateFromTensor("style", styleTensor),
-            NamedOnnxValue.CreateFromTensor("speed", speedTensor)
-        };
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_session is null)
+                throw new InvalidOperationException("Kokoro ONNX session is not loaded.");
 
-        using var results = _session.Run(inputs);
-        return results.First().AsEnumerable<float>().ToArray();
+            // The style/voice row is indexed by the phoneme count *before* the
+            // two boundary pad tokens were added (matches the model card's
+            // reference Python: `ref_s = voices[len(tokens)]` where `tokens`
+            // excludes the pad wrapper added just before inference).
+            var coreTokenCount = Math.Max(0, tokenIds.Length - 2);
+            var style = LoadStyleVector(voice, coreTokenCount);
+            var inputIds = new DenseTensor<long>(tokenIds.Select(id => (long)id).ToArray(), new[] { 1, tokenIds.Length });
+            var styleTensor = new DenseTensor<float>(style, new[] { 1, style.Length });
+            var speedTensor = new DenseTensor<float>(new[] { (float)speed }, new[] { 1 });
+
+            var inputs = new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor("input_ids", inputIds),
+                NamedOnnxValue.CreateFromTensor("style", styleTensor),
+                NamedOnnxValue.CreateFromTensor("speed", speedTensor)
+            };
+
+            using var results = _session.Run(inputs);
+            return results.First().AsEnumerable<float>().ToArray();
+        }
+        finally { _gate.Release(); }
     }
 
     private float[] LoadStyleVector(string voice, int tokenCount)
@@ -335,20 +345,20 @@ internal sealed class KokoroOnnxModel : IDisposable
 
     private async Task DownloadIfMissingAsync(string path, string url, string expectedSha256, IProgress<string>? progress, CancellationToken ct)
     {
-        if (File.Exists(path) && await VerifySha256Async(path, expectedSha256, ct))
+        if (File.Exists(path) && await VerifySha256Async(path, expectedSha256, ct).ConfigureAwait(false))
             return;
 
         var temp = $"{path}.download";
         // ResponseHeadersRead avoids buffering the whole response (a few
         // hundred MB for the model) into memory before streaming it to disk,
         // which could OOM low-RAM machines (docs/review/01-code-audit.md P2-6).
-        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        await using (var source = await response.Content.ReadAsStreamAsync(ct))
+        await using (var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
         await using (var target = File.Create(temp))
-            await source.CopyToAsync(target, ct);
+            await source.CopyToAsync(target, ct).ConfigureAwait(false);
 
-        if (!await VerifySha256Async(temp, expectedSha256, ct))
+        if (!await VerifySha256Async(temp, expectedSha256, ct).ConfigureAwait(false))
         {
             File.Delete(temp);
             throw new InvalidOperationException($"{Path.GetFileName(path)} failed SHA256 verification.");
@@ -364,7 +374,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             return false;
 
         await using var stream = File.OpenRead(path);
-        var hash = await SHA256.HashDataAsync(stream, ct);
+        var hash = await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
         var actual = Convert.ToHexString(hash).ToLowerInvariant();
         return string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase);
     }
@@ -449,10 +459,21 @@ internal sealed class KokoroOnnxModel : IDisposable
         catch { return -1; }
     }
 
-    public void Dispose()
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public async ValueTask DisposeAsync()
     {
-        _session?.Dispose();
-        _resourceCoordinator?.ReleaseAllocation($"inprocess-{ResourceConsumerIds.NativeKokoro}");
-        _gate.Dispose();
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _session?.Dispose();
+            _session = null;
+            _voiceStyleCache.Clear();
+            _resourceCoordinator?.ReleaseAllocation($"inprocess-{ResourceConsumerIds.NativeKokoro}");
+        }
+        finally { _gate.Release(); }
+        // Keep the managed semaphore alive for queued callers to observe disposal.
     }
 }

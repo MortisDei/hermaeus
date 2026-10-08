@@ -5,6 +5,16 @@ namespace Hermaeus.Tests;
 
 public sealed class AudioPlaybackTests
 {
+    [WindowsOnlyFact]
+    public async Task Windows_player_rejects_a_lost_wav_without_substituting_a_system_beep()
+    {
+        using var temp = new TempDir();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AudioPlayback.PlayWindowsAsync(temp.PathFor("lost-after-validation.wav"), CancellationToken.None));
+
+        Assert.Contains("default system-sound fallback is disabled", error.Message);
+    }
+
     /// <summary>r11 4.2: Windows uses the native winmm player and does not depend on a media-player file association.</summary>
     [Fact]
     public void SelectPlayerCommand_uses_native_winmm_on_windows()
@@ -173,5 +183,19 @@ public sealed class AudioPlaybackTests
             value => selected = value);
 
         Assert.Equal("first", selected);
+    }
+
+    [Fact]
+    public async Task Failed_players_report_the_fallback_reason_before_the_next_backend()
+    {
+        var attempts = new List<(string Command, bool Succeeded)>();
+
+        await AudioPlayback.PlayCandidatesAsync(
+            [("first", (IReadOnlyList<string>)["tone.wav"]), ("fallback", (IReadOnlyList<string>)["tone.wav"])],
+            (command, _, _) => Task.FromResult(command == "fallback"),
+            CancellationToken.None,
+            onBackendAttempt: (command, succeeded) => attempts.Add((command, succeeded)));
+
+        Assert.Equal([("first", false), ("fallback", true)], attempts);
     }
 }

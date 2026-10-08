@@ -28,6 +28,7 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
     private readonly Task _worker;
     private CancellationTokenSource? _playbackCts;
     private VoiceChannel? _currentChannel;
+    private int _shutdownRequested;
     private bool _disposed;
 
     public bool IsMuted { get; set; }
@@ -49,6 +50,8 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
 
     public Task EnqueueAsync(VoiceUtterance utterance, CancellationToken ct = default)
     {
+        if (_disposed || Volatile.Read(ref _shutdownRequested) != 0)
+            return Task.CompletedTask;
         if (string.IsNullOrWhiteSpace(utterance.Text))
             return Task.CompletedTask;
         if (IsMuted || !_settings.Settings.Tts.Enabled)
@@ -104,6 +107,17 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
             _queue.Clear();
             _playbackCts?.Cancel();
         }
+    }
+
+    public async Task ShutdownAsync(CancellationToken ct = default)
+    {
+        if (_disposed)
+            return;
+
+        Interlocked.Exchange(ref _shutdownRequested, 1);
+        StopAll();
+        _lifetimeCts.Cancel();
+        await _worker.WaitAsync(ct).ConfigureAwait(false);
     }
 
     private bool IsChannelEnabled(VoiceChannel channel)
@@ -228,6 +242,7 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        Interlocked.Exchange(ref _shutdownRequested, 1);
         _lifetimeCts.Cancel();
         try { _worker.Wait(TimeSpan.FromSeconds(2)); } catch { }
         _lifetimeCts.Dispose();

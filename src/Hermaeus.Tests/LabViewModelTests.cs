@@ -1,3 +1,7 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Data;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -7,7 +11,8 @@ using Xunit;
 
 namespace Hermaeus.Tests;
 
-public sealed class LabViewModelTests
+[Collection(AvaloniaTestHost.CollectionName)]
+public sealed class LabViewModelTests(AvaloniaTestHost avalonia)
 {
     [Fact]
     public void Lab_start_paths_disable_each_other_while_a_run_is_active()
@@ -15,8 +20,10 @@ public sealed class LabViewModelTests
         using var temp = new TempDir();
         var (_, vm) = Build(temp);
 
-        Assert.True(vm.CanStartRun);
-        Assert.True(vm.CanRunRecipe);
+        Assert.False(vm.CanStartRun);
+        Assert.False(vm.CanRunRecipe);
+        Assert.False(vm.FreezeAndStartCommand.CanExecute(null));
+        Assert.False(vm.RunSelectedRecipeCommand.CanExecute(null));
 
         vm.IsRunActive = true;
 
@@ -72,7 +79,7 @@ public sealed class LabViewModelTests
 
         var row = Assert.Single(vm.Experiences);
         Assert.Equal("Unknown", row.OutcomeLabel);
-        Assert.Equal("ModelInference", row.OriginLabel);
+        Assert.Equal("Model inference", row.OriginLabel);
     }
 
     [Fact]
@@ -596,6 +603,98 @@ public sealed class LabViewModelTests
     }
 
     [Fact]
+    public Task Services_status_refresh_preserves_the_selected_lab_candidate() => avalonia.RunAsync(() =>
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var services = Helpers.NewServicesViewModel(settings);
+        var store = new SqliteEmpiricalExperienceStore(settings, new RedactionService());
+        var vm = new LabViewModel(store, new FakeToasts(), null, settings, null, services);
+        var picker = new ComboBox { DataContext = vm };
+        picker.Bind(ItemsControl.ItemsSourceProperty, new Binding(nameof(vm.ConfiguredServers)));
+        picker.Bind(SelectingItemsControl.SelectedItemProperty, new Binding(nameof(vm.SelectedServer)) { Mode = BindingMode.TwoWay });
+        var window = new Window { Content = picker, Opacity = 0, ShowActivated = false, ShowInTaskbar = false };
+        window.Show();
+        window.Hide();
+        try
+        {
+            var original = vm.SelectedServer;
+            vm.CandidateContextSize = 512;
+
+            foreach (var status in new[] { ServerStatus.Starting, ServerStatus.Stopped, ServerStatus.Running })
+            {
+                services.Servers.Single(server => !server.EmbeddingsMode).Status = status;
+                Assert.NotSame(original, vm.SelectedServer);
+                Assert.Equal(original!.Id, vm.SelectedServer!.Id);
+                Assert.Same(vm.SelectedServer, picker.SelectedItem);
+                Assert.Equal(512, vm.CandidateContextSize);
+            }
+
+            vm.SelectedServer = new ServerConfig { Id = "another-chat", ContextSize = 2048 };
+            Assert.Equal(2048, vm.CandidateContextSize);
+        }
+        finally { window.Close(); }
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public async Task Lab_freezes_the_candidate_and_source_before_suspension_refreshes_services()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var services = new RefreshingServicesViewModel(settings);
+        var store = new SqliteEmpiricalExperienceStore(settings, new RedactionService());
+        var experiments = new RunningExperimentService();
+        var vm = new LabViewModel(store, new FakeToasts(), experiments, settings, null, services);
+        var source = vm.SelectedServer!;
+        vm.CandidateContextSize = 512;
+        vm.ExperimentName = "Frozen owner candidate";
+        services.DuringSuspend = () =>
+        {
+            // A delayed UI change cannot rewrite the operation already started.
+            vm.CandidateContextSize = 1024;
+            vm.ExperimentName = "Later draft";
+        };
+
+        await vm.FreezeAndStartCommand.ExecuteAsync(null);
+
+        var definition = Assert.IsType<LabExperimentDefinition>(experiments.LastDefinition);
+        Assert.Equal("Frozen owner candidate", definition.Name);
+        Assert.Equal(source.Id, definition.TargetServerId);
+        Assert.Equal(source.ContextSize, definition.Baseline.ContextSize);
+        Assert.Equal(512, Assert.Single(definition.Candidates).ContextSize);
+        Assert.Equal(source.Id, services.SuspendedId);
+        await vm.CancelRunCommand.ExecuteAsync(null);
+        Assert.Equal("Restored", vm.RestoreStatus);
+    }
+
+    private sealed class RefreshingServicesViewModel(SettingsService settings)
+        : ServicesViewModel(settings, new RuntimeProfileService(settings), new FakeToasts(),
+            new RedactionService(), new TrustService(), new RuntimeLogService(settings),
+            Helpers.NewTtsSettingsViewModel(settings))
+    {
+        public Action? DuringSuspend { get; set; }
+        public string? SuspendedId { get; private set; }
+
+        public override Task<IReadOnlyList<string>> SuspendRunningServersAsync(IEnumerable<string> serverIds)
+        {
+            SuspendedId = Assert.Single(serverIds);
+            Servers.Single(server => server.Id == SuspendedId).Status = ServerStatus.Starting;
+            DuringSuspend?.Invoke();
+            return Task.FromResult<IReadOnlyList<string>>([SuspendedId]);
+        }
+
+        public override Task RestartServersAsync(IReadOnlyList<string> serverIds)
+        {
+            foreach (var id in serverIds)
+                Servers.Single(server => server.Id == id).Status = ServerStatus.Running;
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
     public async Task Lab_refreshes_when_services_later_rebuilds_the_eventual_canonical_chat_card()
     {
         using var temp = new TempDir();
@@ -665,7 +764,8 @@ public sealed class LabViewModelTests
         public Task<IReadOnlyList<LabRecipePlan>> InspectAsync(ServerConfig source, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<LabRecipePlan>>([Plan]);
 
-        public Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source, string prompt, CancellationToken ct = default) =>
+        public Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source, string prompt,
+            CancellationToken ct = default, IProgress<LabRunProgress>? progress = null) =>
             returnsFailedSnapshot
                 ? Task.FromResult(new LabRunSnapshot
                 {
@@ -717,6 +817,7 @@ public sealed class LabViewModelTests
     {
         private LabRunSnapshot? _run;
         public int CancelCount { get; private set; }
+        public LabExperimentDefinition? LastDefinition { get; private set; }
 
         public Task<LabExperimentDefinition> CreateDefinitionAsync(
             string name, string protocolId, ServerConfig source, LabConfiguration baseline,
@@ -733,6 +834,7 @@ public sealed class LabViewModelTests
 
         public Task<LabRunSnapshot> StartAsync(LabExperimentDefinition definition, ServerConfig source, CancellationToken ct = default)
         {
+            LastDefinition = definition;
             _run = new LabRunSnapshot { Definition = definition, Status = LabRunStatus.Running };
             return Task.FromResult(_run);
         }

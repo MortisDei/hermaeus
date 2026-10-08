@@ -8,14 +8,38 @@ namespace Hermaeus.Services;
 
 public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
 {
+    private static readonly TimeSpan ProcessGpuProbeMinimumInterval = TimeSpan.FromSeconds(2);
+    private const int MaximumCachedGpuProbes = 32;
     private readonly ISystemInfoService? _systemInfo;
+    private readonly IRuntimeLogService? _logs;
+    private readonly bool _traceNative = Environment.GetEnvironmentVariable("HERMAEUS_NATIVE_PROBE_TRACE") == "1";
+    private readonly object _gpuProbeGate = new();
+    private readonly Dictionary<string, GpuProbeCacheEntry> _gpuProbeCache = new(StringComparer.Ordinal);
 
-    public ProcessRuntimeTelemetrySource(ISystemInfoService? systemInfo = null) => _systemInfo = systemInfo;
+    private sealed record GpuProbeCacheEntry(DateTimeOffset StartedAt, Task<(long? Bytes, string Source)> Probe);
+
+    public ProcessRuntimeTelemetrySource(ISystemInfoService? systemInfo = null, IRuntimeLogService? logs = null)
+    {
+        _systemInfo = systemInfo;
+        _logs = logs;
+    }
+
+    private void TraceNative(string message)
+    {
+        if (!_traceNative) return;
+        try
+        {
+            _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service, $"Native telemetry: desktop_pid={Environment.ProcessId}; {message}"));
+        }
+        catch { /* Diagnostics must not change native resource ownership. */ }
+    }
 
     public async Task<IReadOnlyList<RuntimeTelemetrySample>> CaptureAsync(
         RuntimeTelemetryRequest request,
         CancellationToken ct = default)
     {
+        TraceNative($"capture-enter; series={request.SeriesId}; runtime_pid={request.ProcessId}; runtime_started_utc={request.ProcessStartedAtUtc.ToUniversalTime():O}");
         var observedAt = DateTime.UtcNow;
         var processInstance = RuntimeTelemetrySeries.ProcessInstance(request.ProcessId, request.ProcessStartedAtUtc);
         var samples = new List<RuntimeTelemetrySample>();
@@ -25,13 +49,16 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
             if (process.HasExited || process.StartTime.ToUniversalTime() != request.ProcessStartedAtUtc.ToUniversalTime())
                 return UnknownProcessSamples(request, processInstance, observedAt, "runtime-process-restarted", "The matching runtime process is no longer alive.");
 
+            if (!await MatchesExpectedRuntimeAsync(process, request.RuntimeIdentity, ct))
+                return UnknownProcessSamples(request, processInstance, observedAt, "runtime-executable-mismatch", "The PID is alive, but its executable does not match the recorded runtime identity.");
+
             process.Refresh();
             samples.Add(Sample(
                 request, processInstance, RuntimeTelemetryMetric.ProcessWorkingSetBytes,
                 process.WorkingSet64, RuntimeTelemetrySourceKind.ProcessCounter,
                 RuntimeTelemetryTrustState.ProcessScoped, observedAt,
                 "process-working-set", "Operating-system working set for the matching runtime process."));
-            var (gpuMemory, gpuMemorySource) = await TryCaptureNvidiaProcessMemoryAsync(request.ProcessId, ct);
+            var (gpuMemory, gpuMemorySource) = await TryCaptureNvidiaProcessMemoryAsync(request, ct);
             samples.Add(Sample(
                 request, processInstance, RuntimeTelemetryMetric.ProcessGpuMemoryBytes,
                 gpuMemory, gpuMemory.HasValue ? RuntimeTelemetrySourceKind.ProcessCounter : RuntimeTelemetrySourceKind.Unknown,
@@ -65,10 +92,100 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         return samples;
     }
 
-    private static async Task<(long? Bytes, string Source)> TryCaptureNvidiaProcessMemoryAsync(int processId, CancellationToken ct)
+    private static async Task<bool> MatchesExpectedRuntimeAsync(
+        Process process, RuntimeIdentityV2 expected, CancellationToken ct)
     {
-        if (NvidiaProcessMemoryProbe.TryGetBytes(processId, out var nvmlBytes))
+        if (string.IsNullOrWhiteSpace(expected.ExecutableSha256))
+            return true;
+
+        try
+        {
+            var path = process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+            var observed = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(path, null, ct);
+            return expected.IdentifiesSameRuntime(observed);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException or IOException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<(long? Bytes, string Source)> TryCaptureNvidiaProcessMemoryAsync(
+        RuntimeTelemetryRequest request,
+        CancellationToken ct)
+    {
+        var cacheKey = $"{request.ProcessId}:{request.ProcessStartedAtUtc.ToUniversalTime():O}:{request.RuntimeIdentity.StableId}";
+        GpuProbeCacheEntry entry;
+        var now = DateTimeOffset.UtcNow;
+        lock (_gpuProbeGate)
+        {
+            if (_gpuProbeCache.TryGetValue(cacheKey, out entry!)
+                && (!entry.Probe.IsCompleted || now - entry.StartedAt < ProcessGpuProbeMinimumInterval))
+            {
+                // A caller cancellation cancels only its wait. The shared probe
+                // remains bounded and can serve the next telemetry sample.
+            }
+            else
+            {
+                entry = new GpuProbeCacheEntry(
+                    now,
+                    Task.Run(() => ProbeNvidiaProcessMemoryAsync(request.ProcessId, CancellationToken.None)));
+                _gpuProbeCache[cacheKey] = entry;
+                TrimGpuProbeCacheLocked();
+            }
+        }
+
+        try
+        {
+            return await entry.Probe.WaitAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Do not discard an in-flight shared probe just because this
+            // sample stopped waiting. Its result can still serve the next
+            // bounded telemetry request.
+            throw;
+        }
+        catch
+        {
+            lock (_gpuProbeGate)
+            {
+                if (_gpuProbeCache.TryGetValue(cacheKey, out var current)
+                    && ReferenceEquals(current.Probe, entry.Probe))
+                    _gpuProbeCache.Remove(cacheKey);
+            }
+            throw;
+        }
+    }
+
+    private void TrimGpuProbeCacheLocked()
+    {
+        if (_gpuProbeCache.Count <= MaximumCachedGpuProbes)
+            return;
+
+        foreach (var key in _gpuProbeCache
+            .OrderBy(item => item.Value.StartedAt)
+            .Take(_gpuProbeCache.Count - MaximumCachedGpuProbes)
+            .Select(item => item.Key)
+            .ToArray())
+            _gpuProbeCache.Remove(key);
+    }
+
+    private async Task<(long? Bytes, string Source)> ProbeNvidiaProcessMemoryAsync(int processId, CancellationToken ct)
+    {
+        var probeId = _traceNative ? Guid.NewGuid().ToString("N") : string.Empty;
+        Action<string>? trace = _traceNative
+            ? message => TraceNative($"probe={probeId}; runtime_pid={processId}; {message}")
+            : null;
+        trace?.Invoke("probe-enter");
+        if (NvidiaProcessMemoryProbe.TryGetBytes(processId, out var nvmlBytes, trace))
+        {
+            trace?.Invoke("probe-exit; source=nvml");
             return (nvmlBytes, "nvml-process-gpu-memory");
+        }
+        trace?.Invoke("probe-exit; source=nvml-unavailable; fallback=nvidia-smi");
 
         var executable = ExecutableResolver.FindOnPath("nvidia-smi");
         if (executable is null)

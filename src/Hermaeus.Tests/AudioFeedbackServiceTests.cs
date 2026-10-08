@@ -1,19 +1,57 @@
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using Hermaeus.Voice;
 using Xunit;
 
 namespace Hermaeus.Tests;
 
 public sealed class AudioFeedbackServiceTests
 {
+    [Theory]
+    [InlineData(AudioFeedbackEventKind.TaskNeedsApproval)]
+    [InlineData(AudioFeedbackEventKind.TaskCompleted)]
+    [InlineData(AudioFeedbackEventKind.TaskFailed)]
+    [InlineData(AudioFeedbackEventKind.ManagedRuntimeReady)]
+    [InlineData(AudioFeedbackEventKind.ManagedRuntimeFailed)]
+    [InlineData(AudioFeedbackEventKind.LongOperationCompleted)]
+    public void Semantic_wav_contains_separated_audible_notes_at_the_declared_pitches(AudioFeedbackEventKind kind)
+    {
+        var cue = AudioFeedbackAssets.Resolve(kind);
+        using var stream = new MemoryStream(AudioFeedbackAssets.CreateWav(kind, 25));
+        var audio = WavFile.Read(stream);
+        var toneSamples = audio.SampleRate * cue.ToneMilliseconds / 1000;
+        var gapSamples = audio.SampleRate * cue.GapMilliseconds / 1000;
+
+        Assert.InRange(cue.ToneMilliseconds, 400, 500);
+        Assert.InRange(cue.GapMilliseconds, 300, 400);
+        Assert.InRange(audio.Samples.Length / (double)audio.SampleRate, 1.1, 1.8);
+        Assert.Equal(cue.Frequencies.Count * toneSamples + (cue.Frequencies.Count - 1) * gapSamples, audio.Samples.Length);
+        for (var note = 0; note < cue.Frequencies.Count; note++)
+        {
+            var offset = note * (toneSamples + gapSamples);
+            // Count rising zero crossings in the central, unfaded 100 ms.
+            var start = offset + audio.SampleRate / 20;
+            var length = audio.SampleRate / 10;
+            var crossings = 0;
+            for (var i = start; i < start + length; i++)
+                if (audio.Samples[i] <= 0 && audio.Samples[i + 1] > 0)
+                    crossings++;
+            Assert.InRange(crossings * 10, cue.Frequencies[note] - 10, cue.Frequencies[note] + 10);
+            if (note < cue.Frequencies.Count - 1)
+                Assert.All(audio.Samples.Skip(offset + toneSamples).Take(gapSamples), sample => Assert.Equal(0f, sample));
+        }
+    }
+
     [Fact]
-    public void Default_policy_keeps_task_notifications_off()
+    public void Default_policy_disables_audio_feedback_and_retains_opt_in_event_choices()
     {
         var settings = new AudioFeedbackSettings();
 
-        Assert.False(settings.IsEnabled(AudioFeedbackEventKind.TaskNeedsApproval));
-        Assert.False(settings.IsEnabled(AudioFeedbackEventKind.TaskCompleted));
-        Assert.False(settings.IsEnabled(AudioFeedbackEventKind.TaskFailed));
+        Assert.False(settings.Enabled);
+        Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskNeedsApproval));
+        Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskCompleted));
+        Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskFailed));
         Assert.True(settings.IsEnabled(AudioFeedbackEventKind.ManagedRuntimeFailed));
         Assert.False(settings.IsEnabled(AudioFeedbackEventKind.ManagedRuntimeReady));
         Assert.False(settings.IsEnabled(AudioFeedbackEventKind.RecordingStarted));
@@ -24,22 +62,57 @@ public sealed class AudioFeedbackServiceTests
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts.AudioFeedback.Enabled = true;
         settings.Settings.Tts.AudioFeedback.Volume = 25;
         settings.Settings.Tts.AudioFeedback.EventEnabled[nameof(AudioFeedbackEventKind.TaskFailed)] = true;
         settings.Settings.Tts.AudioFeedback.EventEnabled[nameof(AudioFeedbackEventKind.TaskCompleted)] = true;
-        var voice = new FakeVoiceOrchestrator { IsSpeaking = true };
+        var voice = new GatedVoice();
         var played = new List<string>();
         await using var service = new AudioFeedbackService(settings, voice,
             playback: (path, _) => { played.Add(path); return Task.CompletedTask; });
 
         await service.PublishAsync(AudioFeedbackEventKind.TaskCompleted);
-        await Task.Delay(100);
+        await voice.SpeakingWasChecked.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Empty(played);
 
-        voice.IsSpeaking = false;
+        voice.Speaking = false;
+        await Helpers.WaitForAsync(() => played.Count == 1, "deferred cue after TTS");
         await service.PublishAsync(AudioFeedbackEventKind.TaskFailed);
         await service.PublishAsync(AudioFeedbackEventKind.TaskFailed);
-        await Helpers.WaitForAsync(() => played.Count == 1, "one deduplicated cue");
+        await Helpers.WaitForAsync(() => played.Count == 2, "one deduplicated cue");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Saved_audio_choice_survives_settings_reload_and_voice_editor(bool enabled)
+    {
+        using var temp = new TempDir();
+        var path = temp.PathFor("settings.json");
+        var writer = new SettingsService(path);
+        var candidate = writer.Settings.Clone();
+        candidate.Tts.AudioFeedback.Enabled = enabled;
+        await writer.SaveAsync(candidate);
+        var reader = new SettingsService(path);
+        await reader.LoadAsync();
+        Assert.Equal(enabled, reader.Settings.Tts.AudioFeedback.Enabled);
+        using var voiceEditor = Helpers.NewTtsSettingsViewModel(reader);
+        voiceEditor.ReloadFrom(reader.Settings);
+        Assert.Equal(enabled, voiceEditor.AudioFeedbackEnabled);
+        voiceEditor.ApplyVoiceOrchestrationTo(candidate.Tts);
+        Assert.Equal(enabled, candidate.Tts.AudioFeedback.Enabled);
+    }
+
+    [Fact]
+    public void Missing_audio_settings_are_off_in_the_voice_editor()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts = System.Text.Json.JsonSerializer.Deserialize<TtsSettings>("{}")!;
+        using var voiceEditor = Helpers.NewTtsSettingsViewModel(settings);
+        voiceEditor.ReloadFrom(settings.Settings);
+        Assert.False(voiceEditor.AudioFeedbackEnabled);
+        Assert.False(settings.Settings.Tts.AudioFeedback.Enabled);
     }
 
     [Fact]
@@ -47,6 +120,7 @@ public sealed class AudioFeedbackServiceTests
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts.AudioFeedback.Enabled = true;
         settings.Settings.Tts.AudioFeedback.Muted = true;
         settings.Settings.Tts.AudioFeedback.Volume = 77;
         var played = false;
@@ -58,5 +132,87 @@ public sealed class AudioFeedbackServiceTests
 
         Assert.False(played);
         Assert.Equal(77, settings.Settings.Tts.AudioFeedback.Volume);
+    }
+
+    [Fact]
+    public async Task Publish_generates_a_wav_resource_and_records_selection_and_playback_stages()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts.AudioFeedback.Enabled = true;
+        var logs = new CollectingRuntimeLog();
+        var played = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var service = new AudioFeedbackService(
+            settings,
+            logs: logs,
+            playback: (path, _) =>
+            {
+                Assert.True(File.Exists(path));
+                var header = File.ReadAllBytes(path).Take(12).ToArray();
+                Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(header, 0, 4));
+                Assert.Equal("WAVE", System.Text.Encoding.ASCII.GetString(header, 8, 4));
+                played.TrySetResult(path);
+                return Task.CompletedTask;
+            });
+
+        await service.PublishAsync(AudioFeedbackEventKind.TaskCompleted);
+        var path = await played.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await Helpers.WaitForAsync(() => !File.Exists(path), "feedback WAV cleanup");
+
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains("event=TaskCompleted; stage=resource", StringComparison.Ordinal));
+        Assert.Contains(logs.Entries, entry => entry.Message.Contains("event=TaskCompleted; stage=result", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Event_cues_are_distinct_multi_tone_patterns_instead_of_a_generic_beep()
+    {
+        var approval = AudioFeedbackAssets.Resolve(AudioFeedbackEventKind.TaskNeedsApproval);
+        var completed = AudioFeedbackAssets.Resolve(AudioFeedbackEventKind.TaskCompleted);
+        var failed = AudioFeedbackAssets.Resolve(AudioFeedbackEventKind.TaskFailed);
+
+        Assert.NotEqual(approval.Id, completed.Id);
+        Assert.NotEqual(completed.Id, failed.Id);
+        Assert.True(approval.Frequencies.Count > 1);
+        Assert.True(completed.Frequencies.Count > 1);
+        Assert.NotEqual(approval.Frequencies, failed.Frequencies);
+    }
+
+    private sealed class CollectingRuntimeLog : IRuntimeLogService
+    {
+        public List<RuntimeLogEntry> Entries { get; } = [];
+        public event Action<RuntimeLogEntry>? LogAdded;
+        public void Add(RuntimeLogEntry entry) { Entries.Add(entry); LogAdded?.Invoke(entry); }
+        public IReadOnlyList<RuntimeLogEntry> GetEntries() => Entries;
+        public void ClearInMemory() => Entries.Clear();
+        public string GetLogDirectory() => string.Empty;
+        public string GetLogFilePath() => string.Empty;
+    }
+
+    private sealed class GatedVoice : IVoiceOrchestrator
+    {
+        public bool Speaking { get; set; } = true;
+        public bool IsMuted { get; set; }
+        public TaskCompletionSource SpeakingWasChecked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool IsSpeaking
+        {
+            get
+            {
+                SpeakingWasChecked.TrySetResult();
+                return Speaking;
+            }
+        }
+
+        public event Action<VoiceChannel, string>? UtteranceStarted;
+        public event Action<VoiceChannel>? UtteranceCompleted;
+
+        public Task EnqueueAsync(VoiceUtterance utterance, CancellationToken ct = default)
+        {
+            UtteranceStarted?.Invoke(utterance.Channel, utterance.Text);
+            UtteranceCompleted?.Invoke(utterance.Channel);
+            return Task.CompletedTask;
+        }
+        public void StopChannel(VoiceChannel channel) { }
+        public void StopAll() { }
+        public Task ShutdownAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 }

@@ -6,28 +6,41 @@ using System.Reflection;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Microsoft.Data.Sqlite;
+using Hermaeus.Services.ProcessManagement;
 
 namespace Hermaeus.Services;
 
 public sealed class BenchmarkService
 {
+    public const string CurrentEvaluatorVersion = RefusalEvaluator.CurrentVersion;
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
     private readonly ISettingsService _settings;
     private readonly ILlmService _llm;
     private readonly ISystemInfoService _system;
     private readonly IEvalStore _evalStore;
     private readonly IRuntimeLogService? _logs;
+    private readonly ManagedRuntimeRegistry? _runtimeRegistry;
+    private readonly IRuntimeTelemetrySource? _telemetry;
     private string _initializedPath = string.Empty;
     private string _starterSuitesSeededPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
 
-    public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system, IEvalStore evalStore, IRuntimeLogService? logs = null)
+    public BenchmarkService(
+        ISettingsService settings,
+        ILlmService llm,
+        ISystemInfoService system,
+        IEvalStore evalStore,
+        IRuntimeLogService? logs = null,
+        ManagedRuntimeRegistry? runtimeRegistry = null,
+        IRuntimeTelemetrySource? telemetry = null)
     {
         _settings = settings;
         _llm = llm;
         _system = system;
         _evalStore = evalStore;
         _logs = logs;
+        _runtimeRegistry = runtimeRegistry;
+        _telemetry = telemetry;
     }
 
     private string DbPath
@@ -119,18 +132,21 @@ public sealed class BenchmarkService
         BenchmarkSuite suite,
         LlmModel model,
         IProgress<string>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<CancellationToken, Task>? preparation = null)
     {
-        await EnsureInitializedAsync(ct);
-        var cases = suite.Cases.Where(c => !string.IsNullOrWhiteSpace(c.Prompt)).ToList();
-        if (suite.MaxCases > 0)
-            cases = cases.Take(suite.MaxCases).ToList();
+        if (!string.IsNullOrWhiteSpace(suite.EvaluatorVersion)
+            && !string.Equals(suite.EvaluatorVersion, CurrentEvaluatorVersion, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Benchmark suite evaluator {suite.EvaluatorVersion} is not supported by this build. Re-run it from the current suite definition.");
 
         var run = new BenchmarkRun
         {
+            OperationId = OperationCorrelation.NewId(),
             SuiteId = suite.Id,
             SuiteName = suite.Name,
             SuiteVersion = suite.SuiteVersion,
+            EvaluatorVersion = CurrentEvaluatorVersion,
             ScoringProfile = suite.ScoringProfile,
             ModelId = model.Id,
             ModelName = string.IsNullOrWhiteSpace(model.ProfileDisplayName) ? model.Name : model.ProfileDisplayName,
@@ -152,22 +168,48 @@ public sealed class BenchmarkService
             TimeoutSeconds = suite.TimeoutSeconds <= 0 ? 120 : suite.TimeoutSeconds,
             StartedAt = DateTime.UtcNow,
             Status = "Running",
-            HardwareSnapshot = await _system.CaptureAsync(ct)
+            CurrentPhase = "Preparing"
         };
-        run.Metadata = CreateMetadata(suite, model, run.HardwareSnapshot);
-        run.Metadata.ProfileFingerprint = EmpiricalProfileFingerprint.From(run.Metadata, model.Id);
-        run.Metadata.ProfileFingerprintV2 = await CreateProfileFingerprintV2Async(
-            run.Metadata, run.HardwareSnapshot, model, ct);
-        run.Metadata.ObservationSource = new SourceReference(
-            ProvenanceKind.Benchmark,
-            suite.Name,
-            Locator: run.Id,
-            Snippet: "Local benchmark observation",
-            Timestamp: run.StartedAt,
-            EvidenceOrigin: EvidenceOrigin.DirectObservation);
 
+        BenchmarkRuntimeAuthority? authority = null;
         try
         {
+            await EnsureInitializedAsync(ct);
+            var cases = suite.Cases.Where(c => !string.IsNullOrWhiteSpace(c.Prompt)).ToList();
+            if (suite.MaxCases > 0)
+                cases = cases.Take(suite.MaxCases).ToList();
+
+            // The run identity exists before model preparation and the first
+            // durable save happens before hardware, binary, or profile capture.
+            // A cancellation at any later preparation boundary therefore has a
+            // record that can honestly say it never reached a case.
+            await SaveRunAsync(run, ct);
+
+            if (preparation is not null)
+            {
+                SetPhase(run, "Preparing model", progress);
+                await preparation(ct);
+            }
+
+            SetPhase(run, "Capturing hardware", progress);
+            run.HardwareSnapshot = await _system.CaptureAsync(ct);
+            run.Metadata = CreateMetadata(suite, model, run.HardwareSnapshot);
+            run.Metadata.ProfileFingerprint = EmpiricalProfileFingerprint.From(run.Metadata, model.Id);
+            run.Metadata.ProfileFingerprintV2 = await CreateProfileFingerprintV2Async(
+                run.Metadata, run.HardwareSnapshot, model, ct);
+            run.Metadata.ObservationSource = new SourceReference(
+                ProvenanceKind.Benchmark,
+                suite.Name,
+                Locator: run.Id,
+                Snippet: "Local benchmark observation",
+                Timestamp: run.StartedAt,
+                EvidenceOrigin: EvidenceOrigin.DirectObservation);
+            authority = await CaptureBenchmarkAuthorityAsync(run, model, ct);
+            run.RuntimeEvidence = EvaluateBenchmarkAuthority(run, authority);
+            run.Metadata.EvidenceStatus = run.RuntimeEvidence.Status.ToString();
+            await SaveRunAsync(run, ct);
+
+            SetPhase(run, "Running cases", progress);
             for (var i = 0; i < cases.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -176,31 +218,65 @@ public sealed class BenchmarkService
                 {
                     ct.ThrowIfCancellationRequested();
                     var phase = iteration == 0 ? BenchmarkPhase.Cold : BenchmarkPhase.Warm;
+                    run.CurrentPhase = $"Case {i + 1}/{cases.Count}, {phase}";
                     progress?.Report($"{i + 1}/{cases.Count} {phase}: {test.Name} ({iteration + 1}/{run.IterationsPerCase})");
-                    run.Results.Add(await RunCaseAsync(suite, test, model, run.TimeoutSeconds, iteration, phase, ct));
+                    var result = await RunCaseAsync(suite, test, model, run.TimeoutSeconds, iteration, phase, ct);
+                    if (authority is not null)
+                    {
+                        await SampleBenchmarkAuthorityAsync(run, authority, ct);
+                        result.RuntimeEvidenceId = run.RuntimeEvidence?.EnvelopeId ?? string.Empty;
+                    }
+                    run.Results.Add(result);
                     await SaveRunAsync(run, ct);
                 }
             }
 
             run.Status = "Completed";
+            run.CurrentPhase = "Completed";
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             run.Status = "Cancelled";
+            run.CurrentPhase = "Cancelled";
             run.Error = "Benchmark cancelled.";
         }
         catch (Exception ex)
         {
             run.Status = "Failed";
+            run.CurrentPhase = "Failed";
             run.Error = ex.Message;
         }
         finally
         {
+            if (authority is not null)
+            {
+                run.RuntimeEvidence = EvaluateBenchmarkAuthority(run, authority);
+                run.Metadata.EvidenceStatus = run.RuntimeEvidence.Status.ToString();
+            }
             run.FinishedAt = DateTime.UtcNow;
-            await SaveRunAsync(run, CancellationToken.None);
+            try
+            {
+                await SaveRunAsync(run, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                run.EvidenceSaveError = ex.Message;
+                _logs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Error,
+                    RuntimeLogCategory.Service,
+                    $"Benchmark terminal evidence save failed: exception={ex.GetType().Name}.",
+                    run.OperationId));
+            }
         }
 
         return run;
+    }
+
+    private static void SetPhase(BenchmarkRun run, string phase, IProgress<string>? progress)
+    {
+        run.CurrentPhase = phase;
+        progress?.Report($"Benchmark {phase.ToLowerInvariant()}...");
     }
 
     public async Task<BenchmarkRun> RerunAsync(string runId, IProgress<string>? progress = null, CancellationToken ct = default)
@@ -211,7 +287,10 @@ public sealed class BenchmarkService
             Id = previous.SuiteId,
             Name = previous.SuiteName,
             SuiteVersion = previous.SuiteVersion,
+            EvaluatorVersion = CurrentEvaluatorVersion,
             ScoringProfile = previous.ScoringProfile,
+            // Reruns are new observations. The relationship is recorded on
+            // the new run below, while the historical run remains unchanged.
             Temperature = previous.Temperature,
             TimeoutSeconds = previous.TimeoutSeconds,
             IterationsPerCase = previous.IterationsPerCase,
@@ -240,7 +319,10 @@ public sealed class BenchmarkService
         var liveModels = await _llm.GetModelsAsync(ct);
         var model = liveModels.FirstOrDefault(m => string.Equals(m.Id, previous.ModelId, StringComparison.OrdinalIgnoreCase))
             ?? new LlmModel { Id = previous.ModelId, Name = previous.ModelName, Provider = previous.Provider };
-        return await RunAsync(suite, model, progress, ct);
+        var rerun = await RunAsync(suite, model, progress, ct);
+        rerun.RerunOfRunId = previous.Id;
+        await SaveRunAsync(rerun, CancellationToken.None);
+        return rerun;
     }
 
     public async Task<string> ExportAsync(string runId, string targetDirectory, CancellationToken ct = default)
@@ -301,7 +383,8 @@ public sealed class BenchmarkService
     }
 
     public IReadOnlyList<BenchmarkRun> Rank(IEnumerable<BenchmarkRun> runs) =>
-        runs.GroupBy(r => string.IsNullOrWhiteSpace(r.ModelId) ? r.ModelName : r.ModelId, StringComparer.Ordinal)
+        runs.Where(r => r.ComparisonEligible)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.ModelId) ? r.ModelName : r.ModelId, StringComparer.Ordinal)
             .Select(g => g.OrderByDescending(r => r.RankingScore)
                 .ThenByDescending(r => r.StartedAt)
                 .First())
@@ -315,7 +398,8 @@ public sealed class BenchmarkService
             && test.ExpectedKeywordAlternatives.All(group => group.Count > 0 && group.Any(k => ContainsExpected(output, k)));
         var regexHit = test.ExpectedRegexes.Count == 0
             || test.ExpectedRegexes.All(rx => IsRegexMatch(output, rx));
-        var refusalCorrect = !test.ShouldRefuse || LooksLikeRefusal(output);
+        var refusal = RefusalEvaluator.Evaluate(output, test.ShouldRefuse);
+        var refusalCorrect = refusal.IsCorrect;
         var checks = new[] { keywordHit, regexHit, refusalCorrect };
         var quality = checks.Count(x => x) / (double)checks.Length;
         return new BenchmarkResult
@@ -334,6 +418,8 @@ public sealed class BenchmarkService
             KeywordHit = keywordHit,
             RegexHit = regexHit,
             RefusalCorrect = refusalCorrect,
+            RefusalAssessment = refusal.Classification,
+            RefusalDetail = refusal.Detail,
             QualityScore = Math.Round(quality, 4),
             Passed = keywordHit && regexHit && refusalCorrect
         };
@@ -924,6 +1010,156 @@ public sealed class BenchmarkService
         result.ResourceScore = 1.0;
     }
 
+    private sealed class BenchmarkRuntimeAuthority
+    {
+        public ServerConfig? Configuration { get; init; }
+        public ServerProcessManager? Manager { get; init; }
+        public EmpiricalProfileFingerprintV2? Fingerprint { get; init; }
+        public RuntimeLaunchProcessEvidence? Process { get; init; }
+        public EffectiveLaunchObservation? EffectiveLaunch { get; set; }
+        public HashSet<string> TelemetryProcessInstanceIds { get; } = new(StringComparer.Ordinal);
+        public List<string> Reasons { get; } = [];
+    }
+
+    private async Task<BenchmarkRuntimeAuthority> CaptureBenchmarkAuthorityAsync(
+        BenchmarkRun run, LlmModel model, CancellationToken ct)
+    {
+        var authority = new BenchmarkRuntimeAuthority
+        {
+            Fingerprint = run.Metadata.ProfileFingerprintV2
+        };
+        var isLocalGguf = model.Id.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) && File.Exists(model.Id);
+        var server = isLocalGguf
+            ? _settings.Settings.ManagedServers.FirstOrDefault(candidate =>
+                !string.IsNullOrWhiteSpace(candidate.ModelPath)
+                && ModelPathSafety.AreSameLocalPath(candidate.ModelPath, model.Id))
+            : null;
+        if (server is null)
+        {
+            authority.Reasons.Add("managed-runtime-not-applicable");
+            return authority;
+        }
+
+        if (_runtimeRegistry is null)
+        {
+            authority.Reasons.Add("managed-runtime-registry-unavailable");
+            return authority;
+        }
+
+        var manager = _runtimeRegistry.GetOrCreate(server.Id);
+        authority = new BenchmarkRuntimeAuthority
+        {
+            Configuration = server,
+            Manager = manager,
+            Fingerprint = run.Metadata.ProfileFingerprintV2,
+            EffectiveLaunch = manager.LastEffectiveLaunch,
+            Process = manager.LastEffectiveLaunch?.Process
+        };
+        if (manager.Status != ServerStatus.Running)
+            authority.Reasons.Add("managed-runtime-not-running");
+        if (authority.Process is null)
+            authority.Reasons.Add("launch-process-receipt-missing");
+        if (authority.EffectiveLaunch is null)
+            authority.Reasons.Add("effective-runtime-receipt-missing");
+
+        await SampleBenchmarkAuthorityAsync(run, authority, ct);
+        return authority;
+    }
+
+    private async Task SampleBenchmarkAuthorityAsync(
+        BenchmarkRun run, BenchmarkRuntimeAuthority authority, CancellationToken ct)
+    {
+        if (authority.Manager is not null)
+        {
+            var current = authority.Manager.CurrentProcessIdentity;
+            if (authority.Process is null || current is null)
+                authority.Reasons.Add("runtime-process-unavailable");
+            else if (current.ProcessId != authority.Process.ProcessId
+                || current.StartedAtUtc.ToUniversalTime() != authority.Process.StartedAtUtc.ToUniversalTime())
+                authority.Reasons.Add("runtime-process-drift");
+
+            authority.EffectiveLaunch = authority.Manager.LastEffectiveLaunch;
+        }
+
+        if (_telemetry is null || authority.Process is null || authority.Fingerprint is null)
+        {
+            authority.Reasons.Add("telemetry-source-unavailable");
+            return;
+        }
+
+        try
+        {
+            var samples = await _telemetry.CaptureAsync(new RuntimeTelemetryRequest(
+                $"benchmark-{run.Id}", authority.Process.ProcessId, authority.Process.StartedAtUtc,
+                authority.Fingerprint.Runtime, authority.Fingerprint), ct);
+            foreach (var sample in samples)
+                if (!string.IsNullOrWhiteSpace(sample.ProcessInstanceId))
+                    authority.TelemetryProcessInstanceIds.Add(sample.ProcessInstanceId);
+            if (samples.Count == 0)
+                authority.Reasons.Add("telemetry-empty");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            authority.Reasons.Add("telemetry-capture-failed");
+        }
+    }
+
+    private static RuntimeEvidenceEnvelope EvaluateBenchmarkAuthority(
+        BenchmarkRun run, BenchmarkRuntimeAuthority authority)
+    {
+        var fingerprint = authority.Fingerprint;
+        var configuration = authority.Configuration;
+        var identity = configuration is null ? null : ConfigurationIdentityFactory.Create(configuration);
+        var required = configuration is null ? [] : RequiredBenchmarkEffectiveFields(configuration);
+        var envelope = RuntimeEvidenceEvaluator.Evaluate(
+            "benchmark", run.Id, "benchmark-run",
+            fingerprint?.Runtime,
+            fingerprint?.Model,
+            identity, identity,
+            authority.Process is null ? null : identity,
+            authority.Process,
+            authority.EffectiveLaunch,
+            required,
+            authority.TelemetryProcessInstanceIds,
+            RuntimeEvidenceStatus.Unverified,
+            RuntimeEvidenceEvaluator.ExpectedEffectiveValues(identity, required));
+        if (authority.Reasons.Count == 0)
+            return envelope;
+
+        var reasons = envelope.Reasons.Concat(authority.Reasons).Distinct(StringComparer.Ordinal).ToArray();
+        var status = reasons.Any(reason => reason.Contains("drift", StringComparison.Ordinal)
+            || reason.Contains("mismatch", StringComparison.Ordinal))
+            ? RuntimeEvidenceStatus.Mismatch
+            : RuntimeEvidenceStatus.Unverified;
+        return envelope with { Status = status, Reasons = reasons };
+    }
+
+    private static IReadOnlyList<string> RequiredBenchmarkEffectiveFields(ServerConfig config)
+    {
+        var fields = new List<string> { "context", "slots", "gpu_layers" };
+        if (config.TryGetGpuPlacement(out var placement, out _) && placement?.Kind == GpuPlacementKind.Auto)
+            fields.Add("fit");
+        if (config.Threads > 0) fields.Add("threads");
+        if (config.PromptThreads > 0) fields.Add("prompt_threads");
+        if (!string.IsNullOrWhiteSpace(config.KvCacheTypeK)) fields.Add("kv_cache_type_k");
+        if (!string.IsNullOrWhiteSpace(config.KvCacheTypeV)) fields.Add("kv_cache_type_v");
+        if (!string.IsNullOrWhiteSpace(config.FlashAttention)) fields.Add("flash_attention");
+        if (config.CpuMoeLayers != 0) fields.Add("cpu_moe_layers");
+        if (config.Speculative is { } speculative)
+        {
+            if (speculative.Types.Count > 0) fields.Add("speculative_mechanism");
+            if (speculative.NMax.HasValue) fields.Add("speculative_nmax");
+            if (speculative.NMin.HasValue) fields.Add("speculative_nmin");
+            if (speculative.PMin.HasValue) fields.Add("speculative_pmin");
+            if (speculative.DraftGpuLayers.HasValue) fields.Add("speculative_draft_gpu_layers");
+        }
+        return fields;
+    }
+
     /// <summary>
     /// r17 02-benchmark-truth.md 2.4: every run used to stamp Quantization="", RuntimeKind=
     /// "dotnet", GpuLayers=null, ModelPath="", Threads=Environment.ProcessorCount (the app's own
@@ -1139,28 +1375,6 @@ public sealed class BenchmarkService
         return ex.GetType().Name;
     }
 
-    private static bool LooksLikeRefusal(string answer)
-    {
-        if (string.IsNullOrWhiteSpace(answer)) return false;
-        var refusal = answer.Contains("not enough", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("insufficient", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("cannot determine", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("cannot answer", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("no context", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("cannot provide", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("did not provide", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("do not have access", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("don't have access", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("no record", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("unable to verify", StringComparison.OrdinalIgnoreCase)
-            || answer.Contains("can't verify", StringComparison.OrdinalIgnoreCase);
-        if (!refusal) return false;
-
-        return !Regex.IsMatch(answer,
-            @"\b(?:but|however|actually|the answer is|it is|it's)\s+(?:\$?\d|[A-Z][\w-]{2,})",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    }
-
     private static bool ContainsExpected(string output, string expected)
     {
         if (string.IsNullOrEmpty(expected)) return true;
@@ -1192,6 +1406,9 @@ public sealed class BenchmarkService
         md.AppendLine($"- Model: `{run.ModelName}`");
         md.AppendLine($"- Provider: `{run.Provider}`");
         md.AppendLine($"- Suite version: `{run.SuiteVersion}`");
+        md.AppendLine($"- Evaluator version: `{run.EvaluatorVersion}`");
+        if (!string.IsNullOrWhiteSpace(run.RerunOfRunId))
+            md.AppendLine($"- Rerun of: `{run.RerunOfRunId}`");
         md.AppendLine($"- Scoring profile: `{run.ScoringProfile}`");
         md.AppendLine($"- Run mode: `{run.RunMode}`");
         md.AppendLine($"- Iterations per case: {run.IterationsPerCase}");
@@ -1206,6 +1423,11 @@ public sealed class BenchmarkService
         md.AppendLine($"- P95 total: {run.P95TotalMs:F0} ms");
         md.AppendLine($"- Stability: {run.StabilityScore:P0}");
         md.AppendLine($"- Resource score: {run.ResourceScore:P0}");
+        var evidenceStatus = string.IsNullOrWhiteSpace(run.Metadata.EvidenceStatus)
+            ? run.RuntimeEvidence?.Status.ToString() ?? "not recorded"
+            : run.Metadata.EvidenceStatus;
+        md.AppendLine($"- Evidence status: `{evidenceStatus}`");
+        md.AppendLine($"- Comparison eligible: `{run.ComparisonEligible}`");
         md.AppendLine();
         md.AppendLine("## Metadata");
         md.AppendLine();
@@ -1226,6 +1448,8 @@ public sealed class BenchmarkService
         md.AppendLine($"- CPU: {run.Metadata.CPU}");
         md.AppendLine($"- RAM: {run.Metadata.RAM}");
         md.AppendLine($"- GPU: {run.Metadata.GPU}");
+        md.AppendLine($"- Runtime evidence envelope: `{run.RuntimeEvidence?.EnvelopeId ?? "not recorded"}`");
+        md.AppendLine($"- Evidence reasons: `{string.Join("; ", run.RuntimeEvidence?.Reasons ?? Array.Empty<string>())}`");
         md.AppendLine();
         foreach (var result in run.Results)
         {
@@ -1235,6 +1459,8 @@ public sealed class BenchmarkService
             md.AppendLine($"- Total: {result.TotalMs} ms");
             md.AppendLine($"- Approx tokens/sec: {result.ApproxTokensPerSecond:F2}");
             md.AppendLine($"- Quality: {result.QualityScore:P0}");
+            md.AppendLine($"- Refusal assessment: `{result.RefusalAssessment}`");
+            md.AppendLine($"- Refusal detail: {result.RefusalDetail}");
             md.AppendLine($"- Failure category: {result.FailureCategory}");
             if (!string.IsNullOrWhiteSpace(result.Error))
                 md.AppendLine($"- Error: {result.Error}");
@@ -1250,9 +1476,12 @@ public sealed class BenchmarkService
     private static string ToCsv(BenchmarkRun run)
     {
         var csv = new StringBuilder();
-        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error,kv_cache_type_k,kv_cache_type_v,flash_attention,profile_fingerprint,observation_origin");
+        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,refusal_assessment,refusal_detail,failure_category,error,evaluator_version,rerun_of_run_id,kv_cache_type_k,kv_cache_type_v,flash_attention,profile_fingerprint,observation_origin,runtime_evidence_id,evidence_status,comparison_eligible");
+        var evidenceStatus = string.IsNullOrWhiteSpace(run.Metadata.EvidenceStatus)
+            ? run.RuntimeEvidence?.Status.ToString() ?? string.Empty
+            : run.Metadata.EvidenceStatus;
         foreach (var result in run.Results)
-            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)},{Csv(run.Metadata.ProfileFingerprint?.StableId ?? string.Empty)},{Csv(run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? string.Empty)}");
+            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.RefusalAssessment)},{Csv(result.RefusalDetail)},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.EvaluatorVersion)},{Csv(run.RerunOfRunId)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)},{Csv(run.Metadata.ProfileFingerprint?.StableId ?? string.Empty)},{Csv(run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? string.Empty)},{Csv(run.RuntimeEvidence?.EnvelopeId ?? string.Empty)},{Csv(evidenceStatus)},{run.ComparisonEligible}");
         return csv.ToString();
     }
 

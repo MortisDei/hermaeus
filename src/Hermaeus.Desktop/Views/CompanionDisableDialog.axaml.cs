@@ -9,6 +9,7 @@ public partial class CompanionDisableDialog : Window
     public CompanionDisableDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
     }
 
     public CompanionDisableDialog(ModelDeletionPlan plan) : this()

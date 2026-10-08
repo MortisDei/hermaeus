@@ -75,6 +75,15 @@ public partial class App : Application
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
+            Program.SetActivationHandler(() => Avalonia.Threading.Dispatcher.UIThread.Post(
+                () => _desktopIntegration.ShowAndActivate()));
+            window.RequestApplicationExit = () => desktop.Shutdown();
+            var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
+            window.ApplicationLifecycle = lifecycle;
+            lifecycle.RegisterShutdownOwner("desktop view models", ct => vm.ShutdownAsync(ct));
+            lifecycle.RegisterShutdownOwner(
+                "voice orchestrator",
+                ct => sp.GetRequiredService<IVoiceOrchestrator>().ShutdownAsync(ct));
             window.Opened += async (_, _) =>
             {
                 if (Interlocked.Exchange(ref _initialized, 1) != 0) return;
@@ -84,9 +93,10 @@ public partial class App : Application
             {
                 try
                 {
-                    sp.GetRequiredService<AppLifecycleJournalService>().RecordCleanExit();
                     _desktopIntegration?.Dispose();
-                    vm.ShutdownAsync().GetAwaiter().GetResult();
+                    var shutdown = lifecycle.ShutdownAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+                    if (!shutdown.Clean)
+                        Console.Error.WriteLine("Hermaeus shutdown did not complete cleanly; lifecycle evidence was retained as incomplete.");
                 }
                 catch (Exception ex)
                 {
@@ -129,48 +139,23 @@ public partial class App : Application
             var ui = settingsService.Settings.Ui;
             AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
             AppThemeService.Apply(ui.Theme);
-            sp.GetRequiredService<AppLifecycleJournalService>().RecordStartup();
             // Constructed purely for its side effect: subscribes to toasts and
             // forwards Warning/Error ones onto the Notification voice channel.
             sp.GetRequiredService<VoiceNotificationBridge>();
             phases.Add(new StartupPhase("settings", phaseTimer.ElapsedMilliseconds));
 
             phaseTimer.Restart();
-            await Task.WhenAll(
-                sp.GetRequiredService<IConversationStore>().InitializeAsync(),
-                sp.GetRequiredService<IMemoryStore>().InitializeAsync(),
-                sp.GetRequiredService<SqliteRagStore>().InitializeAsync(),
-                sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
-                sp.GetRequiredService<BenchmarkService>().InitializeAsync(),
-                sp.GetRequiredService<IEvalStore>().InitializeAsync(),
-                sp.GetRequiredService<IRecommendationStore>().InitializeAsync());
-            phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
-
-            phaseTimer.Restart();
-            try
-            {
-                await sp.GetRequiredService<RecommendationApplicationService>().ReconcileAsync();
-            }
-            catch (Exception ex)
-            {
+            var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
+            var startup = await lifecycle.StartAsync();
+            foreach (var failed in startup.Phases.Where(phase => !phase.Succeeded))
                 logs.Add(new RuntimeLogEntry(
                     DateTime.UtcNow,
                     RuntimeLogLevel.Warning,
-                    RuntimeLogCategory.Service,
-                    $"Recommendation startup reconciliation failed: {ex.Message}"));
-            }
-            phases.Add(new StartupPhase("recommendation reconciliation", phaseTimer.ElapsedMilliseconds));
-
-            phaseTimer.Restart();
-            foreach (var result in await sp.GetRequiredService<ILabRuntimeHost>().RecoverOwnedProcessesAsync())
-            {
-                logs.Add(new RuntimeLogEntry(
-                    DateTime.UtcNow,
-                    result.Contains("Unknown", StringComparison.Ordinal) ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info,
-                    RuntimeLogCategory.Service,
-                    result));
-            }
-            phases.Add(new StartupPhase("lab-recovery", phaseTimer.ElapsedMilliseconds));
+                    RuntimeLogCategory.Startup,
+                    $"Application startup phase failed: {failed.Name}: {failed.Error}"));
+            if (!startup.Ready)
+                throw new InvalidOperationException("Shared application startup was incomplete.");
+            phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
 
             // Probe active voice provider health at startup to detect externally-running services
             phaseTimer.Restart();
@@ -244,6 +229,45 @@ public partial class App : Application
         if (!settings.SetupWizardCompleted)
             return;
 
+        var lifecycle = services.GetRequiredService<IApplicationLifecycleCoordinator>();
+        var registrationGate = new object();
+        var warmupCts = new CancellationTokenSource();
+        var shutdownStarted = 0;
+        Task? warmupTask = null;
+        EventHandler? availabilityChanged = null;
+
+        lifecycle.RegisterShutdownOwner(
+            "embedding warm-up and backfill",
+            async ct =>
+            {
+                Interlocked.Exchange(ref shutdownStarted, 1);
+                if (availabilityChanged is not null)
+                    vm.Services.ServerAvailabilityChanged -= availabilityChanged;
+
+                warmupCts.Cancel();
+                Task? task;
+                lock (registrationGate)
+                    task = warmupTask;
+                if (task is not null)
+                    await task.WaitAsync(ct);
+                warmupCts.Dispose();
+            });
+
+        void StartWarmup()
+        {
+            if (Volatile.Read(ref shutdownStarted) != 0)
+                return;
+
+            lock (registrationGate)
+            {
+                if (Volatile.Read(ref shutdownStarted) != 0 || warmupTask is not null)
+                    return;
+
+                warmupTask = Task.Run(
+                    () => WarmEmbeddingsAndBackfillAsync(services, logs, warmupCts.Token));
+            }
+        }
+
         var endpoint = Uri.TryCreate(settings.Rag.EmbeddingBaseUrl, UriKind.Absolute, out var parsed)
             ? parsed
             : null;
@@ -253,12 +277,11 @@ public partial class App : Application
 
         if (managed is null)
         {
-            _ = Task.Run(() => WarmEmbeddingsAndBackfillAsync(services, logs));
+            StartWarmup();
             return;
         }
 
         var scheduled = 0;
-        EventHandler? availabilityChanged = null;
         availabilityChanged = (_, _) => TrySchedule();
         void TrySchedule()
         {
@@ -266,14 +289,17 @@ public partial class App : Application
                 return;
 
             vm.Services.ServerAvailabilityChanged -= availabilityChanged;
-            _ = Task.Run(() => WarmEmbeddingsAndBackfillAsync(services, logs));
+            StartWarmup();
         }
 
         vm.Services.ServerAvailabilityChanged += availabilityChanged;
         TrySchedule();
     }
 
-    private static async Task WarmEmbeddingsAndBackfillAsync(IServiceProvider services, IRuntimeLogService logs)
+    private static async Task WarmEmbeddingsAndBackfillAsync(
+        IServiceProvider services,
+        IRuntimeLogService logs,
+        CancellationToken ct)
     {
         var warmupTimer = Stopwatch.StartNew();
         try
@@ -281,13 +307,17 @@ public partial class App : Application
             var embeddings = services.GetService<IEmbeddingService>();
             if (embeddings is not null)
             {
-                await embeddings.EmbedAsync("warmup", CancellationToken.None);
+                await embeddings.EmbedAsync("warmup", ct);
                 logs.Add(new RuntimeLogEntry(
                     DateTime.UtcNow,
                     RuntimeLogLevel.Info,
                     RuntimeLogCategory.Startup,
                     $"Embedding warm-up completed in {warmupTimer.ElapsedMilliseconds} ms"));
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
         }
         catch (Exception ex)
         {
@@ -302,7 +332,11 @@ public partial class App : Application
         {
             var memoryStore = services.GetService<IMemoryStore>();
             if (memoryStore is not null)
-                await memoryStore.RunEmbeddingBackfillAsync();
+                await memoryStore.RunEmbeddingBackfillAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
         }
         catch (Exception ex)
         {
@@ -327,6 +361,7 @@ public partial class App : Application
         s.AddSingleton<TtsSettingsViewModel>();
         s.AddSingleton<SttSettingsViewModel>();
         s.AddSingleton<SettingsViewModel>();
+        s.AddSingleton<DesktopPetViewModel>();
         s.AddSingleton<ModelInventoryService>();
         s.AddSingleton<ModelManagementViewModel>();
         s.AddSingleton<RagViewModel>();

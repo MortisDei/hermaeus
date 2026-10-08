@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Services.ProcessManagement;
 
 namespace Hermaeus.Services;
 
@@ -61,15 +62,74 @@ public static class LabRecipeCatalog
         }
     }
 
+    /// <summary>
+    /// A syntactically valid recipe is not runnable merely because its
+    /// dimension is known. Lab must first prove the selected source model,
+    /// GGUF header, and exact executable identity. This keeps the catalogue
+    /// useful in isolation while making the production inspection truthful.
+    /// </summary>
+    public static LabRecipePlan ReconcileBaselineAvailability(
+        LabRecipePlan plan,
+        ServerConfig source,
+        GgufModelInfo? gguf)
+    {
+        if (plan.Availability != CapabilityState.Available)
+            return plan;
+
+        if (string.IsNullOrWhiteSpace(source.ModelPath) || !File.Exists(source.ModelPath))
+            return plan with
+            {
+                Availability = CapabilityState.Unknown,
+                AvailabilityDetail = "The selected Chat model is missing, so Lab cannot establish a baseline for this recipe."
+            };
+
+        var executable = ExecutableResolver.Resolve(source.ExecutablePath, "llama-server");
+        if (!executable.Success)
+            return plan with
+            {
+                Availability = CapabilityState.Unknown,
+                AvailabilityDetail = "The selected llama-server executable is not resolvable, so Lab cannot establish an exact runtime baseline."
+            };
+
+        if (gguf is null)
+            return plan with
+            {
+                Availability = CapabilityState.Unknown,
+                AvailabilityDetail = "The selected model's GGUF header could not be read, so Lab cannot establish model identity or fit evidence."
+            };
+
+        return plan;
+    }
+
     private static LabRecipePlan EngineProfile(LabConfiguration baseline, GgufModelInfo? gguf)
     {
         var layers = new List<int> { 0, -1 };
         if (gguf?.BlockCount is > 2) layers.Insert(1, gguf.BlockCount.Value / 2);
-        var candidates = layers.Distinct().Where(value => value != baseline.GpuLayers)
-            .Select((value, index) => baseline with { Id = $"gpu-{index + 1}", Label = value switch { 0 => "CPU", -1 => "All GPU layers", _ => $"{value} GPU layers" }, GpuLayers = value })
+        var baselinePlacement = ResolvePlacement(baseline);
+        var candidates = layers.Distinct()
+            .Where(value => !SamePlacement(value, baselinePlacement))
+            .Select((value, index) => baseline with
+            {
+                Id = $"gpu-{index + 1}",
+                Label = value switch { 0 => "CPU", -1 => "All GPU layers", _ => $"{value} GPU layers" },
+                GpuLayers = value,
+                GpuPlacement = GpuPlacementIntent.TryFromLegacy(value, out var placement, out _)
+                    ? placement : null
+            })
             .Take(3).ToArray();
         return Plan("engine-profile-v1", "GPU layer placement", LabRecipeKind.EngineProfile,
             CapabilityState.Available, "GPU layer placement is a first-class managed runtime setting.", baseline, candidates, []);
+
+        static GpuPlacementIntent? ResolvePlacement(LabConfiguration configuration) =>
+            configuration.GpuPlacement
+            ?? (GpuPlacementIntent.TryFromLegacy(configuration.GpuLayers, out var placement, out _)
+                ? placement : null);
+
+        static bool SamePlacement(int legacyValue, GpuPlacementIntent? baselinePlacement) =>
+            GpuPlacementIntent.TryFromLegacy(legacyValue, out var candidatePlacement, out _)
+            && candidatePlacement is not null
+            && baselinePlacement is not null
+            && candidatePlacement.CanonicalValue == baselinePlacement.CanonicalValue;
     }
 
     private static LabRecipePlan Context(LabConfiguration baseline)
@@ -300,6 +360,49 @@ public static class LabRecipeCatalog
         _ => new HashSet<string>(StringComparer.Ordinal)
     };
 
+    /// <summary>
+    /// Every shipped recipe must prove the common launch identity and the
+    /// field it varies. A rendered flag or configuration fingerprint is not
+    /// effective evidence for any of these fields.
+    /// </summary>
+    public static IReadOnlyList<string> RequiredEffectiveFields(LabRecipeKind kind)
+    {
+        var fields = new List<string> { "context", "slots", "gpu_layers" };
+        switch (kind)
+        {
+            case LabRecipeKind.KvCache:
+                fields.AddRange(["kv_cache_type_k", "kv_cache_type_v"]);
+                break;
+            case LabRecipeKind.FlashAttention:
+                fields.Add("flash_attention");
+                break;
+            case LabRecipeKind.CpuMoePlacement:
+                fields.Add("cpu_moe_layers");
+                break;
+            case LabRecipeKind.ExternalDraft:
+            case LabRecipeKind.Eagle3:
+                fields.Add("speculative_mechanism");
+                break;
+            case LabRecipeKind.SpeculativeDraftMaximum:
+                fields.AddRange(["speculative_mechanism", "speculative_nmax"]);
+                break;
+            case LabRecipeKind.SpeculativeDraftMinimum:
+                fields.AddRange(["speculative_mechanism", "speculative_nmin"]);
+                break;
+            case LabRecipeKind.SpeculativeProbabilityMinimum:
+                fields.AddRange(["speculative_mechanism", "speculative_pmin"]);
+                break;
+            case LabRecipeKind.SpeculativeDraftGpuLayers:
+                fields.AddRange(["speculative_mechanism", "speculative_draft_gpu_layers"]);
+                break;
+            case LabRecipeKind.PromptPrefixReuse:
+                fields.Add("prompt_cache");
+                break;
+        }
+
+        return fields;
+    }
+
     private static IReadOnlyList<string> Differences(LabConfiguration left, LabConfiguration right)
     {
         var differences = new List<string>();
@@ -512,13 +615,21 @@ public sealed class LabRecipeRunner
     }
 
     public async Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source,
-        LocalModelCapabilities capabilities, string prompt, CancellationToken ct = default)
+        LocalModelCapabilities capabilities, string prompt, CancellationToken ct = default,
+        IProgress<LabRunProgress>? progress = null)
     {
         if (plan.Availability != CapabilityState.Available)
             throw new InvalidOperationException($"Recipe {plan.Label} is {plan.Availability}: {plan.AvailabilityDetail}");
         LabRecipeCatalog.Validate(plan);
+        var candidateTotal = plan.Candidates.Count + 1;
+        var total = Math.Max(1, candidateTotal * 3);
+        Report(progress, plan.Label, "Preparing", 0, candidateTotal, "Preparing", 0, total);
         var definition = await _experiments.CreateDefinitionAsync(plan.Label, plan.Id, source,
             plan.Baseline, plan.Candidates, 3, plan.CorrectnessRequirement, ct);
+        definition = definition with
+        {
+            RequiredEffectiveFields = LabRecipeCatalog.RequiredEffectiveFields(plan.Kind)
+        };
         definition = definition with
         {
             WorkloadId = "greedy-chat-completion-v1",
@@ -533,6 +644,7 @@ public sealed class LabRecipeRunner
             RequiredMetrics = plan.RequiredMetrics,
             RequestedCapabilityIds = plan.RequiredCapabilityIds
         };
+        Report(progress, definition.Name, "Preparing", 0, candidateTotal, "Predicting resource fit", 0, total);
         var plannedPredictions = new Dictionary<string, ModelFitPrediction>(StringComparer.Ordinal);
         foreach (var configuration in plan.Candidates.Prepend(plan.Baseline))
         {
@@ -543,18 +655,33 @@ public sealed class LabRecipeRunner
             plannedPredictions[configuration.Id] = await PredictModelAsync(source, configuration, fingerprint, capabilities, ct);
         }
         var run = await _experiments.StartAsync(definition, source, ct);
-        if (run.Status != LabRunStatus.Running) return run;
+        if (run.Status != LabRunStatus.Running)
+        {
+            ReportTerminal(progress, definition.Name, "Preparing", 0, candidateTotal, run.Status,
+                "The isolated runtime did not reach the running state.", 0, total);
+            return run;
+        }
+        Report(progress, definition.Name, "Baseline", 1, candidateTotal, "Starting isolated runtime", 0, total);
 
         var observations = new List<LabObservation>();
         var outputs = new List<LabOutputEvidence>();
         var failures = new List<string>();
+        var completed = 0;
+        var currentCandidateIndex = 0;
+        var currentCandidateLabel = "Preparing";
         try
         {
             var consecutiveFailures = 0;
             var reusedCounterField = PromptReuseEvidenceAdapter.ProvenCounterField(capabilities.Observations ?? []);
             var configurations = plan.Candidates.Prepend(plan.Baseline).ToArray();
-            foreach (var configuration in configurations)
+            for (var configurationIndex = 0; configurationIndex < configurations.Length; configurationIndex++)
             {
+                var configuration = configurations[configurationIndex];
+                var candidateIndex = configurationIndex + 1;
+                currentCandidateIndex = candidateIndex;
+                currentCandidateLabel = configuration.Label;
+                Report(progress, definition.Name, configuration.Label, candidateIndex, candidateTotal,
+                    "Starting candidate", completed, total);
                 if (configuration.Id != plan.Baseline.Id)
                 {
                     try { run = await _experiments.SwitchConfigurationAsync(run.Id, source, configuration.Id, ct); }
@@ -581,6 +708,8 @@ public sealed class LabRecipeRunner
                     observations.Add(MissingQualityObservation(run.Id, configuration.Id, fingerprint));
                 for (var repetition = 0; repetition < definition.Repetitions; repetition++)
                 {
+                    Report(progress, definition.Name, configuration.Label, candidateIndex, candidateTotal,
+                        $"Running repetition {repetition + 1} of {definition.Repetitions}", completed, total);
                     var workloadPrompt = plan.Kind == LabRecipeKind.PromptPrefixReuse
                         ? SharedPrefixPromptFixture.Build(prompt, repetition) : prompt;
                     var caseId = plan.Kind == LabRecipeKind.PromptPrefixReuse
@@ -593,6 +722,9 @@ public sealed class LabRecipeRunner
                     observations.AddRange(result.Observations);
                     if (result.Output is not null) outputs.Add(result.Output);
                     observations.AddRange(await CaptureTelemetryAsync(run, configuration, fingerprint, ct));
+                    completed++;
+                    Report(progress, definition.Name, configuration.Label, candidateIndex, candidateTotal,
+                        "Repetition complete", completed, total);
                     if (result.Failure is not null)
                     {
                         failures.Add($"{configuration.Id} repetition {repetition}: {result.Failure}");
@@ -610,23 +742,89 @@ public sealed class LabRecipeRunner
                     if (comparison.State == LabEquivalenceState.Different) break;
                 }
             }
-            return await _experiments.CompleteAsync(run.Id, observations, outputs, failures, ct);
+            Report(progress, definition.Name, "Finalizing", candidateTotal, candidateTotal,
+                "Persisting bounded evidence", completed, total);
+            var completedRun = await _experiments.CompleteAsync(run.Id, observations, outputs, failures, ct);
+            ReportTerminal(progress, definition.Name, "Finalizing", candidateTotal, candidateTotal,
+                completedRun.Status, "Lab evidence persisted.", total, total);
+            return completedRun;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return await _experiments.CancelAsync(run.Id, CancellationToken.None);
+            var cancelled = await _experiments.CancelAsync(run.Id, CancellationToken.None);
+            ReportTerminal(progress, definition.Name, currentCandidateLabel, currentCandidateIndex, candidateTotal,
+                cancelled.Status, "The Lab recipe was cancelled; captured evidence was retained.", completed, total);
+            return cancelled;
         }
         catch (Exception ex)
         {
             failures.Add($"run failed: {ex.Message}");
+            var current = _experiments.GetRun(run.Id) ?? run;
+            if (current.Status != LabRunStatus.Running)
+                throw;
             try
             {
-                return await _experiments.CompleteAsync(run.Id, observations, outputs, failures, CancellationToken.None);
+                var failedRun = await _experiments.CompleteAsync(run.Id, observations, outputs, failures, CancellationToken.None);
+                ReportTerminal(progress, definition.Name, currentCandidateLabel, currentCandidateIndex, candidateTotal,
+                    failedRun.Status, "The Lab recipe failed; captured evidence was retained.", completed, total);
+                return failedRun;
             }
             catch (Exception cleanupException)
             {
-                throw new AggregateException("The Lab run failed and cleanup also failed.", ex, cleanupException);
+                ReportTerminal(progress, definition.Name, currentCandidateLabel, currentCandidateIndex, candidateTotal,
+                    LabRunStatus.Failed, $"Lab evidence finalization failed: {cleanupException.Message}", completed, total);
+                throw new AggregateException("The Lab run failed and finalization also failed.", ex, cleanupException);
             }
+        }
+    }
+
+    private static void Report(
+        IProgress<LabRunProgress>? progress,
+        string experimentName,
+        string candidateLabel,
+        int candidateIndex,
+        int candidateTotal,
+        string stage,
+        int completed,
+        int total,
+        string detail = "")
+    {
+        if (progress is null)
+            return;
+        try
+        {
+            progress.Report(new LabRunProgress(experimentName, candidateLabel,
+                candidateIndex, candidateTotal, stage, completed,
+                total, Math.Max(0, total - completed), Detail: detail));
+        }
+        catch (Exception)
+        {
+            // Progress is presentation-only and must never change Lab evidence.
+        }
+    }
+
+    private static void ReportTerminal(
+        IProgress<LabRunProgress>? progress,
+        string experimentName,
+        string candidateLabel,
+        int candidateIndex,
+        int candidateTotal,
+        LabRunStatus status,
+        string detail,
+        int completed,
+        int total)
+    {
+        if (progress is null)
+            return;
+        try
+        {
+            progress.Report(new LabRunProgress(experimentName, candidateLabel,
+                candidateIndex, candidateTotal, status.ToString(), completed,
+                total, Math.Max(0, total - completed), status, detail));
+        }
+        catch (Exception)
+        {
+            // Progress is presentation-only and must never change Lab evidence.
         }
     }
 
@@ -717,7 +915,8 @@ public sealed class LabRecipeRunner
         Trust = sample?.Trust.ToString() ?? "Unknown",
         MissingReason = sample?.ValueBytes.HasValue == true ? string.Empty : sample?.Detail ?? "No trustworthy process-scoped measurement is available.",
         RuntimeFingerprint = fingerprint.Runtime.StableId, ModelFingerprint = fingerprint.Model.StableId,
-        HardwareFingerprint = fingerprint.Hardware.StableId, ConfigurationFingerprint = fingerprint.Configuration.StableId
+        HardwareFingerprint = fingerprint.Hardware.StableId, ConfigurationFingerprint = fingerprint.Configuration.StableId,
+        RuntimeProcessInstanceId = sample?.ProcessInstanceId ?? string.Empty
     };
 
     private static LabObservation MissingObservation(string runId, string configurationId,
@@ -764,6 +963,10 @@ public sealed class LabRecipeService : ILabRecipeService
 
     public async Task<IReadOnlyList<LabRecipePlan>> InspectAsync(ServerConfig source, CancellationToken ct = default)
     {
+        var sourceReadiness = ReadSourceReadiness(source);
+        if (sourceReadiness is not null)
+            return BuildUnavailablePlans(source, sourceReadiness);
+
         var capabilities = await _capabilities.ProbeAsync(source.ModelPath, source.ExecutablePath, ct: ct);
         var observations = capabilities.Observations ?? [];
         var gguf = GgufMetadataReader.TryRead(source.ModelPath);
@@ -774,11 +977,59 @@ public sealed class LabRecipeService : ILabRecipeService
         return Enum.GetValues<LabRecipeKind>()
             .Select(kind => LabRecipeCatalog.Build(kind, source, observations, gguf, draftGguf,
                 targetIdentity, draftIdentity))
+            .Select(plan => LabRecipeCatalog.ReconcileBaselineAvailability(plan, source, gguf))
             .ToArray();
     }
 
+    private static IReadOnlyList<LabRecipePlan> BuildUnavailablePlans(ServerConfig source, string detail) =>
+        Enum.GetValues<LabRecipeKind>()
+            .Select(kind => BuildUnavailablePlan(kind, source, detail))
+            .ToArray();
+
+    private static LabRecipePlan BuildUnavailablePlan(LabRecipeKind kind, ServerConfig source, string detail)
+    {
+        var baseline = LabConfigurationMapper.FromServer(source, "baseline", "Baseline");
+        var placeholder = baseline with { Id = "unavailable-placeholder", Label = "Unavailable placeholder" };
+        return new LabRecipePlan(
+            $"{kind.ToString().ToLowerInvariant()}-unavailable",
+            kind.ToString(),
+            kind,
+            CapabilityState.Unavailable,
+            detail,
+            baseline,
+            [placeholder],
+            2,
+            false,
+            [],
+            ["prompt.tokens_per_second", "decode.tokens_per_second", "ttft.milliseconds"],
+            LabCorrectnessRequirement.ExactEquivalence);
+    }
+
+    /// <summary>
+    /// Lab inspection is a production path, not a catalogue-only operation.
+    /// Do this readiness check before capability, GGUF, or runtime identity
+    /// services see a configured path so an empty or missing Services value is
+    /// rendered as an actionable unavailable recipe instead of reaching
+    /// <see cref="FileInfo"/> or process probing with an empty path.
+    /// </summary>
+    private static string? ReadSourceReadiness(ServerConfig source)
+    {
+        if (string.IsNullOrWhiteSpace(source.ModelPath))
+            return "Select an existing Chat .gguf model in Services before inspecting Lab recipes.";
+
+        if (!File.Exists(source.ModelPath.Trim()))
+            return "The selected Chat model is missing. Choose an existing .gguf model in Services before inspecting Lab recipes.";
+
+        if (string.IsNullOrWhiteSpace(source.ExecutablePath))
+            return "Select a llama-server executable in Services before inspecting Lab recipes.";
+
+        return ExecutableResolver.Resolve(source.ExecutablePath, "llama-server").Success
+            ? null
+            : "The selected llama-server executable is not resolvable. Configure or install llama.cpp in Services before inspecting Lab recipes.";
+    }
+
     public async Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source,
-        string prompt, CancellationToken ct = default)
+        string prompt, CancellationToken ct = default, IProgress<LabRunProgress>? progress = null)
     {
         if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 4096)
             throw new InvalidOperationException("A Lab recipe prompt must contain 1 to 4,096 characters.");
@@ -790,7 +1041,7 @@ public sealed class LabRecipeService : ILabRecipeService
             != LabCanonicalJson.Hash(LabCanonicalJson.Serialize(plan)))
             throw new InvalidOperationException("The recipe capability, asset identity, or baseline changed after inspection. Inspect it again.");
         var capabilities = await _capabilities.ProbeAsync(source.ModelPath, source.ExecutablePath, ct: ct);
-        return await _runner.RunAsync(currentPlan, source, capabilities, prompt, ct);
+        return await _runner.RunAsync(currentPlan, source, capabilities, prompt, ct, progress);
     }
 
     private async Task<ModelIdentityV2?> ProvenIdentityAsync(string path, GgufModelInfo? gguf, CancellationToken ct)

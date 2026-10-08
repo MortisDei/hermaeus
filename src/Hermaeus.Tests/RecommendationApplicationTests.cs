@@ -1,4 +1,5 @@
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Xunit;
 
@@ -57,6 +58,26 @@ public sealed class RecommendationApplicationTests
         Assert.Equal("stale-refused", result.ResultCode);
         Assert.Equal(4096, target.ContextSize);
         Assert.Equal(RecommendationStatus.Superseded, (await store.GetAsync(recommendation.Id))!.Status);
+    }
+
+    [Fact]
+    public async Task Apply_refuses_when_the_saved_projection_does_not_match()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var target = settings.Settings.ManagedServers[0];
+        target.Id = "chat-server";
+        var proposed = settings.Settings.Clone().ManagedServers[0];
+        proposed.Id = target.Id;
+        proposed.ContextSize = 8192;
+        var store = new SqliteRecommendationStore(settings, new RedactionService());
+        var recommendation = await CreateRecommendationAsync(settings, target, proposed, store);
+        var application = new RecommendationApplicationService(store, new NonProjectingSettingsService(settings));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => application.ApplyAsync(recommendation.Id));
+
+        Assert.Equal(4096, settings.Settings.ManagedServers[0].ContextSize);
+        Assert.Contains(await store.QueryDecisionsAsync(recommendation.Id), decision => decision.ResultCode == "failed");
     }
 
     [Fact]
@@ -126,5 +147,27 @@ public sealed class RecommendationApplicationTests
         var settings = new SettingsService(temp.PathFor("settings.json"));
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
         return settings;
+    }
+
+    private sealed class NonProjectingSettingsService(SettingsService inner) : ISettingsService
+    {
+        public AppSettings Settings => inner.Settings;
+        public event EventHandler? SettingsChanged
+        {
+            add => inner.SettingsChanged += value;
+            remove => inner.SettingsChanged -= value;
+        }
+
+        public Task LoadAsync() => inner.LoadAsync();
+
+        public Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null) =>
+            inner.SaveAsync(previousDataRootDirectory);
+
+        public Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null) =>
+            Task.FromResult(new SettingsSaveResult(
+                false, previousDataRootDirectory, inner.Settings.DataManagement.DataRootDirectory, null, 0));
+
+        public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory) =>
+            inner.PreviewDataRootMigration(previousDataRootDirectory, nextDataRootDirectory);
     }
 }

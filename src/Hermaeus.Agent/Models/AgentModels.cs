@@ -65,6 +65,13 @@ public enum AgentActionKind
     Final
 }
 
+public enum AgentOwnerInteractionKind
+{
+    Question,
+    Approval,
+    Instruction
+}
+
 public enum AgentToolDisposition
 {
     Allowed,
@@ -79,7 +86,36 @@ public enum AgentDraftPatchStatus
     Approved,
     Rejected,
     Blocked,
-    Reverted
+    Reverted,
+    AlreadySatisfied
+}
+
+/// <summary>Deterministic operation class for a prepared Agent mutation.</summary>
+public enum AgentMutationKind
+{
+    Create,
+    Edit,
+    Replace,
+    ApplyDraftPatch,
+    Command,
+    SubTaskPlan
+}
+
+/// <summary>
+/// Authoritative outcome of a prepared mutation attempt. The model's prose is
+/// never allowed to upgrade one of these outcomes to Verified.
+/// </summary>
+public enum AgentMutationOutcome
+{
+    Pending,
+    Applied,
+    AlreadySatisfied,
+    Blocked,
+    Unavailable,
+    Failed,
+    Cancelled,
+    Conflict,
+    Unknown
 }
 
 /// <summary>Lifecycle of one entry in a parent task's <see cref="AgentTaskState.SubTaskPlan"/>.</summary>
@@ -150,7 +186,27 @@ public sealed class AgentTaskState
     /// </summary>
     public List<AgentSteeringNote> PendingInstructions { get; set; } = [];
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
+    /// <summary>
+    /// Durable mutation attempts. Older task files have an empty list and are
+    /// treated as legacy evidence rather than being given fabricated
+    /// post-images.
+    /// </summary>
+    public List<AgentMutationReceipt> MutationReceipts { get; set; } = [];
     public AgentPendingToolAction? PendingToolAction { get; set; }
+    /// <summary>
+    /// Owner-facing interactions retained by an orchestration parent. A child
+    /// task keeps its own authoritative state, while this additive list keeps
+    /// the parent's interaction queue from being replaced by a late child
+    /// completion. Older task files deserialize with an empty list.
+    /// </summary>
+    public List<AgentOwnerInteraction> PendingOwnerInteractions { get; set; } = [];
+    /// <summary>
+    /// Empty when the parent's visible owner interaction belongs to itself;
+    /// otherwise the authoritative child task id being mirrored here. This is
+    /// routing metadata, not a second approval authority.
+    /// </summary>
+    public string PendingOwnerInteractionTaskId { get; set; } = string.Empty;
+    public string PendingOwnerInteractionId { get; set; } = string.Empty;
     public string Summary { get; set; } = string.Empty;
 
     /// <summary>
@@ -192,6 +248,23 @@ public sealed class AgentTaskState
     /// that recovered from trouble along the way.
     /// </summary>
     public int TotalStepErrors { get; set; }
+    /// <summary>
+    /// Signature of the most recent materially equivalent blocked, no-effect,
+    /// or uninformative action. JSON-additive. The Agent uses it to stop a
+    /// task-level sequence of non-progressing planner actions after a small
+    /// bounded number of attempts.
+    /// </summary>
+    public string LastNonProgressSignature { get; set; } = string.Empty;
+    public string LastNonProgressDescription { get; set; } = string.Empty;
+    public int ConsecutiveNonProgressCount { get; set; }
+    /// <summary>
+    /// Signature of the last read-only result used to distinguish a changed
+    /// observation from the same observation repeated after an intervening
+    /// non-progressing action. JSON-additive for older task files.
+    /// </summary>
+    public string LastReadResultSignature { get; set; } = string.Empty;
+    /// <summary>The last ask_user question answered by the owner, if any.</summary>
+    public string LastAnsweredQuestion { get; set; } = string.Empty;
     /// <summary>
     /// Whether the most recent planner call was sent with the protocol schema
     /// enforced by the provider's sampler (r28 doc 05 5.6). Read beside
@@ -501,6 +574,30 @@ public sealed class AgentDraftPatch
     /// restoring the pre-image, so a later edit is never silently clobbered.
     /// </summary>
     public string AppliedContent { get; set; } = string.Empty;
+    /// <summary>Receipt that proved this patch's post-image, when available.</summary>
+    public string? MutationReceiptId { get; set; }
+
+    /// <summary>
+    /// Prepared proposal facts captured when this patch entered the review
+    /// queue. Empty on older manually queued patches, which retain the legacy
+    /// apply path but are rechecked immediately before writing.
+    /// </summary>
+    public string ProposalId { get; set; } = string.Empty;
+    public int ProposalRevision { get; set; }
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    public string ExpectedPreImageSha256 { get; set; } = string.Empty;
+    public bool ExpectedPreImageExisted { get; set; }
+    public string ProposedContentSha256 { get; set; } = string.Empty;
+    public string PolicyFingerprint { get; set; } = string.Empty;
+    public DateTime PreparedAt { get; set; }
+    /// <summary>
+    /// Complete approval binding for the prepared proposal. Empty on older
+    /// manually queued patches that do not have an Agent pending action.
+    /// </summary>
+    public string ApprovalFingerprint { get; set; } = string.Empty;
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsPrepared => ProposalId.Length > 0 && ProposalRevision > 0 && PreparedAt != default;
 
     public DateTime? RevertedAt { get; set; }
     public string? RevertedBy { get; set; }
@@ -531,12 +628,60 @@ public sealed record AgentTaskRevertResult(IReadOnlyList<AgentTaskRevertFileOutc
 }
 
 /// <summary>
-/// Outcome of an approval decision (AgentService.AppendApprovalAsync).
-/// <see cref="Applied"/> is false only when the approval fingerprint did not
-/// match the currently pending action (r23 4.1); the pending action stays
-/// pending and nothing executed.
+/// One durable attempt to carry a prepared proposal through approval,
+/// execution, observation and verification. Additive fields keep older task
+/// state readable without inventing receipts for historic writes.
 /// </summary>
-public sealed record AgentApprovalResult(bool Applied, string Message);
+public sealed class AgentMutationReceipt
+{
+    public string ReceiptId { get; set; } = Guid.NewGuid().ToString("N");
+    public string AttemptId { get; set; } = Guid.NewGuid().ToString("N");
+    public string ProposalId { get; set; } = string.Empty;
+    public int ProposalRevision { get; set; }
+    public string TaskId { get; set; } = string.Empty;
+    public string ToolName { get; set; } = string.Empty;
+    /// <summary>
+    /// Fingerprint of the requested tool and arguments, excluding the prepared
+    /// pre-image and proposal timestamp. This lets convergence detect an exact
+    /// repeated mutation request even when the workspace has already changed
+    /// because an earlier attempt was applied.
+    /// </summary>
+    public string RequestedActionFingerprint { get; set; } = string.Empty;
+    public AgentMutationKind MutationKind { get; set; }
+    /// <summary>
+    /// The persisted workspace identity needed to reconcile an attempt after
+    /// the process disappears between the write and its terminal receipt.
+    /// Empty on older receipts, which remain Unknown rather than being
+    /// guessed against a caller-supplied workspace.
+    /// </summary>
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public string ExpectedPreImageSha256 { get; set; } = string.Empty;
+    public bool ExpectedPreImageExisted { get; set; }
+    public string ProposedContentSha256 { get; set; } = string.Empty;
+    public string ObservedPostImageSha256 { get; set; } = string.Empty;
+    public bool ObservedPostImageExisted { get; set; }
+    public bool Changed { get; set; }
+    public bool ApprovalRecorded { get; set; }
+    public bool Verified { get; set; }
+    public AgentMutationOutcome Outcome { get; set; } = AgentMutationOutcome.Pending;
+    public string CompletionReason { get; set; } = string.Empty;
+    public string EvidenceId { get; set; } = string.Empty;
+    public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+    public DateTime FinishedAt { get; set; }
+}
+
+/// <summary>
+/// Outcome of an approval decision (AgentService.AppendApprovalAsync).
+/// <see cref="Applied"/> means the approved proposal produced a verified
+/// filesystem change. A refusal, conflict, failed attempt or no-effect result
+/// is not an applied mutation.
+/// </summary>
+public sealed record AgentApprovalResult(bool Applied, string Message)
+{
+    public AgentMutationOutcome Outcome { get; init; } = AgentMutationOutcome.Unknown;
+    public string ReceiptId { get; init; } = string.Empty;
+}
 
 public enum AgentLedgerFileKind { Created, Edited }
 
@@ -711,6 +856,34 @@ public sealed class AgentPendingToolAction
     /// approval path recomputes from ToolName/Arguments in that case.
     /// </summary>
     public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Fingerprint of the model's requested tool and arguments before the
+    /// prepared workspace facts are attached. Empty on older task files and
+    /// recomputed when needed.
+    /// </summary>
+    public string RequestedActionFingerprint { get; set; } = string.Empty;
+
+    /// <summary>Immutable proposal identity and prepared execution facts.</summary>
+    public string ProposalId { get; set; } = string.Empty;
+    public int ProposalRevision { get; set; }
+    public int SchemaVersion { get; set; }
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    public AgentMutationKind MutationKind { get; set; }
+    public string RelativePath { get; set; } = string.Empty;
+    public string ExpectedPreImageSha256 { get; set; } = string.Empty;
+    public bool ExpectedPreImageExisted { get; set; }
+    public string ProposedContent { get; set; } = string.Empty;
+    public string ProposedContentSha256 { get; set; } = string.Empty;
+    public string PolicyFingerprint { get; set; } = string.Empty;
+    public DateTime PreparedAt { get; set; }
+
+    /// <summary>
+    /// True only when the action passed typed, containment, policy and
+    /// capability preparation. Empty on pre-R33 task state.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsPrepared => ProposalId.Length > 0 && SchemaVersion >= 1 && PreparedAt != default;
 }
 
 public sealed class AgentNextAction
@@ -827,8 +1000,14 @@ public sealed record AgentTaskListItem(
 public sealed record AgentFileSearchResult(
     string RelativePath,
     string Snippet,
-    DateTime ModifiedUtc,
+    DateTime? ModifiedUtc,
     /// <summary>True only for the explicit final row that says the result cap was reached.</summary>
+    bool IsTruncationNotice = false);
+
+public sealed record AgentWorkspaceFileEntry(
+    string RelativePath,
+    DateTime? ModifiedUtc,
+    bool IsDirectory = false,
     bool IsTruncationNotice = false);
 
 public sealed record AgentFileReadResult(
@@ -863,6 +1042,45 @@ public sealed record AgentFileReadResult(
                 + "line_limit (for example line_offset=0, line_limit=400, then line_offset=400) to read it in "
                 + "slices, or use search_files to find a symbol without reading the whole file.";
 }
+
+/// <summary>
+/// A durable parent-owned pointer to an owner interaction. The optional
+/// pending action is a rendered snapshot only. Approval and answer operations
+/// re-load <see cref="SourceTaskId"/> and revalidate its identity before any
+/// state changes or workspace execution.
+/// </summary>
+public sealed class AgentOwnerInteraction
+{
+    public string InteractionId { get; set; } = Guid.NewGuid().ToString("N");
+    public string SourceTaskId { get; set; } = string.Empty;
+    public AgentOwnerInteractionKind Kind { get; set; }
+    public AgentTaskStatus SourceStatus { get; set; } = AgentTaskStatus.WaitingForUser;
+    public string Prompt { get; set; } = string.Empty;
+    public AgentPendingToolAction? PendingToolAction { get; set; }
+    public string ProposalId { get; set; } = string.Empty;
+    public int ProposalRevision { get; set; }
+    public string Fingerprint { get; set; } = string.Empty;
+    public int SourceStepCount { get; set; }
+    public int Sequence { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsApproval => Kind == AgentOwnerInteractionKind.Approval && PendingToolAction is not null;
+}
+
+/// <summary>
+/// Result of the owner-driven Workspace save path. It is deliberately not an
+/// Agent mutation receipt: the owner saved directly, while any already
+/// prepared Agent proposal remains bound to the pre-save content hash and
+/// will be rejected as stale if approved later.
+/// </summary>
+public sealed record AgentOwnerFileSaveResult(
+    string RelativePath,
+    string Content,
+    string ContentSha256,
+    bool Changed,
+    bool Conflict,
+    string Message);
 
 public sealed record AgentFileSummaryResult(
     string RelativePath,

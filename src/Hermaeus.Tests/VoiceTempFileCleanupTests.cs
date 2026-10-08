@@ -102,6 +102,50 @@ public sealed class VoiceTempFileCleanupTests
         Assert.False(File.Exists(playedPath));
     }
 
+    [Fact]
+    public async Task OpenAi_speak_deletes_the_temp_wav_when_playback_fails()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Llm.OpenAiApiKey = "plain-key";
+        var handler = new FakeSpeechHandler();
+        using var http = new HttpClient(handler);
+        string? playedPath = null;
+        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http,
+            (path, _) =>
+            {
+                playedPath = path;
+                throw new InvalidOperationException("playback failed");
+            });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => provider.SpeakAsync("hello"));
+
+        Assert.NotNull(playedPath);
+        Assert.False(File.Exists(playedPath));
+    }
+
+    [Fact]
+    public async Task OpenAi_preview_deletes_the_temp_wav_when_playback_is_cancelled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Llm.OpenAiApiKey = "plain-key";
+        var handler = new FakeSpeechHandler();
+        using var http = new HttpClient(handler);
+        string? playedPath = null;
+        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http,
+            (path, _) =>
+            {
+                playedPath = path;
+                throw new OperationCanceledException();
+            });
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => provider.PreviewVoiceAsync("alloy", "preview"));
+
+        Assert.NotNull(playedPath);
+        Assert.False(File.Exists(playedPath));
+    }
+
     private sealed class PassthroughSecretStore : ISecretStore
     {
         public bool IsReference(string value) => false;

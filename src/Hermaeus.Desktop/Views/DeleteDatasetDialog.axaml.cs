@@ -13,6 +13,7 @@ public partial class DeleteDatasetDialog : Window
     public DeleteDatasetDialog(string datasetName, int chunkCount)
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
         DataContext = new DeleteDatasetDialogViewModel(datasetName, chunkCount);
     }
 

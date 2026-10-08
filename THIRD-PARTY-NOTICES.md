@@ -36,6 +36,7 @@ own `.nuspec`.
 | Avalonia.Angle.Windows.Natives | 2.1.27548.20260419 | BSD-3-Clause (ANGLE) | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | Avalonia.AvaloniaEdit | 12.0.0 | MIT | Copyright 2017-2026 (c) The AvaloniaUI Project |
 | Avalonia.BuildServices | 11.3.2 | MIT | Copyright 2023-2025 (c) The AvaloniaUI Project |
+| Avalonia.Controls.WebView | 12.1.0 | MIT | Copyright 2019-2026 © The AvaloniaUI Project |
 | Avalonia.Desktop | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | Avalonia.Fonts.Inter | 12.1.2 | MIT (package); the Inter font itself is SIL OFL 1.1, see section 3 | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | Avalonia.FreeDesktop | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
@@ -97,6 +98,18 @@ licences.
 | Protocol Buffers | Google.Protobuf | BSD-3-Clause | Copyright 2015, Google Inc. |
 
 ## 3. Bundled data
+
+### Monaco editor bundle
+
+The bounded Workspace editor includes Monaco 0.56.0's local `min/vs` bundle.
+Monaco is used only as a presentation editor; the host keeps filesystem,
+process, approval, and application command authority. The upstream license and
+third-party notices are carried beside the bundle at
+`src/Hermaeus.Desktop/Assets/Monaco/LICENSE.txt` and
+`src/Hermaeus.Desktop/Assets/Monaco/ThirdPartyNotices.txt`.
+
+MIT License. Copyright (c) 2016 - present Microsoft Corporation.
+Source: https://github.com/microsoft/monaco-editor
 
 ### CMU Pronouncing Dictionary (cmudict)
 

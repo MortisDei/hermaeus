@@ -209,7 +209,8 @@ public sealed partial class DoctorService : IDoctorService
         string fixLabel,
         bool canFix,
         string diagnostics,
-        string category)
+        string category,
+        DoctorActionTarget? target = null)
     {
         var actionKind = !canFix || status == DoctorCheckStatus.Ready
             ? DoctorActionKind.None
@@ -218,7 +219,46 @@ public sealed partial class DoctorService : IDoctorService
                 : fixLabel.StartsWith("Open ", StringComparison.OrdinalIgnoreCase)
                     ? DoctorActionKind.Navigate
                     : DoctorActionKind.Fix;
-        return new DoctorCheck(key, title, status, summary, detail, fixLabel, canFix, diagnostics, category, actionKind);
+        var resolvedTarget = target ?? ResolveActionTarget(key, category);
+        return new DoctorCheck(
+            key, title, status, summary, detail, fixLabel, canFix, diagnostics, category,
+            actionKind, resolvedTarget?.Route ?? string.Empty)
+        {
+            Target = resolvedTarget
+        };
+    }
+
+    private static DoctorActionTarget? ResolveActionTarget(string key, string category)
+    {
+        var area = category switch
+        {
+            "Runtime" => "services",
+            "RAG" => "rag",
+            "System" => "system",
+            "Voice" or "Security" or "Storage" or "Data" => "settings",
+            _ => string.Empty
+        };
+        if (area.Length == 0)
+            return null;
+
+        if (key.StartsWith("oversized-context-", StringComparison.Ordinal)
+            || key.StartsWith("draft-model-", StringComparison.Ordinal)
+            || key.StartsWith("gpu-inference-", StringComparison.Ordinal))
+        {
+            var separator = key.IndexOf('-', key.IndexOf('-') + 1);
+            var itemId = separator >= 0 && separator + 1 < key.Length
+                ? key[(separator + 1)..]
+                : string.Empty;
+            var section = key.StartsWith("draft-model-", StringComparison.Ordinal)
+                ? "managed-server-draft"
+                : "managed-server";
+            var focus = key.StartsWith("draft-model-", StringComparison.Ordinal)
+                ? "draft-model"
+                : key.StartsWith("gpu-inference-", StringComparison.Ordinal) ? "gpu-placement" : "context-size";
+            return new DoctorActionTarget(area, section, itemId, focus);
+        }
+
+        return new DoctorActionTarget(area, category.ToLowerInvariant(), key, "");
     }
 
     private static async Task<(bool Ok, string Detail)> TryWriteAsync(string root, CancellationToken ct)

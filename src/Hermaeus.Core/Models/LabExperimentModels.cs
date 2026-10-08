@@ -10,8 +10,24 @@ public enum LabRunStatus
     Running,
     Succeeded,
     PartiallySucceeded,
+    Inconclusive,
     Cancelled,
     Failed
+}
+
+public sealed record LabRunProgress(
+    string ExperimentName,
+    string CandidateLabel,
+    int CandidateIndex,
+    int CandidateTotal,
+    string Stage,
+    int Completed,
+    int Total,
+    int Remaining,
+    LabRunStatus? TerminalStatus = null,
+    string Detail = "")
+{
+    public int Percent => Total <= 0 ? 0 : Math.Clamp((int)Math.Round(Completed * 100d / Total), 0, 100);
 }
 
 public enum LabEquivalenceState
@@ -122,6 +138,11 @@ public sealed record LabExperimentDefinition
     public int TimeoutSeconds { get; init; } = 300;
     public IReadOnlyList<string> StopConditions { get; init; } = [];
     public IReadOnlyList<string> RequiredMetrics { get; init; } = [];
+    /// <summary>
+    /// Effective runtime fields required for this protocol to be a controlled
+    /// comparison. A missing field is Unknown, never inferred from argv.
+    /// </summary>
+    public IReadOnlyList<string> RequiredEffectiveFields { get; init; } = [];
     public LabCorrectnessRequirement CorrectnessRequirement { get; init; } = LabCorrectnessRequirement.ExactEquivalence;
     public IReadOnlyList<string> RequestedCapabilityIds { get; init; } = [];
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
@@ -150,6 +171,7 @@ public sealed record LabObservation
     public string ModelFingerprint { get; init; } = string.Empty;
     public string HardwareFingerprint { get; init; } = string.Empty;
     public string ConfigurationFingerprint { get; init; } = string.Empty;
+    public string RuntimeProcessInstanceId { get; init; } = string.Empty;
 }
 
 public sealed record LabOutputEvidence(
@@ -209,6 +231,10 @@ public sealed record LabRunSnapshot
     public IReadOnlyList<LabObservation> Observations { get; init; } = [];
     public IReadOnlyList<LabOutputEvidence> Outputs { get; init; } = [];
     public IReadOnlyList<LabComparison> Comparisons { get; init; } = [];
+    public IReadOnlyDictionary<string, EffectiveLaunchObservation> EffectiveLaunches { get; init; } =
+        new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, RuntimeEvidenceEnvelope> RuntimeEvidence { get; init; } =
+        new Dictionary<string, RuntimeEvidenceEnvelope>(StringComparer.Ordinal);
     public IReadOnlyList<string> Failures { get; init; } = [];
     public string StartEvidenceId { get; init; } = string.Empty;
     public string CompletionEvidenceId { get; init; } = string.Empty;
@@ -221,6 +247,17 @@ public sealed record LabRunEvidenceSlice(
     IReadOnlyList<LabObservation> Observations,
     IReadOnlyList<LabOutputEvidence> Outputs,
     int ChunkIndex = 0);
+
+public sealed record LabRunComparisonEvidence(
+    string RunId,
+    string DefinitionHash,
+    LabComparison Comparison);
+
+public sealed record LabRunEffectiveLaunchEvidence(
+    string RunId,
+    string DefinitionHash,
+    string ConfigurationId,
+    EffectiveLaunchObservation Observation);
 
 public sealed record LabComparisonDecision(
     string BaselineConfigurationId,
@@ -244,7 +281,13 @@ public sealed record LabRunCompletionSummary(
     IReadOnlyList<LabConfiguration>? Configurations = null,
     IReadOnlyList<LabComparison>? DetailedComparisons = null,
     string? ExperimentName = null,
-    string? ModelIdentityLabel = null);
+    string? ModelIdentityLabel = null)
+{
+    public IReadOnlyDictionary<string, EffectiveLaunchObservation> EffectiveLaunches { get; init; } =
+        new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal);
+    public IReadOnlyList<string> ComparisonEvidenceIds { get; init; } = [];
+    public IReadOnlyList<string> EffectiveLaunchEvidenceIds { get; init; } = [];
+}
 
 public sealed record LabApplyEvidence(
     string RunId,

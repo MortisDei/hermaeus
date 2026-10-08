@@ -1,3 +1,7 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Data;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -7,7 +11,8 @@ using static Hermaeus.Tests.Helpers;
 
 namespace Hermaeus.Tests;
 
-public sealed class ChatViewModelModelSwitchTests
+[Collection(AvaloniaTestHost.CollectionName)]
+public sealed class ChatViewModelModelSwitchTests(AvaloniaTestHost avalonia)
 {
     private static (ChatViewModel vm, ThrowingSaveConversationStore store, ISettingsService settings) NewViewModel(
         TempDir temp, ILlmService? llm = null)
@@ -77,6 +82,88 @@ public sealed class ChatViewModelModelSwitchTests
     }
 
     [Fact]
+    public Task Bound_model_picker_refresh_preserves_sampling_and_provider_usage() => avalonia.RunAsync(async () =>
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = NewViewModel(temp, new UsageLlm());
+        await vm.LoadModelsAsync();
+        var (window, picker) = CreateBoundPicker(vm);
+        try
+        {
+            vm.Temperature = 0.2;
+            vm.TopP = 0.4;
+            vm.MaxTokens = 71;
+            vm.TopK = 23;
+            vm.MinP = 0.05;
+            vm.RepeatPenalty = 1.2;
+            vm.FrequencyPenalty = 0.3;
+            vm.PresencePenalty = 0.6;
+            vm.InputText = "Synthetic picker refresh check";
+            await vm.SendCommand.ExecuteAsync(null);
+            Assert.Equal("Reported by provider", vm.ContextUsageKind);
+            var reportedLabel = vm.ContextUsageLabel;
+            var previousModel = vm.SelectedModel;
+
+            await vm.LoadModelsAsync(force: true);
+
+            Assert.NotSame(previousModel, vm.SelectedModel);
+            Assert.Same(vm.SelectedModel, picker.SelectedItem);
+            Assert.Equal(0.2, vm.Temperature);
+            Assert.Equal(0.4, vm.TopP);
+            Assert.Equal(71, vm.MaxTokens);
+            Assert.Equal(23, vm.TopK);
+            Assert.Equal(0.05, vm.MinP);
+            Assert.Equal(1.2, vm.RepeatPenalty);
+            Assert.Equal(0.3, vm.FrequencyPenalty);
+            Assert.Equal(0.6, vm.PresencePenalty);
+            await Task.Delay(200); // A transient picker selection must not schedule the 150 ms estimate refresh.
+            Assert.Equal("Reported by provider", vm.ContextUsageKind);
+            Assert.Equal(reportedLabel, vm.ContextUsageLabel);
+
+            vm.InputText = "A changed draft does need a fresh estimate";
+            await WaitForAsync(() => vm.ContextUsageKind == "Estimated", "draft token estimate");
+        }
+        finally { window.Close(); }
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Bound_model_picker_refresh_applies_defaults_when_the_selected_model_disappears(bool noModels) => avalonia.RunAsync(async () =>
+    {
+        using var temp = new TempDir();
+        var refreshed = false;
+        var llm = new ScriptedModelsLlm(() => !refreshed ? [Model("a", temp: 0.9)]
+            : noModels ? [] : [Model("b", temp: 0.5)]);
+        var (vm, _, settings) = NewViewModel(temp, llm);
+        await vm.LoadModelsAsync();
+        var (window, picker) = CreateBoundPicker(vm);
+        try
+        {
+            vm.Temperature = 0.2;
+            refreshed = true;
+            await vm.LoadModelsAsync(force: true);
+
+            Assert.Equal(noModels ? null : "b", vm.SelectedModel?.Id);
+            Assert.Same(vm.SelectedModel, picker.SelectedItem);
+            Assert.Equal(noModels ? settings.Settings.Llm.Temperature : 0.5, vm.Temperature);
+            Assert.Equal(!noModels, vm.HasSelectedModel);
+        }
+        finally { window.Close(); }
+    });
+
+    private static (Window Window, ComboBox Picker) CreateBoundPicker(ChatViewModel vm)
+    {
+        var picker = new ComboBox { DataContext = vm };
+        picker.Bind(ItemsControl.ItemsSourceProperty, new Binding(nameof(vm.AvailableModels)));
+        picker.Bind(SelectingItemsControl.SelectedItemProperty, new Binding(nameof(vm.SelectedModel)) { Mode = BindingMode.TwoWay });
+        var window = new Window { Content = picker, Opacity = 0, ShowActivated = false, ShowInTaskbar = false };
+        window.Show();
+        window.Hide();
+        return (window, picker);
+    }
+
+    [Fact]
     public async Task Switching_to_a_model_without_a_profile_value_resets_to_the_settings_default_instead_of_leaking()
     {
         using var temp = new TempDir();
@@ -125,6 +212,25 @@ public sealed class ChatViewModelModelSwitchTests
 
         Assert.Single(vm.AvailableModels);
         Assert.Equal(1, llm.GetModelsCallCount);
+    }
+
+    [Fact]
+    public async Task Refreshing_models_preserves_a_selection_changed_while_discovery_was_pending()
+    {
+        using var temp = new TempDir();
+        var llm = new ScriptedModelsLlm(() => [Model("a", temp: 0.9), Model("b", temp: 0.5)]);
+        var (vm, _, _) = NewViewModel(temp, llm);
+        await vm.LoadModelsAsync();
+        llm.DelayGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var refresh = vm.LoadModelsAsync(force: true);
+        vm.SelectedModel = vm.AvailableModels.Single(m => m.Id == "b");
+        vm.Temperature = 0.3;
+        llm.DelayGate.SetResult();
+        await refresh;
+
+        Assert.Equal("b", vm.SelectedModel?.Id);
+        Assert.Equal(0.3, vm.Temperature);
     }
 
     // ── 3.9: ClearChat resets the system prompt; RemoveContextAttachment recomputes status ──

@@ -8,6 +8,7 @@ public partial class EmptyDirectoryCleanupDialog : Window
     public EmptyDirectoryCleanupDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
     }
 
     public void SetCount(int count) =>

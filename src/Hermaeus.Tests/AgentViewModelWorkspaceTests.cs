@@ -151,6 +151,107 @@ public sealed class AgentViewModelWorkspaceTests
         Assert.Empty(vm.WorkspaceFiles);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Workspace_listing_recovery_clears_its_previous_error(bool restoreSameRoot)
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var missingRoot = temp.PathFor("missing-workspace");
+        vm.WorkspaceRoot = missingRoot;
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+        Assert.True(vm.IsError);
+        Assert.Contains("Could not list workspace files", vm.StatusMessage);
+
+        var recoveredRoot = restoreSameRoot ? missingRoot : temp.PathFor("valid-workspace");
+        Directory.CreateDirectory(recoveredRoot);
+        await File.WriteAllTextAsync(Path.Combine(recoveredRoot, "note.txt"), "recovered");
+        if (restoreSameRoot)
+        {
+            await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+        }
+        else
+        {
+            await ObserveWorkspaceChangeAsync(vm,
+                () => vm.WorkspaceFiles.Any(file => file.RelativePath == "note.txt") && !vm.IsError,
+                () => vm.WorkspaceRoot = recoveredRoot);
+        }
+
+        Assert.Contains(vm.WorkspaceFiles, file => file.RelativePath == "note.txt");
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Empty(vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Workspace_listing_recovery_preserves_a_newer_unrelated_error()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var workspace = temp.PathFor("workspace");
+        vm.WorkspaceRoot = workspace;
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+        Assert.True(vm.IsError);
+
+        vm.StatusMessage = "Task execution failed.";
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "note.txt"), "recovered");
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.WorkspaceFiles);
+        Assert.True(vm.IsError);
+        Assert.Equal("Task execution failed.", vm.StatusMessage);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Workspace_file_load_recovery_clears_only_its_own_error(bool newerUnrelatedError)
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        vm.WorkspaceRoot = workspace;
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+
+        await ObserveWorkspaceChangeAsync(vm,
+            () => vm.IsError && vm.StatusMessage.StartsWith("Could not load missing.txt:", StringComparison.Ordinal),
+            () => vm.SelectedWorkspaceFile = new AgentWorkspaceFileViewModel("missing.txt", "", null));
+        Assert.Equal("Load failed.", vm.WorkspaceEditorStatus);
+
+        if (newerUnrelatedError)
+            vm.StatusMessage = "Task execution failed.";
+        await File.WriteAllTextAsync(Path.Combine(workspace, "note.txt"), "recovered");
+        await ObserveWorkspaceChangeAsync(vm,
+            () => vm.DraftProposedContent == "recovered",
+            () => vm.SelectedWorkspaceFile = new AgentWorkspaceFileViewModel("note.txt", "", null));
+
+        Assert.Equal("recovered", vm.WorkspaceFilePreview);
+        Assert.Equal(newerUnrelatedError, vm.IsError);
+        Assert.Equal(newerUnrelatedError ? "Task execution failed." : string.Empty, vm.StatusMessage);
+    }
+
+    private static async Task ObserveWorkspaceChangeAsync(AgentViewModel vm, Func<bool> ready, Action action)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Changed(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+        {
+            if (ready()) completion.TrySetResult();
+        }
+        vm.PropertyChanged += Changed;
+        try
+        {
+            action();
+            if (ready()) completion.TrySetResult();
+            await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            vm.PropertyChanged -= Changed;
+        }
+    }
+
     // ── 2.5: overlapping LoadAsync calls must not duplicate models ──
 
     [Fact]
@@ -190,6 +291,188 @@ public sealed class AgentViewModelWorkspaceTests
             SubTaskPlan = [new AgentSubTaskSpec { Goal = "child", ProfileName = "general" }]
         };
         Assert.True(vm.HasSubTaskPlan, "an orchestration parent with a materialized plan should show the chrome");
+    }
+
+    [Fact]
+    public async Task Start_command_is_disabled_while_an_existing_task_is_open()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        await vm.LoadAsync();
+        vm.WorkspaceRoot = temp.PathFor("workspace");
+        vm.GoalText = "start another task";
+        vm.CurrentTask = new AgentTaskState
+        {
+            TaskId = "existing",
+            Goal = "already open",
+            Status = AgentTaskStatus.WaitingForUser
+        };
+
+        Assert.False(vm.StartCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Suggested_agents_can_be_queued_without_an_open_task_and_never_write_directly()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        vm.WorkspaceRoot = workspace;
+        vm.SuggestedAgentsMd = "# AGENTS.md\n\nKeep changes local and reviewed.";
+
+        DraftPatchPreviewRequest? preview = null;
+        vm.RequestDraftPatchPreview = request =>
+        {
+            preview = request;
+            return Task.FromResult(true);
+        };
+
+        Assert.True(vm.CanReviewSuggestedAgents);
+        await vm.ReviewSuggestedAgentsCommand.ExecuteAsync(null);
+
+        Assert.NotNull(preview);
+        Assert.Equal("AGENTS.md", preview!.RelativePath);
+        Assert.Equal(vm.SuggestedAgentsMd, preview.NewContent);
+        Assert.NotNull(vm.CurrentTask);
+        Assert.Equal("Create workspace AGENTS.md", vm.CurrentTask!.Goal);
+        var patch = Assert.Single(vm.CurrentTask.DraftPatches);
+        Assert.Equal("AGENTS.md", patch.RelativePath);
+        Assert.Equal(AgentDraftPatchStatus.Pending, patch.Status);
+        Assert.False(File.Exists(Path.Combine(workspace, "AGENTS.md")));
+        Assert.Equal(AgentViewModel.ChangesTabIndex, vm.SelectedTabIndex);
+    }
+
+    [Fact]
+    public async Task Per_patch_approve_command_uses_the_authoritative_prepared_mutation()
+    {
+        using var temp = new TempDir();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "note.txt"), "old");
+        var (vm, _, store) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var state = await SavePreparedPatchTaskAsync(store, workspace, "new");
+
+        vm.WorkspaceRoot = workspace;
+        vm.RequestDraftPatchPreview = _ => Task.FromResult(true);
+        await vm.LoadTaskCommand.ExecuteAsync(state.TaskId);
+
+        await vm.ApprovePatchCommand.ExecuteAsync(new AgentDraftPatchViewModel(state.DraftPatches[0]));
+
+        var saved = await store.LoadAsync(state.TaskId);
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(workspace, "note.txt")));
+        Assert.Null(saved!.PendingToolAction);
+        Assert.Equal(AgentDraftPatchStatus.Applied, Assert.Single(saved.DraftPatches).Status);
+        Assert.Contains(saved.MutationReceipts, receipt => receipt.Verified && receipt.Outcome == AgentMutationOutcome.Applied);
+    }
+
+    [Fact]
+    public async Task Per_patch_reject_command_records_the_same_authoritative_review_transition()
+    {
+        using var temp = new TempDir();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "note.txt"), "old");
+        var (vm, _, store) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var state = await SavePreparedPatchTaskAsync(store, workspace, "new");
+
+        vm.WorkspaceRoot = workspace;
+        await vm.LoadTaskCommand.ExecuteAsync(state.TaskId);
+
+        await vm.RejectPatchCommand.ExecuteAsync(new AgentDraftPatchViewModel(state.DraftPatches[0]));
+
+        var saved = await store.LoadAsync(state.TaskId);
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Equal("old", File.ReadAllText(Path.Combine(workspace, "note.txt")));
+        Assert.Null(saved!.PendingToolAction);
+        Assert.Equal(AgentDraftPatchStatus.Rejected, Assert.Single(saved.DraftPatches).Status);
+        Assert.False(Assert.Single(saved.ApprovalHistory).Approved);
+    }
+
+    [Fact]
+    public async Task Per_patch_block_command_preserves_the_blocked_owner_action_state()
+    {
+        using var temp = new TempDir();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "note.txt"), "old");
+        var (vm, _, store) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+        var state = await SavePreparedPatchTaskAsync(store, workspace, "new");
+
+        vm.WorkspaceRoot = workspace;
+        await vm.LoadTaskCommand.ExecuteAsync(state.TaskId);
+
+        await vm.BlockPatchCommand.ExecuteAsync(new AgentDraftPatchViewModel(state.DraftPatches[0]));
+
+        var saved = await store.LoadAsync(state.TaskId);
+        Assert.False(vm.IsError, vm.StatusMessage);
+        Assert.Equal("old", File.ReadAllText(Path.Combine(workspace, "note.txt")));
+        Assert.Null(saved!.PendingToolAction);
+        Assert.Equal(AgentTaskStatus.Blocked, saved.Status);
+        Assert.Equal(AgentDraftPatchStatus.Blocked, Assert.Single(saved.DraftPatches).Status);
+        Assert.Contains("blocked", saved.LastUserMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<AgentTaskState> SavePreparedPatchTaskAsync(
+        FileAgentTaskStateStore store,
+        string workspace,
+        string proposedContent)
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["relative_path"] = "note.txt",
+            ["proposed_content"] = proposedContent
+        };
+        var preparation = await AgentMutationPreparation.PrepareAsync(
+            "apply_draft_patch",
+            arguments,
+            new AgentWorkspaceOptions(workspace),
+            policy: null,
+            workspaceTools: new AgentWorkspaceTools());
+        Assert.True(preparation.IsValid, preparation.Error);
+        var pending = preparation.Pending!;
+        var patch = new AgentDraftPatch
+        {
+            RelativePath = pending.RelativePath,
+            Rationale = "Update the note.",
+            ProposedContent = pending.ProposedContent,
+            Status = AgentDraftPatchStatus.Pending,
+            CreatedAt = pending.PreparedAt,
+            ProposalId = pending.ProposalId,
+            ProposalRevision = pending.ProposalRevision,
+            WorkspaceRoot = pending.WorkspaceRoot,
+            ExpectedPreImageSha256 = pending.ExpectedPreImageSha256,
+            ExpectedPreImageExisted = pending.ExpectedPreImageExisted,
+            ProposedContentSha256 = pending.ProposedContentSha256,
+            PolicyFingerprint = pending.PolicyFingerprint,
+            PreparedAt = pending.PreparedAt,
+            ApprovalFingerprint = AgentApprovalFingerprint.Resolve(pending)
+        };
+        var state = new AgentTaskState
+        {
+            Goal = "Review a prepared patch",
+            Status = AgentTaskStatus.WaitingForUser,
+            WorkspaceRoot = workspace,
+            PendingToolAction = pending,
+            LastUserMessage = "Review the prepared note patch.",
+            DraftPatches = [patch]
+        };
+        await store.SaveAsync(state);
+        return state;
+    }
+
+    [Fact]
+    public void Historical_goal_preview_is_bounded_but_full_goal_is_retained()
+    {
+        var goal = string.Join(' ', Enumerable.Repeat("long-goal-word", 40));
+        var item = new AgentTaskListItem("task", goal, AgentTaskStatus.Complete, DateTime.UtcNow);
+
+        var viewModel = new AgentTaskListItemViewModel(item);
+
+        Assert.Equal(goal, viewModel.Goal);
+        Assert.Equal(180, viewModel.GoalPreview.Length);
+        Assert.EndsWith("...", viewModel.GoalPreview, StringComparison.Ordinal);
     }
 
     // ── r16 03-workbench-and-desktop.md 3.1: recent-tasks list / LoadTaskCommand ──

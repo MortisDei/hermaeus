@@ -18,6 +18,7 @@ public partial class BenchmarkViewModel : ObservableObject
     private readonly ServicesViewModel? _services;
     private readonly IBenchmarkInsightsService? _insights;
     private readonly IVoiceOrchestrator? _voice;
+    private readonly IAudioFeedbackService? _audioFeedback;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly RecommendationApplicationService? _recommendationApplication;
     private CancellationTokenSource? _runCts;
@@ -116,7 +117,8 @@ public partial class BenchmarkViewModel : ObservableObject
         IBenchmarkInsightsService? insights = null,
         IVoiceOrchestrator? voice = null,
         RecommendationDerivationService? recommendationDerivation = null,
-        RecommendationApplicationService? recommendationApplication = null)
+        RecommendationApplicationService? recommendationApplication = null,
+        IAudioFeedbackService? audioFeedback = null)
     {
         _benchmarks = benchmarks;
         _llm = llm;
@@ -126,6 +128,7 @@ public partial class BenchmarkViewModel : ObservableObject
         _services = services;
         _insights = insights;
         _voice = voice;
+        _audioFeedback = audioFeedback;
         _recommendationDerivation = recommendationDerivation;
         _recommendationApplication = recommendationApplication;
         InsightsUsage.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasInsightsUsage));
@@ -141,6 +144,9 @@ public partial class BenchmarkViewModel : ObservableObject
     /// <summary>r19 6.6: a lonely ranked row reveals nothing by comparison; the Rankings tab
     /// asks for a second model instead of rendering a table of one.</summary>
     public bool HasComparableRankings => RankedRuns.Count >= 2;
+
+    /// <summary>Explains the current per-suite ranking shortage, including why recorded but unverified runs are excluded.</summary>
+    [ObservableProperty] private string _rankingEmptyState = "Run the same suite against two or more models to compare them.";
 
     /// <summary>
     /// Re-entrancy-safe (r12 02-async-and-threading.md 2.5): overlapping
@@ -199,7 +205,6 @@ public partial class BenchmarkViewModel : ObservableObject
         _runCts = new CancellationTokenSource();
         try
         {
-            await PrepareSelectedModelAsync(_runCts.Token);
             var suites = RunAllSuites ? Suites.ToList() : [SelectedSuite];
             BenchmarkRun? run = null;
             for (var i = 0; i < suites.Count; i++)
@@ -210,14 +215,35 @@ public partial class BenchmarkViewModel : ObservableObject
                     suite,
                     SelectedModel,
                     new Progress<string>(s => Status = $"{suite.Name}: {s}"),
-                    _runCts.Token);
+                    _runCts.Token,
+                    preparation: PrepareSelectedModelAsync);
+                if (run.Status == "Cancelled")
+                    break;
             }
 
             await ReloadRunsAsync();
             await RefreshInsightsIfLoadedAsync();
             if (run is not null)
                 SelectedRun = Runs.FirstOrDefault(r => r.Id == run.Id);
-            _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
+            if (run?.Status == "Completed" && run.ComparisonEligible)
+            {
+                _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
+            }
+            else if (run?.Status == "Completed")
+            {
+                _toasts.Show("Benchmark complete, evidence unverified",
+                    "The workload finished, but runtime authority was not proven, so it is excluded from rankings. "
+                    + EvidenceReasonSummary(run),
+                    ToastKind.Warning, 9000);
+            }
+            else if (run?.Status == "Cancelled")
+            {
+                _toasts.Show("Benchmark cancelled", "The partial run was saved.", ToastKind.Info, 7000);
+            }
+            else if (run?.Status == "Failed")
+            {
+                _toasts.Show("Benchmark failed", run.Error, ToastKind.Error, 7000);
+            }
             NarrateCompletion(run, SelectedModel.Name);
         }
         finally
@@ -231,13 +257,30 @@ public partial class BenchmarkViewModel : ObservableObject
 
     private void NarrateCompletion(BenchmarkRun? run, string modelName)
     {
-        if (_voice is null || run is null)
+        if (run is null)
+            return;
+
+        if (_audioFeedback is not null)
+            _ = _audioFeedback.PublishAsync(AudioFeedbackEventKind.LongOperationCompleted);
+
+        if (_voice is null)
             return;
 
         var text = run.Status == "Cancelled"
             ? $"Benchmark {run.SuiteName} on {modelName} cancelled."
             : $"Benchmark {run.SuiteName} on {modelName} complete: {run.Passed} of {run.Total} passed.";
         _ = _voice.EnqueueAsync(new VoiceUtterance(text, VoiceChannel.Benchmark, VoicePriority.Normal, DedupeKey: $"benchmark:{run.Id}"));
+    }
+
+    private static string EvidenceReasonSummary(BenchmarkRun run)
+    {
+        var reasons = run.RuntimeEvidence?.Reasons
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .Take(4)
+            .ToArray() ?? [];
+        return reasons.Length == 0
+            ? "Open Run Detail for the reconciliation state."
+            : $"Reasons: {string.Join(", ", reasons)}.";
     }
 
     [RelayCommand]
@@ -605,9 +648,13 @@ public partial class BenchmarkViewModel : ObservableObject
     private void UpdateRankedRuns(List<BenchmarkRunViewModel> runs)
     {
         RankedRuns.Clear();
-        var list = runs.Select(r => r.Run).ToList();
-        if (SelectedSuite is not null)
-            list = list.Where(r => r.SuiteId == SelectedSuite.Id).ToList();
+        var suiteRuns = SelectedSuite is null
+            ? runs
+            : runs.Where(r => string.Equals(r.Run.SuiteId, SelectedSuite.Id, StringComparison.Ordinal)).ToList();
+        var list = suiteRuns.Where(r => r.Run.ComparisonEligible).Select(r => r.Run).ToList();
+        var eligibleModelCount = list.Select(GetRankingGroupKey).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var unverifiedCount = suiteRuns.Count(r => !r.Run.ComparisonEligible);
+        RankingEmptyState = BuildRankingEmptyState(suiteRuns.Count, eligibleModelCount, unverifiedCount);
 
         // counts per model for display
         var counts = list.GroupBy(r => GetRankingGroupKey(r), StringComparer.OrdinalIgnoreCase)
@@ -624,6 +671,23 @@ public partial class BenchmarkViewModel : ObservableObject
             counts.TryGetValue(GetRankingGroupKey(run), out var count);
             RankedRuns.Add(new BenchmarkRunViewModel(run, Math.Max(1, count)) { Rank = rank });
         }
+    }
+
+    private static string BuildRankingEmptyState(int recordedRunCount, int eligibleModelCount, int unverifiedCount)
+    {
+        if (eligibleModelCount >= 2)
+            return string.Empty;
+
+        var evidenceNote = unverifiedCount > 0
+            ? $" {unverifiedCount} recorded run{(unverifiedCount == 1 ? " is" : "s are")} excluded because runtime evidence is unverified."
+            : string.Empty;
+
+        return eligibleModelCount switch
+        {
+            1 => $"One eligible model is recorded. Run this suite on one more eligible model to compare them.{evidenceNote}",
+            0 when recordedRunCount > 0 => $"No eligible runs can be ranked yet. Verify runtime evidence, then run this suite on two eligible models to compare them.{evidenceNote}",
+            _ => "Run the same suite against two or more eligible models to compare them."
+        };
     }
 
     private bool CanRun() => !IsRunning && SelectedSuite is not null && SelectedModel is not null;
@@ -761,6 +825,7 @@ public partial class BenchmarkViewModel : ObservableObject
         Name = suite.Name,
         Description = suite.Description,
         SuiteVersion = suite.SuiteVersion,
+        EvaluatorVersion = suite.EvaluatorVersion,
         ScoringProfile = suite.ScoringProfile,
         BaselineModelId = suite.BaselineModelId,
         BaselineModelName = suite.BaselineModelName,
@@ -796,7 +861,9 @@ public sealed class BenchmarkRunViewModel
     public string Id => Run.Id;
     public string Title => $"{Run.SuiteName} · {Run.ModelName}";
     public string Model => string.IsNullOrWhiteSpace(Run.Provider) ? Run.ModelName : $"{Run.ModelName} [{Run.Provider}]";
-    public string Status => Run.Status;
+    public string Status => Run.ComparisonEligible
+        ? Run.Status
+        : $"{Run.Status} · {(string.IsNullOrWhiteSpace(Run.Metadata.EvidenceStatus) ? "evidence unknown" : Run.Metadata.EvidenceStatus)}";
     public string Started => Run.StartedAt.ToLocalTime().ToString("g");
     public string Score => $"{Run.RankingScore:P0}";
     /// <summary>0-100 fill for the Rankings score bar (r19 6.6); RankingScore is a 0-1 fraction.</summary>
@@ -807,7 +874,17 @@ public sealed class BenchmarkRunViewModel
     public string RunCountLabel => RunCount == 1 ? "Best run" : $"Best of {RunCount} runs";
     public bool HasResults => Run.Results.Count > 0;
     public BenchmarkResultViewModel? FirstResult => Run.Results.FirstOrDefault() is { } result ? new BenchmarkResultViewModel(result) : null;
-    public string Summary => $"{Score} · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}";
+    public string Summary => Run.ComparisonEligible
+        ? $"{Score} · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}"
+        : $"unverified evidence · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}";
+    public string EvidenceReasonSummary => Run.ComparisonEligible
+        ? string.Empty
+        : string.Join("; ", (Run.RuntimeEvidence?.Reasons ?? []).Take(4)) switch
+        {
+            { Length: > 0 } reasons => $"Excluded from rankings: {reasons}",
+            _ => "Excluded from rankings: runtime reconciliation is not recorded."
+        };
+    public bool HasEvidenceReasonSummary => EvidenceReasonSummary.Length > 0;
     public BenchmarkRunViewModel(BenchmarkRun run, int runCount = 1)
     {
         Run = run;
@@ -836,7 +913,13 @@ public sealed class BenchmarkResultViewModel
     };
     public bool HasDraftAcceptance => Result.DraftTokens.HasValue;
     public string Quality => $"{Result.QualityScore:P0}";
-    public string Checks => $"keyword {Result.KeywordHit} · regex {Result.RegexHit} · refusal {Result.RefusalCorrect} · failure {Result.FailureCategory}";
+    public string RefusalAssessment => string.IsNullOrWhiteSpace(Result.RefusalAssessment)
+        ? "Unknown"
+        : Result.RefusalAssessment;
+    public string RefusalDetail => string.IsNullOrWhiteSpace(Result.RefusalDetail)
+        ? "No refusal assessment detail was persisted."
+        : Result.RefusalDetail;
+    public string Checks => $"keyword {Result.KeywordHit} · regex {Result.RegexHit} · refusal {Result.RefusalCorrect} ({RefusalAssessment}) · failure {Result.FailureCategory}";
     public string Error => Result.Error;
     public string Output => Result.Output;
     public BenchmarkResultViewModel(BenchmarkResult result) => Result = result;

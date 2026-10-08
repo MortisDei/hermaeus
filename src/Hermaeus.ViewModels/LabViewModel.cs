@@ -50,16 +50,24 @@ public partial class ExperienceRowViewModel : ViewModelBase
     public bool IsLabCompletionSummary => ResultDetails is not null;
     public bool IsLabEvidenceSlice => Experience.Domain == EmpiricalExperienceDomains.LabRun
         && !IsLabCompletionSummary && LabRunId is not null;
-    public string OutcomeLabel => Experience.Outcome.Outcome.ToString();
+    public string OutcomeLabel => LabPresentationText.Outcome(Experience.Outcome.Outcome);
     public string OriginLabel => Experience.Provenance.Count == 0
         ? "Unknown"
-        : string.Join(", ", Experience.Provenance.Select(p => p.Source.EvidenceOrigin).Distinct());
+        : string.Join(", ", Experience.Provenance
+            .Select(p => LabPresentationText.EvidenceOrigin(p.Source.EvidenceOrigin))
+            .Distinct(StringComparer.Ordinal));
     public string ScopeLabel => Experience.ProjectId ?? Experience.WorkspaceFingerprint ?? "Unscoped";
     public string CreatedLabel => Experience.CreatedAtUtc.ToLocalTime().ToString("g");
-    public string StatusLabel => Experience.Status.ToString();
+    public string StatusLabel => LabPresentationText.EvidenceStatus(Experience.Status);
     public string ContextSummary => SummarizeJson(Experience.ContextJson);
     public string ActionSummary => SummarizeJson(Experience.ActionJson);
-    public string ResultSummary => SummarizeLabCompletion(Experience.ActionJson);
+    public string ResultSummary => SummarizeLabCompletion(Experience.ActionJson, EvidenceRecords);
+    /// <summary>Human-readable outcome shown before technical evidence and raw JSON.</summary>
+    public string HumanSummary => IsLabCompletionSummary
+        ? ResultSummary
+        : string.IsNullOrWhiteSpace(Experience.Outcome.Detail)
+            ? $"{OutcomeLabel}. {ActionSummary}"
+            : $"{OutcomeLabel}: {Experience.Outcome.Detail}";
     public LabResultSummaryViewModel? ResultDetails { get; }
     [ObservableProperty] private bool _isExportSelected;
 
@@ -97,7 +105,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
         static string Truncate(string value) => value.Length <= 120 ? value : value[..117] + "...";
     }
 
-    private static string SummarizeLabCompletion(string json)
+    private static string SummarizeLabCompletion(string json, IReadOnlyList<EmpiricalExperience> evidenceRecords)
     {
         try
         {
@@ -115,19 +123,11 @@ public partial class ExperienceRowViewModel : ViewModelBase
             lines.Add($"Started: {summary.StartedAtUtc.ToLocalTime():g}." +
                 (summary.CompletedAtUtc is { } completed ? $" Completed: {completed.ToLocalTime():g}." : string.Empty));
 
-            if (summary.DetailedComparisons is { Count: > 0 } detailedComparisons)
-            {
-                foreach (var comparison in detailedComparisons)
-                    lines.Add(FormatComparison(comparison, configurations));
-            }
-            else
-            {
-                foreach (var comparison in comparisons)
-                    lines.Add(FormatComparison(comparison, configurations));
-            }
+            var detailedComparisons = ReadDetailedComparisons(summary, evidenceRecords);
+            foreach (var comparison in detailedComparisons)
+                lines.Add(FormatComparison(comparison, configurations));
 
-            var hasEligibleComparison = summary.DetailedComparisons?.Any(comparison => comparison.CanShowHeadlineDelta)
-                ?? comparisons.Any(comparison => comparison.CanShowHeadlineDelta);
+            var hasEligibleComparison = detailedComparisons.Any(comparison => comparison.CanShowHeadlineDelta);
             var eligible = comparisons
                 .Where(comparison => comparison.CanShowHeadlineDelta)
                 .Select(comparison => configurations.TryGetValue(comparison.CandidateConfigurationId, out var configuration)
@@ -144,6 +144,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
             if (failures.Count > 0)
                 lines.Add($"Failures: {string.Join(" ", failures)}");
             lines.Add($"Evidence: {(summary.EvidenceSliceIds ?? []).Count} immutable configuration slice(s).");
+            lines.Add($"Effective launch: {FormatEffectiveLaunches(summary, ReadEffectiveLaunches(summary, evidenceRecords))}");
             return string.Join(Environment.NewLine, lines);
         }
         catch (JsonException)
@@ -216,7 +217,83 @@ public partial class ExperienceRowViewModel : ViewModelBase
         var summary = TryReadSummary(experience.ActionJson);
         if (!string.IsNullOrWhiteSpace(summary?.ExperimentName))
             return summary.ExperimentName;
+        try
+        {
+            using var document = JsonDocument.Parse(experience.ActionJson);
+            if (document.RootElement.TryGetProperty("definition", out var definition)
+                && definition.ValueKind == JsonValueKind.Object
+                && definition.TryGetProperty("name", out var name)
+                && name.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(name.GetString()))
+                return name.GetString();
+        }
+        catch (JsonException) { }
         return "Lab experiment";
+    }
+
+    internal static IReadOnlyList<LabComparison> ReadDetailedComparisons(
+        LabRunCompletionSummary summary, IReadOnlyList<EmpiricalExperience> evidenceRecords)
+    {
+        if (summary.DetailedComparisons is { Count: > 0 } detailed)
+            return detailed;
+
+        var ids = summary.ComparisonEvidenceIds.ToHashSet(StringComparer.Ordinal);
+        return evidenceRecords
+            .Where(record => ids.Count == 0 || ids.Contains(record.Id))
+            .Select(record => TryReadComparisonEvidence(record.ActionJson))
+            .Where(comparison => comparison is not null)
+            .Select(comparison => comparison!)
+            .ToArray();
+    }
+
+    internal static IReadOnlyDictionary<string, EffectiveLaunchObservation> ReadEffectiveLaunches(
+        LabRunCompletionSummary summary, IReadOnlyList<EmpiricalExperience> evidenceRecords)
+    {
+        if (summary.EffectiveLaunches.Count > 0)
+            return summary.EffectiveLaunches;
+
+        var ids = summary.EffectiveLaunchEvidenceIds.ToHashSet(StringComparer.Ordinal);
+        return evidenceRecords
+            .Where(record => ids.Count == 0 || ids.Contains(record.Id))
+            .Select(record => TryReadEffectiveLaunchEvidence(record.ActionJson))
+            .Where(evidence => evidence is not null)
+            .Select(evidence => evidence!)
+            .ToDictionary(evidence => evidence.ConfigurationId, evidence => evidence.Observation,
+                StringComparer.Ordinal);
+    }
+
+    private static LabComparison? TryReadComparisonEvidence(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("comparison", out var comparison)
+                || comparison.ValueKind != JsonValueKind.Object)
+                return null;
+            return JsonSerializer.Deserialize<LabRunComparisonEvidence>(json,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Comparison;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static LabRunEffectiveLaunchEvidence? TryReadEffectiveLaunchEvidence(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("observation", out var observation)
+                || observation.ValueKind != JsonValueKind.Object)
+                return null;
+            return JsonSerializer.Deserialize<LabRunEffectiveLaunchEvidence>(json,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string ShortId(string value) => value.Length <= 8 ? value : value[..8];
@@ -224,6 +301,7 @@ public partial class ExperienceRowViewModel : ViewModelBase
     private static string FormatStatus(LabRunStatus status) => status switch
     {
         LabRunStatus.PartiallySucceeded => "Partially succeeded",
+        LabRunStatus.Inconclusive => "Inconclusive",
         _ => status.ToString()
     };
 
@@ -250,6 +328,30 @@ public partial class ExperienceRowViewModel : ViewModelBase
         return $"{baseline} vs {candidate}: " + (comparison.CanShowHeadlineDelta
             ? $"correctness passed; {comparison.Equivalence.Detail}"
             : comparison.RefusalReason);
+    }
+
+    private static string FormatEffectiveLaunches(
+        LabRunCompletionSummary summary,
+        IReadOnlyDictionary<string, EffectiveLaunchObservation> effectiveLaunches)
+    {
+        var configurations = summary.Configurations ?? [];
+        if (configurations.Count == 0)
+            return "Unknown for every configuration; Apply is unavailable.";
+
+        return string.Join("; ", configurations.Select(configuration =>
+        {
+            if (!effectiveLaunches.TryGetValue(configuration.Id, out var observation))
+                return $"{configuration.Id}: Unknown";
+            var state = observation.IsAuditable ? "auditable" : "not auditable";
+            return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
+        }));
+
+        static string Field(EffectiveLaunchObservation observation, string name) =>
+            observation.Fields.FirstOrDefault(field => field.Field == name)?.EffectiveValue ?? "Unknown";
+
+        static string Process(EffectiveLaunchObservation observation) => observation.Process is { } process
+            ? $"PID {process.ProcessId}, argv {string.Join(" ", process.Arguments)}"
+            : "PID Unknown, argv Unknown";
     }
 
     private static string FormatComparison(LabComparison comparison,
@@ -302,13 +404,15 @@ public sealed class LabResultSummaryViewModel
 
         var configurations = (summary.Configurations ?? []).ToDictionary(item => item.Id, StringComparer.Ordinal);
         var decisions = summary.Comparisons ?? [];
-        var comparisons = summary.DetailedComparisons is { Count: > 0 } detailed
+        var comparisons = ExperienceRowViewModel.ReadDetailedComparisons(summary, evidenceRecords) is { Count: > 0 } detailed
             ? detailed.Select(comparison => new LabResultComparisonViewModel(comparison, configurations)).ToArray()
             : decisions
                 .Select(decision => new LabResultComparisonViewModel(ToComparison(decision), configurations))
                 .ToArray();
         Comparisons = comparisons;
         TestedConfigurations = FormatConfigurations(configurations, decisions, summary.Configurations);
+        EffectiveLaunchLabel = FormatEffectiveLaunches(summary,
+            ExperienceRowViewModel.ReadEffectiveLaunches(summary, evidenceRecords));
 
         var eligible = comparisons
             .Where(comparison => comparison.IsEligible)
@@ -335,6 +439,7 @@ public sealed class LabResultSummaryViewModel
     public string FailuresLabel { get; }
     public bool HasFailures => FailuresLabel.Length > 0;
     public string EvidenceLabel { get; }
+    public string EffectiveLaunchLabel { get; }
     public IReadOnlyList<LabResultComparisonViewModel> Comparisons { get; }
 
     private static LabComparison ToComparison(LabComparisonDecision decision) => new()
@@ -348,6 +453,30 @@ public sealed class LabResultSummaryViewModel
         CanShowHeadlineDelta = decision.CanShowHeadlineDelta,
         RefusalReason = decision.RefusalReason
     };
+
+    private static string FormatEffectiveLaunches(
+        LabRunCompletionSummary summary,
+        IReadOnlyDictionary<string, EffectiveLaunchObservation> effectiveLaunches)
+    {
+        var configurations = summary.Configurations ?? [];
+        if (configurations.Count == 0)
+            return "Unknown for every configuration; Apply is unavailable.";
+
+        return string.Join("; ", configurations.Select(configuration =>
+        {
+            if (!effectiveLaunches.TryGetValue(configuration.Id, out var observation))
+                return $"{configuration.Id}: Unknown";
+            var state = observation.IsAuditable ? "auditable" : "not auditable";
+            return $"{configuration.Id}: {state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
+        }));
+
+        static string Field(EffectiveLaunchObservation observation, string name) =>
+            observation.Fields.FirstOrDefault(field => field.Field == name)?.EffectiveValue ?? "Unknown";
+
+        static string Process(EffectiveLaunchObservation observation) => observation.Process is { } process
+            ? $"PID {process.ProcessId}, argv {string.Join(" ", process.Arguments)}"
+            : "PID Unknown, argv Unknown";
+    }
 
     private static string? ReadModelIdentityLabel(EmpiricalExperience experience)
     {
@@ -397,6 +526,7 @@ public sealed class LabResultSummaryViewModel
     private static string FormatStatus(LabRunStatus status) => status switch
     {
         LabRunStatus.PartiallySucceeded => "Partially succeeded",
+        LabRunStatus.Inconclusive => "Inconclusive",
         _ => status.ToString()
     };
 
@@ -501,9 +631,14 @@ public sealed class LabRecipeRowViewModel
     public LabRecipeRowViewModel(LabRecipePlan plan) => Plan = plan;
     public LabRecipePlan Plan { get; }
     public string Label => Plan.Label;
-    public string AvailabilityLabel => Plan.Availability.ToString();
+    public string AvailabilityLabel => LabPresentationText.CapabilityState(Plan.Availability);
+    public string AvailabilityHint => LabPresentationText.CapabilityHint(Plan.Availability);
     public string Detail => Plan.AvailabilityDetail;
     public string CandidateLabel => $"Baseline + {Plan.Candidates.Count} candidate(s), max {Plan.MaximumRunCount} runs";
+    public string BaselineLabel => $"Baseline: context {Plan.Baseline.ContextSize:N0}, {Plan.Baseline.Threads} thread(s), {Plan.Baseline.Slots} slot(s)";
+    public string RequiredCapabilitiesLabel => Plan.RequiredCapabilityIds.Count == 0
+        ? "Required runtime capabilities: none"
+        : $"Required runtime capabilities: {string.Join(", ", Plan.RequiredCapabilityIds)}";
     public bool CanRun => Plan.Availability == CapabilityState.Available;
 }
 
@@ -515,8 +650,10 @@ public partial class LabViewModel : ViewModelBase
     private readonly ILabRecipeService? _recipes;
     private readonly ISettingsService? _settings;
     private readonly ServicesViewModel? _services;
+    private bool _refreshingServerSelection;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly RecommendationApplicationService? _recommendationApplication;
+    private readonly IAudioFeedbackService? _audioFeedback;
     private string? _reviewRecommendationId;
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts)
@@ -528,7 +665,8 @@ public partial class LabViewModel : ViewModelBase
         ILabExperimentService? experiments, ISettingsService? settings, ILabRecipeService? recipes,
         ServicesViewModel? services = null,
         RecommendationDerivationService? recommendationDerivation = null,
-        RecommendationApplicationService? recommendationApplication = null)
+        RecommendationApplicationService? recommendationApplication = null,
+        IAudioFeedbackService? audioFeedback = null)
     {
         _store = store;
         _toasts = toasts;
@@ -538,6 +676,7 @@ public partial class LabViewModel : ViewModelBase
         _services = services;
         _recommendationDerivation = recommendationDerivation;
         _recommendationApplication = recommendationApplication;
+        _audioFeedback = audioFeedback;
         if (_services is not null)
             _services.ServerAvailabilityChanged += OnServicesAvailabilityChanged;
 
@@ -578,8 +717,18 @@ public partial class LabViewModel : ViewModelBase
     private string _restoreStatus = "Not required";
     [ObservableProperty] private string _runtimeIsolation = "No Lab runtime is active.";
     [ObservableProperty] private string _comparisonSummary = string.Empty;
+    [ObservableProperty] private string _effectiveLaunchSummary = "Effective launch evidence: not captured.";
     [ObservableProperty] private string _applyReviewSummary = string.Empty;
     [ObservableProperty] private bool _isRunActive;
+    [ObservableProperty] private string _progressExperimentName = string.Empty;
+    [ObservableProperty] private string _progressCandidateLabel = string.Empty;
+    [ObservableProperty] private string _progressCandidatePosition = string.Empty;
+    [ObservableProperty] private string _progressStage = string.Empty;
+    [ObservableProperty] private int _progressCompleted;
+    [ObservableProperty] private int _progressTotal;
+    [ObservableProperty] private int _progressRemaining;
+    [ObservableProperty] private int _progressPercent;
+    [ObservableProperty] private bool _hasRunProgress;
     [ObservableProperty] private LabRecipeRowViewModel? _selectedRecipe;
     [ObservableProperty] private string _recipePrompt = "Reply with exactly: Hermaeus Lab.";
     [ObservableProperty] private bool _isRecipeRunning;
@@ -605,6 +754,48 @@ public partial class LabViewModel : ViewModelBase
     public string EvidenceEmptyHint => HasAnyEvidence
         ? "Clear or broaden the filters to inspect the evidence already captured."
         : "Run an isolated experiment or guided recipe to capture the first evidence record.";
+    public bool HasConfiguredServers => ConfiguredServers.Count > 0;
+    public bool HasRecipeOptions => RecipeOptions.Count > 0;
+    public bool HasSelectedRecipe => SelectedRecipe is not null;
+    public string RunStatusLabel => LabPresentationText.RunStatus(RunStatus);
+    public string RunNextActionLabel
+    {
+        get
+        {
+            if (IsRunActive)
+                return "Finish the run to capture the comparison, or cancel it to retain the cancellation evidence.";
+            if (IsRecipeRunning)
+                return "The guided recipe is running. Cancel it if needed; captured evidence is retained.";
+            if (RunStatus == "Failed")
+                return "Inspect the failure detail and correct the runtime or model before trying again.";
+            if (RunStatus == "Cancelled")
+                return "The run was cancelled. Review retained evidence or start a new isolated run.";
+            if (RunStatus == "Inconclusive")
+                return "The run completed, but effective runtime configuration was not verified. Review the evidence and rerun after the runtime exposes an auditable receipt.";
+            if (CanReviewCurrentRun)
+                return "A correctness-eligible candidate is ready. Review its exact fields before any Apply.";
+            if (RunStatus is "Succeeded" or "PartiallySucceeded")
+                return "Inspect the Evidence tab for the recorded comparisons and any refusal reasons.";
+            if (!HasConfiguredServers)
+                return "Save a configured non-embedding Chat server on Services before starting Lab.";
+            return "Choose a configured Chat server, set the candidate, then start an isolated run.";
+        }
+    }
+    public string ApplyStateLabel
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(AppliedRecommendationId))
+                return "Applied through Services";
+            if (CanConfirmApply)
+                return "Ready to confirm reviewed settings";
+            if (!string.IsNullOrWhiteSpace(_reviewRecommendationId))
+                return "Recommendation ready for review";
+            return CanReviewCurrentRun
+                ? "Candidate available for review"
+                : "No candidate ready to apply";
+        }
+    }
     private readonly UiBoundCollection<ServerConfig> _configuredServers = [];
     public IReadOnlyList<ServerConfig> ConfiguredServers => _configuredServers;
     public string ConfiguredServerHint => ConfiguredServers.Count switch
@@ -618,8 +809,10 @@ public partial class LabViewModel : ViewModelBase
     public Func<EmpiricalExperience, Task<bool>>? ConfirmRemoval { get; set; }
     public Func<LabApplyReview, Task<bool>>? ConfirmApply { get; set; }
     public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
-    public bool CanStartRun => !IsRunActive && !IsRecipeRunning && !IsBusy;
-    public bool CanRunRecipe => !IsRunActive && !IsRecipeRunning && !IsBusy;
+    public bool CanStartRun => _experiments is not null && SelectedServer is not null
+        && !IsRunActive && !IsRecipeRunning && !IsBusy;
+    public bool CanRunRecipe => _recipes is not null && SelectedServer is not null
+        && SelectedRecipe?.CanRun == true && !IsRunActive && !IsRecipeRunning && !IsBusy;
     public bool CanReviewCurrentRun => GetReviewRun() is
         { Status: LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded } run
         && run.Comparisons.Any(comparison => comparison.CanShowHeadlineDelta);
@@ -627,15 +820,41 @@ public partial class LabViewModel : ViewModelBase
     public bool CanUndoAppliedRecommendation => _recommendationApplication is not null
         && !string.IsNullOrWhiteSpace(AppliedRecommendationId);
 
-    partial void OnSelectedServerChanged(ServerConfig? value)
+    partial void OnSelectedServerChanged(ServerConfig? oldValue, ServerConfig? newValue)
     {
-        if (value is not null) CandidateContextSize = value.ContextSize;
+        // Availability refreshes rebuild snapshots of the same server. They must
+        // not replace the candidate the owner is about to run.
+        if (!_refreshingServerSelection && newValue is not null
+            && !string.Equals(oldValue?.Id, newValue.Id, StringComparison.Ordinal))
+            CandidateContextSize = newValue.ContextSize;
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));
+        NotifyRunCommands();
+    }
+
+    partial void OnSelectedRecipeChanged(LabRecipeRowViewModel? value)
+    {
+        OnPropertyChanged(nameof(HasSelectedRecipe));
+        NotifyRunCommands();
     }
 
     partial void OnIsRunActiveChanged(bool value) => NotifyRunCommands();
     partial void OnIsRecipeRunningChanged(bool value) => NotifyRunCommands();
     partial void OnIsBusyChanged(bool value) => NotifyRunCommands();
+    partial void OnRunStatusChanged(string value)
+    {
+        OnPropertyChanged(nameof(RunStatusLabel));
+        OnPropertyChanged(nameof(RunNextActionLabel));
+    }
+    partial void OnProgressCompletedChanged(int value) => OnPropertyChanged(nameof(ProgressCountLabel));
+    partial void OnProgressTotalChanged(int value) => OnPropertyChanged(nameof(ProgressCountLabel));
+    partial void OnProgressRemainingChanged(int value) => OnPropertyChanged(nameof(ProgressRemainingLabel));
+    partial void OnRestoreStatusChanged(string value) => OnPropertyChanged(nameof(RunNextActionLabel));
+    partial void OnAppliedRecommendationIdChanged(string value) => OnPropertyChanged(nameof(ApplyStateLabel));
+
+    public string ProgressCountLabel => ProgressTotal > 0
+        ? $"{ProgressCompleted} of {ProgressTotal} workload step(s) completed"
+        : "No workload steps completed";
+    public string ProgressRemainingLabel => $"{ProgressRemaining} remaining";
 
     private void NotifyRunCommands()
     {
@@ -643,6 +862,8 @@ public partial class LabViewModel : ViewModelBase
         RunSelectedRecipeCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanStartRun));
         OnPropertyChanged(nameof(CanRunRecipe));
+        OnPropertyChanged(nameof(RunNextActionLabel));
+        OnPropertyChanged(nameof(ApplyStateLabel));
     }
 
     private void OnServicesAvailabilityChanged(object? sender, EventArgs e) => RunOnUi(RefreshConfiguredServers);
@@ -654,17 +875,30 @@ public partial class LabViewModel : ViewModelBase
             ? _settings?.Settings.ManagedServers.Where(server => !server.EmbeddingsMode)
             : _services.Servers.Where(server => !server.EmbeddingsMode).Select(server => server.BuildConfig());
 
-        _configuredServers.Clear();
-        if (servers is not null)
+        // A bound picker writes null back when its items are cleared. Treat
+        // publication as one refresh so that transient selection cannot reset
+        // the owner's candidate during source suspension or restoration.
+        _refreshingServerSelection = true;
+        try
         {
-            foreach (var server in servers)
-                _configuredServers.Add(server);
-        }
+            _configuredServers.Clear();
+            if (servers is not null)
+            {
+                foreach (var server in servers)
+                    _configuredServers.Add(server);
+            }
 
-        SelectedServer = _configuredServers.FirstOrDefault(server => string.Equals(server.Id, selectedId, StringComparison.Ordinal))
-            ?? _configuredServers.FirstOrDefault();
+            SelectedServer = _configuredServers.FirstOrDefault(server => string.Equals(server.Id, selectedId, StringComparison.Ordinal))
+                ?? _configuredServers.FirstOrDefault();
+        }
+        finally { _refreshingServerSelection = false; }
+
+        if (SelectedServer is { } selected && !string.Equals(selected.Id, selectedId, StringComparison.Ordinal))
+            CandidateContextSize = selected.ContextSize;
         OnPropertyChanged(nameof(ConfiguredServerHint));
+        OnPropertyChanged(nameof(HasConfiguredServers));
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));
+        OnPropertyChanged(nameof(RunNextActionLabel));
     }
 
     partial void OnSelectedExperienceChanged(ExperienceRowViewModel? value)
@@ -674,6 +908,7 @@ public partial class LabViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(CanReviewCurrentRun));
         OnPropertyChanged(nameof(CanConfirmApply));
+        OnPropertyChanged(nameof(ApplyStateLabel));
         if (value is null) return;
         CorrectionOutcome = value.Experience.Outcome.Outcome.ToString();
         CorrectionDetail = value.Experience.Outcome.Detail;
@@ -807,6 +1042,7 @@ public partial class LabViewModel : ViewModelBase
             RecipeOptions.Clear();
             foreach (var plan in plans) RecipeOptions.Add(new LabRecipeRowViewModel(plan));
             SelectedRecipe = RecipeOptions.FirstOrDefault(row => row.CanRun) ?? RecipeOptions.FirstOrDefault();
+            OnPropertyChanged(nameof(HasRecipeOptions));
             StatusMessage = RecipeOptions.Count == 0 ? "No recipes are available for this runtime." : $"{RecipeOptions.Count} recipe(s) inspected.";
         }
         catch (Exception ex) { _toasts.Show("Could not inspect Lab recipes", ex.Message, ToastKind.Error, 5000); }
@@ -835,6 +1071,9 @@ public partial class LabViewModel : ViewModelBase
             StatusMessage = "Another Lab run is already active.";
             return;
         }
+        var source = SelectedServer;
+        var plan = SelectedRecipe.Plan;
+        var prompt = RecipePrompt;
         _recipeCts = new CancellationTokenSource();
         _recipeCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         IsRecipeRunning = true;
@@ -843,20 +1082,27 @@ public partial class LabViewModel : ViewModelBase
         {
             if (_suspendedSourceServers.Count == 0)
                 RestoreStatus = "Not required";
-            await SuspendSelectedSourceAsync();
-            _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt, _recipeCts.Token);
+            await SuspendSelectedSourceAsync(source);
+            var progress = new Progress<LabRunProgress>(value => RunOnUi(() => ApplyRunProgress(value)));
+            _currentRun = await _recipes.RunAsync(plan, source, prompt,
+                _recipeCts.Token, progress);
             ShowCompletedRun(_currentRun);
             TradeoffSummary = BuildTradeoffSummary(_currentRun);
-            var failureMessage = _currentRun.Status == LabRunStatus.Failed
-                ? $"Lab recipe failed: {_currentRun.Failures.FirstOrDefault() ?? "The Lab run failed without a detail."}"
-                : null;
+            var failureMessage = _currentRun.Status switch
+            {
+                LabRunStatus.Failed => $"Lab recipe failed: {_currentRun.Failures.FirstOrDefault() ?? "The Lab run failed without a detail."}",
+                LabRunStatus.Inconclusive => "Lab recipe completed, but effective runtime configuration was not verified. No recommendation or Apply is available.",
+                _ => null
+            };
             await RefreshEvidenceCoreAsync(failureMessage);
+            PublishLongOperationCompletion();
         }
         catch (OperationCanceledException) when (_recipeCts?.IsCancellationRequested == true)
         {
             RunStatus = "Cancelled";
             StatusMessage = "Lab recipe cancelled; any captured evidence was retained.";
             await RefreshEvidenceCoreAsync();
+            PublishLongOperationCompletion();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -870,6 +1116,7 @@ public partial class LabViewModel : ViewModelBase
                 _toasts.Show("Could not refresh Lab evidence", refreshEx.Message, ToastKind.Warning, 5000);
                 StatusMessage = failureMessage;
             }
+            PublishLongOperationCompletion();
         }
         finally
         {
@@ -883,17 +1130,17 @@ public partial class LabViewModel : ViewModelBase
         }
     }
 
-    public async Task ShutdownAsync()
+    public async Task ShutdownAsync(CancellationToken ct = default)
     {
         _recipeCts?.Cancel();
         if (_recipeCompletion?.Task is { } recipeCompletion)
-            await Task.WhenAny(recipeCompletion, Task.Delay(TimeSpan.FromSeconds(10)));
+            await Task.WhenAny(recipeCompletion, Task.Delay(TimeSpan.FromSeconds(10), ct));
 
         if (_experiments is not null && _currentRun?.Status == LabRunStatus.Running)
         {
             try
             {
-                _currentRun = await _experiments.CancelAsync(_currentRun.Id);
+                _currentRun = await _experiments.CancelAsync(_currentRun.Id, ct);
                 ShowCompletedRun(_currentRun);
             }
             catch (Exception ex)
@@ -935,19 +1182,21 @@ public partial class LabViewModel : ViewModelBase
             StatusMessage = "Another Lab run is already active.";
             return;
         }
+        var source = SelectedServer;
+        var baseline = ConfigurationFrom(source, "baseline", "Baseline");
+        var candidate = baseline with { Id = "candidate-1", Label = "Candidate", ContextSize = CandidateContextSize };
+        var experimentName = ExperimentName;
         IsBusy = true;
         try
         {
             if (_suspendedSourceServers.Count == 0)
                 RestoreStatus = "Not required";
-            await SuspendSelectedSourceAsync();
-            var baseline = ConfigurationFrom(SelectedServer, "baseline", "Baseline");
-            var candidate = baseline with { Id = "candidate-1", Label = "Candidate", ContextSize = CandidateContextSize };
+            await SuspendSelectedSourceAsync(source);
             var definition = await _experiments.CreateDefinitionAsync(
-                ExperimentName, "isolated-runtime-v1", SelectedServer, baseline, [candidate], 1,
+                experimentName, "isolated-runtime-v1", source, baseline, [candidate], 1,
                 LabCorrectnessRequirement.ExactEquivalence);
             DefinitionPreview = definition.CanonicalJson();
-            _currentRun = await _experiments.StartAsync(definition, SelectedServer);
+            _currentRun = await _experiments.StartAsync(definition, source);
             RunStatus = _currentRun.Status.ToString();
             IsRunActive = _currentRun.Status == LabRunStatus.Running;
             RuntimeIsolation = _currentRun.TemporaryPort is int port
@@ -1042,6 +1291,7 @@ public partial class LabViewModel : ViewModelBase
             ShowCompletedRun(_currentRun);
             await RefreshAsync();
             await RestoreSuspendedSourceAsync();
+            PublishLongOperationCompletion();
         }
         catch (Exception ex) { _toasts.Show("Could not complete Lab run", ex.Message, ToastKind.Error, 5000); }
     }
@@ -1056,6 +1306,7 @@ public partial class LabViewModel : ViewModelBase
             ShowCompletedRun(_currentRun);
             await RefreshAsync();
             await RestoreSuspendedSourceAsync();
+            PublishLongOperationCompletion();
         }
         catch (Exception ex) { _toasts.Show("Could not cancel Lab run", ex.Message, ToastKind.Error, 5000); }
     }
@@ -1068,6 +1319,7 @@ public partial class LabViewModel : ViewModelBase
         {
             ApplyReviewSummary = "This historical evidence is read-only. Review the current in-memory run before applying settings.";
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
             return;
         }
         try
@@ -1079,6 +1331,7 @@ public partial class LabViewModel : ViewModelBase
             {
                 ApplyReviewSummary = "The completed Lab run has no candidate to review.";
                 OnPropertyChanged(nameof(CanConfirmApply));
+                OnPropertyChanged(nameof(ApplyStateLabel));
                 return;
             }
 
@@ -1141,11 +1394,13 @@ public partial class LabViewModel : ViewModelBase
                     + (_reviewRecommendationId is null ? string.Empty : Environment.NewLine + $"Recommendation {_reviewRecommendationId} is ready for explicit Apply.")
                 : _applyReview.RefusalReason;
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
         }
         catch (Exception ex)
         {
             _applyReview = null;
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
             _toasts.Show("Could not review Lab result", ex.Message, ToastKind.Error, 5000);
         }
     }
@@ -1163,6 +1418,7 @@ public partial class LabViewModel : ViewModelBase
         {
             ApplyReviewSummary = "The selected evidence changed while Apply was being confirmed. Review the current selection again.";
             OnPropertyChanged(nameof(CanConfirmApply));
+            OnPropertyChanged(nameof(ApplyStateLabel));
             return;
         }
 
@@ -1184,6 +1440,7 @@ public partial class LabViewModel : ViewModelBase
             _reviewRecommendationId = null;
             OnPropertyChanged(nameof(CanConfirmApply));
             OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
+            OnPropertyChanged(nameof(ApplyStateLabel));
         }
         catch (Exception ex) { _toasts.Show("Could not apply Lab result", ex.Message, ToastKind.Error, 5000); }
     }
@@ -1201,6 +1458,7 @@ public partial class LabViewModel : ViewModelBase
             AppliedRecommendationId = string.Empty;
             ApplyReviewSummary = "The reviewed settings were restored. Any running server remains unchanged.";
             OnPropertyChanged(nameof(CanUndoAppliedRecommendation));
+            OnPropertyChanged(nameof(ApplyStateLabel));
         }
         catch (Exception ex) { _toasts.Show("Could not undo Lab result", ex.Message, ToastKind.Error, 5000); }
     }
@@ -1220,13 +1478,67 @@ public partial class LabViewModel : ViewModelBase
     {
         RunStatus = run.Status.ToString();
         IsRunActive = false;
+        HasRunProgress = true;
+        ProgressExperimentName = run.Definition.Name;
+        ProgressCandidateLabel = "Finalizing";
+        ProgressCandidatePosition = $"{run.Definition.Candidates.Count + 1} of {run.Definition.Candidates.Count + 1}";
+        ProgressStage = run.Status.ToString();
+        ProgressRemaining = 0;
+        ProgressPercent = 100;
         OnPropertyChanged(nameof(CanReviewCurrentRun));
         RuntimeIsolation = "The dedicated Lab runtime is stopped and its ownership record is cleaned up.";
+        EffectiveLaunchSummary = FormatEffectiveLaunches(run);
         ComparisonSummary = run.Comparisons.Count == 0
             ? "No controlled comparison was produced."
-            : string.Join(Environment.NewLine, run.Comparisons.Select(comparison => comparison.CanShowHeadlineDelta
+                : string.Join(Environment.NewLine, run.Comparisons.Select(comparison => comparison.CanShowHeadlineDelta
                 ? $"{comparison.CandidateConfigurationId}: controlled and correctness-gated"
                 : $"{comparison.CandidateConfigurationId}: {comparison.RefusalReason}"));
+    }
+
+    private void ApplyRunProgress(LabRunProgress progress)
+    {
+        ProgressExperimentName = progress.ExperimentName;
+        ProgressCandidateLabel = progress.CandidateLabel;
+        ProgressCandidatePosition = progress.CandidateTotal > 0
+            ? $"{Math.Clamp(progress.CandidateIndex, 0, progress.CandidateTotal)} of {progress.CandidateTotal}"
+            : string.Empty;
+        ProgressStage = progress.Stage;
+        ProgressCompleted = Math.Max(0, progress.Completed);
+        ProgressTotal = Math.Max(0, progress.Total);
+        ProgressRemaining = Math.Max(0, progress.Remaining);
+        ProgressPercent = progress.Percent;
+        HasRunProgress = true;
+        if (progress.TerminalStatus is { } terminal)
+            RunStatus = terminal.ToString();
+        else if (IsRecipeRunning)
+            RunStatus = LabRunStatus.Running.ToString();
+    }
+
+    private static string FormatEffectiveLaunches(LabRunSnapshot run)
+    {
+        var configurations = run.Definition.Candidates.Prepend(run.Definition.Baseline).ToArray();
+        if (configurations.Length == 0)
+            return "Effective launch evidence: Unknown; Apply is unavailable.";
+
+        return "Effective launch evidence: " + string.Join("; ", configurations.Select(configuration =>
+        {
+            if (!run.EffectiveLaunches.TryGetValue(configuration.Id, out var observation))
+                return $"{configuration.Id}=Unknown";
+            var state = observation.IsAuditable ? "auditable" : "not auditable";
+            return $"{configuration.Id}={state}, context {Field(observation, "context")}, GPU {Field(observation, "gpu_layers")}, slots {Field(observation, "slots")}, {Process(observation)}";
+        }));
+
+        static string Field(EffectiveLaunchObservation observation, string name) =>
+            observation.Fields.FirstOrDefault(field => field.Field == name)?.EffectiveValue ?? "Unknown";
+
+        static string Process(EffectiveLaunchObservation observation) => observation.Process is { } process
+            ? $"PID {process.ProcessId}, argv {string.Join(" ", process.Arguments)}"
+            : "PID Unknown, argv Unknown";
+    }
+
+    private void PublishLongOperationCompletion()
+    {
+        _ = _audioFeedback?.PublishAsync(AudioFeedbackEventKind.LongOperationCompleted);
     }
 
     private static string BuildTradeoffSummary(LabRunSnapshot run)
@@ -1291,17 +1603,17 @@ public partial class LabViewModel : ViewModelBase
     private static LabConfiguration ConfigurationFrom(ServerConfig source, string id, string label)
         => LabConfigurationMapper.FromServer(source, id, label);
 
-    private async Task SuspendSelectedSourceAsync()
+    private async Task SuspendSelectedSourceAsync(ServerConfig sourceConfiguration)
     {
-        if (_services is null || SelectedServer is null || _suspendedSourceServers.Count > 0)
+        if (_services is null || _suspendedSourceServers.Count > 0)
             return;
 
-        var source = _services.Servers.FirstOrDefault(server => server.Id == SelectedServer.Id);
+        var source = _services.Servers.FirstOrDefault(server => server.Id == sourceConfiguration.Id);
         if (source is null)
             return;
 
         _suspendedSourceConfigurationFingerprints[source.Id] = JsonSerializer.Serialize(source.BuildConfig());
-        _suspendedSourceServers = await _services.SuspendRunningServersAsync([SelectedServer.Id]);
+        _suspendedSourceServers = await _services.SuspendRunningServersAsync([sourceConfiguration.Id]);
         if (_suspendedSourceServers.Count > 0)
         {
             RestoreStatus = "Pending";

@@ -41,6 +41,16 @@ public sealed class ServerLaunchArgumentTests
     }
 
     [Fact]
+    public void Lab_runtime_properties_endpoint_is_transient_and_opt_in()
+    {
+        var lab = Args(new ServerConfig { EnableRuntimePropertiesEndpoint = true });
+        var ordinary = Args(new ServerConfig());
+
+        Assert.Contains("--props", lab);
+        Assert.DoesNotContain("--props", ordinary);
+    }
+
+    [Fact]
     public void Default_launch_pins_single_slot_and_cache_reuse()
     {
         var args = Args(new ServerConfig());

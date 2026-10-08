@@ -339,6 +339,10 @@ public sealed class AgentScenarioRunnerTests
     public async Task Cancellation_mid_suite_propagates_after_cleanup()
     {
         using var temp = new TempDir();
+        var sandboxParent = Path.Combine(Path.GetTempPath(), "hermaeus-scenario-runs");
+        var beforeSandboxes = Directory.Exists(sandboxParent)
+            ? Directory.EnumerateDirectories(sandboxParent).OrderBy(path => path, StringComparer.Ordinal).ToArray()
+            : [];
         var settings = NewIsolatedSettings(temp);
         var workspaceDir1 = temp.PathFor("scenario-src-1/workspace");
         var workspaceDir2 = temp.PathFor("scenario-src-2/workspace");
@@ -355,6 +359,11 @@ public sealed class AgentScenarioRunnerTests
 
         await ThrowsAsync<OperationCanceledException>(() =>
             runner.RunSuiteAsync([scenario1, scenario2], "test-model", null, cts.Token));
+
+        var afterSandboxes = Directory.Exists(sandboxParent)
+            ? Directory.EnumerateDirectories(sandboxParent).OrderBy(path => path, StringComparer.Ordinal).ToArray()
+            : [];
+        Assert.Equal(beforeSandboxes, afterSandboxes);
     }
 
     // -- r15 orchestration scenarios (03-scenarios-and-hardening.md 3.1) --

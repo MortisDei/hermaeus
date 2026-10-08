@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Hermaeus.Desktop;
 
 /// <summary>
@@ -45,6 +47,29 @@ internal static class SingleInstanceGuard
         catch (UnauthorizedAccessException) { return false; }
         catch (ArgumentException) { return false; }
         catch (NotSupportedException) { return false; }
+    }
+
+    /// <summary>
+    /// The replacement process may start before the old process has released
+    /// its lock handle. Retry only for the explicit internal restart handoff;
+    /// normal launches remain fail-fast so two independent owners never race
+    /// into the same data root.
+    /// </summary>
+    internal static bool TryAcquireForHandoff(TimeSpan timeout, string? lockFilePath = null)
+    {
+        if (timeout <= TimeSpan.Zero)
+            return false;
+
+        var deadline = Stopwatch.StartNew();
+        do
+        {
+            if (TryAcquire(lockFilePath))
+                return true;
+            Thread.Sleep(TimeSpan.FromMilliseconds(50));
+        }
+        while (deadline.Elapsed < timeout);
+
+        return false;
     }
 
     internal static void Release()

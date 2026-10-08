@@ -159,9 +159,10 @@ public sealed class RagEvalService
         var retrievalRank = FindFirstExpectedRank(retrieved, test.ExpectedSources);
         var keywordHit = !test.AnswerKeywords.Any()
                          || test.AnswerKeywords.All(k => answerText.Contains(k, StringComparison.OrdinalIgnoreCase));
-        var refusalCorrect = !test.ShouldRefuse || LooksLikeRefusal(answerText);
+        var refusal = RefusalEvaluator.Evaluate(answerText, test.ShouldRefuse);
+        var refusalCorrect = refusal.IsCorrect;
         var citationHit = HasCitation(answerText, retrieved, test.ExpectedSources);
-        var unsupportedAnswer = !test.ShouldRefuse && !refusalCorrect && hitCount == 0;
+        var unsupportedAnswer = !test.ShouldRefuse && !refusal.DetectedRefusal && hitCount == 0;
 
         return new RagEvalResult
         {
@@ -170,6 +171,8 @@ public sealed class RagEvalService
             RetrievalHit = hitCount > 0,
             KeywordHit = keywordHit,
             RefusalCorrect = refusalCorrect,
+            RefusalAssessment = refusal.Classification,
+            RefusalEvaluatorVersion = refusal.EvaluatorVersion,
             Passed = hitCount > 0 && keywordHit && refusalCorrect,
             LatencyMs = sw.Elapsed.TotalMilliseconds,
             GroundingScore = RagQueryService.GroundingScore(answerText, context),
@@ -231,6 +234,7 @@ public sealed class RagEvalService
             md.AppendLine($"- Retrieval hit: {result.RetrievalHit}");
             md.AppendLine($"- Keyword hit: {result.KeywordHit}");
             md.AppendLine($"- Refusal correct: {result.RefusalCorrect}");
+            md.AppendLine($"- Refusal assessment: {result.RefusalAssessment} ({result.RefusalEvaluatorVersion})");
             md.AppendLine($"- Recall@K: {result.RecallAtK:P0}");
             md.AppendLine($"- MRR: {result.ReciprocalRank:F3}");
             md.AppendLine($"- Citation hit: {result.CitationHit}");
@@ -285,12 +289,6 @@ public sealed class RagEvalService
         return expectedSources.Where(s => !string.IsNullOrWhiteSpace(s)).Any(expectedSource =>
             answer.Contains(expectedSource, StringComparison.OrdinalIgnoreCase));
     }
-
-    private static bool LooksLikeRefusal(string answer) =>
-        answer.Contains("not enough", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("does not contain", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("cannot answer", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("insufficient", StringComparison.OrdinalIgnoreCase);
 
     private static string BuildNotes(bool retrievalHit, bool keywordHit, bool refusalCorrect)
     {

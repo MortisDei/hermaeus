@@ -115,6 +115,16 @@ public sealed class RuntimeIdentityAndCapabilityTests
     }
 
     [Fact]
+    public void Empty_model_path_is_an_unknown_identity_instead_of_a_path_exception()
+    {
+        var identity = RuntimeIdentityFactory.CreateModelIdentity(string.Empty, null);
+
+        Assert.Equal(ModelIdentityStrength.Unknown, identity.Strength);
+        Assert.Equal(IdentityCompleteness.Incomplete, identity.Completeness);
+        Assert.Null(identity.FileSizeBytes);
+    }
+
+    [Fact]
     public void V2_fingerprint_is_incomplete_when_any_component_is_incomplete()
     {
         var fingerprint = Fingerprint(Runtime() with { Completeness = IdentityCompleteness.Incomplete });
@@ -349,7 +359,7 @@ public sealed class RuntimeIdentityAndCapabilityTests
         var modelPath = temp.PathFor("model.gguf");
         var executablePath = temp.PathFor("llama-server.exe");
         File.WriteAllText(modelPath, "model fixture");
-        File.WriteAllText(executablePath, "runtime fixture");
+        Helpers.WriteRunnableLlamaProbeFixture(executablePath);
 
         var writer = new SettingsService(settingsPath);
         var candidate = writer.Settings.Clone();
@@ -445,7 +455,7 @@ public sealed class RuntimeIdentityAndCapabilityTests
         var modelPath = temp.PathFor("model.gguf");
         var executablePath = temp.PathFor("llama-server.exe");
         File.WriteAllText(modelPath, "model fixture");
-        File.WriteAllText(executablePath, "runtime fixture");
+        Helpers.WriteRunnableLlamaProbeFixture(executablePath);
         var logs = new RuntimeLogService(settings);
         var capability = new LocalModelCapabilityService(settings, logs);
 
@@ -471,7 +481,7 @@ public sealed class RuntimeIdentityAndCapabilityTests
         var modelPath = temp.PathFor("model.gguf");
         var executablePath = temp.PathFor("llama-server.exe");
         await File.WriteAllTextAsync(modelPath, "model fixture");
-        await File.WriteAllTextAsync(executablePath, "runtime fixture");
+        Helpers.WriteRunnableLlamaProbeFixture(executablePath);
         var capability = new LocalModelCapabilityService(settings, new RuntimeLogService(settings));
 
         var result = await capability.ProbeWithDriftAsync(modelPath, executablePath, "{}");

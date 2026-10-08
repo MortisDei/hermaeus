@@ -130,7 +130,18 @@ public partial class SettingsView : UserControl
             var dialog = new ConfirmActionDialog(
                 "Clear artwork cache",
                 "Remove cached Hugging Face artwork only? Downloaded models and model manifests will not be changed.");
-            return await dialog.ShowDialog<bool>(owner);
+                return await dialog.ShowDialog<bool>(owner);
+        };
+
+        vm.Ui.RequestPetManifestPicker = async () =>
+        {
+            var files = await PickFileAsync(
+                "Choose ChatGPT Pet manifest",
+                [
+                    new FilePickerFileType("ChatGPT Pet v2 manifest") { Patterns = ["pet.json"] },
+                    new FilePickerFileType("JSON files") { Patterns = ["*.json"] }
+                ]);
+            return files.Count > 0 ? files[0].Path.LocalPath : null;
         };
 
         // Voice's own file pickers (Python/script/model/output/voice-sample) are wired

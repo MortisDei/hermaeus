@@ -24,7 +24,7 @@ internal static class SingleInstanceGuardTests
         // A second exclusive open while the first handle is still live stands
         // in for a second Hermaeus process launching against the same lock.
         // The application must exit before constructing a window or touching
-        // any owner state. There is deliberately no activation IPC path.
+        // any owner state. Activation IPC does not acquire or release this lock.
         FileStream? contender = null;
         try
         {
@@ -51,7 +51,7 @@ internal static class SingleInstanceGuardTests
         True(SingleInstanceGuard.TryAcquire(lockPath), "the first acquire should succeed");
         SingleInstanceGuard.Release();
 
-        True(SingleInstanceGuard.TryAcquire(lockPath),
+        True(SingleInstanceGuard.TryAcquireForHandoff(TimeSpan.FromMilliseconds(100), lockPath),
             "acquiring again after Release should succeed, exactly like relaunching once Hermaeus has fully exited");
         SingleInstanceGuard.Release();
         return Task.CompletedTask;

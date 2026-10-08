@@ -20,6 +20,10 @@
                 <TextBlock Text="Services" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4" />
                 <TextBlock FontSize="13" Opacity="0.45" TextWrapping="Wrap"
                            Text="Manage llama-server processes. Paths and config are saved per card with Save Config. Auto-start launches on Hermaeus startup if model path is set." />
+                <TextBlock Text="{Binding DoctorNavigationStatus}"
+                           IsVisible="{Binding DoctorNavigationStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                           FontSize="12" Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                           TextWrapping="Wrap" />
             </StackPanel>
 
             <Border Classes="settings-card" Padding="16" IsVisible="{Binding HasRecommendations}">
@@ -44,6 +48,7 @@
                                         <TextBlock Text="{Binding EvidenceSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding TradeoffSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding FreshnessSummary}" FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding LastDecisionMessage}" IsVisible="{Binding HasDecisionMessage}" FontSize="12" TextWrapping="Wrap" />
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <Button Content="Apply" Command="{Binding ApplyCommand}" IsVisible="{Binding CanApply}" Padding="12,5" />
                                             <Button Content="Undo" Command="{Binding UndoCommand}" IsVisible="{Binding CanUndo}" Padding="12,5" />
@@ -156,7 +161,9 @@
                 </StackPanel>
             </Border>
 
-            <ListBox ItemsSource="{Binding Servers}"
+            <ListBox x:Name="ServerList"
+                     ItemsSource="{Binding Servers}"
+                     SelectedItem="{Binding SelectedServer, Mode=TwoWay}"
                      Background="Transparent"
                      BorderThickness="0">
                 <ListBox.ItemsPanel>
@@ -381,6 +388,7 @@
                                                        ToolTip.Tip="Port" />
                                         <NumericUpDown Grid.Column="1"
                                                        Value="{Binding ContextSize}"
+                                                       Classes="doctor-context-size"
                                                        Minimum="512" Maximum="131072"
                                                        Increment="512"
                                                        Width="132" HorizontalAlignment="Left"
@@ -390,6 +398,7 @@
                                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
                                             <ComboBox ItemsSource="{Binding GpuPlacementOptions}"
                                                       SelectedItem="{Binding GpuPlacementSelection}"
+                                                      Classes="doctor-gpu-placement"
                                                       Width="96"
                                                       FontSize="12"
                                                       IsEnabled="{Binding CanEdit}"
@@ -636,6 +645,7 @@
                                             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
                                                 <ComboBox ItemsSource="{Binding DetectedDraftModelPaths}"
                                                           SelectedItem="{Binding DraftModelPath}"
+                                                          Classes="doctor-draft-model"
                                                           PlaceholderText="No draft model"
                                                           HorizontalAlignment="Stretch"
                                                           FontSize="12" CornerRadius="6"
@@ -716,10 +726,16 @@
                                             Content="Save Config"
                                             Padding="12,5" CornerRadius="6" FontSize="12" />
                                     <Button Command="{Binding AutoTuneCommand}"
+                                            IsVisible="{Binding !IsAutoTuning}"
                                             IsEnabled="{Binding CanEdit}"
                                             Content="Auto Tune"
                                             Padding="12,5" CornerRadius="6" FontSize="12"
                                             ToolTip.Tip="Probe llama.cpp auto-fit for this model/GPU and set the fitted GPU layer count." />
+                                    <Button Command="{Binding CancelAutoTuneCommand}"
+                                            IsVisible="{Binding IsAutoTuning}"
+                                            Content="Cancel Tune"
+                                            Padding="12,5" CornerRadius="6" FontSize="12"
+                                            ToolTip.Tip="Cancel the managed-runtime auto-tune operation and release its probe resources." />
                                 </StackPanel>
 
                                 <TextBlock IsVisible="{Binding HasUnsavedChanges}"

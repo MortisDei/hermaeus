@@ -77,6 +77,17 @@ APP_DIR="$PACKAGE_DIR/app"
 ICON_DIR="$PACKAGE_DIR/icons"
 LOCALAPI_DIR="$APP_DIR/LocalApi"
 INTEGRATION_DIR="$APP_DIR/integration"
+BUILD_SUCCEEDED="false"
+
+cleanup_publish_output() {
+  if [[ "$BUILD_SUCCEEDED" != "true" ]]; then
+    rm -rf -- "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$ARCHIVE" "$CHECKSUM"
+  fi
+}
+
+trap cleanup_publish_output EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ "$SKIP_RESTORE" == "false" ]]; then
   echo "Restoring..."
@@ -175,12 +186,21 @@ chmod +x "$INSTALL_DIR/app/hermaeus-app" "$INSTALL_DIR/app/install-hermaeus" "$I
 chmod +x "$INSTALL_DIR/app/integration/install-desktop.sh" "$INSTALL_DIR/app/integration/uninstall-desktop.sh"
 cp "$INSTALL_DIR/icons/hermaeus-app.png" "$PNG_ICON_FILE"
 
+desktop_exec_escape() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '"%s"' "$value"
+}
+
+DESKTOP_EXEC="$(desktop_exec_escape "$INSTALL_DIR/Hermaeus")"
+
 cat > "$DESKTOP_FILE" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Hermaeus
 Comment=Local-first AI workspace
-Exec=$INSTALL_DIR/Hermaeus
+Exec=$DESKTOP_EXEC
 Icon=hermaeus
 Terminal=false
 Categories=Utility;Development;
@@ -246,6 +266,8 @@ echo "Writing $CHECKSUM..."
   cd "$DIST_DIR"
   sha256sum "$PACKAGE_NAME.tar.gz" > "$PACKAGE_NAME.tar.gz.sha256"
 )
+
+BUILD_SUCCEEDED="true"
 
 echo "Package ready:"
 echo "  $PACKAGE_DIR"

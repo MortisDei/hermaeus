@@ -14,7 +14,7 @@ public enum AudioFeedbackEventKind
 
 public sealed class AudioFeedbackSettings
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
     public int Volume { get; set; } = 50;
     public bool Muted { get; set; }
     public bool SuppressWhileTtsSpeaking { get; set; } = true;
@@ -24,6 +24,9 @@ public sealed class AudioFeedbackSettings
     {
         if (EventEnabled.TryGetValue(kind.ToString(), out var enabled))
             return enabled;
-        return kind is AudioFeedbackEventKind.ManagedRuntimeFailed;
+        return kind is AudioFeedbackEventKind.TaskNeedsApproval
+            or AudioFeedbackEventKind.TaskCompleted
+            or AudioFeedbackEventKind.TaskFailed
+            or AudioFeedbackEventKind.ManagedRuntimeFailed;
     }
 }

@@ -72,13 +72,19 @@ public sealed class AgentTaskContinuityViewModelTests
         var taskId = vm.CurrentTask!.TaskId;
         Assert.Equal(AgentTaskStatus.Complete, vm.CurrentTask!.Status);
         Assert.True(vm.CanShowNewTaskButton);
+        Assert.True(vm.HasTaskArtifacts);
+
+        string? openedPath = null;
+        vm.RequestOpenFolder = path => openedPath = path;
+        vm.OpenTaskArtifactsCommand.Execute(null);
+        Assert.Equal(store.GetTaskDirectory(taskId), openedPath);
 
         vm.NewTaskCommand.Execute(null);
 
         Assert.Null(vm.CurrentTask);
         Assert.Equal(string.Empty, vm.GoalText);
         Assert.Equal(string.Empty, vm.ReplyText);
-        Assert.Equal(string.Empty, vm.StatusMessage);
+        Assert.Contains("New task ready", vm.StatusMessage, StringComparison.Ordinal);
         Assert.False(vm.IsError);
 
         var stillPersisted = await store.LoadAsync(taskId);

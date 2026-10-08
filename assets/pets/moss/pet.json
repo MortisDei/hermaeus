@@ -1,0 +1,7 @@
+{
+  "id": "moss",
+  "displayName": "Moss",
+  "description": "A compact pixel-art green moss creature with a slightly grumpy face, tiny glowing eyes, and frantic typing when it works.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
+}

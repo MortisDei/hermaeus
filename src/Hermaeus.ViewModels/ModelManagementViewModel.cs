@@ -23,6 +23,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly HuggingFaceArtworkService _artwork;
     private readonly ModelDownloadService _downloader;
     private readonly ModelInventoryService _inventory;
+    private readonly IManagedRuntimeTuningService? _runtimeTuning;
     private readonly IActivityRecorder? _activity;
     private readonly IRuntimeLogService? _runtimeLogs;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
@@ -31,6 +32,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly List<ModelProfileItemViewModel> _allModels = [];
     private readonly HashSet<string> _reportedArtworkOutcomes = new(StringComparer.Ordinal);
     private readonly object _artworkReportLock = new();
+    private HardwareProfile? _hardwareProfile;
     private CancellationTokenSource? _hfSelectionCts;
     private long _hfSelectionGeneration;
 
@@ -60,6 +62,7 @@ public partial class ModelManagementViewModel : ObservableObject
     public bool HasSelectedProfile => SelectedProfile is not null;
 
     private volatile bool _isTuneInProgress;
+    private CancellationTokenSource? _autoTuneCts;
     private CancellationTokenSource? _autoTuneAllCts;
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
@@ -268,10 +271,12 @@ public partial class ModelManagementViewModel : ObservableObject
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null,
-        ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null, IRuntimeLogService? runtimeLogs = null)
+        ModelInventoryService? inventory = null, HuggingFaceArtworkService? artwork = null,
+        IRuntimeLogService? runtimeLogs = null, IManagedRuntimeTuningService? runtimeTuning = null)
     {
         _activity = activity;
         _runtimeLogs = runtimeLogs;
+        _runtimeTuning = runtimeTuning;
         _llm = llm;
         _profiles = profiles;
         _toasts = toasts;
@@ -649,7 +654,7 @@ public partial class ModelManagementViewModel : ObservableObject
         item.ApplySavedState();
         lock (_modelCacheLock)
             _profiles.ApplyProfiles(_modelCache);
-        _toasts.Show("Model profile saved", $"Updated metadata for {item.DisplayName}.", ToastKind.Success);
+        _toasts.Show("Model profile saved", $"Updated metadata for {item.EffectiveName}.", ToastKind.Success);
     }
 
     [RelayCommand]
@@ -926,6 +931,79 @@ public partial class ModelManagementViewModel : ObservableObject
             ? existing.ContextSize
             : item.DefaultContextSize ?? (_settings.Settings.ManagedServers.FirstOrDefault()?.ContextSize ?? 4096);
 
+    private async Task<HardwareProfile> GetHardwareProfileAsync(CancellationToken ct)
+    {
+        _hardwareProfile ??= await _system.GetHardwareProfileAsync(ct);
+        return _hardwareProfile;
+    }
+
+    private ServerConfig BuildModelTuneProbe(
+        ModelProfileItemViewModel item,
+        string executable,
+        int contextSize)
+    {
+        var draft = item.Companions.FirstOrDefault(companion => companion.IsVerifiedDraftHead);
+        var projector = item.Companions.FirstOrDefault(companion => companion.IsVerifiedProjector);
+        return new ServerConfig
+        {
+            Id = $"model-tune-{Guid.NewGuid():N}",
+            Name = $"Auto-tune {item.EffectiveName}",
+            ExecutablePath = executable,
+            ModelPath = item.ModelId,
+            MmprojPath = projector?.LocalFilePath ?? string.Empty,
+            UseProjector = projector is not null,
+            Port = GetFreePort(),
+            ContextSize = contextSize,
+            EmbeddingsMode = false,
+            AutoStart = false,
+            Speculative = draft is null
+                ? new SpeculativeDecodingConfig()
+                : new SpeculativeDecodingConfig
+                {
+                    Types = ["draft-mtp"],
+                    DraftModelPath = draft.LocalFilePath
+                }
+        };
+    }
+
+    private async Task<T> RunWithRunningServersSuspendedAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        var serverIds = _services.Servers.Select(server => server.Id).ToArray();
+        var suspended = await _services.SuspendRunningServersAsync(serverIds);
+        Exception? operationFailure = null;
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            return await operation();
+        }
+        catch (Exception ex)
+        {
+            operationFailure = ex;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                await _services.RestartServersAsync(suspended);
+            }
+            catch (Exception restoreFailure)
+            {
+                if (operationFailure is null)
+                    throw;
+
+                throw new AggregateException(
+                    "Auto-tune failed and the previously running managed servers could not all be restored.",
+                    operationFailure,
+                    restoreFailure);
+            }
+        }
+    }
+
     [RelayCommand]
     private async Task AutoTuneModelAsync(ModelProfileItemViewModel? item)
     {
@@ -953,25 +1031,38 @@ public partial class ModelManagementViewModel : ObservableObject
 
         _isTuneInProgress = true;
         item.IsTuning = true;
+        using var tuneCts = new CancellationTokenSource();
+        _autoTuneCts = tuneCts;
         try
         {
-            var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
-            var contextSize = ResolveProbeContextSize(item, existing);
-            var probe = new ServerConfig
+            var ct = tuneCts.Token;
+            var tuned = await RunWithRunningServersSuspendedAsync(async () =>
             {
-                ExecutablePath = executable,
-                ModelPath = item.ModelId,
-                Port = GetFreePort(),
-                ContextSize = contextSize,
-                AutoStart = false
-            };
+                var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
+                var contextSize = ResolveProbeContextSize(item, existing);
+                var probe = BuildModelTuneProbe(item, executable, contextSize);
+                var ggufInfo = File.Exists(item.ModelId)
+                    ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), ct)
+                    : null;
+                var hardware = await GetHardwareProfileAsync(ct);
 
-            var result = await ServerProcessManager.AutoTuneAsync(probe);
-            LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, contextSize, string.Empty, result.GpuLayers, result.Threads, result);
+                if (_runtimeTuning is null)
+                    throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
+                var result = await _runtimeTuning.RunAsync(probe, ct: ct, ggufInfo: ggufInfo, hardware: hardware);
+                ct.ThrowIfCancellationRequested();
+                return (Result: result, ContextSize: contextSize);
+            }, ct);
+            var effectiveContext = tuned.Result.TunedContextSize ?? tuned.ContextSize;
+            LlamaTuneProfileStore.ValidateAutoTuneResult(tuned.Result, tuned.ContextSize);
+            LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, tuned.Result.GpuLayers, tuned.Result.Threads, tuned.Result);
             await _settings.SaveAsync();
             RefreshTuneSummary(item);
             item.RetuneRecommended = false;
             _toasts.Show("Auto-tune complete", $"{item.EffectiveName}: {item.TuneSummary}.", ToastKind.Success);
+        }
+        catch (OperationCanceledException) when (tuneCts.IsCancellationRequested)
+        {
+            _toasts.Show("Auto-tune cancelled", $"{item.EffectiveName}: no tune profile was saved.", ToastKind.Info, 5000);
         }
         catch (Exception ex)
         {
@@ -979,6 +1070,8 @@ public partial class ModelManagementViewModel : ObservableObject
         }
         finally
         {
+            if (ReferenceEquals(_autoTuneCts, tuneCts))
+                _autoTuneCts = null;
             item.IsTuning = false;
             _isTuneInProgress = false;
         }
@@ -1029,38 +1122,49 @@ public partial class ModelManagementViewModel : ObservableObject
         IsAutoTuningAll = true;
         var tuned = 0;
         var failed = 0;
+        var cancelled = false;
         string? firstFailure = null;
         try
         {
             for (var i = 0; i < candidates.Count; i++)
             {
                 if (_autoTuneAllCts.IsCancellationRequested)
+                {
+                    cancelled = true;
                     break;
+                }
 
                 var item = candidates[i];
                 AutoTuneAllStatus = $"Tuning {i + 1}/{candidates.Count}: {item.EffectiveName}";
                 item.IsTuning = true;
                 try
                 {
-                    var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
-                    var contextSize = ResolveProbeContextSize(item, existing);
-                    var probe = new ServerConfig
+                    var tunedResult = await RunWithRunningServersSuspendedAsync(async () =>
                     {
-                        ExecutablePath = executable,
-                        ModelPath = item.ModelId,
-                        Port = GetFreePort(),
-                        ContextSize = contextSize,
-                        AutoStart = false
-                    };
+                        var existing = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
+                        var contextSize = ResolveProbeContextSize(item, existing);
+                        var probe = BuildModelTuneProbe(item, executable, contextSize);
+                        var ggufInfo = File.Exists(item.ModelId)
+                            ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId), _autoTuneAllCts.Token)
+                            : null;
+                        var hardware = await GetHardwareProfileAsync(_autoTuneAllCts.Token);
 
-                    var result = await ServerProcessManager.AutoTuneAsync(probe, ct: _autoTuneAllCts.Token);
-                    LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, contextSize, string.Empty, result.GpuLayers, result.Threads, result);
+                        if (_runtimeTuning is null)
+                            throw new InvalidOperationException("Managed-runtime tuning is unavailable; no probe was started.");
+                        var result = await _runtimeTuning.RunAsync(probe, ct: _autoTuneAllCts.Token, ggufInfo: ggufInfo, hardware: hardware);
+                        _autoTuneAllCts.Token.ThrowIfCancellationRequested();
+                        return (Result: result, ContextSize: contextSize);
+                    }, _autoTuneAllCts.Token);
+                    var effectiveContext = tunedResult.Result.TunedContextSize ?? tunedResult.ContextSize;
+                    LlamaTuneProfileStore.ValidateAutoTuneResult(tunedResult.Result, tunedResult.ContextSize);
+                    LlamaTuneProfileStore.Upsert(_settings.Settings, item.ModelId, effectiveContext, string.Empty, tunedResult.Result.GpuLayers, tunedResult.Result.Threads, tunedResult.Result);
                     await _settings.SaveAsync();
                     RefreshTuneSummary(item);
                     tuned++;
                 }
                 catch (OperationCanceledException)
                 {
+                    cancelled = true;
                     break;
                 }
                 catch (Exception ex)
@@ -1075,8 +1179,17 @@ public partial class ModelManagementViewModel : ObservableObject
             }
 
             var skipped = eligible.Count - candidates.Count;
-            AutoTuneAllStatus = $"Tuned {tuned}, skipped {skipped}, failed {failed}" + (firstFailure is not null ? $" (first failure: {firstFailure})" : "");
-            _toasts.Show("Auto-tune all complete", AutoTuneAllStatus, failed > 0 ? ToastKind.Warning : ToastKind.Success, 7000);
+            cancelled |= _autoTuneAllCts.IsCancellationRequested;
+            AutoTuneAllStatus = cancelled
+                ? $"Auto-tune all cancelled after tuning {tuned}, skipped {skipped}, failed {failed}"
+                : $"Tuned {tuned}, skipped {skipped}, failed {failed}";
+            if (firstFailure is not null)
+                AutoTuneAllStatus += $" (first failure: {firstFailure})";
+            _toasts.Show(
+                cancelled ? "Auto-tune all cancelled" : "Auto-tune all complete",
+                AutoTuneAllStatus,
+                cancelled ? ToastKind.Info : failed > 0 ? ToastKind.Warning : ToastKind.Success,
+                7000);
         }
         finally
         {
@@ -1089,6 +1202,16 @@ public partial class ModelManagementViewModel : ObservableObject
 
     [RelayCommand]
     private void CancelAutoTuneAll() => _autoTuneAllCts?.Cancel();
+
+    [RelayCommand]
+    private void CancelAutoTuneModel(ModelProfileItemViewModel? item)
+    {
+        if (item is null || !item.IsTuning)
+            return;
+
+        _autoTuneCts?.Cancel();
+        _autoTuneAllCts?.Cancel();
+    }
 
     private bool IsTuneStale(ModelProfileItemViewModel item)
     {
@@ -1809,6 +1932,15 @@ public partial class ModelManagementViewModel : ObservableObject
         {
             await SelectHfRepoCoreAsync(repo, selectionCts.Token, generation);
         }
+        catch (OperationCanceledException) when (
+            selectionCts.IsCancellationRequested
+            || generation != Interlocked.Read(ref _hfSelectionGeneration))
+        {
+            // Selection cancellation is an expected replacement/navigation
+            // event. AsyncRelayCommand must not surface it as an unhandled UI
+            // failure, while an unrelated OperationCanceledException still
+            // propagates for diagnosis.
+        }
         finally
         {
             if (ReferenceEquals(Interlocked.CompareExchange(ref _hfSelectionCts, null, selectionCts), selectionCts))
@@ -1821,7 +1953,14 @@ public partial class ModelManagementViewModel : ObservableObject
         Interlocked.Increment(ref _hfSelectionGeneration);
         try { _hfSelectionCts?.Cancel(); }
         catch (ObjectDisposedException) { }
+        IsLoadingHfFiles = false;
     }
+
+    /// <summary>
+    /// Stops repository inspection when the Models panel is no longer visible.
+    /// The generation increment also makes late metadata/artwork results stale.
+    /// </summary>
+    public void CancelHuggingFaceSelection() => CancelHfSelection();
 
     private async Task SelectHfRepoCoreAsync(HfRepoResultViewModel repo, CancellationToken ct, long generation)
     {
@@ -1980,7 +2119,8 @@ public partial class ModelManagementViewModel : ObservableObject
         }
         finally
         {
-            IsLoadingHfFiles = false;
+            if (IsCurrentHfSelection(repo, generation))
+                IsLoadingHfFiles = false;
         }
     }
 
@@ -2530,16 +2670,26 @@ public sealed class ModelCompanionViewModel
     public string ModelId { get; }
     public string LocalFilePath { get; }
     public string FileName { get; }
+    public string Role { get; }
     public string RoleLabel { get; }
     public string StateLabel { get; }
     public string StateTooltip { get; }
     public bool CanClear => !string.IsNullOrWhiteSpace(LocalFilePath);
+    public bool IsVerifiedDraftHead => string.Equals(Role, "draft_head", StringComparison.OrdinalIgnoreCase)
+        && StateLabel == "Present"
+        && !RequiresUserConfirmation;
+    public bool IsVerifiedProjector => string.Equals(Role, "projector", StringComparison.OrdinalIgnoreCase)
+        && StateLabel == "Present"
+        && !RequiresUserConfirmation;
+    private bool RequiresUserConfirmation { get; }
 
     public ModelCompanionViewModel(ModelCompanionManifestEntry companion, string modelId = "")
     {
         ModelId = modelId;
         LocalFilePath = companion.LocalFilePath;
         FileName = Path.GetFileName(LocalFilePath);
+        Role = companion.Role;
+        RequiresUserConfirmation = companion.RequiresUserConfirmation;
         RoleLabel = ModelManagementViewModel.CompanionRoleLabelForDisplay(companion.Role);
         var exists = false;
         var sizeMatches = false;
@@ -2997,7 +3147,27 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _originalAutoManageCompanionAssets = AutoManageCompanionAssets;
     }
 
-    public string EffectiveName => string.IsNullOrWhiteSpace(DisplayName) ? RawName : DisplayName.Trim();
+    public string EffectiveName
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(DisplayName))
+                return DisplayName.Trim();
+            if (!string.IsNullOrWhiteSpace(RawName))
+                return RawName.Trim();
+            try
+            {
+                var fileName = Path.GetFileNameWithoutExtension(ModelId);
+                return string.IsNullOrWhiteSpace(fileName)
+                    ? string.IsNullOrWhiteSpace(ModelId) ? "selected model" : ModelId
+                    : fileName;
+            }
+            catch (ArgumentException)
+            {
+                return string.IsNullOrWhiteSpace(ModelId) ? "selected model" : ModelId;
+            }
+        }
+    }
     public string TagsDisplay => string.Join("  ", Tags);
 
     public ModelProfile ToProfile() => new()

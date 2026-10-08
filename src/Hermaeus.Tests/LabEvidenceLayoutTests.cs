@@ -14,6 +14,8 @@ public sealed class LabEvidenceLayoutTests
 
         Assert.Contains("SelectedExperience.ResultDetails.ExperimentLabel", source, StringComparison.Ordinal);
         Assert.Contains("SelectedExperience.ResultDetails.Comparisons", source, StringComparison.Ordinal);
+        Assert.Contains("SelectedExperience.HumanSummary", source, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Technical evidence\"", source, StringComparison.Ordinal);
         Assert.Contains("Execution evidence details", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Text=\"{Binding SelectedExperience.ResultSummary}\"", source, StringComparison.Ordinal);
     }

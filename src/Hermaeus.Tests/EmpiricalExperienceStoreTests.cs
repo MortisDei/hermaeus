@@ -283,10 +283,14 @@ public sealed class EmpiricalExperienceStoreTests
         await agent.RunStepAsync(task.TaskId, options);
         var rows = await store.QueryAsync(new EmpiricalExperienceQuery { Domain = EmpiricalExperienceDomains.AgentToolOutcome });
 
-        var gate = Assert.Single(rows);
+        var gate = Assert.Single(rows, row => row.ContextJson.Contains("\"toolName\":\"safety_gate\"", StringComparison.Ordinal));
         Assert.Equal(NormalizedOutcome.Blocked, gate.Outcome.Outcome);
         Assert.DoesNotContain(workspace, gate.WorkspaceFingerprint ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(task.TaskId, gate.ContextJson, StringComparison.Ordinal);
         Assert.Contains("safety_gate", gate.ContextJson, StringComparison.Ordinal);
+
+        var prepared = Assert.Single(rows, row => row.ContextJson.Contains("\"toolName\":\"draft_patch\"", StringComparison.Ordinal));
+        Assert.Equal(NormalizedOutcome.Succeeded, prepared.Outcome.Outcome);
+        Assert.Equal("draft-prepared", prepared.Outcome.EvidenceCode);
     }
 }

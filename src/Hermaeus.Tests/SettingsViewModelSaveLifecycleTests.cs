@@ -2,7 +2,6 @@ using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
-using System.Text.Json;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -381,17 +380,18 @@ public sealed class SettingsViewModelSaveLifecycleTests
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var saved = new CompletionTracker();
+        settings.SettingsChanged += (_, _) => saved.Record();
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
         vm.Llm.DefaultSystemPrompt = "persisted automatically";
 
-        await WaitForAsync(
-            () => settings.Settings.Llm.DefaultSystemPrompt == "persisted automatically",
-            "debounced settings save", timeoutMs: 5000);
+        await saved.WaitForCountAsync(1);
         var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
 
         Assert.Equal("persisted automatically", reloaded.Settings.Llm.DefaultSystemPrompt);
+        vm.Shutdown();
     }
 
     [Fact]
@@ -400,39 +400,19 @@ public sealed class SettingsViewModelSaveLifecycleTests
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var saved = new CompletionTracker();
+        settings.SettingsChanged += (_, _) => saved.Record();
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
         var aiRoot = temp.PathFor("ai-assets");
 
         vm.Data.LocalAiAssetsRoot = aiRoot;
 
-        await WaitForAsync(
-            () => File.Exists(temp.PathFor("settings/settings.json"))
-                && PersistedLocalAiAssetsRootEquals(temp.PathFor("settings/settings.json"), aiRoot),
-            "debounced AI assets root write", timeoutMs: 5000);
+        await saved.WaitForCountAsync(1);
         var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
 
         Assert.Equal(aiRoot, reloaded.Settings.DataManagement.LocalAiAssetsRoot);
         vm.Shutdown();
-    }
-
-    private static bool PersistedLocalAiAssetsRootEquals(string path, string expected)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
-            return document.RootElement.TryGetProperty("DataManagement", out var dataManagement)
-                && dataManagement.TryGetProperty("LocalAiAssetsRoot", out var assetsRoot)
-                && string.Equals(assetsRoot.GetString(), expected, StringComparison.Ordinal);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
     }
 
     [Fact]
@@ -441,24 +421,18 @@ public sealed class SettingsViewModelSaveLifecycleTests
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var saved = new CompletionTracker();
+        settings.SettingsChanged += (_, _) => saved.Record();
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
         vm.Llm.DefaultSystemPrompt = "first group";
-        await WaitForAsync(
-            () => File.Exists(temp.PathFor("settings/settings.json"))
-                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(
-                    "\"DefaultSystemPrompt\": \"first group\"", StringComparison.Ordinal),
-            "first settings group autosave");
+        await saved.WaitForCountAsync(1);
 
         settings.Settings.Memory.RecallInjectionEnabled = true;
         await settings.SaveAsync();
 
         vm.Ui.FontSize = 16;
-        await WaitForAsync(
-            () => File.Exists(temp.PathFor("settings/settings.json"))
-                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(
-                    "\"FontSize\": 16", StringComparison.Ordinal),
-            "second settings group autosave");
+        await saved.WaitForCountAsync(3); // The intervening direct save also completed.
 
         var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
@@ -479,15 +453,15 @@ public sealed class SettingsViewModelSaveLifecycleTests
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var saved = new CompletionTracker();
+        settings.SettingsChanged += (_, _) => saved.Record();
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
         settings.Settings.Memory.RecallInjectionEnabled = true;
         await settings.SaveAsync();
 
         vm.Llm.DefaultSystemPrompt = "second group";
-        await WaitForAsync(
-            () => settings.Settings.Llm.DefaultSystemPrompt == "second group",
-            "settings VM autosave after direct save");
+        await saved.WaitForCountAsync(2); // Direct save, then the debounced VM save.
 
         var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
@@ -503,6 +477,8 @@ public sealed class SettingsViewModelSaveLifecycleTests
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var saved = new CompletionTracker();
+        settings.SettingsChanged += (_, _) => saved.Record();
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
         var server = new McpServerConfigViewModel(new McpServerConfig { Name = "new server" });
@@ -511,11 +487,9 @@ public sealed class SettingsViewModelSaveLifecycleTests
         server.ArgumentsText = "--flag value";
         server.AllowedToolsText = "echo, read";
 
-        await WaitForAsync(
-            () => File.Exists(temp.PathFor("settings/settings.json"))
-                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(
-                    "\"Command\": \"mcp-command\"", StringComparison.Ordinal),
-            "MCP collection autosave");
+        // SettingsChanged is raised after the atomic save has finished. Polling
+        // the destination could race replacement and fail with a sharing violation.
+        await saved.WaitForCountAsync(1);
 
         var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();

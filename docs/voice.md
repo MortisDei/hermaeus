@@ -1,5 +1,9 @@
 # Voice
 
+Native Kokoro serializes model loading, inference, asset replacement, and
+disposal through the same model lifetime gate. Async disposal waits for an
+active model operation before freeing its ONNX session.
+
 Text-to-speech (output) and speech-to-text (input) are optional, local-first by
 default, and never persist audio beyond the moment they need it.
 
@@ -176,13 +180,32 @@ reviewed task, runtime, long-operation, and recording events, with per-event
 defaults, volume, mute, visual equivalents, and suppression while TTS speaks.
 It never cues ordinary token arrival, clicks, navigation, or high GPU use.
 Windows playback uses the native winmm `PlaySound` API directly, so a preview
-does not open a media player or depend on the WAV file association. Temporary
-cue files are deleted after playback.
+does not open a media player or depend on the WAV file association. Default
+Windows sound substitution is disabled: a rejected WAV reports a playback
+failure rather than a successful generic beep. Temporary cue files are deleted
+after playback. Supplementary audio feedback is off by default for new or
+missing settings, while explicit saved choices are retained. After enabling it,
+approval, task-complete, task-failed, and managed-runtime-failed are the default
+event selections; other event kinds remain opt-in. Each event resolves to a distinct bounded multi-tone generated WAV
+pattern, so approval, completion, failure, and runtime events are not one
+generic beep. Semantic notes last 400 ms with 300 ms pauses, using the spacing
+confirmed by the owner's laptop listening check. Three-note cues last 1.8 seconds;
+recording cues deliberately remain short single tones. The service logs the cue
+identity and pattern,
+generated PCM resource, every backend attempt, fallback reason, policy decision, and playback
+result. When suppression is enabled and
+TTS is speaking, a cue waits for the speaking state to clear and then rechecks
+the current settings; it is not silently dropped or played over speech. A
+backend failure is a diagnostic warning and does not turn the originating
+operation into a failure. Linux and Windows device playback still require
+owner live validation.
 
 ## Audio Data and Privacy Lifecycle
 
 - Voice previews use transient generated audio and delete temporary WAV files
-  after playback when a local player needs a file path. A playback-only
+  after playback, failure, or cancellation when a local player needs a file
+  path. An implicit output path is owned by the provider on every synthesis
+  path; an explicit `OutputPath` remains caller-owned. A playback-only
   failure (a broken or missing OS audio player) no longer masks a synthesis
   that actually succeeded: `GenerateSpeechAsync` now reports success and the
   temp file's path whenever rendering the audio worked, even if playing it

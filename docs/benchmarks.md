@@ -32,6 +32,9 @@ Runs record the following metrics and metadata:
 	but not yet surfaced in the UI itself - treat displayed tok/s as
 	provider-measured only when you know the provider reports real timings.
 - Deterministic quality checks
+- A versioned, provider-neutral refusal assessment. The evaluator records the
+  classification and detail for every answer, and applies the refusal check to
+  refusal-expected cases without a provider or suite-name special case.
 - Resource deltas (CPU, memory, storage changes) for display; the scoring
 	weight for this slot is neutral (reserved, not currently a real signal -
 	see Resource Sampling Notes)
@@ -40,13 +43,20 @@ Runs record the following metrics and metadata:
   layers, generation and prompt thread counts, model path, quantization, KV
   cache K/V types, and Flash Attention (all sourced from the managed server
   actually serving a local GGUF model, not app-process values)
+- A shared runtime evidence envelope with requested, resolved, and launched
+  configuration identities, the effective launch receipt, process identity,
+  telemetry binding, evidence status, and comparison eligibility
+- Effective context records total runtime capacity, using reported slot counts
+  for per-slot fields. Generation parameters cannot prove loaded capacity.
+  Parser v3 keeps this correction separate from historical launch receipts.
 - Persistent empirical profile fingerprints over the material model and
   inference configuration, plus a shared direct-observation source reference.
   The historical v1 fingerprint remains readable. New runs also carry a v2
   composition of runtime, model, hardware, and configuration identity whose
-  stable id excludes local paths. These associate the run with what was
-  actually measured. They are not a generic capability score or an automatic
-  model recommendation.
+  stable id excludes local paths. These identify the intended run composition,
+  but do not by themselves prove what was measured. A `Verified`
+  `RuntimeEvidenceEnvelope` is required before the run is comparison-eligible.
+  They are not a generic capability score or an automatic model recommendation.
 - Suite version, case version, scoring profile, and run mode
 - Cold-only single-iteration runs, or cold and warm phase attempts when suites
 	use repeated iterations per case
@@ -68,7 +78,7 @@ without appearing here.
 `SpeculativeTypes`, `SpeculativeDraftModel`,
 `SpeculativeNMax`, `SpeculativeNMin`, `SpeculativePMin`,
 `SpeculativeDraftGpuLayers`, `ProfileFingerprint`, `ProfileFingerprintV2`,
-`ObservationSource`.
+`ObservationSource`, `EvidenceStatus`.
 
 KV cache and Flash Attention are configuration provenance, not a score or a
 recommendation. New local-GGUF runs record the managed server values in their
@@ -87,6 +97,53 @@ the model behaves the same way on another machine or workload. Historical runs
 keep their absent or v1 identity rather than being reconstructed from presumed
 defaults.
 
+### Runtime authority and evidence status
+
+The saved `RuntimeEvidenceEnvelope` is the trust boundary for benchmark
+comparison. A run can have `Status = Completed` while its evidence status is
+`Unverified` or `Mismatch`; workload completion is not proof that the selected
+managed process, effective configuration, and telemetry produced the numbers.
+For a local managed server, verification requires registry resolution to the
+serving server, PID and start-time ownership, the exact launch receipt and
+executable identity, auditable effective `/props` and startup fields, and
+telemetry samples bound to that same process instance. Requested, resolved,
+launched, effective, and observed identities are compared independently.
+
+Missing or conflicting evidence makes the run ineligible for rankings,
+Insights, and Speed Check. Markdown and CSV exports include the envelope id,
+status, reasons, and comparison-eligibility flag; JSON retains the complete
+envelope. Historical and legacy runs are not backfilled with presumed runtime
+facts. They remain visible with their evidence caveat and must be rerun before
+being used for trustworthy comparison.
+
+The run list and completion notification show a bounded subset of the recorded
+reasons. **Run Detail** shows the full bounded reason list plus a reconciliation
+summary of requested, resolved, launched, effective, and process-bound
+telemetry identities and effective fields. A missing envelope is reported as a
+missing reconciliation, not as a verified run.
+
+Ranking is scoped to the selected suite and counts only `ComparisonEligible`
+runs. The ranking panel explains why it is empty: no recorded runs, no eligible
+runs because runtime evidence is unverified or mismatched, or only one eligible
+model. It asks for another eligible model rather than implying that a single
+model is ranked or substituting requested settings for effective runtime
+evidence.
+
+### Semantic refusal evaluation
+
+The shared evaluator is `refusal-v2`. It distinguishes direct, indirect,
+hedged, and clarification-request refusals from mixed answers,
+hallucinated-answer claims, empty responses, and ordinary no-refusal answers.
+For a refusal-expected case, the four refusal forms are valid; mixed,
+hallucinated, and empty responses fail. The provider, model name, and suite
+label do not alter the classification. Each result stores the classification
+and bounded reason in JSON, Markdown, CSV, and Run Detail so PASS/FAIL is
+inspectable.
+
+Suite definitions and runs persist the evaluator version. A stale suite is
+refused with an instruction to rerun from the current definition. Rerun creates
+a new observation with `RerunOfRunId`; the earlier run remains unchanged.
+
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off
 runs only the highlighted suite. Selecting a discovered local GGUF model in the
@@ -94,6 +151,15 @@ dropdown only updates a status hint; the managed chat `llama-server` is switched
 to that model (restarted if a different model is currently loaded, started if
 stopped) only when **Run** is actually clicked, so browsing the dropdown never
 triggers a 1-2 minute restart on its own.
+
+### Cancellation and evidence
+
+Each run receives an operation id and is persisted before model preparation or
+case execution begins. Cancelling a run records `Cancelled`, the last known
+phase, the cancellation error, and any completed case results. The terminal
+evidence save is attempted without the cancelled caller token so the result is
+not silently left as `Running`. If that final save itself fails, the run keeps
+an explicit evidence-save error and the service log records the failure.
 
 ### Reproducibility in Benchmarks
 
@@ -554,16 +620,27 @@ The **System Overview** page shows the local machine and app environment:
 
 The Services auto-tune action now probes descending GPU layer candidates and
 keeps the highest candidate that starts and reaches `/health`, with CPU fallback
-as the final candidate. Successful tune results are saved per GGUF model file
+as the final candidate. Before persistence, the selected context, threads, and
+reported GPU placement are reconstructed into a second exact probe. Successful
+tune results are saved per GGUF model file only when that confirmation carries
+an exact configuration receipt and context identity. Missing or estimated
+receipts are refused without saving a profile. There is no blanket 16K context
+cap; context selection remains bounded by the reviewed ladder and fit evidence.
+Successful tune results are saved per GGUF model file
 with model size and modified-time metadata. When that model is selected again,
 Hermaeus reapplies the saved GPU layer, thread, context, and extra-argument
 profile before starting the managed server. The Models card shows the current
 profile directly, while the model configuration editor hydrates the same saved
 GPU layer, thread, and context values for intentional review or editing.
 **Save model profile** remains separate from Services **Save Config**, and
-extra arguments remain a Services concern. Auto-tune probes are temporary owned
-processes and require the target managed server to be stopped; they do not
-silently stop and replace a running Chat process.
+extra arguments remain a Services concern. Services probes use the saved server
+configuration, while Models-card probes use a fresh target configuration and
+only verified target companions. They do not inherit the draft, projector, or
+extra arguments of another loaded Chat model. Models-card tuning temporarily
+stops currently running managed servers at the awaited process boundary and
+restores them after success, failure, or cancellation. A target that is itself
+running must still be stopped first, and a profile is saved only after source
+restoration succeeds.
 
 Doctor alerts when local GGUF models do not have matching tuned profiles. It
 also checks the configured `llama-server` binary version and, when GitHub
@@ -591,6 +668,9 @@ Where both the used and total values are trustworthy, RAM, storage, and GPU
 cards also show a small observed-use bar. A bar is omitted when the source is
 unknown; device-wide memory is never presented as process-owned memory. On
 Windows, process GPU memory uses PID-scoped NVML first and a PID-scoped
-`nvidia-smi` query as fallback, otherwise it remains `Unknown`.
+`nvidia-smi` query as fallback, otherwise it remains `Unknown`. A device total
+is never relabelled as process VRAM. Process RAM and GPU samples require the
+same PID, start time, and runtime identity; the bounded GPU probe cache avoids
+re-running an expensive platform query for every nearby sample.
 
 This helps monitor storage usage and plan data cleanup or archival.

@@ -45,6 +45,7 @@ public partial class DoctorViewModel : ObservableObject
 
     public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestNavigate { get; set; }
+    public Action<DoctorActionTarget>? RequestNavigateToTarget { get; set; }
 
     /// <summary>
     /// Opens an external URL (e.g. the GitHub releases page) in the user's
@@ -316,7 +317,10 @@ public partial class DoctorViewModel : ObservableObject
             if (idx >= 0)
             {
                 var existing = Checks[idx];
-                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, string.Join(Environment.NewLine, _embeddingLogLines), existing.Category, existing.ActionKind, existing.ActionTarget);
+                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, string.Join(Environment.NewLine, _embeddingLogLines), existing.Category, existing.ActionKind, existing.ActionTarget)
+                {
+                    Target = existing.Target
+                };
                 // replace item to notify UI
                 Checks[idx] = updated;
             }
@@ -558,7 +562,9 @@ public partial class DoctorViewModel : ObservableObject
         }
 
         var wantsLlamaDownload = check.Key == "llama-server" && check.FixLabel.StartsWith("Download", StringComparison.OrdinalIgnoreCase);
-        if (check.Key == "llama-server-update" || wantsLlamaDownload)
+        if ((check.Key == "llama-server-update"
+                && check.FixLabel.StartsWith("Update", StringComparison.OrdinalIgnoreCase))
+            || wantsLlamaDownload)
         {
             await RunLlamaUpdateAsync();
             return;
@@ -593,6 +599,30 @@ public partial class DoctorViewModel : ObservableObject
             _ => "settings"
         };
 
-        RequestNavigate(target);
+        if (check.Target is { } typedTarget && RequestNavigateToTarget is not null)
+            RequestNavigateToTarget(typedTarget);
+        else
+            RequestNavigate?.Invoke(target);
+    }
+
+    [RelayCommand]
+    private void RunSecondaryAction(DoctorCheck? check)
+    {
+        if (check is null || !check.HasSecondaryAction)
+            return;
+
+        if (RequestNavigateToTarget is not null)
+        {
+            RequestNavigateToTarget(check.Target ?? new DoctorActionTarget("services"));
+            return;
+        }
+
+        if (RequestNavigate is not null)
+        {
+            RequestNavigate("services");
+            return;
+        }
+
+        _toasts.Show("Navigation unavailable", "Doctor navigation is not configured.", ToastKind.Warning, 4000);
     }
 }

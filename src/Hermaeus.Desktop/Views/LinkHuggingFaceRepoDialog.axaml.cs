@@ -8,6 +8,7 @@ public partial class LinkHuggingFaceRepoDialog : Window
     public LinkHuggingFaceRepoDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
     }
 
     public void SetModelName(string name) =>

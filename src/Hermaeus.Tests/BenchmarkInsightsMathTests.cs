@@ -29,6 +29,11 @@ public sealed class BenchmarkInsightsMathTests
             ModelName = modelName,
             StartedAt = startedAt,
             Metadata = new BenchmarkRunMetadata { Quantization = quantization, RuntimeKind = runtimeKind, AppVersion = appVersion },
+            RuntimeEvidence = new RuntimeEvidenceEnvelope
+            {
+                Workflow = "benchmark-test",
+                Status = RuntimeEvidenceStatus.Verified
+            },
             Results = results
         };
     }

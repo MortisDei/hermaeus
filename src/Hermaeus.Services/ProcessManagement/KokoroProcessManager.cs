@@ -217,9 +217,18 @@ public sealed class KokoroProcessManager : IDisposable
 
         var path = Path.Combine(Path.GetTempPath(), "hermaeus-kokoro-server.py");
         var script = EmbeddedPythonScriptLoader.Load("kokoro_server.py");
-        await File.WriteAllTextAsync(path, script, Encoding.UTF8, ct);
-        _serverScriptPath = path;
-        return path;
+        try
+        {
+            await File.WriteAllTextAsync(path, script, Encoding.UTF8, ct);
+            _serverScriptPath = path;
+            return path;
+        }
+        catch
+        {
+            try { File.Delete(path); }
+            catch { }
+            throw;
+        }
     }
 
     public void Dispose()

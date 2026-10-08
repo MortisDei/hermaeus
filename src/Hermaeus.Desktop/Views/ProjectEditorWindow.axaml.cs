@@ -9,6 +9,7 @@ public partial class ProjectEditorWindow : Window
     public ProjectEditorWindow()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
         DataContextChanged += OnDataContextChanged;
     }
 

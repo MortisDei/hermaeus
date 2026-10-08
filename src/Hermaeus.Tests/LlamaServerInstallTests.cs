@@ -167,14 +167,11 @@ public sealed class LlamaServerInstallTests
     }
 
     /// <summary>
-    /// r24 field report: a real 403 from GitHub's anonymous rate limit
-    /// surfaced to the user as the framework's generic
-    /// "Response status code does not indicate success: 403 (rate limit
-    /// exceeded)." GetLatestDownloadInfoAsync must turn that into an
-    /// actionable message instead.
+    /// A rejected request stays actionable without asserting a rate limit
+    /// unless GitHub's response establishes one.
     /// </summary>
     [Fact]
-    public async Task GetLatestDownloadInfoAsync_turns_a_403_into_an_actionable_rate_limit_message()
+    public async Task GetLatestDownloadInfoAsync_preserves_uncertainty_for_an_unqualified_403()
     {
         using var http = new HttpClient(new FixedStatusHandler(HttpStatusCode.Forbidden));
         var service = new LlamaServerSetupService(new ModelDownloadService(http), http);
@@ -183,12 +180,73 @@ public sealed class LlamaServerInstallTests
             () => service.GetLatestDownloadInfoAsync(LlamaRuntimeVariant.Cpu));
 
         Assert.Contains("rate limit", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("hour", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HTTP 403", ex.Message);
+        Assert.Contains("may be responsible", ex.Message);
     }
 
-    private sealed class FixedStatusHandler(HttpStatusCode status) : HttpMessageHandler
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "0")]
+    [InlineData(HttpStatusCode.TooManyRequests, null)]
+    public async Task GetLatestDownloadInfoAsync_reports_a_confirmed_rate_limit(HttpStatusCode status, string? remaining)
+    {
+        using var http = new HttpClient(new FixedStatusHandler(status, remaining));
+        var service = new LlamaServerSetupService(new ModelDownloadService(http), http);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetLatestDownloadInfoAsync());
+
+        Assert.Contains("GitHub rate-limited", error.Message);
+        Assert.Contains($"HTTP {(int)status}", error.Message);
+        Assert.Contains("reset", error.Message);
+    }
+
+    [Fact]
+    public async Task Doctor_preserves_the_failed_llama_release_lookup_reason()
+    {
+        using var http = new HttpClient(new FixedStatusHandler(HttpStatusCode.Forbidden, "0"));
+        var setup = new LlamaServerSetupService(new ModelDownloadService(http), http);
+
+        var lookup = await DoctorService.FetchLatestLlamaReleaseAsync(setup, CancellationToken.None);
+
+        Assert.Null(lookup.Release);
+        Assert.Contains("GitHub rate-limited", lookup.Error);
+        Assert.Contains("HTTP 403", lookup.Error);
+    }
+
+    [Fact]
+    public async Task Doctor_preserves_non_rate_limit_http_failures_without_inventing_a_limit()
+    {
+        using var http = new HttpClient(new FixedStatusHandler(HttpStatusCode.ServiceUnavailable));
+        var setup = new LlamaServerSetupService(new ModelDownloadService(http), http);
+
+        var lookup = await DoctorService.FetchLatestLlamaReleaseAsync(setup, CancellationToken.None);
+
+        Assert.Null(lookup.Release);
+        Assert.Contains("503", lookup.Error);
+        Assert.DoesNotContain("rate limit", lookup.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Doctor_llama_lookup_preserves_owner_cancellation()
+    {
+        using var http = new HttpClient(new FixedStatusHandler(HttpStatusCode.OK));
+        var setup = new LlamaServerSetupService(new ModelDownloadService(http), http);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => DoctorService.FetchLatestLlamaReleaseAsync(setup, cts.Token));
+    }
+
+    private sealed class FixedStatusHandler(HttpStatusCode status, string? remaining = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(status));
+            Task.FromResult(Response());
+
+        private HttpResponseMessage Response()
+        {
+            var response = new HttpResponseMessage(status);
+            if (remaining is not null)
+                response.Headers.Add("X-RateLimit-Remaining", remaining);
+            return response;
+        }
     }
 }

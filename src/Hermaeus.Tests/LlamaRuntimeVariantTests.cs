@@ -456,6 +456,51 @@ public sealed class LlamaRuntimeVariantTests
         bool started, int? exitCode, bool identity, string expected)
         => Assert.Equal(expected, DoctorService.ClassifyLlamaProbe(started, exitCode, identity).ToString());
 
+    [Fact]
+    public async Task Version_probe_records_a_successful_process_and_elapsed_time()
+    {
+        var result = await DoctorService.RunVersionCommandAsync(
+            "dotnet", ["--version"], TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        Assert.True(result.Started, result.Error);
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(result.ElapsedMilliseconds >= 0);
+        Assert.NotEmpty(result.Stdout);
+    }
+
+    [Fact]
+    public async Task Version_probe_keeps_a_wrong_executable_result_distinct_from_a_timeout()
+    {
+        var result = await DoctorService.RunVersionCommandAsync(
+            "dotnet", ["--not-a-real-dotnet-option"], TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        Assert.True(result.Started, result.Error);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.NotEqual(LlamaProbeFailureKind.TimedOut,
+            DoctorService.ClassifyLlamaProbe(result.Started, result.ExitCode, buildIdentityVerified: false));
+    }
+
+    [Fact]
+    public async Task Version_probe_bounds_a_slow_process_and_reports_elapsed_diagnostics()
+    {
+        var executable = OperatingSystem.IsWindows()
+            ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe"
+            : "/bin/sh";
+        IReadOnlyList<string> arguments = OperatingSystem.IsWindows()
+            ? ["/c", "ping", "127.0.0.1", "-n", "10"]
+            : ["-c", "sleep 5"];
+
+        var result = await DoctorService.RunVersionCommandAsync(
+            executable, arguments, TimeSpan.FromMilliseconds(250), CancellationToken.None);
+
+        Assert.True(result.Started, result.Error);
+        Assert.Null(result.ExitCode);
+        Assert.Equal(LlamaProbeFailureKind.TimedOut,
+            DoctorService.ClassifyLlamaProbe(result.Started, result.ExitCode, buildIdentityVerified: false));
+        Assert.Contains("timed out", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.ElapsedMilliseconds >= 100);
+    }
+
     [Theory]
     [InlineData(true, true, 999, true)]   // GPU + CPU build -> advise
     [InlineData(true, false, 0, true)]    // GPU + zero offload -> advise

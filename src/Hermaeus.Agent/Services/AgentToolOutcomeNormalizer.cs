@@ -78,7 +78,8 @@ internal static class AgentToolOutcomeNormalizer
         {
             ToolFamily.RunCommand => NormalizeRunCommand(evidence),
             ToolFamily.Collection => NormalizeCollection(evidence),
-            ToolFamily.Read or ToolFamily.Draft => NormalizeCompletedOperation(evidence),
+            ToolFamily.Read => NormalizeCompletedOperation(evidence),
+            ToolFamily.Draft => NormalizeDraft(evidence),
             ToolFamily.Mutation => NormalizeMutation(evidence),
             ToolFamily.Plan => NormalizePlan(evidence),
             ToolFamily.SafetyGate => NormalizeSafetyGate(evidence),
@@ -114,6 +115,14 @@ internal static class AgentToolOutcomeNormalizer
     {
         AgentToolOutcomeSignal.Completed => Create(NormalizedOutcome.Succeeded, "workspace-operation-completed", evidence.Detail),
         AgentToolOutcomeSignal.NoEffect => Create(NormalizedOutcome.NoEffect, "workspace-no-effect", evidence.Detail),
+        _ => NormalizeCommon(evidence)
+    };
+
+    private static NormalizedToolOutcome NormalizeDraft(AgentToolOutcomeEvidence evidence) => evidence.Signal switch
+    {
+        AgentToolOutcomeSignal.Completed => Create(NormalizedOutcome.Succeeded, "draft-prepared", evidence.Detail),
+        AgentToolOutcomeSignal.NoEffect => Create(NormalizedOutcome.NoEffect, "draft-unchanged", evidence.Detail),
+        AgentToolOutcomeSignal.ApprovalRequired => Create(NormalizedOutcome.Blocked, "approval-required", evidence.Detail),
         _ => NormalizeCommon(evidence)
     };
 

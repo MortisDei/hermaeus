@@ -13,6 +13,7 @@ namespace Hermaeus.Services;
 
 public sealed partial class DoctorService
 {
+    private static readonly TimeSpan LlamaProbeTimeout = TimeSpan.FromSeconds(15);
     private const int MaxProbeOutputCharacters = 8_000;
 
     private async Task<DoctorCheck> CheckLlamaServerBinaryAsync(CancellationToken ct)
@@ -125,7 +126,8 @@ public sealed partial class DoctorService
                 "Runtime");
         }
 
-        var latest = await TryGetLatestLlamaReleaseAsync(ct);
+        var lookup = await TryGetLatestLlamaReleaseAsync(ct);
+        var latest = lookup.Release;
         if (latest is null)
         {
             return BuildCheck(
@@ -133,10 +135,10 @@ public sealed partial class DoctorService
                 "llama.cpp update check",
                 DoctorCheckStatus.Info,
                 $"Installed {local.Label}",
-                "Installed identity is known. Latest release: Unknown because GitHub release metadata was unavailable. Comparison: Unknown; no update or current-state claim is made.",
+                "Installed identity is known. Latest release: Unknown because GitHub release metadata was unavailable. Comparison: Unknown; no update or current-state claim is made. " + lookup.Error,
                 "Open Services",
                 true,
-                $"Executable: {resolved}\nVersion output: {local.Raw}\nInstalled: {local.Label}\nLatest: Unknown\nComparison: Unknown",
+                $"Executable: {resolved}\nVersion output: {local.Raw}\nInstalled: {local.Label}\nLatest: Unknown\nComparison: Unknown\nRelease lookup: {lookup.Error}",
                 "Runtime");
         }
 
@@ -165,7 +167,7 @@ public sealed partial class DoctorService
             status,
             summary,
             detail,
-            "Open Services",
+            comparison == LlamaVersionComparison.Outdated ? "Update llama.cpp" : "Open Services",
             true,
             $"Executable: {resolved}\nVersion output: {local.Raw}\nLatest: {latest.TagName} ({latest.PublishedAt:O})\nMetadata source: {(latest.FromSharedCache ? $"shared cache at {latest.MetadataObservedAt:O}" : "live release lookup")}",
             "Runtime");
@@ -797,7 +799,7 @@ public sealed partial class DoctorService
 
     private static async Task<LlamaVersionInfo> ReadLlamaServerVersionAsync(string executablePath, CancellationToken ct)
     {
-        var result = await RunVersionCommandAsync(executablePath, "--version", ct);
+        var result = await RunVersionCommandAsync(executablePath, ["--version"], LlamaProbeTimeout, ct);
 
         var build = TryParseLlamaBuild(result.Output);
         var label = build is int value ? $"b{value}" : "unknown build";
@@ -810,11 +812,17 @@ public sealed partial class DoctorService
             result.Stdout,
             result.Stderr,
             result.Error,
-            ClassifyLlamaProbe(result.Started, result.ExitCode, build is not null));
+            ClassifyLlamaProbe(result.Started, result.ExitCode, build is not null),
+            result.ElapsedMilliseconds);
     }
 
-    private static async Task<LlamaCommandResult> RunVersionCommandAsync(string executablePath, string arg, CancellationToken ct)
+    internal static async Task<LlamaCommandResult> RunVersionCommandAsync(
+        string executablePath,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeoutBudget,
+        CancellationToken ct)
     {
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -826,20 +834,21 @@ public sealed partial class DoctorService
                 CreateNoWindow = true
             }
         };
-        process.StartInfo.ArgumentList.Add(arg);
+        foreach (var argument in arguments)
+            process.StartInfo.ArgumentList.Add(argument);
 
         try
         {
             if (!process.Start())
-                return new LlamaCommandResult(false, null, string.Empty, string.Empty, "The operating system refused to start the executable.");
+                return new LlamaCommandResult(false, null, string.Empty, string.Empty, "The operating system refused to start the executable.", elapsed.ElapsedMilliseconds);
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+            timeout.CancelAfter(timeoutBudget);
             var stdoutTask = ReadBoundedAsync(process.StandardOutput, timeout.Token);
             var stderrTask = ReadBoundedAsync(process.StandardError, timeout.Token);
             await Task.WhenAll(stdoutTask, stderrTask);
             await process.WaitForExitAsync(timeout.Token);
-            return new LlamaCommandResult(true, process.ExitCode, stdoutTask.Result, stderrTask.Result, string.Empty);
+            return new LlamaCommandResult(true, process.ExitCode, stdoutTask.Result, stderrTask.Result, string.Empty, elapsed.ElapsedMilliseconds);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -856,7 +865,9 @@ public sealed partial class DoctorService
             {
             }
 
-            return new LlamaCommandResult(true, null, string.Empty, string.Empty, "The executable probe timed out after 3 seconds.");
+            return new LlamaCommandResult(true, null, string.Empty, string.Empty,
+                $"The executable probe timed out after {elapsed.ElapsedMilliseconds} ms (budget {timeoutBudget.TotalSeconds:0.###} seconds).",
+                elapsed.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -869,7 +880,7 @@ public sealed partial class DoctorService
             {
             }
 
-            return new LlamaCommandResult(false, null, string.Empty, string.Empty, ex.Message);
+            return new LlamaCommandResult(false, null, string.Empty, string.Empty, ex.Message, elapsed.ElapsedMilliseconds);
         }
     }
 
@@ -911,7 +922,7 @@ public sealed partial class DoctorService
     private static string DescribeLlamaProbeFailure(LlamaVersionInfo probe) => probe.FailureKind switch
     {
         LlamaProbeFailureKind.CouldNotStart => "the executable could not be started",
-        LlamaProbeFailureKind.TimedOut => "the executable started but the probe timed out",
+        LlamaProbeFailureKind.TimedOut => $"the executable started but the probe timed out after {probe.ElapsedMilliseconds} ms",
         LlamaProbeFailureKind.NonZeroExit => $"the executable started but exited with code {probe.ExitCode}",
         LlamaProbeFailureKind.IdentityUnverified => "the executable started and returned exit code 0, but no recognizable llama.cpp build identifier was found",
         _ => "the executable probe completed successfully"
@@ -924,6 +935,7 @@ public sealed partial class DoctorService
         $"Started: {probe.Started}",
         $"Exit code: {probe.ExitCode?.ToString() ?? "unknown"}",
         $"Validation: {probe.FailureKind}",
+        $"Elapsed: {probe.ElapsedMilliseconds} ms",
         $"Stdout: {(string.IsNullOrWhiteSpace(probe.Stdout) ? "<empty>" : probe.Stdout)}",
         $"Stderr: {(string.IsNullOrWhiteSpace(probe.Stderr) ? "<empty>" : probe.Stderr)}",
         $"Error: {(string.IsNullOrWhiteSpace(probe.Error) ? "<none>" : probe.Error)}");
@@ -942,37 +954,41 @@ public sealed partial class DoctorService
                 ? LlamaVersionComparison.Outdated
                 : LlamaVersionComparison.Current;
 
-    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
+    private Task<LlamaReleaseLookup> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
     {
         var shared = LlamaServerSetupService.LastSuccessfulRelease;
         if (shared is { } cached)
         {
-            return Task.FromResult<LlamaLatestRelease?>(new(
+            return Task.FromResult(new LlamaReleaseLookup(new(
                 cached.Download.TagName,
                 TryParseLlamaBuild(cached.Download.TagName),
                 cached.Download.PublishedAt ?? cached.CachedAt,
                 cached.CachedAt,
-                true));
+                true), string.Empty));
         }
 
-        return GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", FetchLatestLlamaReleaseAsync, ct);
+        return GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", token => FetchLatestLlamaReleaseAsync(_llamaSetup, token), ct);
     }
 
-    private async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
+    internal static async Task<LlamaReleaseLookup> FetchLatestLlamaReleaseAsync(LlamaServerSetupService setup, CancellationToken ct)
     {
         try
         {
-            var release = await _llamaSetup.GetLatestDownloadInfoAsync(ct);
-            return new LlamaLatestRelease(
+            var release = await setup.GetLatestDownloadInfoAsync(ct);
+            return new(new LlamaLatestRelease(
                 release.TagName,
                 TryParseLlamaBuild(release.TagName),
                 release.PublishedAt ?? DateTimeOffset.MinValue,
                 DateTimeOffset.UtcNow,
-                false);
+                false), string.Empty);
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return null;
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new(null, ex.Message);
         }
     }
 
@@ -1005,7 +1021,7 @@ public sealed partial class DoctorService
             && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
     }
 
-    private sealed record LlamaCommandResult(bool Started, int? ExitCode, string Stdout, string Stderr, string Error)
+    internal sealed record LlamaCommandResult(bool Started, int? ExitCode, string Stdout, string Stderr, string Error, long ElapsedMilliseconds)
     {
         public string Output => string.Join(Environment.NewLine,
             new[] { Stdout, Stderr }.Where(value => !string.IsNullOrWhiteSpace(value))).Trim();
@@ -1021,8 +1037,10 @@ public sealed partial class DoctorService
         string Stdout,
         string Stderr,
         string Error,
-        LlamaProbeFailureKind FailureKind);
-    private sealed record LlamaLatestRelease(
+        LlamaProbeFailureKind FailureKind,
+        long ElapsedMilliseconds);
+    internal sealed record LlamaReleaseLookup(LlamaLatestRelease? Release, string Error);
+    internal sealed record LlamaLatestRelease(
         string TagName,
         int? BuildNumber,
         DateTimeOffset PublishedAt,

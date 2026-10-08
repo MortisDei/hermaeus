@@ -280,4 +280,16 @@ public sealed class AgentWorkbenchLayoutTests
         Assert.True(outcome.HasOutcome);
         Assert.Equal("Changed 1 file (0 edited, 1 created), +10 -0.", outcome.FilesLine);
     }
+
+    [Fact]
+    public void A_conflicted_file_is_called_out_as_needing_review()
+    {
+        var entry = new AgentLedgerFileEntry(
+            "a.cs", AgentLedgerFileKind.Edited, 1, AgentLedgerFileStatus.Conflicted,
+            2, "old", "new", "t");
+
+        var outcome = AgentRunOutcome.Describe(Ledger(files: [entry]), Task(AgentTaskStatus.Complete));
+
+        Assert.Contains("changed after apply and need review", outcome.FilesLine, StringComparison.Ordinal);
+    }
 }

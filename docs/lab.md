@@ -15,6 +15,21 @@ to start a useful experiment. Only one manual or guided run can be active at a
 time. The UI disables the other start path, and the experiment service enforces
 the same boundary for non-UI callers.
 
+The view names capability state in user terms. A recipe can be **Available**,
+**Unavailable**, or **Unknown**, with a reason tied to the current model and
+runtime; an unavailable recipe cannot be run. With no configured server, start
+and recipe inspection actions are disabled and the next action explains what
+must be configured. Run, cancellation, source restore, Apply, and recovery
+messages remain separate, so a recommendation is not presented as the
+effective loaded runtime state. Recipe prompt detail and evidence filters are
+secondary disclosures, and action groups wrap when the window is narrow.
+
+The Experiment tab captures the selected source, name, baseline and candidate
+before awaiting source suspension. A status refresh of the same server retains
+the candidate draft; choosing a different server resets it to that server's
+context baseline. Guided runs likewise capture their source, recipe and prompt
+before suspension.
+
 The Experiment tab freezes one immutable definition before it starts anything.
 The definition names the protocol, exact v2 runtime/model/hardware/configuration
 fingerprint, target Services server, baseline, bounded candidates, workload,
@@ -39,11 +54,20 @@ after PID, start time, and executable content all match; otherwise cleanup
 remains `Unknown` and the process is not touched.
 
 The Experiment card reports the execution outcome separately from source
-restore. A run can be `Succeeded`, `PartiallySucceeded`, `Cancelled`, or
-`Failed` while source restoration is still `Pending`, `Restored`,
-`Blocked`, or `Failed`. A failed or blocked restore is surfaced as an
-attention state and leaves the source stopped for owner review; it does not
-rewrite the execution result or silently restart a changed configuration.
+restore. A run can be `Succeeded`, `PartiallySucceeded`, `Inconclusive`,
+`Cancelled`, or `Failed` while source restoration is still `Pending`,
+`Restored`, `Blocked`, or `Failed`. `Inconclusive` means the workload completed
+but one or more owned runtimes did not provide auditable effective launch
+evidence. It cannot produce a recommendation or Apply review. A failed or
+blocked restore is surfaced as an attention state and leaves the source
+stopped for owner review; it does not rewrite the execution result or silently
+restart a changed configuration.
+
+While a recipe is running, the Experiment card shows the named experiment,
+current candidate and position, stage, completed workload steps, remaining
+steps, and a bounded determinate percentage. Terminal progress carries the
+actual Lab status, so a failed, cancelled, or inconclusive run is not presented
+as an indefinite green bar.
 
 Observations keep value and missing reason separate, so an absent counter never
 becomes zero. Every observation names unit, source, evidence origin, trust,
@@ -52,6 +76,42 @@ Comparisons list uncontrolled fingerprint differences and refuse a headline
 delta when any remain. Timing metrics show median, observed range, repetition
 count, and source. There is no universal score or statistical-significance
 claim.
+Each comparison also carries the isolated runtime's effective launch
+observation. Lab enables the transient local properties endpoint for the owned
+runtime. Total context is read from a top-level capacity field or derived from
+`default_generation_settings.n_ctx` and a reported slot count. The nested
+`params.n_ctx` generation parameter does not prove loaded context. Startup
+`n_ctx` is total capacity; `n_ctx_slot` needs the reported slot count and cannot
+overwrite a total-capacity observation. Parser v3 records this corrected
+meaning; historical receipts retain their original parser identity.
+When a runtime omits a scalar from `/props`, the
+parser may use the matching bounded startup line from that same PID-associated
+launch receipt, including context, thread, slot, KV-cache, and Flash Attention
+observations. GPU placement is read from the startup receipt, for example
+`offloaded 17/36 layers to GPU`; a command-line argument or healthy endpoint
+alone is not placement proof. The receipt keeps the PID, redacted exact argv,
+executable path, and bounded startup evidence together with the effective
+fields. Context size, GPU placement, and slots must be proven and match the
+reviewed configuration; `Auto` additionally needs a proven fit result. Missing,
+invalid, or unassociated process evidence, or ambiguous or mismatched fields,
+make the run `Inconclusive` and prevent a controlled comparison or Apply
+recommendation. An unreviewed sibling candidate does not invalidate the
+candidate currently being compared, but it cannot receive an Apply review
+until its own run evidence exists.
+
+Lab and Benchmarks share the `RuntimeEvidenceEnvelope`. It keeps requested,
+resolved, and launched configuration identities separate from the effective
+runtime receipt and process-scoped telemetry identity. A workload can complete
+while its envelope is `Inconclusive`, `Unverified`, or `Mismatch`; only
+`Verified` evidence is eligible for a controlled comparison, recommendation,
+or Apply. Every shipped recipe adds its varied effective field to the common
+`context`, `slots`, and `gpu_layers` requirements: KV cache K/V types, Flash
+Attention, CPU-MoE placement, speculative mechanism and parameter, or prompt
+cache state as applicable. If the selected runtime does not expose a required
+field through an auditable receipt, the result stays Inconclusive rather than
+using the requested value as a proxy. The complete recipe matrix and native
+receipts are recorded in the historical [R33 authority audit](review/r33/13-lab-benchmark-authority-audit.md),
+while the current branch disposition is in the [R33 owner-dogfood closeout](review/r33/14-owner-dogfood-closeout.md).
 
 Correctness compares token ids when both sides expose them and falls back to an
 exact UTF-8 output hash at a weaker declared level. It reports `Equivalent`,
@@ -62,11 +122,17 @@ explicit and can never recommend Apply.
 Start and completion are separate immutable `lab-run` experience records.
 Repeated observations and output hashes are split into bounded immutable
 per-configuration evidence slices linked to the frozen start record. The final
-completion stores only comparison decisions, failures, and links to those raw
-slices, keeping every experience document inside its existing 32 KiB bound.
+completion stores only comparison decisions, failures, and links to raw slices,
+comparison records, and effective-launch records, keeping every experience
+document inside its existing 32 KiB bound. Older completion summaries with
+embedded detail remain readable.
 The Evidence surface projects all records with the same durable run id into one
 top-level execution entry, without duplicating or migrating persisted truth.
 Its drill-down retains every slice, comparison, provenance link, and raw JSON.
+The execution list leads with a human result summary for failed, cancelled, or
+inconclusive runs. Technical identifiers, normalized outcomes, and raw evidence
+remain available under an explicit technical-evidence disclosure instead of
+replacing the useful outcome text.
 Prompt/output bodies and token values are omitted from exportable records.
 Cancellation preserves partial evidence and normalizes the result as
 `Cancelled` or `PartiallySucceeded`. Manual completion is deliberately explicit:
@@ -74,12 +140,17 @@ Cancellation preserves partial evidence and normalizes the result as
 and stops the isolated runtime. It does not invent a workload or pretend that a
 candidate comparison was measured.
 
+The candidate context draft survives refreshes of the bound source picker
+during server suspension and restoration. Choosing a different source starts
+its draft from that server's context; it does not rewrite a frozen definition.
+
 **Apply to Services** is a separate review after a controlled, correctness-
-passing result. It shows every persisted field that would change and captures
+passing result with auditable effective launch evidence. It shows every persisted field that would change and captures
 the current server configuration plus runtime/model identity. Confirmation
 rechecks all three, clones `AppSettings`, and uses the normal settings save
-flow. A stale review is refused, and applying never deletes prior configuration
-or experiment evidence.
+flow. The live Services projection is read back after save and a mismatch is
+reported as a failed Apply. A stale review is refused, and applying never
+deletes prior configuration or experiment evidence.
 
 Guided recipes persist valid evidence automatically. Review selects the eligible
 candidate produced by that recipe, so saving each evidence slice manually is not
@@ -92,8 +163,17 @@ cannot become an Apply recommendation.
 server. Every plan keeps the baseline, allows at most eight total launches, and
 changes one declared dimension:
 
+Inspection first validates the selected Services model and llama-server
+executable. An empty, missing, or unresolvable source returns bounded
+`Unavailable` placeholder plans with an actionable detail and does not probe
+capabilities, GGUF metadata, speculative companions, or runtime identity.
+This is separate from a configured source whose model or runtime evidence is
+present but insufficient, which can remain `Unknown`.
+
 - GPU-layer placement uses CPU, partial where model block count is known, and
-  all-GPU candidates;
+  all-GPU candidates. Each candidate updates both the legacy layer value and
+  typed placement intent, so a stale typed setting cannot make every candidate
+  launch the same runtime configuration;
 - context uses adjacent values from Hermaeus's reviewed 2K to 128K ladder;
 - KV offers only `f16`, `q8_0`, or `q4_0` when the exact runtime advertised
   both the baseline and candidate representation. Any configuration with a

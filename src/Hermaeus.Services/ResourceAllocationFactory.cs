@@ -10,10 +10,13 @@ namespace Hermaeus.Services;
 /// </summary>
 public static class ResourceAllocationFactory
 {
-    public static ResourceConsumerDescriptor ManagedServerConsumer(ServerConfig config) => new(
-        config.Id,
+    public static ResourceConsumerDescriptor ManagedServerConsumer(ServerConfig config) =>
+        ManagedServerConsumer(config, config.Id);
+
+    public static ResourceConsumerDescriptor ManagedServerConsumer(ServerConfig config, string consumerId) => new(
+        consumerId,
         config.EmbeddingsMode ? ResourceConsumerKind.EmbeddingRuntime : ResourceConsumerKind.ChatRuntime,
-        ResourceOwnerIdentity.OwnedProcess($"managed-server-{config.Id}"),
+        ResourceOwnerIdentity.OwnedProcess($"managed-server-{consumerId}"),
         nameof(ProcessManagement.ServerProcessManager),
         config.EmbeddingsMode ? ResourcePriorityClass.Background : ResourcePriorityClass.Interactive,
         ResourceReclaimability.Cooperative,
@@ -21,7 +24,16 @@ public static class ResourceAllocationFactory
             ResourceKind.KvAllocation, ResourceKind.RuntimeComputeOverhead, ResourceKind.CompanionAllocation]);
 
     public static ResourceAllocation ManagedServerProposal(ServerConfig config) =>
-        CreateManagedServerAllocation(config, ResourceLifecycleState.Planned, null, null);
+        CreateManagedServerAllocation(config, ResourceLifecycleState.Planned, null, null,
+            config.Id, $"managed-allocation-{config.Id}");
+
+    public static ResourceAllocation ManagedServerProposal(
+        ServerConfig config,
+        string consumerId,
+        string allocationId,
+        string? attemptId = null) =>
+        CreateManagedServerAllocation(config, ResourceLifecycleState.Planned, null, attemptId,
+            consumerId, allocationId);
 
     public static ResourceAllocation ActiveFromProcess(
         ResourceAllocation proposal,
@@ -119,7 +131,7 @@ public static class ResourceAllocationFactory
 
     public static ResourceAllocation LabProposal(string runId, ServerConfig config)
     {
-        var allocation = CreateManagedServerAllocation(config, ResourceLifecycleState.Planned, null, null);
+        var allocation = ManagedServerProposal(config);
         return new ResourceAllocation(
             $"lab-allocation-{OpaquePart(runId)}",
             LabConsumerId(runId),
@@ -175,7 +187,9 @@ public static class ResourceAllocationFactory
         ServerConfig config,
         ResourceLifecycleState state,
         ManagedRuntimeProcessIdentity? process,
-        string? attemptId)
+        string? attemptId,
+        string consumerId,
+        string allocationId)
     {
         var components = new List<ResourceAllocationComponent>();
         var placement = config.TryGetGpuPlacement(out var intent, out _) ? intent : null;
@@ -218,8 +232,8 @@ public static class ResourceAllocationFactory
                 ? speculative.DraftModelPath : string.Empty);
 
         return new ResourceAllocation(
-            $"managed-allocation-{config.Id}",
-            config.Id,
+            allocationId,
+            consumerId,
             attemptId,
             state,
             null,

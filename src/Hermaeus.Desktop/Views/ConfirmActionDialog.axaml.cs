@@ -1,5 +1,7 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 
 namespace Hermaeus.Desktop.Views;
 
@@ -12,6 +14,9 @@ public partial class ConfirmActionDialog : Window
     public ConfirmActionDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
+        KeyDown += OnKeyDown;
+        Opened += OnOpened;
     }
 
     public ConfirmActionDialog(string title, string message) : this()
@@ -29,4 +34,21 @@ public partial class ConfirmActionDialog : Window
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
     private void OnConfirmClick(object? sender, RoutedEventArgs e) => Close(true);
+
+    private void OnOpened(object? sender, EventArgs e) =>
+        Dispatcher.UIThread.Post(() => CancelButton.Focus(), DispatcherPriority.Input);
+
+    private void OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            Close(false);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && ConfirmButton.IsEnabled)
+        {
+            Close(true);
+            e.Handled = true;
+        }
+    }
 }

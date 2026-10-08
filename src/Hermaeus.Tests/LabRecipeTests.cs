@@ -1,3 +1,4 @@
+using System.Globalization;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -63,11 +64,116 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public void Production_recipe_reconciliation_keeps_missing_baselines_unknown()
+    {
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, Server(), []);
+
+        var reconciled = LabRecipeCatalog.ReconcileBaselineAvailability(plan, Server(), null);
+
+        Assert.Equal(CapabilityState.Unknown, reconciled.Availability);
+        Assert.Contains("model is missing", reconciled.AvailabilityDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Production_recipe_reconciliation_requires_an_exact_runtime_and_readable_model()
+    {
+        using var temp = new TempDir();
+        var model = temp.PathFor("model.gguf");
+        var executable = temp.PathFor("llama-server");
+        File.WriteAllText(model, "fixture");
+        File.WriteAllText(executable, "fixture");
+        var source = Server();
+        source.ModelPath = model;
+        source.ExecutablePath = executable;
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, source, []);
+        var gguf = new GgufModelInfo("llama", "Q4_K_M", 32, 8192, 4096, 32, 8, 128, 128);
+
+        var reconciled = LabRecipeCatalog.ReconcileBaselineAvailability(plan, source, gguf);
+
+        Assert.Equal(CapabilityState.Available, reconciled.Availability);
+        Assert.Equal(plan.AvailabilityDetail, reconciled.AvailabilityDetail);
+    }
+
+    [Fact]
+    public async Task Production_recipe_inspection_reports_unconfigured_server_without_empty_path_probing()
+    {
+        using var fixture = new RecipeFixture();
+        var source = Server();
+        source.ModelPath = string.Empty;
+        source.ExecutablePath = string.Empty;
+        var logs = new RuntimeLogService(fixture.Settings);
+        var service = new LabRecipeService(
+            new LocalModelCapabilityService(fixture.Settings, logs),
+            fixture.Runner,
+            new ModelManifestStore(fixture.Settings));
+
+        var plans = await service.InspectAsync(source);
+
+        Assert.Equal(Enum.GetValues<LabRecipeKind>().Length, plans.Count);
+        Assert.All(plans, plan =>
+        {
+            Assert.Equal(CapabilityState.Unavailable, plan.Availability);
+            Assert.Contains("Select an existing Chat .gguf model", plan.AvailabilityDetail, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task Production_recipe_inspection_with_configured_source_and_no_draft_does_not_probe_an_empty_companion_path()
+    {
+        using var fixture = new RecipeFixture();
+        var modelPath = fixture.PathFor("model.gguf");
+        var executablePath = fixture.PathFor("llama-server");
+        await File.WriteAllTextAsync(modelPath, "not a GGUF fixture");
+        await File.WriteAllTextAsync(executablePath, "not an executable fixture");
+        var source = Server();
+        source.ModelPath = modelPath;
+        source.ExecutablePath = executablePath;
+        source.Speculative!.DraftModelPath = string.Empty;
+        var logs = new RuntimeLogService(fixture.Settings);
+        var service = new LabRecipeService(
+            new LocalModelCapabilityService(fixture.Settings, logs),
+            fixture.Runner,
+            new ModelManifestStore(fixture.Settings));
+
+        var plans = await service.InspectAsync(source);
+
+        Assert.Equal(Enum.GetValues<LabRecipeKind>().Length, plans.Count);
+        Assert.All(plans, plan => Assert.NotEqual(CapabilityState.Available, plan.Availability));
+    }
+
+    [Fact]
     public void Engine_recipe_changes_only_gpu_layers()
     {
         var plan = LabRecipeCatalog.Build(LabRecipeKind.EngineProfile, Server(), []);
         Assert.Contains(plan.Candidates, candidate => candidate.GpuLayers == -1);
         Assert.All(plan.Candidates, candidate => Assert.Equal(plan.Baseline.ContextSize, candidate.ContextSize));
+    }
+
+    [Fact]
+    public void Engine_recipe_rewrites_typed_gpu_placement_for_each_candidate()
+    {
+        var source = Server();
+        source.GpuLayers = 999;
+        source.GpuPlacement = GpuPlacementIntent.Exact(999);
+
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.EngineProfile, source, []);
+        var identities = plan.Candidates
+            .Prepend(plan.Baseline)
+            .Select(ConfigurationIdentityFactory.Create)
+            .Select(identity => identity.StableId)
+            .ToArray();
+
+        Assert.Equal(identities.Length, identities.Distinct(StringComparer.Ordinal).Count());
+        Assert.DoesNotContain(plan.Candidates, candidate => candidate.GpuPlacement?.CanonicalValue == "exact:999");
+        Assert.Contains(plan.Candidates, candidate => candidate.GpuPlacement?.Kind == GpuPlacementKind.Cpu);
+        Assert.Contains(plan.Candidates, candidate => candidate.GpuPlacement?.Kind == GpuPlacementKind.All);
+
+        foreach (var candidate in plan.Candidates)
+        {
+            var isolated = LabConfigurationMapper.Apply(source, candidate, 39202);
+            Assert.True(isolated.EnableRuntimePropertiesEndpoint);
+            Assert.Equal(candidate.GpuPlacement?.LegacyGpuLayers, isolated.GpuLayers);
+        }
     }
 
     [Fact]
@@ -283,6 +389,44 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public async Task Runner_reports_named_candidate_progress_and_a_truthful_terminal_state()
+    {
+        using var fixture = new RecipeFixture();
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, fixture.Source, []);
+        var progress = new CapturingProgress();
+
+        var run = await fixture.Runner.RunAsync(
+            plan, fixture.Source, fixture.Capabilities([]), "controlled prompt", progress: progress);
+
+        Assert.NotEmpty(progress.Values);
+        Assert.Contains(progress.Values, value => value.ExperimentName == plan.Label
+            && value.CandidateLabel == plan.Baseline.Label
+            && value.CandidateIndex == 1
+            && value.CandidateTotal == plan.Candidates.Count + 1
+            && value.Stage == "Repetition complete");
+        var terminal = Assert.Single(progress.Values.Where(value => value.TerminalStatus is not null).TakeLast(1));
+        Assert.Equal(run.Status, terminal.TerminalStatus);
+        Assert.Equal(terminal.Total, terminal.Completed);
+        Assert.Equal(0, terminal.Remaining);
+    }
+
+    [Fact]
+    public async Task Missing_effective_launch_evidence_is_inconclusive_and_cannot_be_applied()
+    {
+        using var fixture = new RecipeFixture();
+        fixture.Host.OmitEffectiveLaunch = true;
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, fixture.Source, []);
+
+        var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities([]), "controlled prompt");
+        var review = fixture.Experiments.CreateApplyReview(run.Id, plan.Candidates[0].Id);
+
+        Assert.Equal(LabRunStatus.Inconclusive, run.Status);
+        Assert.All(run.Comparisons, comparison => Assert.False(comparison.CanShowHeadlineDelta));
+        Assert.False(review.CanApply);
+        Assert.Contains("completed Lab run", review.RefusalReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Runner_cleans_owned_runtime_after_ordinary_workload_exception()
     {
         using var fixture = new RecipeFixture();
@@ -433,7 +577,9 @@ public sealed class LabRecipeTests
 
         var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities([]), "shared prefix");
 
-        Assert.Equal(LabRunStatus.Succeeded, run.Status);
+        Assert.Equal(LabRunStatus.Inconclusive, run.Status);
+        Assert.Contains(run.RuntimeEvidence.Values,
+            evidence => evidence.Reasons.Contains("effective-field:prompt_cache", StringComparer.Ordinal));
         Assert.Equal(6, fixture.Workload.Requests.Count);
         var disabled = fixture.Workload.Requests.Where(request => request.DisablePromptCache).ToArray();
         var enabled = fixture.Workload.Requests.Where(request => !request.DisablePromptCache).ToArray();
@@ -455,6 +601,7 @@ public sealed class LabRecipeTests
         public LabExperimentService Experiments { get; }
         public LabRecipeRunner Runner { get; }
         public ServerConfig Source => Settings.Settings.ManagedServers.Single();
+        public string PathFor(string name) => _temp.PathFor(name);
 
         public RecipeFixture()
         {
@@ -474,18 +621,73 @@ public sealed class LabRecipeTests
         private static CapabilityEvidence Unknown() => new(CapabilityState.Unknown, "test", "unknown");
     }
 
+    private sealed class CapturingProgress : IProgress<LabRunProgress>
+    {
+        public List<LabRunProgress> Values { get; } = [];
+        public void Report(LabRunProgress value) => Values.Add(value);
+    }
+
     private static LabWorkloadRequest WorkloadRequest() => new(
         "run", 1234, LabConfigurationMapper.FromServer(Server(), "baseline", "Baseline"),
         Fingerprint(), "prompt", 1, 16, "case", 0, TimeSpan.FromSeconds(1));
+
+    private static EffectiveLaunchObservation EffectiveLaunch(LabConfiguration configuration)
+    {
+        var placement = configuration.GpuPlacement;
+        if (placement is null)
+            GpuPlacementIntent.TryFromLegacy(configuration.GpuLayers, out placement, out _);
+        var gpuLayers = placement?.Kind switch
+        {
+            GpuPlacementKind.All => "-1",
+            GpuPlacementKind.Exact => placement.ExactLayerCount!.Value.ToString(CultureInfo.InvariantCulture),
+            _ => "0"
+        };
+        var fit = placement?.Kind == GpuPlacementKind.Auto ? "true" : "false";
+        return new EffectiveLaunchObservation(
+            Runtime(), EffectiveLaunchObservationParser.ParserVersion, true,
+            placement?.Kind == GpuPlacementKind.Auto, null, null,
+            [
+                new AdaptiveFieldObservation("context", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), null,
+                    configuration.ContextSize.ToString(CultureInfo.InvariantCulture), configuration.ContextSize.ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "test.props.context"),
+                new AdaptiveFieldObservation("gpu_layers", placement?.CanonicalValue, gpuLayers, gpuLayers, gpuLayers,
+                    AdaptiveEvidenceState.Proven, "test.props.gpu_layers"),
+                new AdaptiveFieldObservation("fit", fit, fit, fit, fit, AdaptiveEvidenceState.Proven, "test.props.fit"),
+                new AdaptiveFieldObservation("slots", Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "test.props.slots")
+            ],
+            ["test.props"], true)
+        {
+            Process = new RuntimeLaunchProcessEvidence(
+                string.Equals(configuration.Id, "baseline", StringComparison.Ordinal) ? 1001 : 1002,
+                DateTime.UnixEpoch,
+                "/runtime/llama-server",
+                ["--ctx-size", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), "--n-gpu-layers", gpuLayers])
+        };
+    }
 
     private sealed class FakeHost : ILabRuntimeHost
     {
         public List<string> StartedConfigurations { get; } = [];
         public List<FakeSession> Sessions { get; } = [];
+        public bool OmitEffectiveLaunch { get; set; }
         public Task<ILabRuntimeSession> StartAsync(string runId, ServerConfig source, LabConfiguration configuration, CancellationToken ct = default)
         {
             StartedConfigurations.Add(configuration.Id);
             var session = new FakeSession(50000 + Sessions.Count, 100 + Sessions.Count);
+            if (!OmitEffectiveLaunch)
+            {
+                var process = session.Process!;
+                session.EffectiveLaunch = EffectiveLaunch(configuration) with
+                {
+                    Process = new RuntimeLaunchProcessEvidence(
+                        process.ProcessId, process.StartedAtUtc, "/runtime/llama-server",
+                        ["--ctx-size", configuration.ContextSize.ToString(CultureInfo.InvariantCulture)])
+                };
+            }
             Sessions.Add(session);
             return Task.FromResult<ILabRuntimeSession>(session);
         }
@@ -498,6 +700,7 @@ public sealed class LabRecipeTests
         public int Port { get; } = port;
         public bool IsRunning => StopCount == 0;
         public ManagedProcessReference? Process { get; } = new(processId, DateTime.UnixEpoch.AddSeconds(processId));
+        public EffectiveLaunchObservation? EffectiveLaunch { get; set; }
         public int StopCount { get; private set; }
         public Task StopAsync(CancellationToken ct = default) { if (StopCount == 0) StopCount++; return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

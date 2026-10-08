@@ -17,7 +17,10 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class BenchmarkRankingsTests
 {
-    private static BenchmarkRun NewRun(string modelId, double qualityScore)
+    private static BenchmarkRun NewRun(
+        string modelId,
+        double qualityScore,
+        RuntimeEvidenceStatus evidenceStatus = RuntimeEvidenceStatus.Verified)
     {
         return new BenchmarkRun
         {
@@ -26,6 +29,13 @@ public sealed class BenchmarkRankingsTests
             ModelId = modelId,
             ModelName = modelId,
             StartedAt = DateTime.UtcNow,
+            RuntimeEvidence = new RuntimeEvidenceEnvelope
+            {
+                Workflow = "benchmark",
+                Status = evidenceStatus,
+                RunId = modelId,
+                CandidateId = "benchmark-run"
+            },
             Results =
             [
                 new BenchmarkResult
@@ -84,6 +94,34 @@ public sealed class BenchmarkRankingsTests
 
         InvokeUpdateRankedRuns(vm, [new BenchmarkRunViewModel(NewRun("model-a", 0.5)), new BenchmarkRunViewModel(NewRun("model-b", 0.7))]);
         Assert.True(vm.HasComparableRankings);
+    }
+
+    [Fact]
+    public void Ranking_empty_state_explains_unverified_runs_and_requires_two_eligible_models()
+    {
+        using var temp = new TempDir();
+        var vm = NewViewModel(temp);
+        var unverified = NewRun("unverified-model", 0.8, RuntimeEvidenceStatus.Unverified);
+        unverified.Status = "Completed";
+
+        InvokeUpdateRankedRuns(vm, [new BenchmarkRunViewModel(unverified)]);
+
+        Assert.False(vm.HasComparableRankings);
+        Assert.Contains("unverified", vm.RankingEmptyState, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("two", vm.RankingEmptyState, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(vm.RankedRuns);
+    }
+
+    [Fact]
+    public void Ranking_empty_state_identifies_a_single_eligible_model()
+    {
+        using var temp = new TempDir();
+        var vm = NewViewModel(temp);
+
+        InvokeUpdateRankedRuns(vm, [new BenchmarkRunViewModel(NewRun("solo-model", 0.5))]);
+
+        Assert.Contains("One eligible model", vm.RankingEmptyState, StringComparison.Ordinal);
+        Assert.Contains("one more", vm.RankingEmptyState, StringComparison.Ordinal);
     }
 
     [Fact]

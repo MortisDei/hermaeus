@@ -2,6 +2,18 @@ using Hermaeus.Agent.Models;
 
 namespace Hermaeus.Agent.Services;
 
+/// <summary>
+/// Owns Agent command execution. A task is serialized independently, while a
+/// physical workspace target gets a short additional lock so two tasks cannot
+/// prepare and write the same file concurrently.
+/// </summary>
+public interface IAgentTaskCommandOwner
+{
+    Task ExecuteTaskAsync(string taskId, Func<CancellationToken, Task> action, CancellationToken ct = default);
+    Task<T> ExecuteTaskAsync<T>(string taskId, Func<CancellationToken, Task<T>> action, CancellationToken ct = default);
+    Task<T> ExecuteTargetAsync<T>(string workspaceRoot, string relativePath, Func<CancellationToken, Task<T>> action, CancellationToken ct = default);
+}
+
 public interface IAgentTaskStateStore
 {
     Task InitializeAsync(CancellationToken ct = default);
@@ -35,6 +47,8 @@ public interface IAgentWorkspaceTools
     /// flat listing (default) or a bounded tree view.
     /// </summary>
     IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null);
+    /// <summary>Lists the same safe entries with best-effort filesystem metadata for owner-facing views.</summary>
+    IReadOnlyList<AgentWorkspaceFileEntry> ListFileEntries(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null);
     /// <summary>
     /// <paramref name="regex"/> switches <paramref name="query"/> from a
     /// literal substring match to a regular expression; <paramref name="contextLines"/>
@@ -51,6 +65,20 @@ public interface IAgentWorkspaceTools
     AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath, int? lineOffset = null, int? lineLimit = null);
     AgentFileSummaryResult SummarizeFile(AgentWorkspaceOptions options, string relativePath);
     Task<AgentFileReadResult> ApplyDraftPatchAsync(AgentWorkspaceOptions options, string relativePath, string proposedContent, CancellationToken ct = default);
+    /// <summary>
+    /// Saves text from the owner-facing Workspace editor without entering the
+    /// Agent approval queue. The expected revision is checked immediately
+    /// before the atomic write so an external edit produces a conflict rather
+    /// than being overwritten. Agent proposals retain their own authority and
+    /// become stale through the same content-hash check when later approved.
+    /// </summary>
+    Task<AgentOwnerFileSaveResult> SaveOwnerFileAsync(
+        AgentWorkspaceOptions options,
+        string relativePath,
+        string content,
+        string expectedContentSha256,
+        bool expectedExisted,
+        CancellationToken ct = default);
     string DraftPatch(string relativePath, string rationale, string proposedContent);
     /// <summary>
     /// Applies a surgical text edit: <paramref name="oldString"/> must match
@@ -83,6 +111,12 @@ public interface IAgentToolExecutor
 {
     bool CanExecute(string toolName);
     Task<AgentToolResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, AgentWorkspaceOptions options, CancellationToken ct = default, string? operationId = null);
+    Task<AgentToolResult> ExecuteApprovedPreparedMutationAsync(
+        AgentPendingToolAction pending,
+        string approvalFingerprint,
+        AgentWorkspaceOptions options,
+        CancellationToken ct = default,
+        string? operationId = null);
 }
 
 public interface IAgentContextBuilder
@@ -110,6 +144,12 @@ public interface IAgentService
     /// that the exact visible model is currently available. This is a user
     /// review action, never automatic fallback.</summary>
     Task<AgentTaskState> ChangeTaskModelAsync(string taskId, string modelId, CancellationToken ct = default);
+    /// <summary>Updates the model selections in a pending sub-task proposal as a new prepared revision.</summary>
+    Task<string> UpdatePendingPlanModelsAsync(
+        string taskId,
+        string expectedFingerprint,
+        IReadOnlyDictionary<int, string> modelIds,
+        CancellationToken ct = default);
     /// <summary>
     /// Approves or rejects the task's currently pending tool action.
     /// <paramref name="expectedFingerprint"/> must match the pending
@@ -118,6 +158,13 @@ public interface IAgentService
     /// non-applied result instead of running whatever is actually pending.
     /// </summary>
     Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
+    /// <summary>
+    /// Blocks the task's currently pending action without executing it. This is
+    /// the authoritative sibling of Reject for owner-facing Changes actions:
+    /// the fingerprint still binds the decision to the exact rendered
+    /// proposal, and the task remains blocked with an instruction required.
+    /// </summary>
+    Task<AgentApprovalResult> BlockPendingActionAsync(string taskId, string action, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
     /// <summary>
     /// Answers a task's <c>ask_user</c> question: appends the reply to the
     /// task's transcript so the next step sees it, and resumes the task to

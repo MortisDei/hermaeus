@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -181,6 +183,69 @@ public sealed class LabExperimentTests
         Assert.False(comparison.IsControlled);
         Assert.False(comparison.CanShowHeadlineDelta);
         Assert.Contains("runtime", comparison.FingerprintDifferences);
+    }
+
+    [Fact]
+    public void Comparison_refuses_missing_effective_launch_evidence()
+    {
+        var definition = Definition(correctness: LabCorrectnessRequirement.Behavioral);
+        var effective = new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal)
+        {
+            [definition.Baseline.Id] = EffectiveLaunch(definition.Baseline)
+        };
+
+        var comparison = LabComparisonEngine.Compare(definition, definition.Candidates[0], [], [], effective);
+
+        Assert.False(comparison.IsControlled);
+        Assert.False(comparison.CanShowHeadlineDelta);
+        Assert.Contains("effective:candidate:unknown", comparison.FingerprintDifferences);
+    }
+
+    [Fact]
+    public void Comparison_accepts_matching_effective_launch_evidence()
+    {
+        var definition = Definition(correctness: LabCorrectnessRequirement.Behavioral);
+        var effective = new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal)
+        {
+            [definition.Baseline.Id] = EffectiveLaunch(definition.Baseline),
+            [definition.Candidates[0].Id] = EffectiveLaunch(definition.Candidates[0])
+        };
+
+        var comparison = LabComparisonEngine.Compare(definition, definition.Candidates[0], [], [], effective);
+
+        Assert.Empty(comparison.FingerprintDifferences);
+        Assert.True(comparison.IsControlled);
+    }
+
+    [Fact]
+    public void Comparison_only_requires_effective_evidence_for_the_reviewed_candidate()
+    {
+        var definition = Definition(correctness: LabCorrectnessRequirement.Behavioral) with
+        {
+            Candidates = [Config("candidate", 8192), Config("sibling", 16384)],
+            ConfigurationFingerprints = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["baseline"] = ConfigurationIdentity().StableId,
+                ["candidate"] = ConfigurationIdentity(8192).StableId,
+                ["sibling"] = ConfigurationIdentity(16384).StableId
+            },
+            ConfigurationIdentities = new Dictionary<string, ConfigurationIdentityV2>(StringComparer.Ordinal)
+            {
+                ["baseline"] = ConfigurationIdentity(),
+                ["candidate"] = ConfigurationIdentity(8192),
+                ["sibling"] = ConfigurationIdentity(16384)
+            }
+        };
+        var effective = new Dictionary<string, EffectiveLaunchObservation>(StringComparer.Ordinal)
+        {
+            [definition.Baseline.Id] = EffectiveLaunch(definition.Baseline),
+            [definition.Candidates[0].Id] = EffectiveLaunch(definition.Candidates[0])
+        };
+
+        var comparison = LabComparisonEngine.Compare(definition, definition.Candidates[0], [], [], effective);
+
+        Assert.Empty(comparison.FingerprintDifferences);
+        Assert.True(comparison.IsControlled);
     }
 
     [Fact]
@@ -403,6 +468,37 @@ public sealed class LabExperimentTests
     }
 
     [Fact]
+    public async Task Completion_summary_keeps_comparisons_and_effective_launches_in_bounded_records()
+    {
+        using var fixture = new Fixture();
+        var run = await fixture.Service.StartAsync(await fixture.DefinitionAsync(), fixture.Source);
+        await fixture.Service.SwitchConfigurationAsync(run.Id, fixture.Source, "candidate");
+        var completed = await fixture.Service.CompleteAsync(run.Id, Observations(run), []);
+        var summaryRecord = await fixture.Store.GetAsync(completed.CompletionEvidenceId);
+
+        Assert.NotNull(summaryRecord);
+        Assert.True(Encoding.UTF8.GetByteCount(summaryRecord!.ActionJson) <= ExperienceJson.MaxDocumentBytes);
+        var summary = ExperienceJson.Decode<LabRunCompletionSummary>(summaryRecord.ActionJson);
+        Assert.Null(summary.DetailedComparisons);
+        Assert.Empty(summary.EffectiveLaunches);
+        Assert.NotEmpty(summary.ComparisonEvidenceIds);
+        Assert.NotEmpty(summary.EffectiveLaunchEvidenceIds);
+
+        foreach (var evidenceId in summary.ComparisonEvidenceIds.Concat(summary.EffectiveLaunchEvidenceIds))
+        {
+            var evidence = await fixture.Store.GetAsync(evidenceId);
+            Assert.NotNull(evidence);
+            Assert.True(Encoding.UTF8.GetByteCount(evidence!.ActionJson) <= ExperienceJson.MaxDocumentBytes);
+        }
+
+        var comparisonRecord = await fixture.Store.GetAsync(summary.ComparisonEvidenceIds[0]);
+        var comparison = ExperienceJson.Decode<LabRunComparisonEvidence>(comparisonRecord!.ActionJson);
+        Assert.Equal(run.Id, comparison.RunId);
+        Assert.Equal(run.DefinitionHash, comparison.DefinitionHash);
+        Assert.Equal("candidate", comparison.Comparison.CandidateConfigurationId);
+    }
+
+    [Fact]
     public async Task Speed_only_run_cannot_produce_apply_recommendation()
     {
         using var fixture = new Fixture();
@@ -462,6 +558,7 @@ public sealed class LabExperimentTests
     private static async Task<LabRunSnapshot> CompleteEquivalentAsync(Fixture fixture)
     {
         var run = await fixture.Service.StartAsync(await fixture.DefinitionAsync(), fixture.Source);
+        await fixture.Service.SwitchConfigurationAsync(run.Id, fixture.Source, "candidate");
         var outputs = new[]
         {
             LabCorrectnessEvaluator.Capture("baseline", "case", 0, "same"),
@@ -473,6 +570,44 @@ public sealed class LabExperimentTests
     private static IReadOnlyList<LabObservation> Observations(LabRunSnapshot run) =>
         [Observation(run.Definition, "baseline", 10, "") with { RunId = run.Id },
          Observation(run.Definition, "candidate", 12, "") with { RunId = run.Id }];
+
+    private static EffectiveLaunchObservation EffectiveLaunch(LabConfiguration configuration)
+    {
+        var placement = configuration.GpuPlacement;
+        if (placement is null)
+            GpuPlacementIntent.TryFromLegacy(configuration.GpuLayers, out placement, out _);
+        var gpuLayers = placement?.Kind switch
+        {
+            GpuPlacementKind.All => "-1",
+            GpuPlacementKind.Exact => placement.ExactLayerCount!.Value.ToString(CultureInfo.InvariantCulture),
+            _ => "0"
+        };
+        var fit = placement?.Kind == GpuPlacementKind.Auto ? "true" : "false";
+        return new EffectiveLaunchObservation(
+            Fingerprint().Runtime, EffectiveLaunchObservationParser.ParserVersion, true,
+            placement?.Kind == GpuPlacementKind.Auto, null, null,
+            [
+                new AdaptiveFieldObservation("context", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), null,
+                    configuration.ContextSize.ToString(CultureInfo.InvariantCulture), configuration.ContextSize.ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "test.props.context"),
+                new AdaptiveFieldObservation("gpu_layers", placement?.CanonicalValue, gpuLayers, gpuLayers, gpuLayers,
+                    AdaptiveEvidenceState.Proven, "test.props.gpu_layers"),
+                new AdaptiveFieldObservation("fit", fit, fit, fit, fit, AdaptiveEvidenceState.Proven, "test.props.fit"),
+                new AdaptiveFieldObservation("slots", Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    Math.Max(1, configuration.Slots).ToString(CultureInfo.InvariantCulture),
+                    AdaptiveEvidenceState.Proven, "test.props.slots")
+            ],
+            ["test.props"], true)
+        {
+            Process = new RuntimeLaunchProcessEvidence(
+                string.Equals(configuration.Id, "baseline", StringComparison.Ordinal) ? 1001 : 1002,
+                DateTime.UnixEpoch,
+                "/runtime/llama-server",
+                ["--ctx-size", configuration.ContextSize.ToString(CultureInfo.InvariantCulture), "--n-gpu-layers", gpuLayers])
+        };
+    }
 
     private static LabObservation Observation(LabExperimentDefinition definition, string configId,
         double? value, string missing, int repetition = 0) => new()
@@ -541,6 +676,7 @@ public sealed class LabExperimentTests
             StartCount++;
             var failure = Failure ?? (FailOnStart == StartCount
                 ? new InvalidOperationException("candidate launch refused") : null);
+            Session.EffectiveLaunch = failure is null ? LabExperimentTests.EffectiveLaunch(configuration) : null;
             return failure is null ? Task.FromResult<ILabRuntimeSession>(Session) : Task.FromException<ILabRuntimeSession>(failure);
         }
         public Task<IReadOnlyList<string>> RecoverOwnedProcessesAsync(CancellationToken ct = default) =>
@@ -553,6 +689,7 @@ public sealed class LabExperimentTests
         public int Port => 49152;
         public bool IsRunning => StopCount == 0;
         public ManagedProcessReference? Process => new(42, DateTime.UnixEpoch);
+        public EffectiveLaunchObservation? EffectiveLaunch { get; set; }
         public int StopCount { get; private set; }
         public Task StopAsync(CancellationToken ct = default) { StopCount++; return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

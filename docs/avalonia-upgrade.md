@@ -9,12 +9,28 @@ for the containment rationale.
 
 The Avalonia framework packages (`Avalonia`, `Avalonia.Desktop`,
 `Avalonia.Themes.Fluent`, and `Avalonia.Fonts.Inter`) are pinned to the same
-exact `12.1.2` version in `src/Hermaeus.Desktop/Hermaeus.Desktop.csproj`.
-`Avalonia.AvaloniaEdit` is pinned to its latest stable `12.0.0` release because
+exact `12.1.3` version in `src/Hermaeus.Desktop/Hermaeus.Desktop.csproj`.
+`Avalonia.AvaloniaEdit` is pinned to its latest published `12.0.0` release
+(NuGet checked 2026-10-06) because
 it remains on a separate package line. Its package dependency targets Avalonia
-12.0.0 or newer, so restore resolves it against the 12.1.2 framework. This is the only
+12.0.0 or newer, so restore resolves it against the 12.1.3 framework. This is the only
 intentional package-family version difference and must be checked whenever the
 framework moves.
+
+## R33 patch update
+
+R33 consolidates Dependabot PRs #17, #18 and #19 into one coherent framework
+update from 12.1.2 to 12.1.3. Each PR updates the base package and only one
+companion; applying the complete set together preserves the framework pin.
+No package reference is added, and AvaloniaEdit remains at 12.0.0.
+
+The [upstream release](https://github.com/AvaloniaUI/Avalonia/releases/tag/12.1.3)
+includes tray attachment, theme-switch crash, text layout, shutdown and Linux
+tray fixes relevant to Hermaeus's desktop surfaces. These release notes are
+not evidence that Hermaeus's historical native crash or COSMIC editor flicker
+is fixed. The tooltip workaround and reflection-binding default remain in
+place. Packaged theme, tray, rendering and lifecycle checks remain required
+before release, including Linux/COSMIC owner validation.
 
 ## R32 migration record
 

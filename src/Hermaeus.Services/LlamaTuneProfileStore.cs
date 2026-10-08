@@ -14,6 +14,28 @@ public static class LlamaTuneProfileStore
 {
     public const int MaxProfiles = 200;
 
+    /// <summary>
+    /// Auto-tune persistence is allowed only when the returned result carries
+    /// the exact configuration receipt produced by a successful probe. A
+    /// measured or inferred layer count without that receipt is not a launch
+    /// proof and must remain unpersisted.
+    /// </summary>
+    public static void ValidateAutoTuneResult(ServerTuneResult result, int requestedContext)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var effectiveContext = result.TunedContextSize ?? requestedContext;
+        if (effectiveContext <= 0)
+            throw new InvalidOperationException("Auto-tune returned an invalid context size; no tune profile was saved.");
+        if (result.ProbeContextSize != effectiveContext)
+            throw new InvalidOperationException("Auto-tune returned no exact probe receipt for the persisted context; no tune profile was saved.");
+        if (string.IsNullOrWhiteSpace(result.ProbeConfigurationStableId))
+            throw new InvalidOperationException("Auto-tune returned no exact probe configuration receipt; no tune profile was saved.");
+        if (result.GpuLayers < -1)
+            throw new InvalidOperationException("Auto-tune returned an invalid GPU layer count; no tune profile was saved.");
+        if (result.Threads <= 0)
+            throw new InvalidOperationException("Auto-tune returned an invalid thread count; no tune profile was saved.");
+    }
+
     /// <summary>Resolves a configured model path to an existing file: the path itself if it
     /// is a file, or the single .gguf inside it if it is a directory containing exactly one.
     /// Returns empty when neither resolves (mirrors ServerProcessManager.ResolveModel's
@@ -101,6 +123,11 @@ public static class LlamaTuneProfileStore
         profile.ContextSize = contextSize;
         profile.ExtraArgs = extraArgs;
         profile.LlamaServerVersion = result?.LlamaServerVersion ?? profile.LlamaServerVersion;
+        if (result is not null)
+        {
+            profile.ProbeConfigurationStableId = result.ProbeConfigurationStableId;
+            profile.ProbeContextSize = result.ProbeContextSize;
+        }
         profile.TunedAtUtc = DateTime.UtcNow;
         Prune(settings);
         return profile;

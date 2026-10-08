@@ -17,6 +17,9 @@ defined by `Directory.Build.props`.
 - Context Inspector and a per-answer context receipt show what was prepared and
   injected. Attached Knowledge, Memories, Recall, Project State, attachments,
   token estimates, and provider-reported usage remain distinguishable.
+- Refreshing the Chat model picker preserves conversation sampling overrides
+  and reported token usage when the same model remains selected. A genuine
+  model change applies that model's sampling defaults.
 - Reasoning is a separate, labelled transcript channel when the selected route
   provides it. It is preserved and replayed only when the runtime and template
   evidence supports that behavior.
@@ -53,6 +56,11 @@ for Knowledge behavior in Chat.
 - Services manages local runtime processes and files. Managed `llama.cpp`,
   Ollama, and OpenAI-compatible profiles are supported, with explicit
   localhost, model, port, and launch configuration.
+- Switching the selected Services model keeps unsaved model-specific runtime
+  fields isolated per local model. A first visit hydrates only the target
+  model's card and tune profile, while a switch back restores that model's
+  in-memory draft. Companion paths, speculative settings, context, placement,
+  threads, cache, and adaptive fields never come from another model.
 - Data-root changes use an explicit confirmation and the existing safe
   migration boundary. The Data Storage page distinguishes the configured root
   from the root currently effective for composed stores and tells the user to
@@ -71,7 +79,9 @@ for Knowledge behavior in Chat.
   refused instead of silently becoming CPU.
   Update identity uses the verified upstream b-numbered release tag and
   SHA256-checked archive, with `--version` output captured from both stdout and
-  stderr. Help text or a zero exit code alone never proves build identity.
+  stderr. The version probe has a bounded 15-second budget and records elapsed
+  time in timeout diagnostics. Help text or a zero exit code alone never proves
+  build identity.
   Known upstream archive wrapper directories are removed at the owned version
   boundary, while flat upstream packages are accepted as well; mixed layouts
   fail closed and legacy nested installations remain discoverable and protected.
@@ -107,6 +117,8 @@ for Knowledge behavior in Chat.
   model update check may backfill either source when its verified manifest
   revision matches the fetched card and tree; decoration failures never fail
   the update check.
+- Replacing or abandoning a Hugging Face repository inspection cancels the
+  superseded request and prevents stale details or artwork from publishing.
 - GPU Fit is a deterministic prediction over the current editor values. It
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are
@@ -132,6 +144,15 @@ for Knowledge behavior in Chat.
   when its exact runtime, model, hardware, base configuration, workload, and
   bounded evidence age match; it never skips fresh admission. Unsupported fit,
   cache, and multi-device behavior remains Unavailable or Unknown.
+- Services AutoTune probes preserve the complete managed-server configuration
+  and change only the candidate axes for each probe. Models-card AutoTune
+  probes build an independent target configuration and use only verified
+  target companions, so a loaded source model cannot contribute its draft,
+  projector, or extra arguments. Running managed servers are suspended before
+  the Models-card probe and restored after success, failure, or cancellation;
+  the profile is saved only after restoration. Local GGUF metadata and the
+  current hardware profile are supplied when available; transient probe values
+  are never written back to saved settings.
 - Model cards use the detailed versioned prediction when local GGUF shape
   metadata is available. Remote or pre-download cards retain a clearly labelled
   rough pre-download estimate until that metadata exists.
@@ -155,6 +176,9 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
 - Watched sources use cancellable drift scans. Refresh applies only new and
   changed files by default; removing missing sources remains a separate,
   explicitly confirmed action. Automatic refresh is off by default.
+- Manual ingest and reindex are single-flight operations. A duplicate start
+  while one is active does not create a competing generation, and the existing
+  overall and current-stage progress remains the authoritative operation state.
 - Dataset Manager exposes source and chunk health, embedding identity,
   dimensions, missing and stale files, duplicate rows, index size, reindex
   state, and published generation history. A dataset embedded with another
@@ -163,6 +187,9 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
   generation, source revision, and content hash that supplied the chunk.
 - Chat Knowledge injection is bounded and cited. Weak retrieval adds nothing
   rather than forcing unrelated chunks into a response.
+- RAG and document Recall rank FTS keyword matches before applying their
+  candidate limits, then score the bounded candidate set with dataset BM25
+  statistics. Candidate selection no longer favours the storage-order prefix.
 - The RAG question panel can include an explicit combination of datasets per
   question. Its multi-select scope is separate from the single-dataset
   manager controls used for ingest, reindex, and evaluation.
@@ -172,6 +199,12 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
   dataset; later selections are persisted. Ask, Manage, Sources, and Diagnostics
   are explicit workspace views, keeping persistent dataset administration
   separate from per-question context selection and evidence inspection.
+- The Ask surface states whether a question is ready, searching/generating,
+  answered, refused for weak retrieval, failed, cancelled, or blocked by a
+  missing knowledge base, and names the next action. Dataset scope labels make
+  Local files and Remote web sources distinct. Retrieved citations and query
+  traces remain one click away through secondary inspection views rather than
+  dominating the normal answer.
 - RAG has a native evaluation harness with retrieval metrics, refusal handling,
   cancellation, and export. The separate [eval harness plan](rag-eval-harness.md)
   describes proposed expansion beyond the shipped surface.
@@ -237,12 +270,54 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
 - Read-only inspection can run within the selected workspace. Writes,
   commands, MCP calls, and sub-task planning remain approval-gated and are
   classified deterministically by the safety gate.
+- Mutating Agent proposals are prepared before review with typed arguments,
+  workspace policy, target identity, preimage, and proposed output where
+  applicable. Approval revalidates the exact proposal, persists a receipt
+  before execution, and records readback verification. `Applied` means the
+  target changed and matches the proposed post-image; `AlreadySatisfied` is a
+  separate no-write outcome. Workspace-browser patch queues use the same
+  preparation and ownership path.
+- Per-patch Approve, Reject, and Block decisions revalidate the authoritative
+  proposal, revision, preimage, content, fingerprint, and policy before they
+  enter the task transition. Parent-owned child questions and approvals retain
+  source identity and reject stale answers or decisions.
 - The workbench exposes the current decision, live progress, plan, response,
   changes, approvals, reservations, commands, and unfinished work. Responses
-  are selectable Markdown with an explicit copy action. Continue planned work,
+  are selectable Markdown with an explicit copy action and continue rendering
+  current content after tab navigation. Continue planned work,
   continue with an instruction, Finish run, and Stop are distinct persisted
   lifecycle transitions. A run ledger supports per-file Rewind with staleness
   checks.
+- Agent's Run surface states the current lifecycle and next action in user
+  terms, including answer waits, approvals, blocked/failed/cancelled runs,
+  interruption recovery, and complete runs with reservations. Changes
+  distinguishes pending review from applied/readback-verified and conflicted
+  files. Workspace uses AvaloniaEdit as its sole local editor. The owner can
+  edit the selected file and save directly with Save or Ctrl+S; the write is
+  revision-checked, atomic, and reports an external conflict instead of
+  overwriting newer content. Agent-proposed patches remain on the prepared,
+  reviewable path. Terminal runs can open their
+  persisted state/transcript/trace/log folder. New Task clears task-scoped
+  composer, response, draft, selection, and evidence projections without
+  deleting the persisted task.
+- Successful workspace listings and file loads clear only the error from their
+  earlier failed read, preserving any newer task or owner-save failure.
+- Workspace file listings distinguish directories and preserve nullable
+  modification times. When the filesystem cannot provide a trustworthy time,
+  the UI says **Modified time unavailable** instead of displaying a fabricated
+  date.
+- Equivalent approved mutation requests and already-verified post-images are
+  bounded as task-level non-progress before another approval is offered.
+  Startup rebuilds parent-owned child interaction mirrors from child state,
+  preserves routable child queue rows, and terminalizes orphaned children as
+  interrupted rather than leaving phantom approval rows.
+- A second top-level task cannot start while another task is open. An
+  orchestration parent cannot be finished while a child is still pending or
+  running. Dismissing a paused parent cancels its unfinished children without
+  executing pending tools, skips unstarted work and preserves completed evidence.
+  Startup recovery marks an inconsistent completed parent state
+  as blocked for explicit continuation. A suggested workspace `AGENTS.md` is
+  previewed and queued through the same approval path as every other write.
 - Scenario Evals supports both suite execution and an individual row Run
   action. Those actions are disabled while definitions are loading or when no
   model or scenario set is ready. Persisted evidence restoration runs after
@@ -267,6 +342,21 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
 
 See [Agent Workbench](agent.md) and the [Agent Local API contract](agent-api.md).
 
+## Optional ChatGPT Pet companion
+
+- Hermaeus can import generic ChatGPT Pet v2 data packages after validating the
+  manifest, sprite version, relative paths, file types, reparse points, and
+  resource limits. Packages contain data only and do not run scripts or receive
+  chat content.
+- The bundled Moss package is selected as the compatibility default but the
+  overlay is disabled by default. Enabling it shows a small draggable animated
+  sprite, persists the selected package and position through normal UI
+  settings, clamps the entire sprite inside the window, and reverses walking
+  direction from the current pointer movement.
+- Moss asset provenance and its unresolved external redistribution/licensing
+  question are recorded beside the bundled package. The feature does not add a
+  marketplace, pet editor, or voice subsystem.
+
 ## Projects
 
 Projects provide shared defaults for Chat, Agent, and RAG: folder root, model,
@@ -283,9 +373,11 @@ manual or guided run may be active at a time. A running
 selected Chat source is fully stopped and awaited before the isolated process
 starts, then restored only if its complete configuration is unchanged. Lab does
 not change saved settings or select a winner automatically. Definitions are
-frozen, candidates are bounded, valid recipe evidence flows directly into
-candidate review, missing measurements remain missing, and output correctness
-gates comparisons and Apply review. Failures retain their useful operation
+frozen before source suspension, candidate drafts survive status refreshes of
+the bound source picker, and choosing another server resets the candidate to its
+context baseline. Candidates are bounded, valid recipe evidence flows directly
+into candidate review, missing measurements remain missing, and output
+correctness gates comparisons and Apply review. Failures retain their useful operation
 detail. One Lab execution is one top-level Evidence entry keyed by its durable
 run id. Its drill-down retains the completion result, configuration slices,
 provenance, and raw detail. Completion summaries name the eligible candidate or
@@ -294,6 +386,9 @@ review and confirmation owned by the Hermaeus window. The result card leads
 with the experiment, recorded model identity when available, status,
 timestamps, tested configurations, recommendation state, correctness, and
 measured or predicted resource deltas. Missing measurements remain `Unknown`.
+Comparison decisions and effective-launch observations are persisted as separate
+bounded records and linked from the summary, so a long run cannot exceed the
+existing per-document limit merely because its detail is retained.
 The Experiment card keeps the execution outcome separate from source-restore
 state and raises an explicit attention state when restoration fails or is
 blocked by a changed configuration.
@@ -302,6 +397,28 @@ The Evidence surface stores typed Agent, GPU Fit, Lab, and adaptive-launch recor
 links, fingerprints, corrections, redacted export, and confirmed removal.
 Experience is descriptive evidence only. It never grants approval, changes a
 safety decision, or rewrites the analytical GPU Fit prediction.
+
+Lab's Experiment surface describes capability and recipe availability for the
+selected server/model, disables runs that are unavailable or have no eligible
+target, and keeps run, cancellation, source-restore, Apply, and recovery next
+actions visible. During a recipe run it shows the named experiment, candidate
+and position, current stage, completed steps, remaining steps, and a bounded
+determinate percentage. Recipe prompt detail and evidence filters are disclosed
+until needed, and action groups wrap on narrow windows. The selected runtime's
+effective state remains distinct from a recommendation or saved configuration.
+Each baseline-to-candidate comparison also retains the isolated runtime's
+effective launch observation. Context and slots come from the structured
+properties receipt when available, with matching scalar startup lines used only
+from the same PID-associated launch receipt when the runtime omits them. GPU
+placement comes from a startup receipt that reports the offloaded layer count.
+The effective receipt keeps the PID, redacted exact argv, executable path, and
+bounded startup evidence with those fields. Context, GPU placement, and slot
+count must be auditable and match the reviewed configuration; Auto additionally
+requires auditable fit evidence. Missing or invalid process association, or
+missing or mismatched effective state, makes the run Inconclusive and blocks a
+controlled headline or Apply. After Apply, the live Services
+projection is read back to verify that the reviewed fields were actually
+persisted.
 
 Successful auditable adaptive changes and correctness-gated Lab winners can
 produce a shared review card. The card shows current and proposed fields,
@@ -318,11 +435,19 @@ Benchmarks run reusable local prompt suites, retain immutable run history, recor
 failures and runtime metadata, compare models over shared cases, and export
 Markdown, JSON, and CSV. Ranking profiles, Best overall, Best across every
 suite, and the fixed Speed Check answer different questions and do not collapse
-missing evidence into a score.
+missing evidence into a score. Lab and Benchmarks share a runtime evidence
+envelope that keeps requested, resolved, launched, effective, and
+process-bound telemetry identity separate. A completed run with unverified or
+mismatched evidence remains visible but is excluded from rankings and Insights
+until rerun with verified evidence.
 
 Benchmark resource readings distinguish process RAM, device totals, and honest
 per-process `Unknown` values. Lab owns controlled configuration experiments;
-Benchmarks own reusable suites and run comparisons.
+Benchmarks own reusable suites and run comparisons. When runtime authority is
+missing or conflicting, the run list, completion notification, and Run Detail
+view retain bounded reasons and the reconciliation of requested, resolved,
+launched, effective, and process-bound telemetry identities. The run remains
+visible but is excluded from trustworthy rankings.
 
 See the [Benchmarks reference](benchmarks.md).
 
@@ -342,14 +467,24 @@ Native Kokoro health failures retain the provider's observed diagnosis in
 Services and link directly to Doctor. Doctor owns the verified asset repair
 action; a healthy native provider is not offered as an install action.
 
-Audio feedback is a separate semantic cue service with explicit events,
+Audio feedback is off by default for new or missing settings; explicit saved
+choices are preserved. It is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
-speaks. It does not cue ordinary clicks, token arrival, navigation, or high GPU
-use.
+speaks. Semantic events use distinct generated patterns with 400 ms notes and
+300 ms pauses, with three-note cues bounded to 1.8 seconds. Recording cues
+remain short single tones.
+Windows playback refuses default-beep substitution, and
+diagnostics identify the resource, backend attempts, fallback, and result. It
+does not cue ordinary clicks, token arrival, navigation, or high GPU use.
 
 See the [Voice reference](voice.md).
 
 ## Doctor and Setup
+
+Unavailable llama.cpp release metadata retains its lookup error in Doctor's
+details and copied diagnostics. GitHub rate limits require HTTP 429 or exhausted
+quota evidence; an unqualified HTTP 403 remains a rejected request with an
+uncertain cause. An unavailable comparison never means the runtime is current.
 
 The setup wizard makes Data Root, AI Assets, runtime, model, and optional voice
 choices explicit. Doctor checks actual paths, executable readiness, runtimes,
@@ -376,12 +511,39 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   component, and best-effort GPU information.
 - Chat telemetry can sample the currently active managed server process. Its
   process RAM and per-process GPU readings are tied to that process identity;
-  missing counters remain Unknown.
+  missing counters remain Unknown, and the telemetry flyout exposes the
+  evidence code and bounded source detail explaining an unavailable process
+  counter. Closing the flyout or leaving its view stops its polling session;
+  late samples cannot repopulate a closed view.
+- Telemetry identifies the selected runtime by kind, version, build, and
+  backend, and the model by manifest or local identity plus architecture and
+  quantization. Stable identifiers remain available as secondary diagnostic
+  details rather than replacing the human-readable labels.
 - Chat send traces retain the selected provider tag, separate first-event and
   first-content timing, and count emitted reasoning deltas when available.
 - Activity records observed outcomes for operations such as model downloads,
   server lifecycle, ingest, backups, restores, memory sweeps, and voice.
   Artifact-specific rows open their artifact; rows without one stay inert.
+- Data Root restore preflights all file entries for safe paths, duplicate
+  targets, and bounded per-entry and total uncompressed sizes before writing.
+  The archive is expanded beneath a data-root staging directory, with actual
+  expanded bytes checked while copying. Commit moves are rollback-safe, and
+  existing files are preserved if a late commit step fails.
+- Settings-triggered restart drains the shared application owners before it
+  starts the replacement. The replacement uses a bounded internal lock
+  handoff. An ordinary second launch requests restoration of the existing
+  window over a same-user, activation-only named pipe, then exits without
+  composing services or acquiring the owner's data root.
+- Tray icons are attached through Avalonia's application collection and removed
+  on disable or disposal. Closing/minimizing hides the window only with an
+  available tray; Linux additionally requires a tray interaction in the current
+  session. Without that evidence, close quits cleanly and minimize retains the
+  taskbar window. Disabling the tray restores a hidden window first.
+- Window close and tray **Stop Services** use the same bounded managed-process
+  stop path. After the drain completes, the desktop exits through the Avalonia
+  application lifetime rather than re-entering a cancelled window close. An
+  incomplete drain is journaled as incomplete, with per-owner and final result
+  diagnostics, instead of being presented as a clean exit.
 - Runtime Logs apply redaction before display and persistence, omit repetitive
   low-level llama slot scheduler chatter from the normal persistent sink, and
   rotate with bounded file-count, age, and total-size retention. Settings holds

@@ -255,6 +255,127 @@ public sealed class AdaptiveInferenceTests
     }
 
     [Fact]
+    public void Effective_parser_reads_nested_props_and_process_bound_gpu_receipt()
+    {
+        var config = Config(GpuPlacementIntent.Exact(17), new AdaptiveInferenceEnvelope
+        {
+            Mode = AdaptiveInferenceMode.AdaptAtLaunch
+        });
+        var process = new RuntimeLaunchProcessEvidence(
+            17768,
+            DateTime.UnixEpoch,
+            "/runtime/llama-server",
+            ["--n-gpu-layers", "17"])
+        {
+            StartupEvidence = ["load_tensors: offloaded 17/36 layers to GPU"]
+        };
+
+        var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
+            """{"default_generation_settings":{"n_ctx":4096,"params":{"n_ctx":512}},"total_slots":1}""",
+            process,
+            "load_tensors: offloaded 17/36 layers to GPU");
+
+        Assert.True(observation.IsAuditable);
+        Assert.Equal(process, observation.Process);
+        Assert.Equal("4096", Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+        Assert.Equal("17", Assert.Single(observation.Fields, field => field.Field == "gpu_layers").EffectiveValue);
+        Assert.Equal("1", Assert.Single(observation.Fields, field => field.Field == "slots").EffectiveValue);
+        Assert.Contains("runtime.log.gpu_layers", observation.EvidenceIds);
+    }
+
+    [Fact]
+    public void Effective_parser_uses_bounded_native_startup_receipt_for_missing_props_scalars()
+    {
+        var config = Config(GpuPlacementIntent.All(), new AdaptiveInferenceEnvelope
+        {
+            Mode = AdaptiveInferenceMode.AdaptAtLaunch
+        });
+        config.Slots = 4;
+        config.Threads = 4;
+        config.KvCacheTypeK = "f16";
+        config.KvCacheTypeV = "f16";
+        config.FlashAttention = "auto";
+        var process = new RuntimeLaunchProcessEvidence(
+            381677,
+            DateTime.UnixEpoch,
+            "/runtime/llama-server",
+            ["--ctx-size", "4096", "--n-gpu-layers", "all"]);
+
+        var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
+            """{"n_ctx":4096,"default_generation_settings":{"n_ctx":1024,"params":{"n_ctx":512}},"total_slots":4}""",
+            process,
+            """
+            system_info: n_threads = 4
+            load_tensors: offloaded 36/36 layers to GPU
+            llama_context: n_ctx = 4096
+            llama_kv_cache: ... K (f16), V (f16)
+            resolve_fused_ops: Flash Attention enabled
+            load_model: initializing n_slots = 4, n_ctx_slot = 1024
+            """);
+
+        Assert.True(observation.IsAuditable);
+        Assert.Equal("4", Assert.Single(observation.Fields, field => field.Field == "threads").EffectiveValue);
+        Assert.Equal("f16", Assert.Single(observation.Fields, field => field.Field == "kv_cache_type_k").EffectiveValue);
+        Assert.Equal("f16", Assert.Single(observation.Fields, field => field.Field == "kv_cache_type_v").EffectiveValue);
+        Assert.Equal("on", Assert.Single(observation.Fields, field => field.Field == "flash_attention").EffectiveValue);
+        Assert.Contains("runtime.log.threads", observation.EvidenceIds);
+        Assert.Contains("runtime.log.flash_attention", observation.EvidenceIds);
+        Assert.DoesNotContain("flash_attention", RuntimeEvidenceEvaluator.ExpectedEffectiveValues(
+            new ConfigurationIdentityV2(4096, null, "gpu-all", 4, 0, 4, null, null,
+                "f16", "f16", "auto", "", "", "", 0,
+                new Dictionary<string, string>(), IdentityCompleteness.Complete),
+            ["flash_attention"]).Keys);
+    }
+
+    [Theory]
+    [InlineData("{\"n_ctx\":4096,\"total_slots\":4,\"default_generation_settings\":{\"n_ctx\":1024,\"params\":{\"n_ctx\":512}}}")]
+    [InlineData("{\"total_slots\":4,\"default_generation_settings\":{\"n_ctx\":1024,\"params\":{\"n_ctx\":512}}}")]
+    public void Effective_context_uses_runtime_capacity_instead_of_generation_parameters(string props)
+    {
+        var observation = EffectiveLaunchObservationParser.Parse(Config(GpuPlacementIntent.All(), new()), Runtime(), props);
+        Assert.Equal("4096", Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+    }
+
+    [Theory]
+    [InlineData("llama_context: n_ctx = 4096\nload_model: initializing n_slots = 4, n_ctx_slot = 1024")]
+    [InlineData("load_model: initializing n_slots = 4, n_ctx_slot = 1024")]
+    public void Effective_context_log_fallback_reports_total_capacity(string log)
+    {
+        var observation = EffectiveLaunchObservationParser.Parse(Config(GpuPlacementIntent.All(), new()), Runtime(),
+            """{"default_generation_settings":{"params":{"n_ctx":512}}}""", runtimeLog: log);
+        Assert.Equal("4096", Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+        Assert.Contains("runtime.log.context", observation.EvidenceIds);
+    }
+
+    [Theory]
+    [InlineData("{\"default_generation_settings\":{\"params\":{\"n_ctx\":512}}}")]
+    [InlineData("{\"default_generation_settings\":{\"n_ctx\":1024}}")]
+    [InlineData("{\"total_slots\":0,\"default_generation_settings\":{\"n_ctx\":1024}}")]
+    [InlineData("{\"total_slots\":2,\"default_generation_settings\":{\"n_ctx\":2147483647}}")]
+    public void Incomplete_or_non_capacity_props_do_not_prove_effective_context(string props)
+    {
+        var observation = EffectiveLaunchObservationParser.Parse(Config(GpuPlacementIntent.All(), new()), Runtime(), props);
+        Assert.Null(Assert.Single(observation.Fields, field => field.Field == "context").EffectiveValue);
+        Assert.False(observation.IsAuditable);
+    }
+
+    [Fact]
+    public void Lab_effective_parser_requires_process_association_for_auditable_receipt()
+    {
+        var config = Config(GpuPlacementIntent.Exact(17), new AdaptiveInferenceEnvelope
+        {
+            Mode = AdaptiveInferenceMode.AdaptAtLaunch
+        });
+        config.EnableRuntimePropertiesEndpoint = true;
+
+        var observation = EffectiveLaunchObservationParser.Parse(config, Runtime(),
+            "{\"ctx_size\":4096,\"n_gpu_layers\":17,\"fit\":false,\"parallel\":1}");
+
+        Assert.True(observation.PropsProbeSucceeded);
+        Assert.False(observation.IsAuditable);
+    }
+
+    [Fact]
     public void Effective_parser_marks_malformed_or_non_object_props_unknown()
     {
         var config = Config(GpuPlacementIntent.Auto(), new AdaptiveInferenceEnvelope { Mode = AdaptiveInferenceMode.AdaptAtLaunch });
@@ -270,6 +391,7 @@ public sealed class AdaptiveInferenceTests
     [Theory]
     [InlineData("out of memory", ServerLaunchFailureKind.ResourceExhaustion)]
     [InlineData("invalid value for --ctx-size", ServerLaunchFailureKind.Configuration)]
+    [InlineData("unsupported ggml tensor type 42", ServerLaunchFailureKind.Configuration)]
     public void Launch_failures_are_classified_without_treating_unknown_as_resource_exhaustion(
         string message, ServerLaunchFailureKind expected)
     {
@@ -316,7 +438,7 @@ public sealed class AdaptiveInferenceTests
         var observation = EffectiveLaunchObservationParser.Parse(
             config,
             runtime,
-            "{\"ctx_size\":4096,\"n_gpu_layers\":24}");
+            "{\"ctx_size\":4096,\"n_gpu_layers\":24,\"parallel\":1}");
         var result = new ServerLaunchResult(ServerStatus.Running, ServerLaunchFailureKind.None, observation, string.Empty);
 
         await service.RecordAsync(

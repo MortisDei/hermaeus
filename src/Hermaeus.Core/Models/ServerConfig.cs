@@ -22,6 +22,14 @@ public class ServerConfig
     public GpuPlacementIntent? GpuPlacement { get; set; }
 
     /// <summary>
+    /// Transient Lab-only launch option. It is never persisted in settings and
+    /// enables the local runtime properties endpoint used for effective-launch
+    /// evidence.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool EnableRuntimePropertiesEndpoint { get; set; }
+
+    /// <summary>
     /// Reads the old JSON property but is omitted after the typed migration is
     /// present. SettingsService performs that migration in memory on load and
     /// writes the new shape on the next ordinary save.

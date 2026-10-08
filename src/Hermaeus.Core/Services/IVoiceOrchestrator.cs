@@ -13,6 +13,7 @@ public interface IVoiceOrchestrator
     Task EnqueueAsync(VoiceUtterance utterance, CancellationToken ct = default);
     void StopChannel(VoiceChannel channel);
     void StopAll();
+    Task ShutdownAsync(CancellationToken ct = default);
     bool IsMuted { get; set; }
     event Action<VoiceChannel, string>? UtteranceStarted;
 

@@ -127,7 +127,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
         }
 
         // r11 4.3: see KokoroVoiceProvider.GenerateSpeechAsync.
-        if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+        if (string.IsNullOrWhiteSpace(request.OutputPath) && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
         {
             try { File.Delete(outputPath); }
             catch { }
@@ -150,13 +150,23 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
         if (speaker.Equals("default", StringComparison.OrdinalIgnoreCase))
             speaker = string.Empty;
 
-        var outputPath = await RenderToFileAsync(text, speaker, null, ct);
-        if (new FileInfo(outputPath).Length == 0)
-            throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
+        var outputPath = string.Empty;
+        try
+        {
+            outputPath = await RenderToFileAsync(text, speaker, null, ct);
+            if (new FileInfo(outputPath).Length == 0)
+                throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
 
-        await Hermaeus.Voice.AudioPlayback.PlayAsync(outputPath, ct);
-        try { File.Delete(outputPath); }
-        catch { }
+            await Hermaeus.Voice.AudioPlayback.PlayAsync(outputPath, ct);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
+        }
     }
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
@@ -169,13 +179,23 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
         var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
 
-        var outputPath = await RenderToFileAsync(text, speaker, null, ct);
-        if (new FileInfo(outputPath).Length == 0)
-            throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
+        var outputPath = string.Empty;
+        try
+        {
+            outputPath = await RenderToFileAsync(text, speaker, null, ct);
+            if (new FileInfo(outputPath).Length == 0)
+                throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
 
-        await Hermaeus.Voice.AudioPlayback.PlayAsync(outputPath, ct);
-        try { File.Delete(outputPath); }
-        catch { }
+            await Hermaeus.Voice.AudioPlayback.PlayAsync(outputPath, ct);
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
+        }
     }
 
     public async Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
@@ -242,14 +262,28 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
                 : $"XTTS v2 returned {(int)response.StatusCode}: {detail}");
         }
 
-        var path = string.IsNullOrWhiteSpace(outputPath)
+        var ownsOutput = string.IsNullOrWhiteSpace(outputPath);
+        var path = ownsOutput
             ? Path.Combine(Path.GetTempPath(), $"hermaeus-xtts-{Guid.NewGuid():N}.wav")
-            : outputPath;
+            : outputPath!;
 
-        await using var source = await response.Content.ReadAsStreamAsync(ct);
-        await using var file = File.Create(path);
-        await source.CopyToAsync(file, ct);
-        return path;
+        try
+        {
+            await using var source = await response.Content.ReadAsStreamAsync(ct);
+            await using var file = File.Create(path);
+            await source.CopyToAsync(file, ct);
+            return path;
+        }
+        catch
+        {
+            if (ownsOutput)
+            {
+                try { File.Delete(path); }
+                catch { }
+            }
+
+            throw;
+        }
     }
 
     private static void AppendLine(string? line, List<string> log)

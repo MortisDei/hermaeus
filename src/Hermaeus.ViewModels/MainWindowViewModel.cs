@@ -23,6 +23,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private static readonly TimeSpan MetadataSaveDebounce = TimeSpan.FromMilliseconds(500);
     private readonly object _backgroundTaskGate = new();
     private readonly List<Task> _backgroundTasks = [];
+    private readonly CancellationTokenSource _backgroundShutdownCts = new();
     private readonly object _shutdownGate = new();
     private Task? _shutdownTask;
     private bool _isShuttingDown;
@@ -43,6 +44,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ProjectViewModel         Projects { get; }
     public PaletteViewModel         Palette { get; }
     public ActivityViewModel        Activity { get; }
+    public DesktopPetViewModel      Pet { get; }
 
     public UiBoundCollection<ConversationItemViewModel> Conversations { get; } = [];
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
@@ -60,6 +62,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool   _doctorHasErrors;
     [ObservableProperty] private bool   _doctorHasWarnings;
     [ObservableProperty] private bool   _doctorIsOk;
+    [ObservableProperty] private DoctorActionTarget? _pendingDoctorTarget;
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowAgent    => ActivePanel == "agent";
@@ -123,7 +126,8 @@ public partial class MainWindowViewModel : ViewModelBase
         IRuntimeLogService runtimeLogs,
         ConversationExportService exports,
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
-        LlamaCppService? llamaCpp = null)
+        LlamaCppService? llamaCpp = null,
+        DesktopPetViewModel? pet = null)
     {
         _recallIndexing = recallIndexing;
         Palette = palette;
@@ -137,6 +141,8 @@ public partial class MainWindowViewModel : ViewModelBase
         Chat.AttachManagedServices(services);
         Benchmarks = benchmarks; Lab = lab; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Projects = projects;
+        Pet = pet ?? new DesktopPetViewModel();
+        Pet.BindSettings(Settings.Ui);
         // r24 doc 01 1.6: switching a project only ever changes what NEW work
         // inherits. Existing conversations/tasks/datasets are never rewritten.
         Chat.ActiveProjectProvider = () => Projects.ActiveProject;
@@ -155,6 +161,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // uses, so there is one answer to "where does a task live".
         Activity.RequestNavigate = NavigateToRecallHitAsync;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
+        Doctor.RequestNavigateToTarget = NavigateToDoctorTarget;
         Doctor.RequestOpenUrl = url =>
         {
             try
@@ -268,6 +275,19 @@ public partial class MainWindowViewModel : ViewModelBase
         Logs.RegisterCommands(commands);
         Projects.RegisterCommands(commands);
         Activity.RegisterCommands(commands);
+    }
+
+    private void NavigateToDoctorTarget(DoctorActionTarget target)
+    {
+        PendingDoctorTarget = target;
+        var resolved = target.Area switch
+        {
+            "services" => Services.NavigateToDoctorTarget(target),
+            _ => true
+        };
+        ActivePanel = target.Area;
+        if (!resolved)
+            _toasts.Show("Doctor target unavailable", Services.DoctorNavigationStatus, ToastKind.Warning, 5000);
     }
 
     public ICommandRegistry Commands { get; }
@@ -445,8 +465,8 @@ public partial class MainWindowViewModel : ViewModelBase
         // Fire and forget: the same isolation and the same log line, without the
         // await. A model load behind a five-minute health deadline is no longer
         // between the user and the model dropdown.
-        RunBackgroundTaskAsync("auto-start managed servers", () => Services.AutoStartAllAsync());
-        RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
+        RunBackgroundTaskAsync("auto-start managed servers", ct => Services.AutoStartAllAsync(ct));
+        RunBackgroundTaskAsync("run startup doctor scan", ct => Doctor.RunStartupScanAsync(ct));
         // r24 doc 02 2.1: shortly after startup, bounded, never on the send path.
         if (_recallIndexing is not null)
             RunBackgroundTaskAsync("recall startup backfill", RunRecallStartupBackfillAsync);
@@ -455,15 +475,15 @@ public partial class MainWindowViewModel : ViewModelBase
             RunBackgroundTaskAsync("watched sources automatic refresh", RunWatchedSourceAutomationAsync);
     }
 
-    private async Task RunRecallStartupBackfillAsync()
+    private async Task RunRecallStartupBackfillAsync(CancellationToken ct)
     {
         // r27 05 5.1: the backfill takes the projection and reads full
         // conversations only for the ids it is actually going to index, rather
         // than deserialising every message of every conversation to discover
         // that most of them are already indexed.
-        var summaries = await _store.GetSummariesAsync(includeArchived: true);
+        var summaries = await _store.GetSummariesAsync(includeArchived: true, ct);
         var tasks = await Agent.BuildRecallTaskInputsAsync();
-        await _recallIndexing!.RunStartupBackfillAsync(summaries, tasks, _store.GetByIdAsync);
+        await _recallIndexing!.RunStartupBackfillAsync(summaries, tasks, _store.GetByIdAsync, ct);
     }
 
     /// <summary>doc 03 3.4: optional, off by default. Runs one on-start pass after a
@@ -494,26 +514,29 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public void Shutdown() => _ = ShutdownAsync();
 
-    public Task ShutdownAsync()
+    public Task ShutdownAsync(CancellationToken ct = default)
     {
         lock (_shutdownGate)
-            return _shutdownTask ??= ShutdownCoreAsync();
+            return _shutdownTask ??= ShutdownCoreAsync(ct);
     }
 
-    private async Task ShutdownCoreAsync()
+    private async Task ShutdownCoreAsync(CancellationToken ct)
     {
         lock (_backgroundTaskGate)
             _isShuttingDown = true;
 
+        _backgroundShutdownCts.Cancel();
         _searchCts?.Cancel();
         _searchCts?.Dispose();
         _searchCts = null;
         _watchedRefreshCts?.Cancel();
         _watchedRefreshCts?.Dispose();
         _watchedRefreshCts = null;
-        await Lab.ShutdownAsync();
-        await Services.StopAllAsync();
-        await AwaitBackgroundTasksAsync();
+        await Agent.ShutdownAsync(ct);
+        await Lab.ShutdownAsync(ct);
+        await Services.StopAllAsync(ct);
+        await AwaitBackgroundTasksAsync(ct);
+        _backgroundShutdownCts.Dispose();
         await Settings.ShutdownAsync();
     }
 
@@ -532,6 +555,22 @@ public partial class MainWindowViewModel : ViewModelBase
         _ = RemoveBackgroundTaskWhenCompleteAsync(task);
     }
 
+    private void RunBackgroundTaskAsync(string operation, Func<CancellationToken, Task> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        Task task;
+        lock (_backgroundTaskGate)
+        {
+            if (_isShuttingDown)
+                return;
+
+            task = RunBackgroundTaskCoreAsync(operation, action, _backgroundShutdownCts.Token);
+            _backgroundTasks.Add(task);
+        }
+
+        _ = RemoveBackgroundTaskWhenCompleteAsync(task);
+    }
+
     private async Task RemoveBackgroundTaskWhenCompleteAsync(Task task)
     {
         try { await task; }
@@ -542,7 +581,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task AwaitBackgroundTasksAsync()
+    private async Task AwaitBackgroundTasksAsync(CancellationToken ct)
     {
         while (true)
         {
@@ -554,7 +593,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 tasks = _backgroundTasks.ToArray();
             }
 
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(tasks).WaitAsync(ct);
         }
     }
 
@@ -981,6 +1020,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnActivePanelChanged(string value)
     {
+        if (!string.Equals(value, "models", StringComparison.OrdinalIgnoreCase))
+            Models.CancelHuggingFaceSelection();
+
         OnPropertyChanged(nameof(ShowChat));
         OnPropertyChanged(nameof(ShowAgent));
         OnPropertyChanged(nameof(ShowSettings));
@@ -1270,6 +1312,28 @@ public partial class MainWindowViewModel : ViewModelBase
         try
         {
             await action();
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
+                $"{operation} failed: {ex.Message}"));
+            _toasts.Show("Background task failed", $"{operation}: {ex.Message}", ToastKind.Warning, 7000);
+        }
+    }
+
+    private async Task RunBackgroundTaskCoreAsync(
+        string operation,
+        Func<CancellationToken, Task> action,
+        CancellationToken ct)
+    {
+        try
+        {
+            await action(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Service,
+                $"{operation} cancelled during application shutdown."));
         }
         catch (Exception ex)
         {

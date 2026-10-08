@@ -62,8 +62,8 @@ repoint with skipped evidence; a partial conflict remains refused.
   SQLite sidecars; live databases are copied through SQLite backup so the
   archive represents a consistent snapshot. Restore rejects traversal, prefix
   escapes, and existing files unless its explicit overwrite path is in scope.
-  The current restore path does not reject every pre-existing symlink ancestor;
-  that remains a documented security limitation.
+  Restore checks the target and its existing ancestors for reparse points,
+  and applies the same path-containment boundary to staging and rollback paths.
 - Fallback secrets stay outside backup scope. Derived indexes such as
   `agent/task_index.db` remain rebuildable from `task_state.json`.
 - Long-running RAG and indexing writes stay batched and cancellable. Settings,

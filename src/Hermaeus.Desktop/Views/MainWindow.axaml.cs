@@ -17,6 +17,8 @@ public partial class MainWindow : Window
 {
     public DesktopIntegrationService? DesktopIntegration { get; set; }
     public IPatchDiffService? PatchDiffService { get; set; }
+    public IApplicationLifecycleCoordinator? ApplicationLifecycle { get; set; }
+    public Action? RequestApplicationExit { get; set; }
     private IInputElement? _prePaletteFocus;
     private bool _closeAfterShutdown;
 
@@ -171,7 +173,12 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(processPath))
             throw new InvalidOperationException("The current application path is unavailable, so Hermaeus cannot restart itself.");
 
-        await vm.ShutdownAsync();
+        if (ApplicationLifecycle is null)
+            throw new InvalidOperationException("The application lifecycle coordinator is not configured.");
+
+        var shutdown = await ApplicationLifecycle.ShutdownAsync(TimeSpan.FromSeconds(15));
+        if (!shutdown.Clean)
+            throw new InvalidOperationException("Hermaeus could not complete its bounded shutdown, so restart was refused.");
 
         var startInfo = new ProcessStartInfo
         {
@@ -181,12 +188,13 @@ public partial class MainWindow : Window
         };
         foreach (var argument in Environment.GetCommandLineArgs().Skip(1))
             startInfo.ArgumentList.Add(argument);
+        startInfo.ArgumentList.Add(Program.RestartHandoffArgument);
 
         if (Process.Start(startInfo) is null)
             throw new InvalidOperationException("Hermaeus could not start the replacement process.");
 
         _closeAfterShutdown = true;
-        Close();
+        ExitApplicationLifetime();
     }
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
@@ -198,14 +206,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_closeAfterShutdown || DataContext is not MainWindowViewModel vm)
+        if (_closeAfterShutdown || DataContext is not MainWindowViewModel)
             return;
 
         e.Cancel = true;
         _closeAfterShutdown = true;
         try
         {
-            await vm.ShutdownAsync();
+            if (ApplicationLifecycle is null)
+            {
+                Console.Error.WriteLine("Application lifecycle coordinator is unavailable during window close.");
+                return;
+            }
+
+            var shutdown = await ApplicationLifecycle.ShutdownAsync(TimeSpan.FromSeconds(15));
+            if (!shutdown.Clean)
+                Console.Error.WriteLine("Application shutdown was incomplete; the lifecycle journal retained the incomplete result.");
         }
         catch (Exception ex)
         {
@@ -213,7 +229,21 @@ public partial class MainWindow : Window
         }
         finally
         {
-            Close();
+            ExitApplicationLifetime();
         }
+    }
+
+    private void ExitApplicationLifetime()
+    {
+        if (RequestApplicationExit is not null)
+        {
+            RequestApplicationExit();
+            return;
+        }
+
+        // The callback is supplied by App for the normal desktop lifetime. The
+        // fallback keeps this window usable in a host that does not expose an
+        // application lifetime, such as an isolated view test.
+        Close();
     }
 }

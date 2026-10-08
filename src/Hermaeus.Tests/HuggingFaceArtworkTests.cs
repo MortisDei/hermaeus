@@ -14,7 +14,8 @@ using Xunit;
 
 namespace Hermaeus.Tests;
 
-public sealed class HuggingFaceArtworkTests
+[Collection(AvaloniaTestHost.CollectionName)]
+public sealed class HuggingFaceArtworkTests(AvaloniaTestHost avalonia)
 {
     private const string Revision = "0123456789abcdef0123456789abcdef01234567";
     private const string Repo = "org/repo";
@@ -208,11 +209,14 @@ public sealed class HuggingFaceArtworkTests
         Assert.Equal(HfArtworkState.Available, result.State);
         Assert.NotNull(result.CachePath);
         Assert.True(File.Exists(result.CachePath));
-        Hermaeus.Desktop.Program.BuildAvaloniaApp<Avalonia.Application>().SetupWithoutStarting();
-        using var bitmap = Assert.IsType<Bitmap>(ArtworkFileToBitmapConverter.Instance.Convert(
-            result.CachePath, typeof(Bitmap), null, CultureInfo.InvariantCulture));
-        Assert.Equal(1, bitmap.PixelSize.Width);
-        Assert.Equal(1, bitmap.PixelSize.Height);
+        await avalonia.RunAsync(() =>
+        {
+            using var bitmap = Assert.IsType<Bitmap>(ArtworkFileToBitmapConverter.Instance.Convert(
+                result.CachePath, typeof(Bitmap), null, CultureInfo.InvariantCulture));
+            Assert.Equal(1, bitmap.PixelSize.Width);
+            Assert.Equal(1, bitmap.PixelSize.Height);
+            return Task.CompletedTask;
+        });
     }
 
     [Fact]
@@ -746,7 +750,7 @@ public sealed class HuggingFaceArtworkTests
         var firstSelection = vm.SelectHfRepoCommand.ExecuteAsync(firstRepo);
         await firstArtworkStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
         await vm.SelectHfRepoCommand.ExecuteAsync(secondRepo);
-        try { await firstSelection; } catch (OperationCanceledException) { }
+        await firstSelection;
         await Helpers.WaitForAsync(() => secondRepo.ArtworkState == HfArtworkState.Available, "second repository artwork");
 
         Assert.Same(secondRepo, vm.SelectedHfRepo);

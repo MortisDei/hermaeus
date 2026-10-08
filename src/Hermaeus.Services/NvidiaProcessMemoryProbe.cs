@@ -12,7 +12,7 @@ internal static class NvidiaProcessMemoryProbe
     private const int NvmlInsufficientSize = 7;
     private const ulong NvmlValueNotAvailable = ulong.MaxValue;
 
-    public static bool TryGetBytes(int processId, out long bytes)
+    public static bool TryGetBytes(int processId, out long bytes, Action<string>? trace = null)
     {
         bytes = 0;
         if (!OperatingSystem.IsWindows())
@@ -21,9 +21,11 @@ internal static class NvidiaProcessMemoryProbe
         var initialized = false;
         try
         {
+            trace?.Invoke("nvml-init-enter");
             if (nvmlInit_v2() != NvmlSuccess)
                 return false;
             initialized = true;
+            trace?.Invoke("nvml-init-exit; success=true");
 
             uint deviceCount = 0;
             if (nvmlDeviceGetCount_v2(ref deviceCount) != NvmlSuccess)
@@ -40,7 +42,9 @@ internal static class NvidiaProcessMemoryProbe
                 for (var attempt = 0; attempt < 3; attempt++)
                 {
                     var processes = new NvmlProcessInfo[count];
+                    trace?.Invoke($"nvml-compute-v2-enter; device={deviceIndex}; capacity={count}; stride={Marshal.SizeOf<NvmlProcessInfo>()}");
                     var result = nvmlDeviceGetComputeRunningProcesses_v2(device, ref count, processes);
+                    trace?.Invoke($"nvml-compute-v2-exit; device={deviceIndex}; result={result}; count={count}");
                     if (result == NvmlInsufficientSize && count > processes.Length && count <= 4096)
                         continue;
                     if (result != NvmlSuccess)
@@ -76,17 +80,27 @@ internal static class NvidiaProcessMemoryProbe
         {
             if (initialized)
             {
-                try { _ = nvmlShutdown(); }
+                try
+                {
+                    trace?.Invoke("nvml-shutdown-enter");
+                    _ = nvmlShutdown();
+                    trace?.Invoke("nvml-shutdown-exit");
+                }
                 catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or SEHException or ExternalException) { }
             }
         }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NvmlProcessInfo
+    // nvmlDeviceGetComputeRunningProcesses_v2 writes nvmlProcessInfo_v2_t,
+    // including both MIG IDs even on devices without MIG. The v1 layout is
+    // only 16 bytes on x64; v2 is 24. A shorter array permits native overruns.
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    internal struct NvmlProcessInfo
     {
         public uint Pid;
         public ulong UsedGpuMemory;
+        public uint GpuInstanceId;
+        public uint ComputeInstanceId;
     }
 
     [DllImport("nvml.dll", CallingConvention = CallingConvention.Cdecl)]

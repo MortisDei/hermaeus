@@ -31,6 +31,15 @@ filesystem and SQLite state that parallelism would corrupt.
 
 Do not re-enable parallelization.
 
+Native control and bitmap tests share `AvaloniaTestHost` through the
+`Native Avalonia` xunit collection. It owns one platform runtime and UI thread
+using a plain Avalonia application, without composing Hermaeus services or
+loading the owner's settings. Linux needs the same Xvfb display used in CI.
+Control tests create invisible, inactive windows off the taskbar to establish
+real attachment and binding behaviour. They cover Markdown detach/reattach,
+pending parse invalidation, explicit disposal, and bound Chat/Lab picker refresh.
+These are native control regressions, not pixel or owner workflow acceptance.
+
 ## Run the suite in the real terminal environment
 
 The test harness deliberately uses shared temporary data roots and SQLite
@@ -75,6 +84,20 @@ continues to run. Before treating that as a terminated suite, check for the
 test-host process and the requested TRX outside the repository. This is a
 runner-reporting boundary, not a product failure and not a reason to weaken
 tests.
+
+Test scratch directories are created below one per-process `hermaeus-tests-run-*`
+container. Each test owns its child directory, while process-exit cleanup owns
+the container. A cancelled or externally terminated test host therefore leaves
+at most one bounded run container, and the next test process reclaims stale
+Hermaeus test containers older than one hour. Do not create ad hoc top-level
+`/tmp/hermaeus-*` roots for routine verification.
+
+Shell verification drivers use `scripts/verification-scratch.sh` for the same
+ownership boundary. It creates a unique namespace-scoped child below
+`/tmp/hermaeus-verification-runs`, cleans only that child on success, failure,
+or cancellation, and reclaims only matching stale children whose owner is no
+longer running. The R33 wrapper is a thin driver-specific adapter, not the
+reusable lifecycle abstraction. Unrelated `/tmp` paths are never swept.
 
 ## Platform-specific tests report Skipped, not Passed
 
@@ -145,6 +168,9 @@ platform-detected renderer.
 
 Floor: **60%** line coverage, set in `scripts/coverage.sh`,
 `scripts/coverage.ps1` and stated in `AGENTS.md`. All four must agree.
+The scripts compare the Cobertura report's covered and valid line counts to this
+floor and fail if the report is missing or below it. Coverlet's VSTest collector
+[does not enforce MSBuild threshold properties](https://github.com/coverlet-coverage/coverlet/blob/master/Documentation/VSTestIntegration.md).
 
 Measured at r29: **61.6%** overall (29,438 / 47,807 lines). Excluding
 `Hermaeus.Desktop`, which is views and compiled XAML and is not meaningfully

@@ -87,8 +87,50 @@ public sealed class DoctorAdvisoryTests
         Assert.True(warning.HasAction);
         Assert.Equal(DoctorActionKind.Navigate, warning.ActionKind);
         Assert.Contains("relevant Hermaeus settings", warning.ActionTooltip, StringComparison.Ordinal);
+        Assert.Equal("settings", warning.Target?.Area);
         Assert.Equal(DoctorActionKind.Fix, fix.ActionKind);
         Assert.Equal(DoctorActionKind.OpenExternal, external.ActionKind);
+    }
+
+    [Fact]
+    public void Outdated_llama_cpp_check_exposes_update_primary_and_services_secondary_actions()
+    {
+        var outdated = DoctorService.BuildCheck(
+            "llama-server-update", "llama.cpp update check", DoctorCheckStatus.Warning,
+            "Installed old; latest new", "Update is available", "Update llama.cpp", true,
+            "diagnostics", "Runtime");
+        var current = DoctorService.BuildCheck(
+            "llama-server-update", "llama.cpp update check", DoctorCheckStatus.Info,
+            "Installed current", "detail", "Open Services", true, "diagnostics", "Runtime");
+
+        Assert.Equal(DoctorActionKind.Fix, outdated.ActionKind);
+        Assert.True(outdated.HasSecondaryAction);
+        Assert.Equal("Open Services", outdated.SecondaryActionLabel);
+        Assert.False(current.HasSecondaryAction);
+    }
+
+    [Fact]
+    public void Server_specific_doctor_findings_keep_a_typed_remediation_target()
+    {
+        var check = DoctorService.BuildCheck(
+            "draft-model-chat-server", "Chat draft model", DoctorCheckStatus.Warning,
+            "Missing", "detail", "Open Services", true, "diagnostics", "Runtime");
+
+        Assert.Equal(DoctorActionKind.Navigate, check.ActionKind);
+        Assert.Equal("services", check.Target?.Area);
+        Assert.Equal("managed-server-draft", check.Target?.Section);
+        Assert.Equal("chat-server", check.Target?.ItemId);
+        Assert.Equal("draft-model", check.Target?.Focus);
+        Assert.Equal("services/managed-server-draft/chat-server/draft-model", check.ActionTarget);
+
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.ManagedServers.Clear();
+        settings.Settings.ManagedServers.Add(new ServerConfig { Id = "chat-server", Name = "Chat" });
+        var services = Helpers.NewServicesViewModel(settings);
+        Assert.True(services.NavigateToDoctorTarget(check.Target!));
+        Assert.Equal("chat-server", services.SelectedServer?.Id);
+        Assert.Same(check.Target, services.PendingDoctorTarget);
     }
 
     /// <summary>

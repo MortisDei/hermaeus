@@ -27,7 +27,7 @@ explicit user approval before it executes.
   `waiting_for_review` or `blocked`, and nothing else. A task that has been
   approved in the past is not in the queue; its approvals live in the run
   ledger and in that task's own approval labels. A row with a gated action
-  pending offers Approve and Reject; a row waiting on an answer or a blocked
+  pending offers Approve, Reject, or Block as appropriate; a row waiting on an answer or a blocked
   run says so and offers Open, which loads the task into the workbench where
   the reply and Continue boxes are. The queue refreshes itself whenever a run
   pauses, so there is no manual refresh to remember.
@@ -39,7 +39,10 @@ explicit user approval before it executes.
   `cancelled`, so the row leaves the queue for good; the task stays in Recent
   Tasks with its run ledger, approval history and transcript intact, and the
   Continue box can still reopen it. Dismiss records no approval, because
-  walking away from a decision is not making one. It is refused on a task that
+  walking away from a decision is not making one. Dismissing a paused parent
+  also cancels its owned unfinished children, discards their pending actions
+  and questions, and skips unstarted work. Completed child evidence is retained.
+  It is refused on a task that
   is still running (stop it first) and on a sub-task child (dismiss the parent,
   or its orchestration would wait forever on a child that never finished).
 - Shows a Recent Tasks list (status chip, goal, relative time, pending step
@@ -59,12 +62,73 @@ explicit user approval before it executes.
   is really unfinished work. The typed path requires non-empty instruction
   text and both paths refuse a sub-task, an already-running task, or a pending
   tool approval. **Finish run** accepts the current result and ends the run
-  while preserving its transcript, ledger, and unfinished-plan evidence. A
-  "New Task" button next to Start always starts an actual fresh task.
+  while preserving its transcript and ledger, but it is unavailable while an
+  orchestration child remains pending or running. A second top-level task is
+  also refused while another task is open. A "New Task" button next to Start
+  always starts an actual fresh task.
 - Reaching `Agent.MaxAutoSteps` is persisted as a truthful blocked budget pause,
   not as a semantic question from the user. The Run tab offers Continue/Add
   steps or Stop, keeps the model response separate from the pause explanation,
   and records the budget decision in task state and transcript.
+
+### Working the Agent surface
+
+The workbench keeps the primary path in **Run**, with **Changes** for prepared
+patch decisions and the run ledger, **Workspace** for capability notes and
+file inspection, and **History** for prior tasks, lessons, scenarios, and logs.
+The decision strip stays above those tabs when an answer or approval is waiting,
+so the required action is not hidden behind navigation.
+
+Run state is written in plain language: **Waiting for your answer** is an
+`ask_user` response, **Approval needed** is a gated action, and **Recovered
+after interruption**, **Blocked**, **Failed**, **Cancelled**, and **Complete
+with reservations** identify terminal or resumable outcomes. A finished run
+offers **See the changes** and, when its folder exists, **Open run artifacts**
+for the persisted state, transcript, trace, and log files. New Task clears the
+current composer, response, draft, selection, and evidence projections while
+leaving the persisted task available in Recent Tasks.
+
+Workspace file inspection uses the bounded AvaloniaEdit host as the sole local
+editor. The selected file is loaded as a bounded text revision. Save or Ctrl+S
+is an explicit owner action: it compares the loaded SHA256 and existence state,
+uses atomic replacement, and refuses with a reload message when an external
+edit wins the race. It does not enter the Agent approval queue. The editor
+cannot run commands, approve actions, navigate arbitrary pages, or access chat
+content. Editing proposed content still creates a normal reviewable Agent
+patch, and the Changes view remains the source for applied, verified, and
+conflicted outcomes. The status tooltip retains bounded lifecycle diagnostics
+including visual-tree attachment, dimensions, editable state, surface
+visibility, document size, and selected file path.
+When the selected workspace has no `AGENTS.md`, the workbench can preview a
+suggested file and queue it as a normal prepared mutation, even before a normal
+Agent run exists. In that case the workbench creates an explicit `Create
+workspace AGENTS.md` task only after the preview is accepted, then uses the same
+patch review and approval path. The suggestion is never written directly.
+Read-only list, search, glob, file-read, summary, diff-inspection, and plan
+tools remain directly executable even if the model sets an approval flag. A
+workspace with no command recipes blocks only `run_command`; it does not block
+independent inspection or prepared file mutations. Equivalent blocked or
+non-progress results, including repeated read-only results, stop after three
+observations with the exact reason persisted. Repeated `ask_user` questions
+after an answer are consumed and bounded the same way. A simple writable file
+action still follows the prepared-mutation gate and stops truthfully if it
+cannot proceed. Mutation receipts also persist the requested-action
+fingerprint. A verified mutation that requests the same action again, or
+proposes the already-verified post-image, is treated as no progress before
+another approval is offered. Legitimate iterative edits to the same file
+remain distinct when their request or proposed content changes.
+
+The non-progress bound belongs to the task, not to one tool name or one
+outcome label. A no-effect `set_plan` followed by a blocked `plan_subtasks`
+proposal therefore still consumes the same bounded sequence. A changed
+read-only result starts a new sequence. Stable model ids are authoritative for
+the frozen parent and each child; legacy display labels are accepted only when
+they resolve unambiguously against the current visible inventory, including
+the provider identity. A missing or ambiguous frozen or child model blocks
+without guessing or silently falling back. A new task may retain an explicit
+caller-provided model string when a provider does not enumerate it, but that
+path does not select an alternate model and the task still freezes the exact
+string it used.
 
 ### Context & Retrieval
 
@@ -143,6 +207,10 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
 - **History.** Recent tasks, new lessons from this task, the lesson store,
   scenario evals, and the agent log.
 
+Recent task history uses a compact goal preview in the card and retains the full
+goal as a tooltip and in persisted task state. Long goals therefore do not turn
+the history page into an unreadable wall of text.
+
 The panel opens on Run every time and never switches tabs on its own. A
 finished run lights the Changes badge and says so in the run outcome; it does
 not move the page under you.
@@ -191,13 +259,65 @@ The Workspace tab includes a workspace file browser with query, list, preview,
 and summary support so you can inspect local workspace files without leaving
 the workbench.
 
+Successful listings and selected-file loads clear their own earlier read
+error without hiding a newer task or owner-save failure. Markdown responses
+continue updating when the view is revisited after tab navigation.
+
 Draft patch proposals are also available from the workspace file browser. You
 can enter a rationale, review the generated patch preview, queue the patch for
 review, and then approve or reject queued patches from the dedicated panel.
 Approving a queued patch applies the proposed content to the selected workspace
 file immediately and refreshes the preview. Queued patches expose explicit
 pending, applied, rejected, and blocked states so review decisions are visible
-at a glance.
+at a glance. Each per-patch decision revalidates the authoritative prepared
+mutation, target revision, proposal identity, preimage, content, and safety
+policy before routing through the same task approval transition as the global
+decision strip. A stale row cannot approve, reject, or block a newer patch.
+
+### Prepared mutations and receipts
+
+Before a mutating Agent action reaches the review queue, Hermaeus prepares an
+immutable proposal. The proposal records the typed action arguments, selected
+workspace and policy identity, target path, current preimage hash, proposed
+content or command recipe, and the proposal revision. The plan model must be
+visible and available before the proposal can become pending. Malformed or
+unsafe actions are rejected without creating an approval item.
+
+Approval is bound to that exact proposal and is revalidated against the current
+workspace policy and target before execution. A durable mutation receipt is
+written before the executor runs, then the target is read back and checked
+against the proposed post-image. `Applied` means a changed target was verified;
+`AlreadySatisfied` means the target already matched and no write occurred.
+Changed preimages, policy drift, failed readback, and other incomplete outcomes
+remain visible as blocked or failed evidence. Direct Agent mutations and
+workspace-browser queued patches use the same task and target ownership
+boundary, so concurrent paths cannot silently overwrite one another. No model
+response, steering instruction, or repeated fingerprint grants approval.
+
+### Whole-product headless verification
+
+The isolated R33 driver exercises the production composition graph through task
+creation, planning, explicit approval, mutation execution, receipt persistence,
+readback, benchmark cancellation, RAG generation/query, Chat retrieval
+context, voice orchestration, Lab failure cleanup, Lab Apply/settings reopen,
+and shared startup/shutdown. It requires separate scratch paths for settings,
+Data Root, and workspace, and refuses unknown arguments or workspace-overlapping
+paths. The reusable `scripts/verification-scratch.sh` helper creates one unique
+owned root below a bounded verification parent, installs success/failure/
+cancellation cleanup traps, and reclaims only matching stale runs older than
+one hour. For a local R33 run, use the thin repository adapter so its settings,
+Data Root, and workspace scratch tree are deleted on success, failure, or
+cancellation:
+
+```bash
+bash scripts/run-r33-driver.sh
+```
+
+The adapter streams the compact JSON result and does not create a routine log
+file. The R33 driver keeps its workflow-specific arguments and behavior; the
+scratch helper is reusable by future verification drivers and tools. The
+driver does not use the owner's settings, Data Root, or workspace. Its result
+is a verification receipt, not a GUI or native-runtime proof.
 
 ## Autonomous Runs
 
@@ -370,6 +490,21 @@ task happens to be open in the workbench). The parent's own status mirrors a
 paused child's (`WaitingForUser`/`Blocked`) and names which sub-task it is
 waiting on, instead of showing `Running` with nothing happening.
 
+When a child pauses for an owner question, approval, or blocked action, the
+parent stores a source-identified interaction mirror. Replying or deciding
+from the parent routes to that exact child interaction, then refreshes the
+parent from the child's persisted state. Child results remain available to the
+parent, but a child cannot replace an unrelated parent interaction. Prompt,
+proposal, fingerprint, revision, and step identity checks reject stale
+answers or decisions, and a newly issued interaction gets a new route identity.
+
+Startup rebuilds parent interaction mirrors from authoritative child task state.
+Valid child queue rows remain directly routable, stale parent mirrors are
+refreshed, and an orphaned child whose parent or plan entry is missing is
+terminalized as Interrupted with its pending interaction cleared. This makes
+restart recovery deterministic without treating a parent mirror as a second
+source of truth.
+
 A child can reach `Complete`/`Failed` outside the orchestration loop entirely
 - opened directly from the recent-tasks list and stepped to completion, for
 example. The parent self-heals this on its next run: before choosing what to
@@ -406,8 +541,10 @@ The plan review shows a model selector for every proposed child. Choices are
 limited to configured visible models plus an explicit **Inherit parent** option.
 The selection is written back into the pending plan and its approval fingerprint
 is recomputed before approval, so the approved payload is exactly the plan that
-materializes. Unknown, hidden, removed, or unavailable explicit model ids are
-rejected before any child is created.
+materializes. Stable model ids are persisted after resolving a legacy display
+label, and the provider-qualified label is retained for review. Unknown,
+ambiguous, hidden, removed, or unavailable explicit model ids are rejected
+before any child is created.
 
 Each resolved child model is persisted on the sub-task spec and child task before
 execution. Task state, recent-task and sub-task rows, transcripts, traces,
@@ -450,7 +587,10 @@ the model sees next step that only the first one ran.
 - Read-only file tools for workspace inspection: `list_files` (optional
   subdirectory and depth), `search_files` (optional regex and context lines),
   `glob_files` (`*`/`**` patterns), `read_file` (optional line range),
-  `summarize_file`, `draft_patch`, and `inspect_git_diff`.
+  `summarize_file`, and `inspect_git_diff`.
+- `draft_patch` prepares a complete whole-file replacement for review. It does
+  not write directly; the prepared proposal is visible in Draft Patch
+  Decisions and requires explicit approval before application.
 - `set_plan`: replaces the task's visible plan checklist. Executes
   immediately; it only touches task state, never files or commands, so it
   never requires approval.
@@ -710,8 +850,8 @@ even when it is running several steps unattended.
 
 | Level | Meaning | Examples | Behaviour |
 |---|---|---|---|
-| Safe | Read-only local inspection, or task-state-only | `list_files`, `search_files`, `glob_files`, `read_file`, `summarize_file`, `draft_patch`, `inspect_git_diff`, `set_plan` | execute directly |
-| Review | Local write, command, sub-task delegation, or MCP call proposed by the agent | edit_file, create_file, apply_draft_patch, `run_command`, `plan_subtasks`, mcp: calls | queue for approval |
+| Safe | Read-only local inspection, or task-state-only | `list_files`, `search_files`, `glob_files`, `read_file`, `summarize_file`, `inspect_git_diff`, `set_plan` | execute directly |
+| Review | Local write, patch proposal, command, sub-task delegation, or MCP call proposed by the agent | `draft_patch`, `edit_file`, `create_file`, `apply_draft_patch`, `run_command`, `plan_subtasks`, mcp: calls | queue for approval |
 | Blocked | Out of scope | `delete_file`, `install_package`, `network_access`, `upload`, `download`, `modify_system_config`, `commit`, `push`, `change_git_history` | do not execute |
 | Dangerous | Destructive or broad operation | delete tree, overwrite many files | block by default |
 
@@ -750,7 +890,9 @@ Approved patches are applied as text edits against the selected workspace file.
 The apply result, approving user, approval timestamp, and any failure reason
 are recorded in task state. Patch review decisions are independent from a
 separate pending tool action on the same task and cannot approve, reject, or
-execute that action. A queued full-content patch does not currently carry a
+execute that action. Approve, Reject, and Block all use the authoritative
+prepared patch identity when the queue item represents a prepared mutation. A
+queued full-content patch does not currently carry a
 draft-time file hash, so review the live file before applying when other tools
 or people may have edited it since the draft was created. Apply captures the
 live pre-image immediately before writing, allowing Revert to restore that

@@ -6,6 +6,7 @@ public sealed class BenchmarkSuite
     public string Name { get; set; } = "Benchmark";
     public string Description { get; set; } = string.Empty;
     public string SuiteVersion { get; set; } = "1.1.0";
+    public string EvaluatorVersion { get; set; } = RefusalEvaluator.CurrentVersion;
     public string ScoringProfile { get; set; } = "balanced-v1";
     public string BaselineModelId { get; set; } = string.Empty;
     public string BaselineModelName { get; set; } = string.Empty;
@@ -36,9 +37,12 @@ public sealed class BenchmarkCase
 public sealed class BenchmarkRun
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string OperationId { get; set; } = string.Empty;
     public string SuiteId { get; set; } = string.Empty;
     public string SuiteName { get; set; } = string.Empty;
     public string SuiteVersion { get; set; } = string.Empty;
+    public string EvaluatorVersion { get; set; } = string.Empty;
+    public string RerunOfRunId { get; set; } = string.Empty;
     public string ScoringProfile { get; set; } = string.Empty;
     public string ModelId { get; set; } = string.Empty;
     public string ModelName { get; set; } = string.Empty;
@@ -46,6 +50,7 @@ public sealed class BenchmarkRun
     public string RuntimeSnapshot { get; set; } = string.Empty;
     public SystemSnapshot HardwareSnapshot { get; set; } = new();
     public BenchmarkRunMetadata Metadata { get; set; } = new();
+    public RuntimeEvidenceEnvelope? RuntimeEvidence { get; set; }
     public string RunMode { get; set; } = BenchmarkRunMode.ColdWarm.ToString();
     public int IterationsPerCase { get; set; } = 1;
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
@@ -56,7 +61,15 @@ public sealed class BenchmarkRun
     public string JudgeModelId { get; set; } = string.Empty;
     public List<BenchmarkResult> Results { get; set; } = [];
     public string Status { get; set; } = "Pending";
+    public string CurrentPhase { get; set; } = string.Empty;
     public string Error { get; set; } = string.Empty;
+    public string EvidenceSaveError { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True only when the serving process, effective configuration, and
+    /// process-scoped telemetry were bound to this run.
+    /// </summary>
+    public bool ComparisonEligible => RuntimeEvidence?.ComparisonEligible == true;
 
     public int Total => Results.Count;
     public int Passed => Results.Count(r => r.Passed);
@@ -115,6 +128,7 @@ public sealed class BenchmarkRun
 public sealed class BenchmarkResult
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string RuntimeEvidenceId { get; set; } = string.Empty;
     public string CaseId { get; set; } = string.Empty;
     public string CaseName { get; set; } = string.Empty;
     public string CaseVersion { get; set; } = string.Empty;
@@ -161,6 +175,8 @@ public sealed class BenchmarkResult
     public bool KeywordHit { get; set; }
     public bool RegexHit { get; set; }
     public bool RefusalCorrect { get; set; }
+    public string RefusalAssessment { get; set; } = string.Empty;
+    public string RefusalDetail { get; set; } = string.Empty;
     public bool Passed { get; set; }
     public double QualityScore { get; set; }
     public double ResourceScore { get; set; } = 1;

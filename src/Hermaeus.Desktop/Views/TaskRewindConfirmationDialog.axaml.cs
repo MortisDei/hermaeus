@@ -15,6 +15,7 @@ public partial class TaskRewindConfirmationDialog : Window
     public TaskRewindConfirmationDialog()
     {
         InitializeComponent();
+        ModalWindowPlacement.ScheduleCenterOnOwner(this);
     }
 
     public void SetPlan(AgentTaskRewindConfirmation plan)

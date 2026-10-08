@@ -55,6 +55,7 @@ public static class HarnessCases
     [
         [new HarnessCase("redaction hides common secrets and home path", ServiceTests.RedactionHidesSecrets)],
         [new HarnessCase("benchmark db creates starter suites and records runs", ServiceTests.BenchmarkDbCreatesAndRecordsRuns)],
+        [new HarnessCase("benchmark cancellation during preparation persists terminal evidence", ServiceTests.BenchmarkCancellationDuringPreparationPersistsTerminalEvidence)],
         [new HarnessCase("benchmark initialization is gated against concurrent first calls", ServiceTests.BenchmarkInitializationIsGatedAgainstConcurrentFirstCalls)],
         [new HarnessCase("benchmark starter suites include expanded deterministic set", ServiceTests.BenchmarkStarterSuitesIncludeExpandedDeterministicSet)],
         [new HarnessCase("benchmark single iteration exports cold run mode", ServiceTests.BenchmarkSingleIterationRunExportsColdRunMode)],
@@ -238,6 +239,7 @@ public static class HarnessCases
         [new HarnessCase("RAG genuinely empty dataset is distinguished from an uncached one", RagCacheCeilingTests.GenuinelyEmptyDatasetIsDistinguishedFromAnUncachedOne)],
         [new HarnessCase("RAG scan index info reports the budget it was measured against", RagCacheCeilingTests.ScanIndexInfoReportsTheBudgetItWasMeasuredAgainst)],
         [new HarnessCase("RAG FTS candidate generation returns chunks containing the query terms", RagScanIndexTests.FtsCandidateGenerationReturnsChunksContainingTheQueryTerms)],
+        [new HarnessCase("RAG FTS candidate limit retains relevant matches beyond the storage prefix", RagScanIndexTests.FtsCandidateLimitRetainsRelevantMatchesBeyondTheStoragePrefix)],
         [new HarnessCase("RAG malformed MATCH input falls back rather than throwing", RagScanIndexTests.MalformedMatchInputFallsBackRatherThanThrowing)],
         [new HarnessCase("RAG FTS backfill is idempotent and does not duplicate rows", RagScanIndexTests.TheFtsBackfillIsIdempotentAndDoesNotDuplicateRows)],
         [new HarnessCase("RAG re-ingesting the same chunk replaces its search row", RagScanIndexTests.ReIngestingTheSameChunkReplacesItsSearchRowRatherThanAddingOne)],

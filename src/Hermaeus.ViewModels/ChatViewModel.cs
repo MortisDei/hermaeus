@@ -198,10 +198,11 @@ public partial class ChatViewModel : ViewModelBase
     private CancellationTokenSource? _contextUsageCts;
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
     private Task? _loadModelsTask;
-    private bool _suppressModelProfileDefaults;
+    private bool _refreshingModelSelection;
+    private ChatTokenUsage _contextUsage = new(0, 0, 0);
 
     [RelayCommand]
-    private async Task OpenTelemetryAsync()
+    private async Task OpenTelemetryAsync(CancellationToken ct)
     {
         if (Telemetry is null)
             return;
@@ -213,18 +214,30 @@ public partial class ChatViewModel : ViewModelBase
 
         try
         {
-            var request = await ManagedTelemetryRequestFactory(SelectedModel?.Id ?? string.Empty, CancellationToken.None);
+            var request = await ManagedTelemetryRequestFactory(SelectedModel?.Id ?? string.Empty, ct);
+            ct.ThrowIfCancellationRequested();
             if (request is null)
             {
                 Telemetry.Status = "No matching managed local Chat process is running.";
                 return;
             }
-            await Telemetry.OpenAsync(request);
+            await Telemetry.OpenAsync(request, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            Telemetry.Status = $"Telemetry unavailable: {ex.Message}";
+            if (!ct.IsCancellationRequested)
+                Telemetry.Status = $"Telemetry unavailable: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task CloseTelemetryAsync()
+    {
+        OpenTelemetryCommand.Cancel();
+        if (Telemetry is null) return;
+        try { await Telemetry.CloseAsync(); }
+        catch (Exception ex) { Telemetry.Status = $"Telemetry stopped: {ex.Message}"; }
     }
 
     /// <summary>
@@ -900,37 +913,37 @@ public partial class ChatViewModel : ViewModelBase
         if (force)
             _llm.InvalidateModelCache();
 
-        var current = SelectedModel?.Id;
         var models = await _llm.GetModelsAsync();
         _profiles.ApplyProfiles(models);
-        AvailableModels.Clear();
-        CompareModels.Clear();
-        foreach (var m in models.Where(m => m.IsVisible))
+        // Preserve a choice made while asynchronous discovery was pending.
+        var current = SelectedModel?.Id;
+        // Clearing a bound picker can write a transient null selection back
+        // into this VM. Suppress side effects for the whole publication, then
+        // apply defaults only if the final logical model actually changed.
+        _refreshingModelSelection = true;
+        try
         {
-            AvailableModels.Add(m);
-            CompareModels.Add(new CompareModelOptionViewModel(m));
-        }
-        if (AvailableModels.Count > 0)
-        {
+            AvailableModels.Clear();
+            CompareModels.Clear();
+            foreach (var m in models.Where(m => m.IsVisible))
+            {
+                AvailableModels.Add(m);
+                CompareModels.Add(new CompareModelOptionViewModel(m));
+            }
             var def = _settings.Settings.Llm.DefaultModel;
-            var next = AvailableModels.FirstOrDefault(m => m.Id == current)
+            SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == current)
                 ?? AvailableModels.FirstOrDefault(m => m.Id == def)
-                ?? AvailableModels[0];
+                ?? AvailableModels.FirstOrDefault();
+        }
+        finally { _refreshingModelSelection = false; }
 
-            // r12 03-runtime-vm-correctness.md 3.3: GetModelsAsync always
-            // materializes fresh LlmModel instances, so re-matching by id
-            // still reassigns SelectedModel to a *different object* on every
-            // refresh. Suppress OnSelectedModelChanged's profile-default
-            // re-apply when it is the same logical model as before; only a
-            // genuine model switch should touch user-tuned sampling params.
-            _suppressModelProfileDefaults = current is not null && next.Id == current;
-            try { SelectedModel = next; }
-            finally { _suppressModelProfileDefaults = false; }
+        if (SelectedModel?.Id != current)
+        {
+            ApplyModelProfileDefaults(SelectedModel);
+            ScheduleContextUsageRefresh();
         }
         else
-        {
-            SelectedModel = null;
-        }
+            UpdateContextUsage(_contextUsage, ContextUsageKind);
         _modelsLoadedAtUtc = DateTime.UtcNow;
         // r27 01 1.3/1.4: the warming line clears the moment a model lists, and
         // that is also what releases a held message.
@@ -2602,6 +2615,11 @@ public partial class ChatViewModel : ViewModelBase
 
     private void UpdateContextUsage(ChatTokenUsage usage, string kind)
     {
+        // A draft/history debounce started before a fast response must not
+        // overwrite the provider's final usage after the response completes.
+        if (kind == "Reported by provider")
+            _contextUsageCts?.Cancel();
+        _contextUsage = usage;
         var limit = ResolveContextWindowLimit();
         var result = ChatContextUsageCalculator.Compute(usage, limit, kind);
         ContextUsageKind = kind;
@@ -2885,10 +2903,12 @@ public partial class ChatViewModel : ViewModelBase
         // sampling params alone. On a genuine switch, every non-profiled
         // param resets to the settings default instead of keeping the
         // previous model's value, so tuning does not leak across models.
-        if (!_suppressModelProfileDefaults)
+        if (!_refreshingModelSelection)
+        {
             ApplyModelProfileDefaults(value);
+            ScheduleContextUsageRefresh();
+        }
         SendCommand.NotifyCanExecuteChanged();
-        ScheduleContextUsageRefresh();
         OnPropertyChanged(nameof(HasSelectedModel));
         OnPropertyChanged(nameof(IsSelectedModelRemote));
         OnPropertyChanged(nameof(SelectedModelLocalityLabel));
@@ -2932,7 +2952,11 @@ public partial class ChatViewModel : ViewModelBase
             {
                 await Task.Delay(150, token);
                 if (!token.IsCancellationRequested)
-                    RunOnUi(RefreshEstimatedContextUsage);
+                    RunOnUi(() =>
+                    {
+                        if (!token.IsCancellationRequested)
+                            RefreshEstimatedContextUsage();
+                    });
             }
             catch (OperationCanceledException) { }
         }, token);

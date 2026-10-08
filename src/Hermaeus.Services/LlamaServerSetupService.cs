@@ -562,17 +562,19 @@ public sealed class LlamaServerSetupService
         CancellationToken ct,
         bool allowAutoAcceleratedFallback)
     {
-        List<GitHubRelease>? releases;
-        try
+        using var response = await _http.GetAsync($"{ReleaseApiBaseUrl}?per_page=30", ct);
+        if (response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests)
         {
-            releases = await _http.GetFromJsonAsync<List<GitHubRelease>>($"{ReleaseApiBaseUrl}?per_page=30", ct);
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
-        {
+            var rateLimited = response.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+                || (response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining)
+                    && remaining.FirstOrDefault() == "0");
             throw new InvalidOperationException(
-                "GitHub's anonymous API rate limit (60 requests/hour per IP) was reached while checking for the "
-                + "latest llama.cpp release. Wait about an hour and try again.", ex);
+                rateLimited
+                    ? $"GitHub rate-limited the anonymous llama.cpp release request (HTTP {(int)response.StatusCode}). Wait for the limit to reset and try again."
+                    : "GitHub rejected the anonymous llama.cpp release request (HTTP 403). A rate limit or access restriction may be responsible; try again later.");
         }
+        response.EnsureSuccessStatusCode();
+        var releases = await response.Content.ReadFromJsonAsync<List<GitHubRelease>>(ct);
 
         if (releases is null)
             throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");

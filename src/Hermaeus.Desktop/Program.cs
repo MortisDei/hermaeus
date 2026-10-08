@@ -6,10 +6,15 @@ namespace Hermaeus.Desktop;
 
 class Program
 {
+    internal const string RestartHandoffArgument = "--hermaeus-restart-handoff";
+    private static readonly TimeSpan RestartHandoffTimeout = TimeSpan.FromSeconds(20);
     internal static PackageIntegrationLaunch? PackageIntegrationLaunch { get; private set; }
     private const long MaxCrashLogBytes = 512 * 1024;
     private const int MaxCrashEntryCharacters = 128 * 1024;
     private static readonly object CrashLogLock = new();
+    private static SingleInstanceActivation? _activation;
+
+    internal static void SetActivationHandler(Action activate) => _activation?.SetHandler(activate);
 
     // r19 1.3: crash logs must land where the user's other logs and data
     // live, not next to the executable (unwritable in a packaged install,
@@ -84,12 +89,27 @@ class Program
 
         // A second instance would write to the same SQLite data root with no
         // cross-process coordination; refuse to start rather than risk it.
+        var restartHandoff = args.Contains(RestartHandoffArgument, StringComparer.Ordinal);
         var ownsInstance = SingleInstanceGuard.TryAcquire();
+        if (!ownsInstance && restartHandoff)
+            ownsInstance = SingleInstanceGuard.TryAcquireForHandoff(RestartHandoffTimeout);
         if (!ShouldContinueStartup(ownsInstance))
+        {
+            if (!restartHandoff && PackageIntegrationLaunch is null)
+                SingleInstanceActivation.TryRequestAsync().GetAwaiter().GetResult();
             return;
+        }
 
         try
         {
+            if (PackageIntegrationLaunch is null)
+            {
+                try { _activation = new SingleInstanceActivation(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine("Hermaeus window activation is unavailable; the application lock remains enforced.");
+                }
+            }
             // Global unhandled exception handlers to capture unexpected crashes.
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
@@ -102,12 +122,20 @@ class Program
                 AppendCrashLog("hermaeus_unobserved.log", "UNOBSERVED", e.Exception.ToString());
             };
 
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            var applicationArgs = args
+                .Where(argument => !string.Equals(argument, RestartHandoffArgument, StringComparison.Ordinal))
+                .ToArray();
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(applicationArgs);
         }
         finally
         {
-            if (ownsInstance)
-                SingleInstanceGuard.Release();
+            try { _activation?.Dispose(); }
+            finally
+            {
+                _activation = null;
+                if (ownsInstance)
+                    SingleInstanceGuard.Release();
+            }
         }
     }
 

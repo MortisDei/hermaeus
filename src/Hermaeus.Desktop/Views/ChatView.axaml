@@ -308,19 +308,20 @@
                     <PathIcon Data="M3 13h2v8H3v-8zm4-6h2v14H7V7zm4 3h2v11h-2V10zm4-7h2v18h-2V3z"
                               Width="16" Height="16" />
                     <Button.Flyout>
-                        <Flyout Placement="Bottom">
+                        <Flyout Placement="Bottom" Closed="OnTelemetryClosed">
                             <StackPanel Width="300" Spacing="7">
                                 <TextBlock Text="Live model telemetry" FontSize="14" FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding Telemetry.RuntimeIdentity, StringFormat='Runtime: {0}'}" FontSize="11" TextWrapping="Wrap"
-                                           ToolTip.Tip="{Binding Telemetry.RuntimeIdentity}" />
+                                           ToolTip.Tip="{Binding Telemetry.RuntimeIdentityTooltip}" />
                                 <TextBlock Text="{Binding Telemetry.ModelIdentity, StringFormat='Model: {0}'}" FontSize="11" TextWrapping="Wrap"
-                                           ToolTip.Tip="{Binding Telemetry.ModelIdentity}" />
+                                           ToolTip.Tip="{Binding Telemetry.ModelIdentityTooltip}" />
                                 <TextBlock Text="{Binding Telemetry.DecodeRate, StringFormat='Decode: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.PromptThroughput, StringFormat='Prompt: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.TimeToFirstToken, StringFormat='Time to first content: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.TokensServed, StringFormat='Tokens served: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.ProcessRam, StringFormat='Process RAM: {0}'}" FontSize="11" />
                                 <TextBlock Text="{Binding Telemetry.ProcessGpuMemory, StringFormat='Process VRAM: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.ProcessGpuMemoryDetail}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding Telemetry.UnknownNote}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
                             </StackPanel>
                         </Flyout>

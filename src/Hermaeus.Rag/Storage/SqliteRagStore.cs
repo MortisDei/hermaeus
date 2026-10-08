@@ -1315,7 +1315,8 @@ public sealed class SqliteRagStore
             JOIN rag_chunks c ON c.id = f.id
             JOIN rag_datasets d ON d.id = c.dataset_id
             WHERE f.dataset_id = $ds AND c.generation_id = d.current_generation_id
-              AND c.is_parent = 0 AND rag_chunks_fts MATCH $q LIMIT $limit";
+              AND c.is_parent = 0 AND rag_chunks_fts MATCH $q
+            ORDER BY bm25(rag_chunks_fts), f.rowid LIMIT $limit";
         cmd.Parameters.AddWithValue("$ds", datasetId);
         cmd.Parameters.AddWithValue("$q", BuildMatchQuery(terms));
         cmd.Parameters.AddWithValue("$limit", limit);
@@ -1336,7 +1337,8 @@ public sealed class SqliteRagStore
     /// <summary>
     /// Each token as its own OR term, quoted so punctuation cannot be read as
     /// FTS5 syntax. Candidate generation wants recall; Bm25Scorer does the
-    /// ranking, so an over-wide candidate set costs time, not quality.
+    /// final ranking. FTS relevance is applied before the cap so common-term
+    /// matches stored earlier cannot crowd out rare, relevant matches.
     /// </summary>
     private static string BuildMatchQuery(string query)
     {

@@ -99,135 +99,139 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
 
         try
         {
-            CopyWorkspace(scenario.WorkspaceDirectory, workspaceDir);
-            WriteOutsideFiles(scenario.Manifest.OutsideFiles, outsideDir);
-            beforeHashes = HashWorkspace(workspaceDir);
-
-            var scenarioSettings = new ScenarioSettings(dataDir, scenario.Manifest.MaxSteps, scenario.Manifest.MaxOrchestrationSteps);
-            taskStore = new FileAgentTaskStateStore(scenarioSettings);
-            var lessons = new SqliteLessonStore(scenarioSettings);
-            lessonsForChecks = lessons;
-            await taskStore.InitializeAsync(ct);
-            await lessons.InitializeAsync(ct);
-
-            var options = new AgentWorkspaceOptions(WorkspaceRoot: workspaceDir, RagDatasetId: null, ModelId: modelId);
-            var scopeId = Path.GetFullPath(workspaceDir);
-            foreach (var seed in scenario.Manifest.SeedLessons)
-                await SeedLessonAsync(lessons, scopeId, seed, ct);
-
-            var seededMemory = new SeededWorkspaceMemoryStore(scenario.Manifest.SeedMemory);
-            var retrieval = new NullAgentRetrievalService();
-            var tools = new AgentWorkspaceTools();
-            var gate = new AgentSafetyGate();
-            var executor = new AgentToolExecutor(tools, mcpBridge: null);
-            var manifests = new WorkspaceManifestService();
-            var profiles = new FileWorkspaceProfileStore(scenarioSettings);
-            var activation = new WorkspaceActivationService(manifests, profiles);
-            var contextBuilder = new AgentContextBuilder(tools, retrieval, seededMemory, activation, taskStore, scenarioSettings, lessons);
-            var agent = new AgentService(taskStore, contextBuilder, gate, executor, _llm, traces: null, manifests, scenarioSettings, lessons, tools);
-
-            var task = await agent.CreateTaskAsync(scenario.Manifest.Goal, options, ct);
-            taskId = task.TaskId;
-
-            void OnStep(AgentStepResult r) =>
-                progress?.Report($"{scenario.Manifest.Id} step {r.State.StepCount}: {r.State.Status}");
-
-            var maxOuterIterations = scenario.Manifest.MaxSteps + 3;
-            AgentStepResult? lastResult = null;
-            for (var outer = 0; outer < maxOuterIterations; outer++)
+            try
             {
-                ct.ThrowIfCancellationRequested();
-                lastResult = await agent.RunAsync(taskId, options, OnStep, ct);
-                var status = lastResult.State.Status;
+                CopyWorkspace(scenario.WorkspaceDirectory, workspaceDir);
+                WriteOutsideFiles(scenario.Manifest.OutsideFiles, outsideDir);
+                beforeHashes = HashWorkspace(workspaceDir);
 
-                if (status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Blocked)
-                    break;
+                var scenarioSettings = new ScenarioSettings(dataDir, scenario.Manifest.MaxSteps, scenario.Manifest.MaxOrchestrationSteps);
+                taskStore = new FileAgentTaskStateStore(scenarioSettings);
+                var lessons = new SqliteLessonStore(scenarioSettings);
+                lessonsForChecks = lessons;
+                await taskStore.InitializeAsync(ct);
+                await lessons.InitializeAsync(ct);
 
-                if (status == AgentTaskStatus.WaitingForUser)
+                var options = new AgentWorkspaceOptions(WorkspaceRoot: workspaceDir, RagDatasetId: null, ModelId: modelId);
+                var scopeId = Path.GetFullPath(workspaceDir);
+                foreach (var seed in scenario.Manifest.SeedLessons)
+                    await SeedLessonAsync(lessons, scopeId, seed, ct);
+
+                var seededMemory = new SeededWorkspaceMemoryStore(scenario.Manifest.SeedMemory);
+                var retrieval = new NullAgentRetrievalService();
+                var tools = new AgentWorkspaceTools();
+                var gate = new AgentSafetyGate();
+                var executor = new AgentToolExecutor(tools, mcpBridge: null);
+                var manifests = new WorkspaceManifestService();
+                var profiles = new FileWorkspaceProfileStore(scenarioSettings);
+                var activation = new WorkspaceActivationService(manifests, profiles);
+                var contextBuilder = new AgentContextBuilder(tools, retrieval, seededMemory, activation, taskStore, scenarioSettings, lessons);
+                var agent = new AgentService(taskStore, contextBuilder, gate, executor, _llm, traces: null, manifests, scenarioSettings, lessons, tools);
+
+                var task = await agent.CreateTaskAsync(scenario.Manifest.Goal, options, ct);
+                taskId = task.TaskId;
+
+                void OnStep(AgentStepResult r) =>
+                    progress?.Report($"{scenario.Manifest.Id} step {r.State.StepCount}: {r.State.Status}");
+
+                var maxOuterIterations = scenario.Manifest.MaxSteps + 3;
+                AgentStepResult? lastResult = null;
+                for (var outer = 0; outer < maxOuterIterations; outer++)
                 {
-                    var pending = lastResult.State.PendingToolAction;
-                    if (pending is not null
-                        && scenario.Manifest.AutoApprove.Any(t => string.Equals(t, pending.ToolName, StringComparison.OrdinalIgnoreCase)))
+                    ct.ThrowIfCancellationRequested();
+                    lastResult = await agent.RunAsync(taskId, options, OnStep, ct);
+                    var status = lastResult.State.Status;
+
+                    if (status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Blocked)
+                        break;
+
+                    if (status == AgentTaskStatus.WaitingForUser)
                     {
-                        // Never deny: a denial would write a rejection lesson via
-                        // AgentService.RecordApprovalRejectionLessonAsync, which
-                        // would corrupt max_new_lessons checks. Leaving an
-                        // unapproved action pending IS the observable outcome the
-                        // rest of this scenario's checks look for.
-                        //
-                        // The pending action can belong to a CHILD task once
-                        // orchestration is running (lastResult.State is then
-                        // the child's state, not the parent's) - approve on
-                        // whichever task id actually holds it, then resume
-                        // via the PARENT's task id so the orchestration loop
-                        // re-enters and continues that same child.
-                        await agent.AppendApprovalAsync(lastResult.State.TaskId, pending.ToolName, approved: true, AgentApprovalFingerprint.Resolve(pending), options, ct);
-                        continue;
+                        var pending = lastResult.State.PendingToolAction;
+                        if (pending is not null
+                            && scenario.Manifest.AutoApprove.Any(t => string.Equals(t, pending.ToolName, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            // Never deny: a denial would write a rejection lesson via
+                            // AgentService.RecordApprovalRejectionLessonAsync, which
+                            // would corrupt max_new_lessons checks. Leaving an
+                            // unapproved action pending IS the observable outcome the
+                            // rest of this scenario's checks look for.
+                            //
+                            // The pending action can belong to a CHILD task once
+                            // orchestration is running (lastResult.State is then
+                            // the child's state, not the parent's) - approve on
+                            // whichever task id actually holds it, then resume
+                            // via the PARENT's task id so the orchestration loop
+                            // re-enters and continues that same child.
+                            await agent.AppendApprovalAsync(lastResult.State.TaskId, pending.ToolName, approved: true, AgentApprovalFingerprint.Resolve(pending), options, ct);
+                            continue;
+                        }
+
+                        break;
                     }
 
                     break;
                 }
 
-                break;
+                finalState = lastResult?.State;
+                finalResponse = lastResult?.PlannerResponse;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                runError = ex.Message;
+
+                // A thrown step still saves task state before rethrowing
+                // (AgentService's tool-execution and model-call catch blocks
+                // both do this), so the persisted state - not just the
+                // exception message - is what evaluation should see.
+                if (taskStore is not null && taskId is not null)
+                {
+                    try { finalState = await taskStore.LoadAsync(taskId, ct); }
+                    catch { /* best-effort; stateForChecks below falls back to an empty state */ }
+                }
             }
 
-            finalState = lastResult?.State;
-            finalResponse = lastResult?.PlannerResponse;
+            sw.Stop();
+
+            var afterHashes = HashWorkspace(workspaceDir);
+            var diff = DiffWorkspace(beforeHashes, afterHashes);
+            var stateForChecks = finalState ?? new AgentTaskState { Status = AgentTaskStatus.New };
+            IReadOnlyList<AgentLesson> activeLessons = [];
+            if (scenario.Manifest.Expect.ForbidActiveLessonMatching is true && lessonsForChecks is not null)
+            {
+                try { activeLessons = await lessonsForChecks.ListAllAsync(includeRetired: false, ct); }
+                catch { /* best-effort; an unreadable store fails safe by leaving the check with nothing to flag */ }
+            }
+            var checks = new List<AgentScenarioCheckResult>(
+                AgentScenarioChecks.Evaluate(scenario.Manifest.Expect, stateForChecks, finalResponse, diff, activeLessons));
+
+            if (runError is not null && !scenario.Manifest.AllowRunError)
+                checks.Insert(0, new AgentScenarioCheckResult("run_error", false, runError));
+
+            return new AgentScenarioRunResult(
+                ScenarioId: scenario.Manifest.Id,
+                Title: scenario.Manifest.Title,
+                Passed: checks.All(c => c.Passed),
+                Checks: checks,
+                Steps: finalState?.StepCount ?? 0,
+                DurationMs: sw.ElapsedMilliseconds,
+                FinalStatus: finalState?.Status.ToString() ?? "error",
+                RunError: runError,
+                Evidence: AgentScenarioEvidenceContract.Create(
+                    scenario,
+                    modelId,
+                    modelContentHash,
+                    _llm.ProviderName,
+                    DateTime.UtcNow));
         }
-        catch (OperationCanceledException)
+        finally
         {
             CleanupSandbox(sandboxRoot);
-            throw;
         }
-        catch (Exception ex)
-        {
-            runError = ex.Message;
-
-            // A thrown step still saves task state before rethrowing
-            // (AgentService's tool-execution and model-call catch blocks
-            // both do this), so the persisted state - not just the
-            // exception message - is what evaluation should see.
-            if (taskStore is not null && taskId is not null)
-            {
-                try { finalState = await taskStore.LoadAsync(taskId, ct); }
-                catch { /* best-effort; stateForChecks below falls back to an empty state */ }
-            }
-        }
-
-        sw.Stop();
-
-        var afterHashes = HashWorkspace(workspaceDir);
-        var diff = DiffWorkspace(beforeHashes, afterHashes);
-        var stateForChecks = finalState ?? new AgentTaskState { Status = AgentTaskStatus.New };
-        IReadOnlyList<AgentLesson> activeLessons = [];
-        if (scenario.Manifest.Expect.ForbidActiveLessonMatching is true && lessonsForChecks is not null)
-        {
-            try { activeLessons = await lessonsForChecks.ListAllAsync(includeRetired: false, ct); }
-            catch { /* best-effort; an unreadable store fails safe by leaving the check with nothing to flag */ }
-        }
-        var checks = new List<AgentScenarioCheckResult>(
-            AgentScenarioChecks.Evaluate(scenario.Manifest.Expect, stateForChecks, finalResponse, diff, activeLessons));
-
-        if (runError is not null && !scenario.Manifest.AllowRunError)
-            checks.Insert(0, new AgentScenarioCheckResult("run_error", false, runError));
-
-        CleanupSandbox(sandboxRoot);
-
-        return new AgentScenarioRunResult(
-            ScenarioId: scenario.Manifest.Id,
-            Title: scenario.Manifest.Title,
-            Passed: checks.All(c => c.Passed),
-            Checks: checks,
-            Steps: finalState?.StepCount ?? 0,
-            DurationMs: sw.ElapsedMilliseconds,
-            FinalStatus: finalState?.Status.ToString() ?? "error",
-            RunError: runError,
-            Evidence: AgentScenarioEvidenceContract.Create(
-                scenario,
-                modelId,
-                modelContentHash,
-                _llm.ProviderName,
-                DateTime.UtcNow));
     }
 
     private static void CopyWorkspace(string sourceWorkspaceDir, string destWorkspaceDir)
@@ -325,6 +329,20 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
             SqliteConnection.ClearAllPools();
             if (Directory.Exists(sandboxRoot))
                 Directory.Delete(sandboxRoot, recursive: true);
+
+            var runRoot = Directory.GetParent(sandboxRoot)?.FullName;
+            if (!string.IsNullOrWhiteSpace(runRoot)
+                && Directory.Exists(runRoot)
+                && !Directory.EnumerateFileSystemEntries(runRoot).Any())
+            {
+                Directory.Delete(runRoot, recursive: false);
+
+                var sandboxParent = Directory.GetParent(runRoot)?.FullName;
+                if (!string.IsNullOrWhiteSpace(sandboxParent)
+                    && Directory.Exists(sandboxParent)
+                    && !Directory.EnumerateFileSystemEntries(sandboxParent).Any())
+                    Directory.Delete(sandboxParent, recursive: false);
+            }
         }
         catch
         {

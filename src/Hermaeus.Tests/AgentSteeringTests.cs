@@ -22,14 +22,25 @@ namespace Hermaeus.Tests;
 public sealed class AgentSteeringTests
 {
     /// <summary>A well-shaped planner response asking for one tool.</summary>
-    private static string ToolRequest(string toolName) => $$"""
+    private static string ToolRequest(string toolName)
+    {
+        var arguments = toolName switch
+        {
+            "edit_file" => """{"relative_path":"notes.md","old_string":"old","new_string":"new"}""",
+            "plan_subtasks" => """{"subtasks":[{"goal":"Check the work","profile":"correctness","success_criteria":"the work is checked"},{"goal":"Record the result","profile":"docs","success_criteria":"the result is recorded"}]}""",
+            "run_command" => """{"command":"dotnet build"}""",
+            "list_files" => "{}",
+            _ => "{}"
+        };
+
+        return $$"""
         {
           "thought_summary": "Doing as instructed.",
           "current_step": "Run the tool.",
           "next_action": {
             "type": "tool",
             "tool_name": "{{toolName}}",
-            "arguments": { "command": "dotnet build", "relative_path": "notes.md", "subtasks": [] },
+            "arguments": {{arguments}},
             "requires_approval": false,
             "risk_level": "none"
           },
@@ -37,6 +48,7 @@ public sealed class AgentSteeringTests
           "user_message": "Proceeding."
         }
         """;
+    }
 
     private const string FinalAnswer = """
         {
@@ -109,6 +121,7 @@ public sealed class AgentSteeringTests
 
         var workspace = temp.PathFor("workspace");
         Directory.CreateDirectory(workspace);
+        File.WriteAllText(Path.Combine(workspace, "notes.md"), "old");
 
         var tools = new AgentWorkspaceTools();
         var agent = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(),

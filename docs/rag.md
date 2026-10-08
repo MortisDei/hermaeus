@@ -1,5 +1,9 @@
 # RAG Workflow
 
+The in-process ONNX reranker holds its model lifetime gate throughout loading
+and scoring, including batch experiments. Replacement and async disposal wait
+for active inference before freeing the native session.
+
 ## Overview
 
 Hermaeus includes a local RAG: structure-aware chunking, query planning,
@@ -24,6 +28,20 @@ traces, versioned SQLite schema migrations, and native eval support.
 5. Inspect citations, source text, grounding score, query traces, planner
   variants, context packing summaries, and the last ingest report.
 6. Run eval sets from the Eval Harness panel.
+
+The Ask surface keeps the question and answer as the primary workflow. Its
+status names **Ready to ask**, **Searching and generating**, **Answer ready**,
+**No answer: retrieval refused**, **Question failed**, **Question cancelled**,
+or **No knowledge base**, and the adjacent next-action text tells you whether
+to select a dataset, retry, inspect evidence, or create a dataset. Dataset
+chips identify **Local files** versus **Remote web**. **Inspect sources** and
+**Inspect trace** open citation/evidence and diagnostics only when wanted, so
+scores, planner notes, and implementation timing do not crowd normal use.
+Starting a new question clears the prior answer's grounding, variants,
+planner notes, context summary, and trace identifiers before the new state is
+shown. Empty, loading, degraded BM25-only, failed, cancelled, and successful
+states retain distinct copy; cancellation does not remove the last published
+dataset generation.
 
 ### Embedding Model Setup
 
@@ -97,6 +115,10 @@ traces, versioned SQLite schema migrations, and native eval support.
 - Adding documents to an existing dataset that was embedded with a different
   model than the one currently configured is blocked with a message naming
   both models. Use **Reindex** (below) first.
+- Manual ingest and reindex are single-flight operations. A second request
+  while either operation is active does not start a competing generation; the
+  existing overall and current-stage progress remains the operation the UI
+  reports.
 
 Long ingest progress remains stage- and batch-based rather than ETA-based:
 failure messages and cancellation state are shown directly, and the pipeline
@@ -349,11 +371,13 @@ larger limit only moves the point at which a corpus no longer fits.
 ## Keyword candidates
 
 BM25 scoring uses an FTS5 index over chunk content rather than tokenising every
-chunk in the dataset once per query variant. FTS5 finds a few hundred candidates
-and `Bm25Scorer` ranks them. The only chunks that stop being scored are ones
-that share no query term at all and therefore score essentially zero; a
-regression test asserts that scoring the candidate set produces the same ranked
-ids, in the same order, as scoring the whole corpus.
+chunk in the dataset once per query variant. FTS5 ranks matching chunks before
+the candidate cap, then `Bm25Scorer` scores that bounded set using dataset
+statistics. Relevant rare-term matches can therefore survive a large number
+of earlier common-term matches. Small sets below the cap retain the same
+ranking as whole-corpus scoring; capped retrieval does not promise exact
+whole-corpus equivalence. The shared candidate path also serves Recall's
+Documents source.
 
 The index is maintained inside the same transaction as the chunk rows it
 mirrors, and is backfilled once, lazily, on the first search of an existing

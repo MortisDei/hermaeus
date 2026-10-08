@@ -227,6 +227,15 @@ public sealed class ServerProcessManager : IDisposable
             if (!_process.Start())
                 throw new InvalidOperationException($"Failed to start '{cfg.ExecutablePath}'");
 
+            var evidenceRedactor = _redactor ?? new RedactionService();
+            var processEvidence = new RuntimeLaunchProcessEvidence(
+                _process.Id,
+                _process.StartTime.ToUniversalTime(),
+                cfg.ExecutablePath,
+                _process.StartInfo.ArgumentList
+                    .Select(evidenceRedactor.Redact)
+                    .ToArray());
+
             if (OperatingSystem.IsWindows() && !_jobObject.TryAssign(_process))
                 Emit("[hermaeus] Warning: could not attach process to the app's job object; it may survive an abnormal app exit.");
 
@@ -244,7 +253,13 @@ public sealed class ServerProcessManager : IDisposable
 
             var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(cfg.ExecutablePath, runtime.VersionOrHelpText, ct);
             var props = await ReadPropsAsync(cfg.Port, ct);
-            var effective = EffectiveLaunchObservationParser.Parse(cfg, runtimeIdentity, props);
+            var evidence = processEvidence with
+            {
+                ExecutableSha256 = runtimeIdentity.ExecutableSha256,
+                StartupEvidence = CaptureEffectiveRuntimeEvidence()
+            };
+            var effective = EffectiveLaunchObservationParser.Parse(cfg, runtimeIdentity, props, evidence,
+                string.Join('\n', _logRing));
             SetStatus(ServerStatus.Running);
             Emit($"[hermaeus] Server ready on port {cfg.Port}.");
             SetLaunchResult(ServerLaunchFailureKind.None, effective);
@@ -289,7 +304,7 @@ public sealed class ServerProcessManager : IDisposable
     /// model so the previous process cannot still hold model memory while the
     /// next context is being created.
     /// </summary>
-    public async Task StopAsync()
+    public async Task StopAsync(CancellationToken ct = default)
     {
         if (Status == ServerStatus.Stopped && _process is null)
             return;
@@ -305,8 +320,17 @@ public sealed class ServerProcessManager : IDisposable
                 try { process.Kill(entireProcessTree: true); }
                 catch (InvalidOperationException) { }
                 catch (System.ComponentModel.Win32Exception) { }
-                await process.WaitForExitAsync();
+                await process.WaitForExitAsync(ct);
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The lifecycle coordinator owns the deadline. The kill was sent
+            // before waiting, so make a second best-effort kill and surface
+            // cancellation instead of leaving the bounded shutdown waiting on
+            // an uncooperative child.
+            KillProcess();
+            throw;
         }
         finally
         {
@@ -353,29 +377,54 @@ public sealed class ServerProcessManager : IDisposable
         ReleaseResourceAllocation();
     }
 
-    public static async Task<ServerTuneResult> AutoTuneAsync(
+    public static Task<ServerTuneResult> AutoTuneAsync(
         ServerConfig cfg,
         IProgress<string>? progress = null,
         CancellationToken ct = default,
         IPortOwnerLookup? portOwnerLookup = null,
         GgufModelInfo? ggufInfo = null,
         HardwareProfile? hardware = null)
+        => AutoTuneCoreAsync(
+            cfg,
+            progress,
+            ct,
+            portOwnerLookup,
+            ggufInfo,
+            hardware,
+            static (probe, requestedLayers, report, token) =>
+                TryProbeAsync(probe, requestedLayers, report, token));
+
+    /// <summary>
+    /// Runs the bounded tuner with a caller-owned probe operation. The desktop
+    /// Services operation supplies the admission-backed probe; the static
+    /// overload remains for pure compatibility tests and legacy callers that
+    /// explicitly opt into direct process probing.
+    /// </summary>
+    internal static Task<ServerTuneResult> AutoTuneWithProbeAsync(
+        ServerConfig cfg,
+        IProgress<string>? progress,
+        CancellationToken ct,
+        IPortOwnerLookup? portOwnerLookup,
+        GgufModelInfo? ggufInfo,
+        HardwareProfile? hardware,
+        Func<ServerConfig, int, IProgress<string>?, CancellationToken, Task<ProbeResult>> probeCandidate)
+        => AutoTuneCoreAsync(cfg, progress, ct, portOwnerLookup, ggufInfo, hardware, probeCandidate);
+
+    private static async Task<ServerTuneResult> AutoTuneCoreAsync(
+        ServerConfig cfg,
+        IProgress<string>? progress,
+        CancellationToken ct,
+        IPortOwnerLookup? portOwnerLookup,
+        GgufModelInfo? ggufInfo,
+        HardwareProfile? hardware,
+        Func<ServerConfig, int, IProgress<string>?, CancellationToken, Task<ProbeResult>> probeCandidate)
     {
-        var baseConfig = NormalizeConfig(new ServerConfig
-        {
-            Name           = cfg.Name,
-            ExecutablePath = cfg.ExecutablePath,
-            ModelPath      = cfg.ModelPath,
-            Port           = cfg.Port,
-            ContextSize    = cfg.ContextSize,
-            GpuLayers      = cfg.GpuLayers,
-            GpuPlacement   = cfg.GpuPlacement,
-            Threads        = cfg.Threads,
-            Slots          = cfg.Slots,
-            EmbeddingsMode = cfg.EmbeddingsMode,
-            AutoStart      = false,
-            ExtraArgs      = cfg.ExtraArgs
-        });
+        ArgumentNullException.ThrowIfNull(probeCandidate);
+        // NormalizeConfig already returns an isolated, fully populated copy.
+        // Rebuilding a reduced config here silently dropped prompt threads,
+        // KV precision, projector, adaptive bounds, speculative companions,
+        // and runtime capability facts from every probe.
+        var baseConfig = NormalizeConfig(cfg);
 
         // r11 1.5: probes started processes and waited for /health on
         // cfg.Port without the port preflight StartAsync performs. If
@@ -414,23 +463,9 @@ public sealed class ServerProcessManager : IDisposable
         if (suggestedContext is int tunedContext)
         {
             progress?.Report($"[hermaeus] Auto-tune: configured context {baseConfig.ContextSize:N0} does not fit this GPU with this model; probing {tunedContext:N0} context with all layers first.");
-            var contextProbe = new ServerConfig
-            {
-                Name           = baseConfig.Name,
-                ExecutablePath = baseConfig.ExecutablePath,
-                ModelPath      = baseConfig.ModelPath,
-                Port           = baseConfig.Port,
-                ContextSize    = tunedContext,
-                GpuLayers      = -1,
-                GpuPlacement   = GpuPlacementIntent.All(),
-                Threads        = threads,
-                Slots          = baseConfig.Slots,
-                EmbeddingsMode = baseConfig.EmbeddingsMode,
-                AutoStart      = false,
-                ExtraArgs      = baseConfig.ExtraArgs
-            };
+            var contextProbe = BuildAutoTuneProbe(baseConfig, tunedContext, threads, GpuPlacementIntent.All());
 
-            var contextResult = await TryProbeAsync(contextProbe, 999, progress, ct);
+            var contextResult = await probeCandidate(contextProbe, 999, progress, ct);
             if (contextResult.Success)
                 return contextResult.TuneResult! with { TunedContextSize = tunedContext };
 
@@ -445,25 +480,12 @@ public sealed class ServerProcessManager : IDisposable
         foreach (var candidate in candidates)
         {
             ct.ThrowIfCancellationRequested();
-            var probe = new ServerConfig
-            {
-                Name           = baseConfig.Name,
-                ExecutablePath = baseConfig.ExecutablePath,
-                ModelPath      = baseConfig.ModelPath,
-                Port           = baseConfig.Port,
-                ContextSize    = baseConfig.ContextSize,
-                GpuLayers      = candidate,
-                GpuPlacement   = GpuPlacementIntent.TryFromLegacy(candidate, out var candidatePlacement, out _)
-                    ? candidatePlacement
-                    : null,
-                Threads        = threads,
-                Slots          = baseConfig.Slots,
-                EmbeddingsMode = baseConfig.EmbeddingsMode,
-                AutoStart      = false,
-                ExtraArgs      = baseConfig.ExtraArgs
-            };
+            var placement = GpuPlacementIntent.TryFromLegacy(candidate, out var candidatePlacement, out _)
+                ? candidatePlacement
+                : GpuPlacementIntent.Cpu();
+            var probe = BuildAutoTuneProbe(baseConfig, baseConfig.ContextSize, threads, placement!);
 
-            var result = await TryProbeAsync(probe, candidate, progress, ct);
+            var result = await probeCandidate(probe, candidate, progress, ct);
             if (result.Success)
                 return result.TuneResult!;
 
@@ -471,6 +493,50 @@ public sealed class ServerProcessManager : IDisposable
         }
 
         throw new InvalidOperationException($"No llama.cpp auto-tune candidate started successfully.\n\n{string.Join("\n\n", failures)}");
+    }
+
+    private static ServerConfig BuildAutoTuneProbe(
+        ServerConfig baseConfig,
+        int contextSize,
+        int threads,
+        GpuPlacementIntent placement)
+    {
+        var probe = NormalizeConfig(baseConfig);
+        probe.ContextSize = contextSize;
+        probe.Threads = threads;
+        probe.GpuPlacement = placement;
+        probe.GpuLayers = placement.LegacyGpuLayers ?? baseConfig.GpuLayers;
+        probe.AutoStart = false;
+        return probe;
+    }
+
+    /// <summary>
+    /// Reconstructs the exact launch shape that a managed auto-tune result will
+    /// persist. A successful probe may have requested "all" or an optimistic
+    /// layer count while the runtime reported a smaller effective count. The
+    /// confirmation must probe that reported count explicitly so the saved
+    /// profile is tied to a launchable configuration, including context and
+    /// all unrelated normalized options.
+    /// </summary>
+    internal static ServerConfig BuildAutoTuneConfirmationProbe(
+        ServerConfig successfulProbe,
+        ServerTuneResult result)
+    {
+        ArgumentNullException.ThrowIfNull(successfulProbe);
+        ArgumentNullException.ThrowIfNull(result);
+        if (!GpuPlacementIntent.TryFromLegacy(result.GpuLayers, out var placement, out var error)
+            || placement is null)
+            throw new InvalidOperationException($"Auto-tune final validation could not represent the observed GPU placement: {error}");
+
+        var confirmation = NormalizeConfig(successfulProbe);
+        confirmation.Id = $"{successfulProbe.Id}-confirmation";
+        confirmation.Name = $"{successfulProbe.Name} (auto-tune confirmation)";
+        confirmation.ContextSize = result.ProbeContextSize ?? successfulProbe.ContextSize;
+        confirmation.Threads = result.Threads;
+        confirmation.GpuPlacement = placement;
+        confirmation.GpuLayers = placement.LegacyGpuLayers ?? result.GpuLayers;
+        confirmation.AutoStart = false;
+        return confirmation;
     }
 
     private static async Task<ProbeResult> TryProbeAsync(
@@ -524,7 +590,14 @@ public sealed class ServerProcessManager : IDisposable
             var layers = observedLayers ?? requestedLayers;
             var log = string.Join('\n', lines);
             progress?.Report($"[hermaeus] Auto-tune: candidate {requestedLayers} reached /health.");
-            return ProbeResult.Ok(new ServerTuneResult(layers, totalLayers, probe.Threads, ParseLlamaBuildLabel(log), log));
+            return ProbeResult.Ok(new ServerTuneResult(
+                layers,
+                totalLayers,
+                probe.Threads,
+                ParseLlamaBuildLabel(log),
+                log,
+                ProbeConfigurationStableId: ConfigurationIdentityFactory.Create(probe).StableId,
+                ProbeContextSize: probe.ContextSize));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -637,6 +710,20 @@ public sealed class ServerProcessManager : IDisposable
         return (null, null);
     }
 
+    private IReadOnlyList<string> CaptureEffectiveRuntimeEvidence() =>
+        _logRing
+            .Where(line => line.Contains("offloaded ", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("load_tensors:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("system_info:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("n_threads =", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("llama_context:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("llama_kv_cache:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Flash Attention", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("load_model: initializing", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("model loaded", StringComparison.OrdinalIgnoreCase))
+            .TakeLast(24)
+            .ToArray();
+
     public static string ParseLlamaBuildLabel(string text)
     {
         var match = Regex.Match(text ?? string.Empty, @"(?:^|[^a-zA-Z0-9])b(?<build>\d{3,6})(?:[^a-zA-Z0-9]|$)", RegexOptions.IgnoreCase);
@@ -719,6 +806,7 @@ public sealed class ServerProcessManager : IDisposable
                 parts.Add(cfg.RuntimeFitMinimumContext.Value.ToString(CultureInfo.InvariantCulture));
             }
         }
+
         else
         {
             parts.Add("--fit");
@@ -732,6 +820,10 @@ public sealed class ServerProcessManager : IDisposable
                 _ => throw new InvalidOperationException("Unknown GPU placement kind.")
             });
         }
+
+        if (cfg.EnableRuntimePropertiesEndpoint
+            && !extraArgs.Any(argument => string.Equals(argument, "--props", StringComparison.OrdinalIgnoreCase)))
+            parts.Add("--props");
 
         // UseProjector is the authoritative launch gate for the configured
         // projector. ExtraArgs is an escape hatch for other runtime flags, but
@@ -1083,6 +1175,7 @@ public sealed class ServerProcessManager : IDisposable
             ContextSize    = cfg.ContextSize,
             GpuLayers      = cfg.GpuLayers,
             GpuPlacement   = cfg.GpuPlacement,
+            EnableRuntimePropertiesEndpoint = cfg.EnableRuntimePropertiesEndpoint,
             Threads        = cfg.Threads,
             PromptThreads  = cfg.PromptThreads,
             Slots          = cfg.Slots,
@@ -1471,7 +1564,9 @@ public sealed record ServerTuneResult(
     int Threads,
     string LlamaServerVersion,
     string RecentLog,
-    int? TunedContextSize = null);
+    int? TunedContextSize = null,
+    string ProbeConfigurationStableId = "",
+    int? ProbeContextSize = null);
 
 internal sealed record ProbeResult(bool Success, ServerTuneResult? TuneResult, string Error)
 {
