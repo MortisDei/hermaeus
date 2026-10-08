@@ -66,6 +66,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
 
     private static FontFamily MonoFamily => AppFontService.MonoFont;
     private readonly DispatcherTimer _renderTimer;
+    private readonly Func<string, Task<MarkdownDocument>> _parseMarkdown;
     private string _lastRenderedMarkdown = string.Empty;
     private bool _lastRenderedIsError;
     private double _lastRenderedFontSize;
@@ -91,8 +92,14 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     private Control? _dragAnchorBlock;
     private bool _crossBlockSelectionActive;
 
-    public MarkdownViewer()
+    public MarkdownViewer() : this(markdown => Task.Run(() => Markdig.Markdown.Parse(markdown, Pipeline))) { }
+
+    // Control tests can hold a real parse at the asynchronous boundary to
+    // exercise detachment and disposal without timing-dependent large inputs.
+    internal MarkdownViewer(Func<string, Task<MarkdownDocument>> parseMarkdown)
     {
+        ArgumentNullException.ThrowIfNull(parseMarkdown);
+        _parseMarkdown = parseMarkdown;
         _renderTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(75)
@@ -312,7 +319,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             return;
         }
 
-        var doc = await Task.Run(() => Markdig.Markdown.Parse(md, Pipeline));
+        var doc = await _parseMarkdown(md);
         if (version != _renderVersion)
             return;
 
