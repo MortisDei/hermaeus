@@ -9,4 +9,5 @@ public interface ITrayIntegrationState
 {
     bool IsConfirmed { get; }
     void Confirm();
+    void Reset();
 }

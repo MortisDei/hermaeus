@@ -474,7 +474,8 @@ When process VRAM is unavailable, the flyout keeps the value as `Unknown` and
 shows the bounded evidence reason. It does not substitute whole-device usage
 or zero for a missing process counter.
 
-Settings > Voice contains supplementary audio feedback controls for the
+Settings > Voice contains supplementary audio feedback controls, off by default
+for new installations. Existing saved choices are retained. The controls cover the
 explicit task/runtime/recording event list. Volume is retained when muted,
 visual notifications remain authoritative, and cues are suppressed while TTS
 speaks by default. A suppressed cue waits for TTS to finish and then rechecks
@@ -484,6 +485,13 @@ patterns with 400 ms notes and 300 ms pauses. Recording cues remain short
 single tones. Windows does not substitute a default beep for a failed WAV.
 The trace records the cue
 identity, backend attempts, fallback reason, and result.
+
+Settings > UI keeps close-to-tray and minimize-to-tray separate. On Linux, first
+click the tray icon or open its menu in the current session before either option
+can hide the window. If the tray is unavailable or unconfirmed, closing exits
+cleanly and minimizing leaves the window on the taskbar. Turning off the tray
+restores a hidden window. Launching Hermaeus again restores the existing window
+without starting another desktop or another set of managed services.
 
 When Recall injection is enabled, the Chat trace identifies keyword-only
 fallback retrieval separately from embedding-backed retrieval. Lexical hits

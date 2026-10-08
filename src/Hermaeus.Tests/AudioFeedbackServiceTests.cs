@@ -44,10 +44,11 @@ public sealed class AudioFeedbackServiceTests
     }
 
     [Fact]
-    public void Default_policy_enables_task_notifications_and_keeps_ambient_events_off()
+    public void Default_policy_disables_audio_feedback_and_retains_opt_in_event_choices()
     {
         var settings = new AudioFeedbackSettings();
 
+        Assert.False(settings.Enabled);
         Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskNeedsApproval));
         Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskCompleted));
         Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskFailed));
@@ -61,6 +62,7 @@ public sealed class AudioFeedbackServiceTests
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts.AudioFeedback.Enabled = true;
         settings.Settings.Tts.AudioFeedback.Volume = 25;
         settings.Settings.Tts.AudioFeedback.EventEnabled[nameof(AudioFeedbackEventKind.TaskFailed)] = true;
         settings.Settings.Tts.AudioFeedback.EventEnabled[nameof(AudioFeedbackEventKind.TaskCompleted)] = true;
@@ -80,11 +82,45 @@ public sealed class AudioFeedbackServiceTests
         await Helpers.WaitForAsync(() => played.Count == 2, "one deduplicated cue");
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Saved_audio_choice_survives_settings_reload_and_voice_editor(bool enabled)
+    {
+        using var temp = new TempDir();
+        var path = temp.PathFor("settings.json");
+        var writer = new SettingsService(path);
+        var candidate = writer.Settings.Clone();
+        candidate.Tts.AudioFeedback.Enabled = enabled;
+        await writer.SaveAsync(candidate);
+        var reader = new SettingsService(path);
+        await reader.LoadAsync();
+        Assert.Equal(enabled, reader.Settings.Tts.AudioFeedback.Enabled);
+        using var voiceEditor = Helpers.NewTtsSettingsViewModel(reader);
+        voiceEditor.ReloadFrom(reader.Settings);
+        Assert.Equal(enabled, voiceEditor.AudioFeedbackEnabled);
+        voiceEditor.ApplyVoiceOrchestrationTo(candidate.Tts);
+        Assert.Equal(enabled, candidate.Tts.AudioFeedback.Enabled);
+    }
+
+    [Fact]
+    public void Missing_audio_settings_are_off_in_the_voice_editor()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts = System.Text.Json.JsonSerializer.Deserialize<TtsSettings>("{}")!;
+        using var voiceEditor = Helpers.NewTtsSettingsViewModel(settings);
+        voiceEditor.ReloadFrom(settings.Settings);
+        Assert.False(voiceEditor.AudioFeedbackEnabled);
+        Assert.False(settings.Settings.Tts.AudioFeedback.Enabled);
+    }
+
     [Fact]
     public async Task Mute_keeps_saved_volume_and_suppresses_playback()
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts.AudioFeedback.Enabled = true;
         settings.Settings.Tts.AudioFeedback.Muted = true;
         settings.Settings.Tts.AudioFeedback.Volume = 77;
         var played = false;
@@ -103,6 +139,7 @@ public sealed class AudioFeedbackServiceTests
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
+        settings.Settings.Tts.AudioFeedback.Enabled = true;
         var logs = new CollectingRuntimeLog();
         var played = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var service = new AudioFeedbackService(

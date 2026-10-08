@@ -115,7 +115,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
     [ObservableProperty] private bool _streamingChatSpeech;
-    [ObservableProperty] private bool _audioFeedbackEnabled = true;
+    [ObservableProperty] private bool _audioFeedbackEnabled;
     [ObservableProperty] private int _audioFeedbackVolume = 50;
     [ObservableProperty] private bool _audioFeedbackMuted;
     [ObservableProperty] private bool _suppressAudioFeedbackWhileTts = true;

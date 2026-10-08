@@ -10,6 +10,23 @@ statement of a *current* control, that control has been copied into
 See `docs/security-review.md` for current controls and the threat model,
 and `docs/security-roadmap.md` for open hardening work.
 
+## r33: Tray recovery and second-launch activation
+
+The Linux owner found a desktop hidden by close-to-tray with no registered
+tray icon. Avalonia 12.1.3 requires attachment through the application's tray
+collection; creating the object alone no longer creates the native icon.
+Attachment and teardown now share that lifecycle. Linux close/minimize also
+require current-session tray interaction evidence, and disabling the tray
+restores the window before removing the recovery surface.
+
+The exclusive application lock remains authoritative. An ordinary second
+launch can only request restoration through a same-user named pipe. Both
+ends require the current OS user, accept a fixed one-byte activation protocol,
+and bound stalled/disconnected clients. No command-line arguments, file paths,
+settings, credentials, data-root access or Agent authority cross this channel.
+Requests arriving before UI readiness are retained until the restore handler
+is installed. Restart lock handoff and package integration remain separate.
+
 ## r27: Fast, And Honest About It (Startup, Retrieval, Drafting, Model Downloads)
 
 Three security-relevant changes, all of them new user-controlled input

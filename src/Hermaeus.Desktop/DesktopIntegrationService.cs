@@ -35,7 +35,7 @@ public sealed class DesktopIntegrationService : IDisposable
             if (e.Property == Window.WindowStateProperty
                 && window.WindowState == WindowState.Minimized
                 && _vm.Settings.MinimizeToTray
-                && _vm.Settings.EnableTrayIcon)
+                && CanHideToTray)
             {
                 window.Hide();
             }
@@ -67,8 +67,16 @@ public sealed class DesktopIntegrationService : IDisposable
         // Closing and minimizing are separate choices now. Sharing one flag
         // meant wanting minimize-to-tray also meant the app could never be
         // closed from its own window button.
-        return _vm.Settings.EnableTrayIcon && _vm.Settings.CloseToTray;
+        return CanHideToTray && _vm.Settings.CloseToTray;
     }
+
+    // On Linux a created native object does not establish that the compositor
+    // exposes it. Reuse the same interaction evidence as Doctor before hiding.
+    internal bool CanHideToTray => _vm.Settings.EnableTrayIcon
+        && _tray is { IsVisible: true, Icon: not null, NativeMenuExporter: not null }
+        && (!OperatingSystem.IsLinux() || _trayIntegration.IsConfirmed);
+
+    internal TrayIcon? Tray => _tray;
 
     public void Dispose()
     {
@@ -79,7 +87,7 @@ public sealed class DesktopIntegrationService : IDisposable
                 _window.PropertyChanged -= _windowPropertyChangedHandler;
         }
         _vm.Settings.PropertyChanged -= OnSettingsPropertyChanged;
-        _tray?.Dispose();
+        RemoveTray();
         _globalHotkeys.Dispose();
     }
 
@@ -160,6 +168,16 @@ public sealed class DesktopIntegrationService : IDisposable
             _trayIntegration.Confirm();
             ShowAndActivate();
         };
+        if (Application.Current is not { } application)
+        {
+            tray.Dispose();
+            return;
+        }
+        var icons = TrayIcon.GetIcons(application);
+        if (icons is null)
+            TrayIcon.SetIcons(application, new TrayIcons { tray });
+        else
+            icons.Add(tray);
         _tray = tray;
     }
 
@@ -171,8 +189,21 @@ public sealed class DesktopIntegrationService : IDisposable
             return;
         }
 
-        _tray?.Dispose();
+        // Removing the only recovery surface must never strand a hidden window.
+        if (_window is { IsVisible: false })
+            ShowAndActivate();
+        RemoveTray();
+    }
+
+    private void RemoveTray()
+    {
+        if (_tray is not { } tray)
+            return;
+        if (Application.Current is { } application)
+            TrayIcon.GetIcons(application)?.Remove(tray);
+        tray.Dispose();
         _tray = null;
+        _trayIntegration.Reset();
     }
 
     private void ConfigureGlobalHotkeys()
@@ -215,6 +246,7 @@ public sealed class DesktopIntegrationService : IDisposable
     private NativeMenu BuildMenu()
     {
         var menu = new NativeMenu();
+        menu.Opening += (_, _) => _trayIntegration.Confirm();
         menu.Items.Add(Item("Show Hermaeus", ShowAndActivate));
         menu.Items.Add(Item("Quick Chat", () =>
         {
@@ -272,7 +304,7 @@ public sealed class DesktopIntegrationService : IDisposable
         return item;
     }
 
-    private void ShowAndActivate()
+    internal void ShowAndActivate()
     {
         if (_window is null)
             return;

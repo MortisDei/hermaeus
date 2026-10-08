@@ -13,6 +13,13 @@ limit.
 
 ### Changed
 
+- Supplementary audio feedback defaults off for new or missing settings;
+  explicit saved choices are retained.
+- Tray icons are attached to Avalonia's application collection, fixing the
+  missing Linux icon. Close/minimize only hide with an available tray; Linux
+  also requires a tray interaction in the current session. Disabling the tray
+  restores a hidden window, and a second launch requests restoration of the
+  existing window without starting another desktop or touching its data stores.
 - Refreshing Chat's bound model picker no longer resets conversation sampling
   overrides or replaces provider-reported token usage with a transcript-only
   estimate when the same model remains selected. Genuine model changes still

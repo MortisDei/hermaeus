@@ -183,9 +183,10 @@ Windows playback uses the native winmm `PlaySound` API directly, so a preview
 does not open a media player or depend on the WAV file association. Default
 Windows sound substitution is disabled: a rejected WAV reports a playback
 failure rather than a successful generic beep. Temporary cue files are deleted
-after playback. Approval, task-complete, task-failed, and
-managed-runtime-failed cues are enabled by default; other event kinds remain
-opt-in. Each event resolves to a distinct bounded multi-tone generated WAV
+after playback. Supplementary audio feedback is off by default for new or
+missing settings, while explicit saved choices are retained. After enabling it,
+approval, task-complete, task-failed, and managed-runtime-failed are the default
+event selections; other event kinds remain opt-in. Each event resolves to a distinct bounded multi-tone generated WAV
 pattern, so approval, completion, failure, and runtime events are not one
 generic beep. Semantic notes last 400 ms with 300 ms pauses, using the spacing
 confirmed by the owner's laptop listening check. Three-note cues last 1.8 seconds;

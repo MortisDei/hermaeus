@@ -25,9 +25,9 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class MainWindowViewModelStartupTests
 {
-    private sealed record Harness(MainWindowViewModel Main, ModelManagementViewModel Models, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore);
+    internal sealed record Harness(MainWindowViewModel Main, ModelManagementViewModel Models, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore);
 
-    private static async Task<Harness> NewHarnessAsync(
+    internal static async Task<Harness> NewHarnessAsync(
         TempDir temp,
         bool initializeRagStore,
         IDoctorService? doctorService = null,

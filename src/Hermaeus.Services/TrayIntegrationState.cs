@@ -9,4 +9,6 @@ public sealed class TrayIntegrationState : ITrayIntegrationState
     public bool IsConfirmed => Volatile.Read(ref _confirmed) != 0;
 
     public void Confirm() => Interlocked.Exchange(ref _confirmed, 1);
+
+    public void Reset() => Interlocked.Exchange(ref _confirmed, 0);
 }

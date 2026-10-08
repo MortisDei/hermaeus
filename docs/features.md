@@ -467,7 +467,8 @@ Native Kokoro health failures retain the provider's observed diagnosis in
 Services and link directly to Doctor. Doctor owns the verified asset repair
 action; a healthy native provider is not offered as an install action.
 
-Audio feedback is a separate semantic cue service with explicit events,
+Audio feedback is off by default for new or missing settings; explicit saved
+choices are preserved. It is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
 speaks. Semantic events use distinct generated patterns with 400 ms notes and
 300 ms pauses, with three-note cues bounded to 1.8 seconds. Recording cues
@@ -530,7 +531,14 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   existing files are preserved if a late commit step fails.
 - Settings-triggered restart drains the shared application owners before it
   starts the replacement. The replacement uses a bounded internal lock
-  handoff, while ordinary second launches remain fail-fast.
+  handoff. An ordinary second launch requests restoration of the existing
+  window over a same-user, activation-only named pipe, then exits without
+  composing services or acquiring the owner's data root.
+- Tray icons are attached through Avalonia's application collection and removed
+  on disable or disposal. Closing/minimizing hides the window only with an
+  available tray; Linux additionally requires a tray interaction in the current
+  session. Without that evidence, close quits cleanly and minimize retains the
+  taskbar window. Disabling the tray restores a hidden window first.
 - Window close and tray **Stop Services** use the same bounded managed-process
   stop path. After the drain completes, the desktop exits through the Avalonia
   application lifetime rather than re-entering a cancelled window close. An

@@ -75,6 +75,8 @@ public partial class App : Application
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
+            Program.SetActivationHandler(() => Avalonia.Threading.Dispatcher.UIThread.Post(
+                () => _desktopIntegration.ShowAndActivate()));
             window.RequestApplicationExit = () => desktop.Shutdown();
             var lifecycle = sp.GetRequiredService<IApplicationLifecycleCoordinator>();
             window.ApplicationLifecycle = lifecycle;
