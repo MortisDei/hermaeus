@@ -140,6 +140,10 @@ Cancellation preserves partial evidence and normalizes the result as
 and stops the isolated runtime. It does not invent a workload or pretend that a
 candidate comparison was measured.
 
+The candidate context draft survives refreshes of the bound source picker
+during server suspension and restoration. Choosing a different source starts
+its draft from that server's context; it does not rewrite a frozen definition.
+
 **Apply to Services** is a separate review after a controlled, correctness-
 passing result with auditable effective launch evidence. It shows every persisted field that would change and captures
 the current server configuration plus runtime/model identity. Confirmation

@@ -13,6 +13,14 @@ limit.
 
 ### Changed
 
+- Refreshing Chat's bound model picker no longer resets conversation sampling
+  overrides or replaces provider-reported token usage with a transcript-only
+  estimate when the same model remains selected. Genuine model changes still
+  apply profile defaults, including fallback when a model disappears. A model
+  choice made while discovery is pending is retained when the list arrives.
+- Lab preserves the displayed candidate context when its source server is
+  suspended or restored. Rebuilding the bound server picker no longer resets
+  the field to the source's baseline context while the frozen candidate differs.
 - Avalonia, Desktop, Fluent and Inter framework packages move together from
   12.1.2 to 12.1.3, consolidating the overlapping Dependabot updates into R33.
   AvaloniaEdit remains on its separate 12.0.0 package line.

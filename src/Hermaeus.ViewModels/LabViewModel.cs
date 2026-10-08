@@ -650,6 +650,7 @@ public partial class LabViewModel : ViewModelBase
     private readonly ILabRecipeService? _recipes;
     private readonly ISettingsService? _settings;
     private readonly ServicesViewModel? _services;
+    private bool _refreshingServerSelection;
     private readonly RecommendationDerivationService? _recommendationDerivation;
     private readonly RecommendationApplicationService? _recommendationApplication;
     private readonly IAudioFeedbackService? _audioFeedback;
@@ -823,7 +824,8 @@ public partial class LabViewModel : ViewModelBase
     {
         // Availability refreshes rebuild snapshots of the same server. They must
         // not replace the candidate the owner is about to run.
-        if (newValue is not null && !string.Equals(oldValue?.Id, newValue.Id, StringComparison.Ordinal))
+        if (!_refreshingServerSelection && newValue is not null
+            && !string.Equals(oldValue?.Id, newValue.Id, StringComparison.Ordinal))
             CandidateContextSize = newValue.ContextSize;
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));
         NotifyRunCommands();
@@ -873,15 +875,26 @@ public partial class LabViewModel : ViewModelBase
             ? _settings?.Settings.ManagedServers.Where(server => !server.EmbeddingsMode)
             : _services.Servers.Where(server => !server.EmbeddingsMode).Select(server => server.BuildConfig());
 
-        _configuredServers.Clear();
-        if (servers is not null)
+        // A bound picker writes null back when its items are cleared. Treat
+        // publication as one refresh so that transient selection cannot reset
+        // the owner's candidate during source suspension or restoration.
+        _refreshingServerSelection = true;
+        try
         {
-            foreach (var server in servers)
-                _configuredServers.Add(server);
-        }
+            _configuredServers.Clear();
+            if (servers is not null)
+            {
+                foreach (var server in servers)
+                    _configuredServers.Add(server);
+            }
 
-        SelectedServer = _configuredServers.FirstOrDefault(server => string.Equals(server.Id, selectedId, StringComparison.Ordinal))
-            ?? _configuredServers.FirstOrDefault();
+            SelectedServer = _configuredServers.FirstOrDefault(server => string.Equals(server.Id, selectedId, StringComparison.Ordinal))
+                ?? _configuredServers.FirstOrDefault();
+        }
+        finally { _refreshingServerSelection = false; }
+
+        if (SelectedServer is { } selected && !string.Equals(selected.Id, selectedId, StringComparison.Ordinal))
+            CandidateContextSize = selected.ContextSize;
         OnPropertyChanged(nameof(ConfiguredServerHint));
         OnPropertyChanged(nameof(HasConfiguredServers));
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));

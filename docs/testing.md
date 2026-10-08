@@ -31,6 +31,15 @@ filesystem and SQLite state that parallelism would corrupt.
 
 Do not re-enable parallelization.
 
+Native control and bitmap tests share `AvaloniaTestHost` through the
+`Native Avalonia` xunit collection. It owns one platform runtime and UI thread
+using a plain Avalonia application, without composing Hermaeus services or
+loading the owner's settings. Linux needs the same Xvfb display used in CI.
+Control tests create invisible, inactive windows off the taskbar to establish
+real attachment and binding behaviour. They cover Markdown detach/reattach,
+pending parse invalidation, explicit disposal, and bound Chat/Lab picker refresh.
+These are native control regressions, not pixel or owner workflow acceptance.
+
 ## Run the suite in the real terminal environment
 
 The test harness deliberately uses shared temporary data roots and SQLite

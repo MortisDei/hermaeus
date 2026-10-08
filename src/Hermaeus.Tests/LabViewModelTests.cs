@@ -1,3 +1,7 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Data;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -7,7 +11,8 @@ using Xunit;
 
 namespace Hermaeus.Tests;
 
-public sealed class LabViewModelTests
+[Collection(AvaloniaTestHost.CollectionName)]
+public sealed class LabViewModelTests(AvaloniaTestHost avalonia)
 {
     [Fact]
     public void Lab_start_paths_disable_each_other_while_a_run_is_active()
@@ -598,7 +603,7 @@ public sealed class LabViewModelTests
     }
 
     [Fact]
-    public void Services_status_refresh_preserves_the_selected_lab_candidate()
+    public Task Services_status_refresh_preserves_the_selected_lab_candidate() => avalonia.RunAsync(() =>
     {
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
@@ -606,18 +611,32 @@ public sealed class LabViewModelTests
         var services = Helpers.NewServicesViewModel(settings);
         var store = new SqliteEmpiricalExperienceStore(settings, new RedactionService());
         var vm = new LabViewModel(store, new FakeToasts(), null, settings, null, services);
-        var original = vm.SelectedServer;
-        vm.CandidateContextSize = 512;
+        var picker = new ComboBox { DataContext = vm };
+        picker.Bind(ItemsControl.ItemsSourceProperty, new Binding(nameof(vm.ConfiguredServers)));
+        picker.Bind(SelectingItemsControl.SelectedItemProperty, new Binding(nameof(vm.SelectedServer)) { Mode = BindingMode.TwoWay });
+        var window = new Window { Content = picker, Opacity = 0, ShowActivated = false, ShowInTaskbar = false };
+        window.Show();
+        window.Hide();
+        try
+        {
+            var original = vm.SelectedServer;
+            vm.CandidateContextSize = 512;
 
-        services.Servers.Single(server => !server.EmbeddingsMode).Status = ServerStatus.Starting;
+            foreach (var status in new[] { ServerStatus.Starting, ServerStatus.Stopped, ServerStatus.Running })
+            {
+                services.Servers.Single(server => !server.EmbeddingsMode).Status = status;
+                Assert.NotSame(original, vm.SelectedServer);
+                Assert.Equal(original!.Id, vm.SelectedServer!.Id);
+                Assert.Same(vm.SelectedServer, picker.SelectedItem);
+                Assert.Equal(512, vm.CandidateContextSize);
+            }
 
-        Assert.NotSame(original, vm.SelectedServer);
-        Assert.Equal(original!.Id, vm.SelectedServer!.Id);
-        Assert.Equal(512, vm.CandidateContextSize);
-
-        vm.SelectedServer = new ServerConfig { Id = "another-chat", ContextSize = 2048 };
-        Assert.Equal(2048, vm.CandidateContextSize);
-    }
+            vm.SelectedServer = new ServerConfig { Id = "another-chat", ContextSize = 2048 };
+            Assert.Equal(2048, vm.CandidateContextSize);
+        }
+        finally { window.Close(); }
+        return Task.CompletedTask;
+    });
 
     [Fact]
     public async Task Lab_freezes_the_candidate_and_source_before_suspension_refreshes_services()

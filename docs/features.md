@@ -17,6 +17,9 @@ defined by `Directory.Build.props`.
 - Context Inspector and a per-answer context receipt show what was prepared and
   injected. Attached Knowledge, Memories, Recall, Project State, attachments,
   token estimates, and provider-reported usage remain distinguishable.
+- Refreshing the Chat model picker preserves conversation sampling overrides
+  and reported token usage when the same model remains selected. A genuine
+  model change applies that model's sampling defaults.
 - Reasoning is a separate, labelled transcript channel when the selected route
   provides it. It is preserved and replayed only when the runtime and template
   evidence supports that behavior.
@@ -371,7 +374,7 @@ selected Chat source is fully stopped and awaited before the isolated process
 starts, then restored only if its complete configuration is unchanged. Lab does
 not change saved settings or select a winner automatically. Definitions are
 frozen before source suspension, candidate drafts survive status refreshes of
-the same server, and choosing another server resets the candidate to its
+the bound source picker, and choosing another server resets the candidate to its
 context baseline. Candidates are bounded, valid recipe evidence flows directly
 into candidate review, missing measurements remain missing, and output
 correctness gates comparisons and Apply review. Failures retain their useful operation

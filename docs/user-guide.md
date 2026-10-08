@@ -286,6 +286,12 @@ previous answer. Deleting the active conversation returns Chat to a fresh,
 focused input. Delete from a conversation's details flyout shows its nearby
 confirmation; the context-menu path keeps a full confirmation dialog.
 
+Returning to Chat or refreshing available models preserves your conversation's
+sampling overrides and provider-reported token count when the selected model
+is unchanged. Selecting a different model applies its sampling defaults.
+Editing the draft or context replaces the previous reported count with a
+labelled estimate for the next request.
+
 The compact **Quick Chat** surface sends with Enter or Ctrl+Enter; use
 Shift+Enter for a newline. It shows a Processing indicator while the request is
 active.
@@ -490,7 +496,7 @@ remain explicitly unavailable rather than being inferred.
 ## Lab experiments and evidence
 
 Open **Lab > Experiment**, select a configured Chat server, name the run, and
-set the bounded candidate values shown by the editor. **Freeze and start**
+set the bounded candidate values shown by the editor. **Start isolated run**
 captures the exact definition and starts a separate runtime on a temporary
 loopback port. A running selected Chat source is fully stopped and awaited
 first, then restored after the run only if its complete configuration is
@@ -500,7 +506,9 @@ It is an intentional manual completion step, not an automatic workload or
 candidate comparison. **Cancel** stops only the runtime owned by that run and
 records the cancelled or partial result. A second manual or recipe run is
 disabled while one is active, and the service rejects concurrent callers at the
-backend boundary as well.
+backend boundary as well. Source status refreshes preserve the candidate
+context shown in the editor; choosing a different source initialises it from
+that server's context.
 
 **Inspect runtime recipes** explains whether each recipe is Available,
 Unavailable, or Unknown for the selected model and runtime. Unavailable recipes
