@@ -177,7 +177,7 @@ public sealed class BackupService
             foreach (var item in files)
             {
                 ct.ThrowIfCancellationRequested();
-                var staged = Path.GetFullPath(Path.Combine(stagingRoot, item.RelativePath));
+                var staged = ResolveRestoreTarget(stagingRoot, item.RelativePath);
                 var stagingDirectory = Path.GetDirectoryName(staged);
                 if (string.IsNullOrWhiteSpace(stagingDirectory))
                     throw new InvalidOperationException("Backup staging directory could not be resolved.");
@@ -247,7 +247,7 @@ public sealed class BackupService
                     string? backup = null;
                     if (File.Exists(target))
                     {
-                        backup = Path.GetFullPath(Path.Combine(backupRoot, item.RelativePath));
+                        backup = ResolveRestoreTarget(backupRoot, item.RelativePath);
                         var backupDirectory = Path.GetDirectoryName(backup);
                         if (string.IsNullOrWhiteSpace(backupDirectory))
                             throw new InvalidOperationException("Backup rollback directory could not be resolved.");
@@ -257,7 +257,7 @@ public sealed class BackupService
                     }
 
                     committed.Add((target, backup));
-                    var staged = Path.GetFullPath(Path.Combine(stagingRoot, item.RelativePath));
+                    var staged = ResolveRestoreTarget(stagingRoot, item.RelativePath);
                     EnsureNoReparsePoints(staged);
                     var targetDirectory = Path.GetDirectoryName(target);
                     if (string.IsNullOrWhiteSpace(targetDirectory))
@@ -322,12 +322,9 @@ public sealed class BackupService
 
         var safeRelativePath = string.Join(Path.DirectorySeparatorChar, segments);
         var target = Path.GetFullPath(Path.Combine(root, safeRelativePath));
-        var relativeTarget = Path.GetRelativePath(root, target);
+        var rootPrefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (Path.IsPathFullyQualified(relativeTarget)
-            || relativeTarget.Equals("..", comparison)
-            || relativeTarget.StartsWith(".." + Path.DirectorySeparatorChar, comparison)
-            || relativeTarget.StartsWith(".." + Path.AltDirectorySeparatorChar, comparison))
+        if (!target.StartsWith(rootPrefix, comparison))
             throw new InvalidOperationException("Backup contains an unsafe path.");
 
         EnsureNoReparsePoints(target);

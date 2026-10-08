@@ -6,21 +6,23 @@ Branch: `r33/round`. Version: `0.41.0-beta`.
 **Status: R33 dogfood accepted for owner release review.** The Linux tray defect
 is repaired, native Pop!_OS/COSMIC lifecycle checks passed, and the owner
 accepted the rebuilt Windows package's final smoke check. The specific
-verification limits below remain explicit; merge, tags and release are owner actions.
+verification limits below remain explicit. PR checks, including CodeQL, must
+pass before merge; merge, tags and release are owner actions.
 
 ## Current repair verification
 
 | Scope | Result |
 | --- | --- |
 | Final Windows Debug and Release solution builds | Zero warnings/errors |
-| Final Windows tray defaults, activation, lock and audio regressions | 21 passed, no failures/skips |
-| Final Windows full Debug suite | 2,871 passed, no failures/skips; 3m28s |
-| Final Windows precommit coverage gate | 2,871 passed, no failures/skips; 66.70% (54,671/81,965 lines), above the 60% floor |
+| Windows tray defaults, activation, lock and audio regressions | 21 passed, no failures/skips |
+| Archive-containment follow-up regressions | 59 passed, no failures/skips |
+| Final Windows full Debug suite, including archive follow-up | 2,871 passed, no failures/skips; 3m10s |
+| Final Windows precommit coverage, including archive follow-up | 2,871 passed, no failures/skips; 66.69% (54,662/81,962 lines), above the 60% floor |
 | Prior Linux tray, activation, lock and audio regressions | 24 passed, no failures/skips |
 | Prior Linux full Debug suite | 2,853 passed, 18 platform skips, no failures; 2m35s |
 | Prior Linux coverage gate | 66.06% (54,148/81,965 lines), above the 60% floor; 2,853 passed, 18 platform skips |
 | Linux package | Checksum, layout and no-PDB checks passed |
-| Rebuilt Windows package | Desktop assembly matched its Release win-x64 build |
+| Windows owner smoke package | Desktop assembly matched its Release win-x64 build; predates the archive-containment follow-up |
 
 Results are outside the checkout under `/tmp/hermaeus-oct08-tests` on Linux
 and `%TEMP%\hermaeus-r33-release-final` on Windows.
@@ -92,6 +94,17 @@ The tray repair at `8e97f21` passed
 Windows had 2,871 passed/no skips; Ubuntu had 2,853 passed/18 Windows-only skips.
 Both Release builds passed. CI for the final documentation tip is checked
 separately on publication; required merge-context CI comes from the PR workflow.
+
+## PR archive-containment follow-up
+
+[Release PR #20](https://github.com/MortisDei/hermaeus/pull/20) raised CodeQL
+alert `cs/zipslip` at a staging write. Existing preflight rejected malicious
+entry paths; no traversal escape was demonstrated. Final targets, staging
+files and rollback copies now share the canonical containment resolver, with
+an explicit separator-bounded full-path prefix check and reparse-point checks.
+The owner smoke package predates this restore-only follow-up; isolated
+filesystem regressions validate the affected restore paths without touching
+owner data. Final PR checks determine whether the alert is cleared.
 
 ## Remaining work
 

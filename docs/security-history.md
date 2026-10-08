@@ -10,6 +10,18 @@ statement of a *current* control, that control has been copied into
 See `docs/security-review.md` for current controls and the threat model,
 and `docs/security-roadmap.md` for open hardening work.
 
+## r33: Archive containment follow-up
+
+Release PR #20's CodeQL scan flagged a restore staging path as a potential
+Zip Slip. Existing preflight rejected traversal, absolute/drive-qualified
+names and reparse-point ancestors; no escaping archive was demonstrated.
+Staging and rollback previously recombined the prevalidated relative path.
+They now use the same canonical resolver as the final target, with an explicit
+directory-separator-bounded full-path prefix check. The existing archive,
+overwrite, budget and cancellation regressions remain; legitimate mixed
+separators and a trailing root separator also exercise the complete restore.
+No finding was dismissed and no security check was disabled.
+
 ## r33: Tray recovery and second-launch activation
 
 The Linux owner found a desktop hidden by close-to-tray with no registered

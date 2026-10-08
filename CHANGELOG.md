@@ -13,6 +13,8 @@ limit.
 
 ### Changed
 
+- Backup restoration checks final, staging and rollback paths through the same
+  canonical containment and reparse-point boundary before filesystem writes.
 - Supplementary audio feedback defaults off for new or missing settings;
   explicit saved choices are retained.
 - Tray icons are attached to Avalonia's application collection, fixing the

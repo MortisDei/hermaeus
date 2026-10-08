@@ -108,6 +108,12 @@ penetration-test report.
 
 ### R33 bounded lifecycle and evidence clarifications
 
+Backup restoration resolves final targets, staging files and rollback copies
+through the same path validator. Each canonical full path must start with its
+own root plus a directory separator, using platform-correct case comparison.
+Traversal, absolute/drive-qualified names and existing reparse-point ancestors
+remain rejected. Staging does not rely only on the earlier data-root preflight.
+
 The normal window-close and tray service-stop paths use the shared bounded
 managed-process shutdown boundary. If a child does not stop before the owner
 deadline, the lifecycle journal records an incomplete drain and the UI does not

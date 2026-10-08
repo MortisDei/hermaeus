@@ -645,16 +645,23 @@ namespace Hermaeus.Tests
             using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
             {
                 var entry = archive.CreateEntry("nested/deeper/legitimate.txt");
-                using var writer = new StreamWriter(entry.Open());
-                writer.Write("safe content");
+                using (var writer = new StreamWriter(entry.Open()))
+                    writer.Write("safe content");
+                var mixed = archive.CreateEntry("nested\\mixed/./legitimate.txt");
+                using var mixedWriter = new StreamWriter(mixed.Open());
+                mixedWriter.Write("mixed separator content");
             }
 
             var service = NewSettings(temp);
-            service.Settings.DataManagement.DataRootDirectory = root;
+            service.Settings.DataManagement.DataRootDirectory = root + Path.DirectorySeparatorChar;
             await new BackupService(service).RestoreAsync(backup);
 
             Equal("safe content", await File.ReadAllTextAsync(Path.Combine(root, "nested", "deeper", "legitimate.txt")),
                 "nested legitimate archive entries should restore beneath the data root");
+            Equal("mixed separator content", await File.ReadAllTextAsync(Path.Combine(root, "nested", "mixed", "legitimate.txt")),
+                "normalised legitimate archive paths should stay valid through staging and commit");
+            False(Directory.EnumerateDirectories(root, ".hermaeus-restore*").Any(),
+                "a completed restore should remove its staging and rollback directories");
         }
 
         public static async Task BackupRestoreRejectsAdversarialArchiveEntryPaths()
