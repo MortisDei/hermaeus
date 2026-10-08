@@ -3,22 +3,27 @@
 Updated: 2026-10-08 (Australia/Brisbane).
 Branch: `r33/round`. Version: `0.41.0-beta`.
 
-**Status: previous owner checks are accepted. The subsequent Linux tray defect
-is repaired and the rebuilt package passed native tray, close, restoration,
-rendering and clean Quit checks on Pop!_OS/COSMIC.** Windows execution and CI
-for these changes remain open.
+**Status: R33 dogfood accepted for owner release review.** The Linux tray defect
+is repaired, native Pop!_OS/COSMIC lifecycle checks passed, and the owner
+accepted the rebuilt Windows package's final smoke check. The specific
+verification limits below remain explicit; merge, tags and release are owner actions.
 
 ## Current repair verification
 
 | Scope | Result |
 | --- | --- |
-| Debug and Release solution builds | Zero warnings/errors |
-| Tray, activation, lock and audio regressions | 24 passed, no failures/skips |
-| Full Debug suite | 2,853 passed, 18 platform skips, no failures; 2m35s |
-| Final coverage gate | 66.06% (54,148/81,965 lines), above the 60% floor; 2,853 passed, 18 platform skips |
+| Final Windows Debug and Release solution builds | Zero warnings/errors |
+| Final Windows tray defaults, activation, lock and audio regressions | 21 passed, no failures/skips |
+| Final Windows full Debug suite | 2,871 passed, no failures/skips; 3m28s |
+| Final Windows precommit coverage gate | 2,871 passed, no failures/skips; 66.70% (54,671/81,965 lines), above the 60% floor |
+| Prior Linux tray, activation, lock and audio regressions | 24 passed, no failures/skips |
+| Prior Linux full Debug suite | 2,853 passed, 18 platform skips, no failures; 2m35s |
+| Prior Linux coverage gate | 66.06% (54,148/81,965 lines), above the 60% floor; 2,853 passed, 18 platform skips |
 | Linux package | Checksum, layout and no-PDB checks passed |
+| Rebuilt Windows package | Desktop assembly matched its Release win-x64 build |
 
-Results are outside the checkout under `/tmp/hermaeus-oct08-tests`.
+Results are outside the checkout under `/tmp/hermaeus-oct08-tests` on Linux
+and `%TEMP%\hermaeus-r33-release-final` on Windows.
 The Linux archive was built from the local repaired tree based on `5a7aa81`;
 SHA256: `e2b9e49cd8d3045dd53d64ebf25da13b2a22fb2409ab884285aa2c1b745a1512`.
 
@@ -31,7 +36,8 @@ with no transparent surface; temporary captures were removed after inspection.
 
 The exported **Quit Hermaeus** action exited 0, stopped both servers, removed
 the tray item and persisted `CleanExit:true`. All three shutdown owners
-completed without timeout. The app is closed. Existing tray and audio choices
+completed without timeout. The app was closed at the end of that Linux check.
+Existing tray and audio choices
 were preserved; normal application startup/shutdown persisted state, and no
 settings were manually rewritten.
 
@@ -67,25 +73,31 @@ Pop!_OS/COSMIC, audio, focus/DPI, devices and stability. That is owner-reported
 acceptance of the earlier build. The later tray defect reopened that specific
 check and is addressed by the native rebuilt-package evidence above.
 
-The inspected owner session logged successful llama.cpp installation of
+After rebuilding and relaunching on Windows, the owner confirmed that tray and
+taskbar icons work, a local Chat request completes, navigation to RAG and back
+retains the answer, and Doctor has no new errors. The preceding shutdown was
+forced because of the earlier tray issue. Its unclean-shutdown warning is
+expected and is not a new crash or evidence of a clean shutdown. The current
+session log had no error entries and one slow-response warning when inspected.
+Direct desktop capture failed, so this final smoke receipt is owner validation.
+
+The inspected Linux owner session logged successful llama.cpp installation of
 `b11491`. Both live servers used that binary, and two Chat turns subsequently
 completed. Neither that session nor the rebuilt-package session contained
 error-level entries. Warnings included recovered interrupted Agent runs,
 embedding backfill before server readiness, and one slow Chat response.
 
-Published `5a7aa81` passed
-[Branch CI](https://github.com/MortisDei/hermaeus/actions/runs/37739921104):
-Windows had 2,862 passed/no skips; Ubuntu had 2,844 passed/18 platform skips.
-Both Release builds had zero warnings/errors. These results precede this
-repair and do not validate it. No R33 PR was open when checked; required
-merge-context CI comes from the eventual PR workflow.
+The tray repair at `8e97f21` passed
+[Branch CI](https://github.com/MortisDei/hermaeus/actions/runs/37764132995):
+Windows had 2,871 passed/no skips; Ubuntu had 2,853 passed/18 Windows-only skips.
+Both Release builds passed. CI for the final documentation tip is checked
+separately on publication; required merge-context CI comes from the PR workflow.
 
 ## Remaining work
 
 - Packaged minimize-to-tray and tray disable/re-enable preference changes were
   not exercised. Native control regressions cover those mechanics; the owner's
   saved minimize-to-tray choice remains off.
-- Run the repair on Windows and obtain green CI for the changed tree.
 - Owner-controlled PR review, merge, versioning, tag and release.
 
 Historical Windows package and coverage receipts remain in the

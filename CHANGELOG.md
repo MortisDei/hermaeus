@@ -9,7 +9,7 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [Unreleased] - 2026-09-17
+## [0.41.0-beta] - 2026-10-08
 
 ### Changed
 
@@ -98,10 +98,6 @@ limit.
   starts, while llama version probes retain a bounded budget and elapsed-time
   diagnostics.
 
-## [0.41.0-beta] - 2026-09-12
-
-### Changed
-
 - Temporary test, scenario, driver, clipboard-image, Python-health, voice,
   and failed-package artifacts now have explicit source owners and cleanup
   boundaries. Implicit generated audio is removed after playback, failure, or
@@ -138,8 +134,6 @@ limit.
   telemetry identity. Completed but unverified benchmark runs remain visible
   with an evidence caveat and are excluded from rankings, Insights, and Speed
   Check; every shipped Lab recipe requires proof of its varied effective field.
-  Workspace now bounds the editor host and reattaches a functional AvaloniaEdit
-  fallback with the current document when local Monaco is unavailable.
 - Shared application lifecycle now owns startup, recovery, and bounded shutdown
   across Desktop, Local API, and the R33 headless driver. Partial startup can
   retry, shutdown drains owners in reverse registration order, and shutdown
@@ -197,10 +191,6 @@ limit.
   evidence, and keeps citation/trace inspection secondary. Lab explains
   unavailable recipes and keeps run, restore, Apply, and recovery state
   separate.
-- Workspace file editing now prefers a pinned local Monaco bundle hosted by
-  Avalonia's native WebView and falls back to AvaloniaEdit on bundle, adapter,
-  bridge, or resource failure. The bridge carries document data only and does
-  not change Agent approval authority.
 - Generic ChatGPT Pet v2 data packages can be validated and imported from
   Settings. The bundled Moss asset is disabled by default; enabled overlays
   use persisted, clamped positions and current-pointer walking direction, with
@@ -213,8 +203,6 @@ limit.
   Chat retrieval context, deterministic voice orchestration, Lab failure
   cleanup, Lab Apply, settings reopen, and shared shutdown in addition to the
   Agent mutation receipt.
-- R33 development is prepared as `v0.41.0-beta`. This local implementation
-  creates no tag, release, push, pull request, merge, or other publication.
 
 ## [0.40.0-beta] - 2026-09-05
 

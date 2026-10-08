@@ -1,7 +1,9 @@
 # Review round 33: Hermaeus beyond the desktop
 
-Status: **R33 repairs include audio and dependency follow-ups on `r33/round`;
-packaged release validation remains open**. The repair closeout is recorded in
+Status: **R33 dogfood is accepted for owner release review on `r33/round`**.
+The latest Windows smoke check is owner-confirmed; native Linux tray recovery
+and the remaining verification limits are recorded in the readiness receipt.
+The repair closeout is recorded in
 [14-owner-dogfood-closeout.md](14-owner-dogfood-closeout.md), followed by the
 native telemetry and resource-lifetime repairs in
 [15-windows-native-crash-investigation.md](15-windows-native-crash-investigation.md).
@@ -19,7 +21,8 @@ publication actions remain owner-controlled.
 The 2026-10-06 desktop continuation found additional Agent dismissal,
 Workspace, Markdown, Lab, keyword-candidate, effective-context, audio-cue and
 update-diagnostic defects. Their bounded repairs, automated verification and
-remaining packaged owner checks are recorded in that receipt.
+subsequent Linux tray/activation repair and final owner acceptance are recorded
+in that receipt.
 
 The earlier `r33/planning` baseline remains historical. Production and
 regression-test changes are scoped to the batches below. No new runtime
