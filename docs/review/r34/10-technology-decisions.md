@@ -42,6 +42,24 @@ already completed. All claimed hardware benefits are Unknown.
 | T31 | .NET AEAD/streams/process primitives | **Retain framework capability before dependencies** | S1-S3; built-in APIs suffice for bounded readers and authenticated format, F05 |
 | T32 | Another authority or feature programme | **Reject.** Distributed inference, multi-user Agent API, another approval/lifecycle system, new vector DB, browser frontend, replacement editor and automatic model routing are outside R34 | No work package; reconsider only with a new owner-approved premise |
 
+## Approved execution refinements, 2026-10-16
+
+- **B0/B1:** minimum reproducible source/build/security evidence unlocks safety
+  repairs and lifecycle reproduction. Per-host performance/native/package
+  evidence gates optimisation claims and release, not the start of S1/S2/L1.
+- **S1:** investigate Windows Job Objects and Linux process groups/sessions,
+  including start/assignment races, inherited descendants and escape. Tree-kill
+  is not guaranteed containment. No new security boundary is approved.
+- **S2:** proposed local/extraction/cumulative budgets remain proposals until
+  representative legitimate workloads are recorded, limits frozen and the owner
+  explicitly approves user-visible changes. Preserve the existing web limit.
+- **S3/T31:** isolate migration and commit; retain the current persisted format
+  until owner approval of exact format, atomic failure/recovery and downgrade
+  behaviour. Document technical irreversibility rather than promising rollback.
+- **G1:** conditional choices can close by evidence-backed Retain/Defer without
+  implementing an unnecessary change. Required safety, native acceptance,
+  packaging notice delivery and unresolved asset licensing remain release gates.
+
 ## Framework sources
 
 | Ref | Primary source and observed claim | Limitation |

@@ -93,7 +93,7 @@ or authorize planned behavior.
 
 - [`review/archived/`](review/archived/) contains the immutable R1 through R32
   review packs. Each round's README explains its own document set.
-- [`review/r33/`](review/r33/README.md) retains the released R33 planning,
+- [`review/archived/r33/`](review/archived/r33/README.md) retains the released R33 planning,
   implementation and owner evidence, including its explicit limits.
 - [`security-history.md`](security-history.md) contains the historical security
   narrative that used to compete with the current threat model.

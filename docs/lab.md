@@ -110,8 +110,8 @@ Attention, CPU-MoE placement, speculative mechanism and parameter, or prompt
 cache state as applicable. If the selected runtime does not expose a required
 field through an auditable receipt, the result stays Inconclusive rather than
 using the requested value as a proxy. The complete recipe matrix and native
-receipts are recorded in the historical [R33 authority audit](review/r33/13-lab-benchmark-authority-audit.md),
-while the current branch disposition is in the [R33 owner-dogfood closeout](review/r33/14-owner-dogfood-closeout.md).
+receipts are recorded in the historical [R33 authority audit](review/archived/r33/13-lab-benchmark-authority-audit.md),
+while the current branch disposition is in the [R33 owner-dogfood closeout](review/archived/r33/14-owner-dogfood-closeout.md).
 
 Correctness compares token ids when both sides expose them and falls back to an
 exact UTF-8 output hash at a weaker declared level. It reports `Equivalent`,

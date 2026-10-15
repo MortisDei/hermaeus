@@ -2,13 +2,13 @@
 
 Planning date: 2026-10-16 (Australia). Branch: `r34/round`.
 Source baseline: `23cec510c86a65d71c0dbffeaebe31b33973c8f5`, released as
-`v0.41.0-beta` (R33). **Planning complete; implementation not started.**
+`v0.41.0-beta` (R33). **Plan approved; implementation in progress.**
 
 One authority. One representation. One lifecycle. Prefer framework capability,
 delete redundant code, and measure before optimising. Research is not adoption.
 This pack defines bounded work and exit gates, not shipped R34 behaviour or a
 release version. The owner controls dependencies/security-boundary changes and
-all publication. Local planning commits are authorised; publication is not.
+all publication. Small verified local implementation commits are authorised; publication is not.
 
 ## Read order
 
@@ -26,6 +26,7 @@ all publication. Local planning commits are authorised; publication is not.
 | [10-technology-decisions.md](10-technology-decisions.md) | Explicit dispositions and dated primary research sources |
 | [11-dependency-roadmap.md](11-dependency-roadmap.md) | Authoritative implementation packages, dependencies and acceptance |
 | [12-planning-validation-and-release-gates.md](12-planning-validation-and-release-gates.md) | Planning checks, release blockers, conditional/deferred gates |
+| [13-execution-and-evidence.md](13-execution-and-evidence.md) | Actual implementation baseline, results and remaining gates |
 
 ## Evidence vocabulary
 
@@ -49,10 +50,11 @@ conditional Replace decision requires its stated evidence before deletion.
 
 ## Implementation spine
 
-Start with **B0 evidence capture**, then **S1 command lifetime/output bounds**
+Start with **B0 minimum source/build/security evidence**, then **S1 command lifetime/output bounds**
 and **S2 ingest bounds**, while **L1 view reproduction** and **D1 small deletions**
 can proceed independently. Vault migration S3 and containment audit S4 follow
-the baseline. Measure P1 before selecting P2/P3 optimisation. Run U1 native
+the baseline. B1 per-host performance/native/package evidence gates claims and release.
+Measure P1 before selecting P2/P3 optimisation. Run U1 native
 polish after ownership/framework choices settle. G1 integrates verification and
 owner Windows/Linux acceptance. The exact DAG and owner decision points are
 in [11](11-dependency-roadmap.md); phase numbers are workstreams, not waterfalls.

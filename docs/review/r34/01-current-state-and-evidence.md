@@ -23,7 +23,7 @@ or revalidated in this pass.
 
 There are **13 tracked `.csproj` files**, all targeting `net10.0`; see [03](03-dependencies-and-native-assets.md).
 There is no root `ROADMAP.md` or `docs/roadmap.md`. The current inherited round
-roadmap is [R33 document 11](../r33/11-dependency-roadmap.md), interpreted with
+roadmap is [R33 document 11](../archived/r33/11-dependency-roadmap.md), interpreted with
 the later R33 closeout and release receipt, not its historical progress table.
 R34 document 11 becomes the planning roadmap for this round.
 
@@ -31,14 +31,14 @@ R34 document 11 becomes the planning roadmap for this round.
 
 | Contract to preserve | Current source | Historical evidence, not rerun here |
 | --- | --- | --- |
-| Central non-UI DI, shared startup/recovery and bounded shutdown | S01-S03 | [R33 authority](../r33/02-application-authority-and-lifecycle.md), [closeout](../r33/14-owner-dogfood-closeout.md) |
-| Prepared mutations, exact approval identity, preimages, readback and crash reconciliation | S07-S10 | [R33 mutations](../r33/03-agent-workspace-and-mutations.md), closeout |
+| Central non-UI DI, shared startup/recovery and bounded shutdown | S01-S03 | [R33 authority](../archived/r33/02-application-authority-and-lifecycle.md), [closeout](../archived/r33/14-owner-dogfood-closeout.md) |
+| Prepared mutations, exact approval identity, preimages, readback and crash reconciliation | S07-S10 | [R33 mutations](../archived/r33/03-agent-workspace-and-mutations.md), closeout |
 | Settings are the persistence authority; Apply/restart are explicit | S04-S06 | R33 closeout and [features](../../features.md) |
-| Requested/resolved/launched/effective/telemetry evidence stays separate | S11-S14 | [R33 Lab/Benchmark audit](../r33/13-lab-benchmark-authority-audit.md) |
+| Requested/resolved/launched/effective/telemetry evidence stays separate | S11-S14 | [R33 Lab/Benchmark audit](../archived/r33/13-lab-benchmark-authority-audit.md) |
 | Atomic RAG publication and revision-bound citations; Memory revisions remain separate from Recall | S15-S19 | [RAG](../../rag.md), [Recall](../../recall.md), [features](../../features.md) |
 | Native editor owner saves differ from Agent mutations | S20 | R33 editor decision, as superseded by closeout |
-| Restore containment covers final/staging/rollback paths and expansion budgets | S21 | [R33 release readiness](../r33/16-release-readiness.md) |
-| Process telemetry preserves Unknown and native lifetimes | S13 | [R33 native investigation](../r33/15-windows-native-crash-investigation.md) |
+| Restore containment covers final/staging/rollback paths and expansion budgets | S21 | [R33 release readiness](../archived/r33/16-release-readiness.md) |
+| Process telemetry preserves Unknown and native lifetimes | S13 | [R33 native investigation](../archived/r33/15-windows-native-crash-investigation.md) |
 | Local API is separate-process, authenticated and has no Agent execution routes | S22-S23 | [Agent API](../../agent-api.md), [Local API](../../local-api.md) |
 
 The R33 release receipt records Windows Debug/Release zero-warning builds,

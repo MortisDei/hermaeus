@@ -15,7 +15,7 @@ truthful docs and automated verification before owner live acceptance.
 
 | Phase | Packages | Intent |
 | --- | --- | --- |
-| R34.0 Baseline and capability inventory | B0 | Exact source, packages, native assets, current per-host measurements |
+| R34.0 Baseline and capability inventory | B0, B1 | Minimum source/build/security baseline first; per-host performance/native evidence before claims and release |
 | R34.1 Security hardening | S1-S4 | Process and ingest availability first; secrets and containment |
 | R34.2 Authority collapse and deletion | D1-D3 | Remove redundant declarations/boilerplate/workarounds only with equivalent behaviour |
 | R34.3 Measured optimisation | P1-P3 | Instrument existing evidence, then retrieval/runtime experiments |
@@ -30,7 +30,9 @@ graph TD
   B0 --> S4
   B0 --> D1
   B0 --> L1
-  B0 --> P1
+  B0 --> B1
+  B1 --> P1
+  B1 --> G1
   L1 --> D2
   L1 --> D3
   S1 --> L2
@@ -64,31 +66,45 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
 
 ## R34.0
 
-### B0: frozen baseline and capability inventory
+### B0: minimum reproducible source/build/security baseline
 
-- **P0, Composition/Services/Rag/Desktop/packaging; M.** Evidence: [01](01-current-state-and-evidence.md),
-  [03](03-dependencies-and-native-assets.md), [07](07-performance-baselines.md).
-  Prerequisites: none.
-- **Scope:** refresh 13-project/resolved graph for exact implementation HEAD
-  and publish RIDs; capture R33 per-host controls, source/asset/runtime hashes,
-  build/test/package evidence and native module versions. Inventory existing
-  owner settings read-only; use scratch roots for experiments. Establish
-  measurement variability and practical regression decision rules before changes.
-- **Acceptance:** complete fingerprint/raw-evidence manifest for each available
-  target, missing cells Unknown, explicit old/new comparability; no owner data
-  in reports. SQLite native identity and licence/notice delivery verified in
-  real packages. Freeze security budgets below and investigate native dependency
-  skew, not simply remove pins. This planning inventory is useful input, not
-  closure of future execution baselines.
-- **Automated:** zero-warning solution Debug/Release, full sequential applicable
-  suite with honest skips, current dependency audit, existing notice/architecture
-  guards; `sqlite_version()` and publish-layout/native file/hash checks.
-- **Manual:** native R33 start/idle/shutdown and package/backend identification
-  on Windows and COSMIC, CPU fallback; no Mac pass without hardware.
-- **Risks/rollback:** unavailable matching old environment or release asset can
-  invalidate comparisons. Retain immutable R33 package/data snapshots; do not
-  reset owner settings. **Owner:** schedule hardware/OS-cold runs and approve
-  exact limits/security-format decisions; no new dependency authorised.
+- **P0, Composition/Agent/Rag/tests; S.** Prerequisites: none. Evidence:
+  [01](01-current-state-and-evidence.md), [03](03-dependencies-and-native-assets.md).
+- **Scope:** freeze branch/cleanliness/commit, SDK/OS and project graph, existing
+  restored closure and advisory response; run zero-warning solution build and
+  focused approval/process/RAG/containment baseline tests with external results.
+  Use controlled scratch inputs and existing production composition/test seams.
+- **Acceptance:** reproducible commands and actual results, baseline failures
+  triaged before affected repairs; no owner settings/data mutation. This is the
+  prerequisite for S1/S2 and L1 reproduction, not a demand for two-host profiling,
+  package publication or unavailable Linux native evidence before fixing safety.
+- **Automated:** Debug solution build, selected safety/authority regressions;
+  full baseline suite is useful additional evidence, not a prerequisite to every
+  independent investigation. Full Debug/Release/suite/coverage remain integration
+  gates for implementation commits under the repository workflow.
+- **Manual:** source and fixture-containment review. **Risk/rollback:** inherited
+  failures/environment limits must remain attributed. No production state change.
+  **Owner:** no new dependency, format or boundary approved by this package.
+
+### B1: per-host performance, native and package baseline
+
+- **P1, Services/Rag/Desktop/packaging; M.** Prerequisite: B0. Evidence:
+  [07](07-performance-baselines.md), [09](09-moss-native-acceptance.md).
+- **Scope:** exact per-host R33 controls and candidate fingerprints, runtime/model
+  hashes, OS/backend/driver/power state; current RID closures/native modules,
+  archive layout, SQLite identity, raw measurements and visual/workflow receipts.
+- **Acceptance:** each available target has immutable raw-evidence manifest and
+  comparability/noise rules before optimisation claims; unavailable targets stay
+  Unknown. P1/P2/P3 claims need their relevant host baseline, not another GPU's.
+  Native release gates still require Windows and COSMIC evidence independently.
+- **Automated:** RID restore/publish/archive inspection, `sqlite_version()`, hashes,
+  notice/licence delivery and production graph tests. **Manual:** per-host cold/
+  warm startup, idle/drain and GPU/CPU/backend identities; Mac stays Unknown.
+- **Risk/rollback:** missing matching R33 environment invalidates comparison.
+  Keep prior packages/data; never reset owner settings. **Owner:** hardware/cold
+  runs, actual asset licence decisions and release acceptance. Packaging notices
+  and unresolved asset redistribution terms remain explicit G1 blockers for any
+  affected distribution, never waived by a conditional optimisation disposition.
 
 ## R34.1
 
@@ -107,6 +123,11 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
   Each output stream retains at most 256 KiB and 200 reported lines, including
   one giant line. Truncation is visible; final errors and exit status survive.
   Safety/approval/preimage/receipt semantics remain unchanged.
+  Explicitly investigate Windows Job Object assignment/lifetime and Linux
+  process-group/session establishment, inheritance, escape and cleanup. Reuse
+  existing owners where possible; `Kill(entireProcessTree)` is best-effort tree
+  termination, never a guarantee of descendant containment or host-death cleanup.
+  A new containment/security boundary still needs owner approval.
 - **Automated:** original and git sibling regression with start/exit signals,
   timeout versus cancellation, descendant, output-flood and reader-failure cases;
   command classification/prepared mutation suites and full verification.
@@ -130,7 +151,11 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
   256 MiB cumulative retained text/vector staging budget per operation. Account
   bytes before adding batches. Refuse with a factual report rather than silently
   truncating. These are proposed safety ceilings, not measured optimal values;
-  B0 may revise them explicitly against legitimate fixtures before implementation.
+  S2 must freeze them against representative legitimate text/source/PDF and
+  multi-document workloads, record acceptance/rejection and peak resource evidence,
+  then obtain explicit owner approval before changing any user-visible limit.
+  Enforcing the existing web accepted-size limit while streaming can proceed
+  independently; proposed local/extraction/cumulative limits are not authorised.
 - **Acceptance:** false/no length, growing file, compressed/chunked body and
   expanded PDF cannot exceed enforced accumulation limits unnoticed; cancel
   disposes streams and leaves old published generation visible. Parser-internal
@@ -163,7 +188,11 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
 - **Manual:** OS vault and forced fallback in isolated profiles on Windows/Linux;
   provider key use and restart, no real keys in fixtures.
 - **Risk/rollback:** irreversible old-build readability if new payload committed.
-  Retain encrypted pre-migration snapshot privately until verified; do not
+  Keep S3 an isolated implementation/commit, reversible before format activation
+  and via verified encrypted recovery where technically possible. Format, atomic
+  recovery and old-build downgrade behaviour require explicit owner approval
+  before any migration code or activation lands. Retain an encrypted recovery
+  snapshot privately until verified; do not
   downgrade blindly. **Owner:** approves versioned format/migration/downgrade
   policy before implementation lands.
 
@@ -244,7 +273,7 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
 
 ### P1: existing-evidence performance baseline and phase diagnostics
 
-- **P1, Services/Rag/Desktop; M.** Prerequisite: B0. Evidence: [07](07-performance-baselines.md).
+- **P1, Services/Rag/Desktop; M.** Prerequisite: B1. Evidence: [07](07-performance-baselines.md).
 - **Scope:** PERF-01..12 protocols, only missing phase instrumentation in existing
   trace/telemetry/eval infrastructure; no performance database or benchmark dependency.
 - **Acceptance:** reproducible raw evidence and phase accounting with observer
@@ -354,9 +383,14 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
 
 ### G1: integrated acceptance and owner release decision
 
-- **P0, all subsystem owners; M plus platform time.** Prerequisites: S1, S2,
+- **P0, all subsystem owners; M plus platform time.** Prerequisites: B1, S1, S2,
   S3, S4, D1, D2, D3, P1, P2, P3, L2, U1, each with either required acceptance
-  or an explicitly permitted conditional/deferred disposition.
+  or an explicitly permitted conditional/deferred disposition. Evidence-backed
+  Retain/Defer closes conditional D1/D2/D3/P2/P3 packages for G1 without
+  unnecessary implementation; record rationale, exact evidence and the claims
+  consequently unavailable. Mandatory safety/native/licensing gates cannot be
+  waived by using that disposition. Unapproved S3 format work remains an explicit
+  owner decision with the existing format retained, never silently implemented.
 - **Scope:** [12](12-planning-validation-and-release-gates.md) release matrix,
   authoritative docs, package/native/licence verification and owner handover.
   No push/PR/merge/tag/release/repository setting or CI-policy action by default.
