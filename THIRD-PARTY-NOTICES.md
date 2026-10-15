@@ -32,22 +32,21 @@ own `.nuspec`.
 
 | Package | Version | Licence | Copyright |
 | --- | --- | --- | --- |
-| Avalonia | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | Avalonia.Angle.Windows.Natives | 2.1.27548.20260419 | BSD-3-Clause (ANGLE) | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | Avalonia.AvaloniaEdit | 12.0.0 | MIT | Copyright 2017-2026 (c) The AvaloniaUI Project |
 | Avalonia.BuildServices | 11.3.2 | MIT | Copyright 2023-2025 (c) The AvaloniaUI Project |
-| Avalonia.Controls.WebView | 12.1.0 | MIT | Copyright 2019-2026 © The AvaloniaUI Project |
-| Avalonia.Desktop | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Fonts.Inter | 12.1.2 | MIT (package); the Inter font itself is SIL OFL 1.1, see section 3 | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.FreeDesktop | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.FreeDesktop.AtSpi | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.HarfBuzz | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Native | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Remote.Protocol | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Skia | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Themes.Fluent | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.Win32 | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
-| Avalonia.X11 | 12.1.2 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Desktop | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Fonts.Inter | 12.1.3 | MIT (package); the Inter font itself is SIL OFL 1.1, see section 3 | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.FreeDesktop | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.FreeDesktop.AtSpi | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.HarfBuzz | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Native | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Remote.Protocol | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Skia | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Themes.Fluent | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.Win32 | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
+| Avalonia.X11 | 12.1.3 | MIT | Copyright 2013-2026 (c) The AvaloniaUI Project |
 | CommunityToolkit.Mvvm | 8.3.2 | MIT | (c) .NET Foundation and Contributors |
 | Google.Protobuf | 3.30.2 | BSD-3-Clause | Copyright 2015, Google Inc. |
 | HarfBuzzSharp | 8.3.1.3 | MIT | (c) Microsoft Corporation |
@@ -78,10 +77,11 @@ own `.nuspec`.
 | System.Numerics.Tensors | 9.0.9 | MIT | (c) Microsoft Corporation |
 | Tmds.DBus.Protocol | 0.94.1 | MIT | Tom Deseyn |
 
-Apache-2.0 requires that its NOTICE text, where the upstream project ships
-one, travels with redistributions. The Apache-2.0 packages above
-(SQLitePCLRaw, PdfPig) ship their licence files inside the package, which is
-carried into the build output.
+Required licence and upstream NOTICE text must travel with redistributions.
+A file present in the NuGet cache is not proof it reaches publish output.
+The packaging scripts do not explicitly copy this full notices file; the
+R34 package audit must verify actual archive delivery and repair missing
+attribution before claiming that gate passed.
 
 ## 2. Native libraries inside those packages
 
@@ -99,18 +99,6 @@ licences.
 
 ## 3. Bundled data
 
-### Monaco editor bundle
-
-The bounded Workspace editor includes Monaco 0.56.0's local `min/vs` bundle.
-Monaco is used only as a presentation editor; the host keeps filesystem,
-process, approval, and application command authority. The upstream license and
-third-party notices are carried beside the bundle at
-`src/Hermaeus.Desktop/Assets/Monaco/LICENSE.txt` and
-`src/Hermaeus.Desktop/Assets/Monaco/ThirdPartyNotices.txt`.
-
-MIT License. Copyright (c) 2016 - present Microsoft Corporation.
-Source: https://github.com/microsoft/monaco-editor
-
 ### CMU Pronouncing Dictionary (cmudict)
 
 Used by `Hermaeus.Voice` (`src/Hermaeus.Voice/Assets/cmudict.txt.gz`) as the
@@ -122,8 +110,9 @@ Source: https://github.com/cmusphinx/cmudict
 
 ### Inter (typeface)
 
-Embedded in the `Avalonia.Fonts.Inter` package and used as the application
-font. The package is MIT; the typeface is licensed separately under the SIL
+Embedded in the `Avalonia.Fonts.Inter` package and registered at startup.
+AppFontService uses native heading/body/code defaults with user overrides. The
+package is MIT; the typeface is licensed separately under the SIL
 Open Font License 1.1, which permits bundling and redistribution with software
 and requires that the font not be sold on its own.
 
@@ -229,7 +218,7 @@ Used to build or test Hermaeus; never redistributed in a Hermaeus release.
 | Microsoft.NET.Test.Sdk | MIT |
 | Microsoft.AspNetCore.TestHost | MIT |
 | coverlet.collector | MIT |
-| JsonSchema.Net (`src/Tools/TraceValidator`) | MIT |
+| JsonSchema.Net 9.2.1, JsonPointer.Net 7.0.1, Json.More.Net 3.0.1 (`src/Tools/TraceValidator`) | MIT source; publisher binaries include `OSMFEULA.txt` maintenance terms. Review the actual use/distribution against those terms; these packages are not in the shipped Desktop/LocalApi closure. |
 
 ---
 

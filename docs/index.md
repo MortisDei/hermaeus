@@ -76,6 +76,9 @@ These documents describe work in progress, open decisions, or proposed
 extensions. They are not shipped-feature references:
 
 - [R31 deferred ledger](review/deferred.md).
+- [R34: Harden, Simplify, Accelerate](review/r34/README.md), the active
+  source-grounded planning pack and dependency roadmap. No R34 implementation
+  is claimed by the plan.
 - [RAG evaluation harness plan](rag-eval-harness.md), which proposes work beyond
   the native evaluation surface described in [`rag.md`](rag.md).
 - The watchlists and dated upstream audits linked from
@@ -88,8 +91,10 @@ or authorize planned behavior.
 
 ## Historical and archive material
 
-- [`review/archived/`](review/archived/) contains the immutable R1 through R31
+- [`review/archived/`](review/archived/) contains the immutable R1 through R32
   review packs. Each round's README explains its own document set.
+- [`review/r33/`](review/r33/README.md) retains the released R33 planning,
+  implementation and owner evidence, including its explicit limits.
 - [`security-history.md`](security-history.md) contains the historical security
   narrative that used to compete with the current threat model.
 - [`changelog-archive.md`](changelog-archive.md) contains older release entries

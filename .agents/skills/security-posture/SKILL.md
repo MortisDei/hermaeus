@@ -19,10 +19,12 @@ make a workflow easier.
   shutdown. Generated helper scripts must escape interpolated paths using the
   existing generator pattern.
 - Managed llama.cpp servers receive loopback binding and health checks target
-  loopback. Trust checks detect network-facing `--host`, `--host=`, listen, and
-  related forms. User Extra Args can still override the later effective host,
-  so the current posture warns rather than silently claiming a hard block.
-  Do not broaden that warning without a reviewed policy change.
+  loopback. The launch builder rejects conflicting core `--host` values,
+  including equals-style forms, and removes agreeing duplicates. Trust checks
+  also warn about listen-host/listen forms. Audit exact-runtime aliases,
+  environment and preset effects before claiming comprehensive enforcement;
+  broader policy changes require review. Do not weaken the existing rejection
+  to match an older warning-only description.
 
 ## Secrets, downloads, and paths
 

@@ -501,8 +501,9 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 ## System, Logs, Activity, and Settings
 
 - A second normal launch exits immediately when the existing per-user file
-  lock is held. It does not contact, activate, or change the existing
-  instance. The lock remains the cross-process data-safety gate; package
+  lock is held, after requesting restoration of the existing window over the
+  same-user, activation-only channel. It does not compose another service
+  graph. The lock remains the cross-process data-safety gate; package
   install and uninstall helpers remain separate utility launches.
 - Conversation deletion from its details flyout keeps confirmation beside the
   initiating control. The context-menu path retains a full confirmation dialog

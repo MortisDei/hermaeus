@@ -13,9 +13,12 @@ item - they are not moved here.
 ## Network and process
 
 - **Optional blocking policy for network-affecting `llama-server` flags.**
-  Trust scans already detect a `--host` override to a non-loopback address,
-  but only warn. Trigger: before public release, decide whether detection
-  should become a hard block.
+  The launch builder already rejects conflicting core `--host` values,
+  including equals-style forms, and normalises agreeing values. Trust scans
+  also warn about listen-host/listen forms. Broader runtime aliases,
+  environment and preset effects still need an exact-runtime audit before
+  claiming every network-affecting option is blocked. Trigger: before public
+  release; selected for the R34 S4 audit, with any policy expansion owner-reviewed.
 
 ## RAG
 
@@ -64,10 +67,12 @@ item - they are not moved here.
 
 - **Local API per-server tool-level scoping**, analogous to the MCP
   per-server allowed-tools list. Trigger: if the Local API surface grows
-  beyond its current five endpoints.
-- **Hash display/pinning for known local runtime binaries** (llama-server,
-  Python, XTTS scripts) in Trust & Safety. Trigger: a reported
-  binary-substitution concern, or before public release.
+  beyond its six protected operations plus liveness-only health route.
+- **Launch-time pinning for known local runtime binaries** (llama-server,
+  Python, XTTS scripts). Trust & Safety already displays configured file hashes;
+  a displayed hash is not launch-time allowlist enforcement. Trigger: a reported
+  binary-substitution concern, or before public release; R34 S4 audits identity
+  and replacement timing before proposing a trust-policy change.
 - **A workspace policy editor UI.** The `.hermaeus/workspace.json` `policy`
   block (r23) is hand-edited, like `AllowedCommands` already is. Trigger: if
   hand-editing JSON proves to be a real adoption barrier once policy sees

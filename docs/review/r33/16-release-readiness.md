@@ -1,6 +1,6 @@
 # R33 release readiness
 
-Updated: 2026-10-08 (Australia/Brisbane).
+Updated: 2026-10-08 (Australia).
 Branch: `r33/round`. Version: `0.41.0-beta`.
 
 **Status: R33 dogfood accepted for owner release review.** The Linux tray defect

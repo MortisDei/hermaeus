@@ -43,10 +43,17 @@ types. The migration also replaced the obsolete clipboard and drag/drop APIs
 with Avalonia 12's typed transfer APIs, and replaced the obsolete `Watermark`
 property with `PlaceholderText` without changing the displayed prompts.
 
-The built-in tooltip service remains disabled. Upstream issue #19218 is still
-open, and this migration records no assumption that Avalonia 12.1.2 fixes that
-feedback loop. Owner validation of tooltips, theme switching, window behavior,
-tray integration, and Windows runtime behavior remains required.
+The built-in tooltip service remains disabled. The historical migration did
+not establish native equivalence. A 2026-10-16 upstream check confirms
+[issue #19218](https://github.com/AvaloniaUI/Avalonia/issues/19218) was closed
+by [PR #21965](https://github.com/AvaloniaUI/Avalonia/pull/21965), and the
+deferred-close logic is present in the exact 12.1.3 ToolTipService source.
+R34 plans a bounded built-in tooltip comparison; no workaround is removed
+until Windows and Linux/COSMIC pointer, popup, theme and DPI checks pass.
+
+Avalonia 12.1.4 was published on 2026-10-09. R34 records it as a separate
+compatibility/native-validation candidate, not an adopted pin or proof of a
+Hermaeus lifetime fix. See [R34 framework decisions](review/r34/02-architecture-framework-and-deletion.md).
 
 ## When to upgrade
 

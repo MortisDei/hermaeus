@@ -790,7 +790,9 @@ across task sessions.
   Rejections are unaffected, since rejecting the wrong thing executes
   nothing.
 - Full trace logs enable debugging and auditing of agent behavior.
-- Local execution means no data leaves your machine.
+- Workspace file tools execute locally. Remote providers, MCP servers and
+  approved workspace build/test code can cross that boundary; command recipes
+  are not an OS network or filesystem sandbox.
 
 ## Current Non-Goals
 
@@ -800,10 +802,11 @@ safety. The agent does not:
 - execute arbitrary shell commands (only the fixed `run_command` template
   families, and only ones the workspace itself declared safe)
 - install packages
-- access the network
+- expose a general network tool; approved workspace commands and configured
+  external providers/MCP servers retain their documented external effects
 - modify files without explicit user approval
 - commit, push, or interact with remote repositories
-- operate outside the selected workspace root
+- grant workspace file tools access outside the selected workspace root
 - assume whole-chat-history context for decision making
 - let a lesson (or anything in memory) change what the safety gate allows
 
@@ -888,17 +891,15 @@ robust and auditable. Each proposal contains at least:
 
 Approved patches are applied as text edits against the selected workspace file.
 The apply result, approving user, approval timestamp, and any failure reason
-are recorded in task state. Patch review decisions are independent from a
-separate pending tool action on the same task and cannot approve, reject, or
-execute that action. Approve, Reject, and Block all use the authoritative
-prepared patch identity when the queue item represents a prepared mutation. A
-queued full-content patch does not currently carry a
-draft-time file hash, so review the live file before applying when other tools
-or people may have edited it since the draft was created. Apply captures the
-live pre-image immediately before writing, allowing Revert to restore that
-content. `edit_file` has a separate staleness control: if `old_string` no
-longer matches exactly once, the edit is refused and the agent must re-read the
-file.
+are recorded in task state. For prepared queue items, Approve, Reject, and
+Block validate the authoritative pending proposal and use the same task
+decision path as the global review strip. They cannot decide an unrelated or
+newer pending action. Prepared patches retain the draft-time preimage hash,
+existence, policy and proposed output identity; changed state is refused.
+Legacy unprepared patches lack that draft-time identity and are prepared from
+the live target before apply. Apply captures the pre-image for Revert and
+verifies the resulting content. `edit_file` also refuses when `old_string` no
+longer matches exactly once, requiring a fresh read.
 
 ## Run Ledger and Task Rewind
 
