@@ -210,9 +210,15 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                 TimedOut = commandResult.TimedOut,
                 Source = BuildSource(normalized, arguments),
                 NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(normalized, new AgentToolOutcomeEvidence(
-                    commandResult.TimedOut ? AgentToolOutcomeSignal.TimedOut : AgentToolOutcomeSignal.Completed,
+                    commandResult.Signal,
                     commandResult.ExitCode,
-                    commandResult.TimedOut ? "The configured command deadline elapsed." : $"The process exited with code {commandResult.ExitCode}."))
+                    commandResult.Signal switch
+                    {
+                        AgentToolOutcomeSignal.Cancelled => "Caller cancellation requested owned-process cleanup.",
+                        AgentToolOutcomeSignal.TimedOut => "The configured command deadline elapsed.",
+                        AgentToolOutcomeSignal.Failed => "Process capture or cleanup failed.",
+                        _ => $"The process exited with code {commandResult.ExitCode}."
+                    }))
             };
         }
 
@@ -362,7 +368,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
     }
 
     /// <summary>Structured outcome of a run_command execution, used both for the model-visible summary text and for lesson-store capture (see AgentService.RecordLessonEvidenceForToolAsync).</summary>
-    private sealed record CommandExecutionResult(string Summary, int? ExitCode, bool TimedOut);
+    private sealed record CommandExecutionResult(string Summary, int? ExitCode, bool TimedOut, AgentToolOutcomeSignal Signal);
 
     private static async Task<CommandExecutionResult> RunCommandAsync(AgentWorkspaceOptions options, string command, CancellationToken ct)
     {
@@ -382,42 +388,40 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         foreach (var arg in recipe.Args)
             psi.ArgumentList.Add(arg);
 
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Could not start '{command}'.");
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-        try
+        var capture = await AgentProcessCapture.RunAsync(psi, TimeSpan.FromMinutes(5), ct);
+        var status = capture.Signal switch
         {
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            AgentToolOutcomeSignal.Cancelled => $"Command cancelled by the caller (observed root exit code: {capture.ExitCode?.ToString() ?? "unconfirmed"}).",
+            AgentToolOutcomeSignal.TimedOut => $"Command timed out after 5 minutes (observed root exit code: {capture.ExitCode?.ToString() ?? "unconfirmed"}).",
+            AgentToolOutcomeSignal.Failed => $"Command capture failed (observed root exit code: {capture.ExitCode?.ToString() ?? "unconfirmed"}).",
+            _ => $"Exit code {capture.ExitCode}"
+        };
+        // Both diagnostic tails must survive the outer JSON cap. A large
+        // stdout must not hide the final compiler errors on stderr.
+        var streamBudget = 4000;
+        string summary;
+        do
         {
-            try { process.Kill(entireProcessTree: true); }
-            catch { }
-            return new CommandExecutionResult(
-                $"Command '{command}' timed out after 5 minutes and was terminated.", ExitCode: null, TimedOut: true);
-        }
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        // The model needs to see the actual compiler/test error to fix it,
-        // so keep a generous tail instead of the old unbounded dump (which
-        // then just got hard-truncated mid-line by Summarize downstream).
-        var summary = $"Exit code {process.ExitCode}\n\nstdout:\n{LastLines(stdout, 200)}\n\nstderr:\n{LastLines(stderr, 200)}";
-        return new CommandExecutionResult(summary, process.ExitCode, TimedOut: false);
+            summary = $"{status}\n{capture.CleanupDetail}\n\nstdout:\n{LastLines(capture.StandardOutput, 200, streamBudget)}\n\nstderr:\n{LastLines(capture.StandardError, 200, streamBudget)}";
+            streamBudget /= 2;
+        } while (JsonSerializer.Serialize(summary, AgentJson.Options).Length > 12000 && streamBudget >= 128);
+        return new CommandExecutionResult(summary, capture.Signal == AgentToolOutcomeSignal.Completed ? capture.ExitCode : null,
+            capture.Signal == AgentToolOutcomeSignal.TimedOut, capture.Signal);
     }
 
-    private static string LastLines(string text, int maxLines)
+    private static string LastLines(string text, int maxLines, int maxCharacters = 4000)
     {
         var trimmed = text.Trim();
         if (trimmed.Length == 0) return trimmed;
-
         var lines = trimmed.Split('\n');
-        if (lines.Length <= maxLines) return trimmed;
-
-        var omitted = lines.Length - maxLines;
-        return $"[{omitted} earlier line(s) omitted]\n" + string.Join('\n', lines[^maxLines..]);
+        var lineTail = lines.Length > maxLines ? string.Join('\n', lines[^maxLines..]) : trimmed;
+        var omitted = trimmed.Length - lineTail.Length;
+        if (lineTail.Length > maxCharacters)
+        {
+            omitted += lineTail.Length - maxCharacters;
+            lineTail = lineTail[^maxCharacters..];
+        }
+        return omitted > 0 ? $"[output truncated; {omitted} earlier character(s) omitted]\n{lineTail}" : lineTail;
     }
 
     private sealed record GitDiffInspectionResult(string Summary, AgentToolOutcomeSignal Signal);
@@ -440,39 +444,18 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         };
         psi.ArgumentList.Add("status");
         psi.ArgumentList.Add("--short");
-        using var process = Process.Start(psi);
-        if (process is null)
-            return new GitDiffInspectionResult("Could not start git status.", AgentToolOutcomeSignal.Failed);
-
-        // Read stdout/stderr concurrently with waiting: a large working tree
-        // can produce more output than the OS pipe buffer holds, and reading
-        // only after WaitForExit deadlocks against git blocking on a full
-        // pipe, which used to surface as a false "timed out" result
-        // (docs/review/01-code-audit.md P2-4).
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch { }
-            return new GitDiffInspectionResult("git status timed out.", AgentToolOutcomeSignal.TimedOut);
-        }
-
-        var output = await stdoutTask;
-        var error = await stderrTask;
-        if (process.ExitCode != 0)
+        var capture = await AgentProcessCapture.RunAsync(psi, TimeSpan.FromSeconds(3), ct,
+            retainStandardOutputBeginning: true);
+        if (capture.Signal != AgentToolOutcomeSignal.Completed)
             return new GitDiffInspectionResult(
-                string.IsNullOrWhiteSpace(error) ? "git status failed." : error.Trim(),
+                $"git status {capture.Signal.ToString().ToLowerInvariant()}. {capture.CleanupDetail}", capture.Signal);
+        if (capture.ExitCode != 0)
+            return new GitDiffInspectionResult(
+                string.IsNullOrWhiteSpace(capture.StandardError) ? "git status failed." : LastLines(capture.StandardError, 200),
                 AgentToolOutcomeSignal.Failed);
-        return string.IsNullOrWhiteSpace(output)
+        return string.IsNullOrWhiteSpace(capture.StandardOutput)
             ? new GitDiffInspectionResult("No working tree changes.", AgentToolOutcomeSignal.Empty)
-            : new GitDiffInspectionResult(output.Trim(), AgentToolOutcomeSignal.Completed);
+            : new GitDiffInspectionResult(capture.StandardOutput, AgentToolOutcomeSignal.Completed);
     }
 
     internal static string Arg(Dictionary<string, object?> args, params string[] names)

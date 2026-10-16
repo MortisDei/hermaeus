@@ -73,6 +73,9 @@ public sealed class EvidenceAndOutcomeTests
     [InlineData(AgentToolOutcomeSignal.Cancelled, null, NormalizedOutcome.Cancelled, "caller-cancelled")]
     [InlineData(AgentToolOutcomeSignal.Unavailable, null, NormalizedOutcome.Unavailable, "process-executable-missing")]
     [InlineData(AgentToolOutcomeSignal.PolicyBlocked, null, NormalizedOutcome.Blocked, "command-validation-blocked")]
+    [InlineData(AgentToolOutcomeSignal.Failed, null, NormalizedOutcome.Failed, "process-execution-failed")]
+    [InlineData(AgentToolOutcomeSignal.Failed, 0, NormalizedOutcome.Failed, "process-execution-failed")]
+    [InlineData(AgentToolOutcomeSignal.Failed, 7, NormalizedOutcome.Failed, "process-execution-failed")]
     public void Command_normalizer_uses_only_structured_process_evidence(
         object signal,
         int? exitCode,

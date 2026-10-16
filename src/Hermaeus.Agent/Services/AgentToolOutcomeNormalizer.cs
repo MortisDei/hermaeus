@@ -98,7 +98,7 @@ internal static class AgentToolOutcomeNormalizer
         AgentToolOutcomeSignal.Cancelled => Create(NormalizedOutcome.Cancelled, "caller-cancelled", evidence.Detail),
         AgentToolOutcomeSignal.Unavailable => Create(NormalizedOutcome.Unavailable, "process-executable-missing", evidence.Detail),
         AgentToolOutcomeSignal.PolicyBlocked => Create(NormalizedOutcome.Blocked, "command-validation-blocked", evidence.Detail),
-        AgentToolOutcomeSignal.Failed when evidence.ExitCode is null => Create(NormalizedOutcome.Failed, "process-start-failed", evidence.Detail),
+        AgentToolOutcomeSignal.Failed => Create(NormalizedOutcome.Failed, "process-execution-failed", evidence.Detail),
         AgentToolOutcomeSignal.Completed when evidence.ExitCode == 0 => Create(NormalizedOutcome.Succeeded, "process-exit-zero", evidence.Detail),
         AgentToolOutcomeSignal.Completed when evidence.ExitCode is not null => Create(NormalizedOutcome.Failed, "process-exit-nonzero", evidence.Detail),
         _ => Create(NormalizedOutcome.Unknown, "process-outcome-unknown", evidence.Detail)
