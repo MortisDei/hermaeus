@@ -12,70 +12,122 @@ namespace Hermaeus.Desktop.Views;
 
 public partial class ModelManagementView : UserControl
 {
+    private ModelManagementViewModel? _wiredViewModel;
+    private Action? _releaseCallbacks;
+    private Func<bool>? _ownsCallbacks;
+    private long _callbackGeneration;
+
     public ModelManagementView()
     {
         InitializeComponent();
         AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
+        Loaded += (_, _) => WireViewModel();
+        Unloaded += (_, _) => UnwireViewModel();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        UnwireViewModel();
+        WireViewModel();
+    }
+
+    private void UnwireViewModel()
+    {
+        _callbackGeneration++;
+        _releaseCallbacks?.Invoke();
+        _releaseCallbacks = null;
+        _ownsCallbacks = null;
+        _wiredViewModel = null;
+    }
+
+    private bool OwnsCallbacks(long generation) =>
+        generation == _callbackGeneration && _ownsCallbacks?.Invoke() == true;
+
+    private void WireViewModel()
+    {
+        if (!IsLoaded || ReferenceEquals(_wiredViewModel, DataContext)) return;
         if (DataContext is not ModelManagementViewModel vm)
             return;
+        _wiredViewModel = vm;
+        var generation = _callbackGeneration;
 
         vm.RequestOrganizeConfirmation = async plan =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return false;
 
             var dialog = new OrganizeModelsPreviewDialog();
             dialog.SetPlan(plan);
-            return await dialog.ShowDialog<bool>(owner);
+            return await dialog.ShowDialog<bool>(owner) && OwnsCallbacks(generation);
         };
 
         vm.RequestEmptyDirectoryCleanupConfirmation = async count =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return false;
 
             var dialog = new EmptyDirectoryCleanupDialog();
             dialog.SetCount(count);
-            return await dialog.ShowDialog<bool>(owner);
+            return await dialog.ShowDialog<bool>(owner) && OwnsCallbacks(generation);
         };
 
         vm.RequestRepoIdInput = async item =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return null;
 
             var dialog = new LinkHuggingFaceRepoDialog();
             dialog.SetModelName(item.EffectiveName);
-            return await dialog.ShowDialog<string?>(owner);
+            var result = await dialog.ShowDialog<string?>(owner);
+            return OwnsCallbacks(generation) ? result : null;
         };
 
         vm.RequestDeleteModelConfirmation = async plan =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return false;
             var dialog = new ConfirmActionDialog("Delete model", plan.Description);
-            return await dialog.ShowDialog<bool>(owner);
+            return await dialog.ShowDialog<bool>(owner) && OwnsCallbacks(generation);
         };
 
         vm.RequestCompanionDisableConfirmation = async plan =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return CompanionDisableChoice.Cancel;
             var dialog = new CompanionDisableDialog(plan);
-            return await dialog.ShowDialog<CompanionDisableChoice>(owner);
+            var result = await dialog.ShowDialog<CompanionDisableChoice>(owner);
+            return OwnsCallbacks(generation) ? result : CompanionDisableChoice.Cancel;
         };
 
         vm.RequestCompanionRemovalConfirmation = async plan =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return false;
             var dialog = new ConfirmActionDialog("Clear companion", plan.Description);
-            return await dialog.ShowDialog<bool>(owner);
+            return await dialog.ShowDialog<bool>(owner) && OwnsCallbacks(generation);
+        };
+        var ownedRequestOrganizeConfirmation = vm.RequestOrganizeConfirmation;
+        var ownedRequestEmptyDirectoryCleanupConfirmation = vm.RequestEmptyDirectoryCleanupConfirmation;
+        var ownedRequestRepoIdInput = vm.RequestRepoIdInput;
+        var ownedRequestDeleteModelConfirmation = vm.RequestDeleteModelConfirmation;
+        var ownedRequestCompanionDisableConfirmation = vm.RequestCompanionDisableConfirmation;
+        var ownedRequestCompanionRemovalConfirmation = vm.RequestCompanionRemovalConfirmation;
+        _ownsCallbacks = () => ReferenceEquals(_wiredViewModel, vm)
+            && vm.RequestOrganizeConfirmation == ownedRequestOrganizeConfirmation
+            && vm.RequestEmptyDirectoryCleanupConfirmation == ownedRequestEmptyDirectoryCleanupConfirmation
+            && vm.RequestRepoIdInput == ownedRequestRepoIdInput
+            && vm.RequestDeleteModelConfirmation == ownedRequestDeleteModelConfirmation
+            && vm.RequestCompanionDisableConfirmation == ownedRequestCompanionDisableConfirmation
+            && vm.RequestCompanionRemovalConfirmation == ownedRequestCompanionRemovalConfirmation;
+        _releaseCallbacks = () =>
+        {
+            if (vm.RequestOrganizeConfirmation == ownedRequestOrganizeConfirmation) vm.RequestOrganizeConfirmation = null;
+            if (vm.RequestEmptyDirectoryCleanupConfirmation == ownedRequestEmptyDirectoryCleanupConfirmation) vm.RequestEmptyDirectoryCleanupConfirmation = null;
+            if (vm.RequestRepoIdInput == ownedRequestRepoIdInput) vm.RequestRepoIdInput = null;
+            if (vm.RequestDeleteModelConfirmation == ownedRequestDeleteModelConfirmation) vm.RequestDeleteModelConfirmation = null;
+            if (vm.RequestCompanionDisableConfirmation == ownedRequestCompanionDisableConfirmation) vm.RequestCompanionDisableConfirmation = null;
+            if (vm.RequestCompanionRemovalConfirmation == ownedRequestCompanionRemovalConfirmation) vm.RequestCompanionRemovalConfirmation = null;
         };
     }
 

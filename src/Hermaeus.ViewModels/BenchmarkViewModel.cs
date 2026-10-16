@@ -137,6 +137,12 @@ public partial class BenchmarkViewModel : ObservableObject
     }
 
     public bool HasInsightsUsage => InsightsUsage.Count > 0;
+    private bool _hasLoaded;
+    public bool HasLoaded
+    {
+        get => _hasLoaded;
+        private set => SetProperty(ref _hasLoaded, value);
+    }
 
     /// <summary>Drives the "no runs yet" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasRuns => Runs.Count > 0;
@@ -167,6 +173,7 @@ public partial class BenchmarkViewModel : ObservableObject
     private async Task LoadCoreAsync()
     {
         _isLoading = true;
+        HasLoaded = false;
         try
         {
             await _benchmarks.InitializeAsync();
@@ -188,6 +195,7 @@ public partial class BenchmarkViewModel : ObservableObject
             await ReloadRunsAsync();
             Status = $"Loaded {Suites.Count} suite(s), {Runs.Count} run(s).";
             await RefreshInsightsIfLoadedAsync();
+            HasLoaded = true;
         }
         finally
         {

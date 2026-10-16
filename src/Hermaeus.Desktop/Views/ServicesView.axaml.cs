@@ -21,12 +21,17 @@ public partial class ServicesView : UserControl
     private System.Collections.Specialized.NotifyCollectionChangedEventHandler? _collectionChangedHandler;
     private ServicesViewModel? _wiredViewModel;
     private PropertyChangedEventHandler? _propertyChangedHandler;
+    private readonly Dictionary<ServerProcessViewModel, Action<string>> _serverPickers = [];
+    private Action? _releaseVoiceCallbacks;
+    private Func<bool>? _ownsVoiceCallbacks;
+    private long _callbackGeneration;
 
     public ServicesView()
     {
         InitializeComponent();
         AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
+        Loaded += (_, _) => WireViewModel();
         Unloaded += OnUnloaded;
     }
 
@@ -35,32 +40,24 @@ public partial class ServicesView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (_wiredViewModel is not null)
-        {
-            if (_collectionChangedHandler is not null)
-                _wiredViewModel.Servers.CollectionChanged -= _collectionChangedHandler;
-            if (_propertyChangedHandler is not null)
-                _wiredViewModel.PropertyChanged -= _propertyChangedHandler;
-        }
+        UnwireViewModel();
+        WireViewModel();
+    }
 
+    private void WireViewModel()
+    {
+        if (!IsLoaded) return;
+        if (ReferenceEquals(_wiredViewModel, DataContext)) return;
         if (DataContext is not ServicesViewModel vm) return;
         _wiredViewModel = vm;
 
-        foreach (var srv in vm.Servers)
-            WireFilePickers(srv);
+        SynchroniseServerPickers();
         WireVoiceFilePickers(vm.Tts);
         if (vm.Stt is not null)
             WireSttFilePickers(vm.Stt);
+        CaptureVoiceCallbacks(vm);
 
-        // Create and store handler to allow unsubscribing later
-        _collectionChangedHandler = (_, e) =>
-        {
-            if (e.NewItems is not null)
-            {
-                foreach (ServerProcessViewModel srv in e.NewItems)
-                    WireFilePickers(srv);
-            }
-        };
+        _collectionChangedHandler = (_, _) => SynchroniseServerPickers();
         
         vm.Servers.CollectionChanged += _collectionChangedHandler;
         _propertyChangedHandler = (_, args) =>
@@ -73,16 +70,69 @@ public partial class ServicesView : UserControl
     }
 
     private void OnUnloaded(object? sender, RoutedEventArgs e)
+        => UnwireViewModel();
+
+    private void UnwireViewModel()
     {
-        // Clean up event subscriptions when view is unloaded
+        _callbackGeneration++;
         if (_wiredViewModel is not null && _collectionChangedHandler is not null)
             _wiredViewModel.Servers.CollectionChanged -= _collectionChangedHandler;
         if (_wiredViewModel is not null && _propertyChangedHandler is not null)
             _wiredViewModel.PropertyChanged -= _propertyChangedHandler;
 
+        foreach (var (server, picker) in _serverPickers)
+            if (server.RequestFilePicker == picker)
+                server.RequestFilePicker = null;
+        _serverPickers.Clear();
+        _releaseVoiceCallbacks?.Invoke();
+        _releaseVoiceCallbacks = null;
+        _ownsVoiceCallbacks = null;
+
         _wiredViewModel = null;
         _collectionChangedHandler = null;
         _propertyChangedHandler = null;
+    }
+
+    private void SynchroniseServerPickers()
+    {
+        if (_wiredViewModel is not { } vm) return;
+        foreach (var server in _serverPickers.Keys.Where(server => !vm.Servers.Contains(server)).ToArray())
+        {
+            if (server.RequestFilePicker == _serverPickers[server])
+                server.RequestFilePicker = null;
+            _serverPickers.Remove(server);
+        }
+        foreach (var server in vm.Servers)
+            if (!_serverPickers.ContainsKey(server))
+                WireFilePickers(server);
+    }
+
+    private void CaptureVoiceCallbacks(ServicesViewModel vm)
+    {
+        var tts = vm.Tts;
+        var script = tts.RequestTtsScriptPicker;
+        var python = tts.RequestTtsPythonPicker;
+        var output = tts.RequestTtsOutputPicker;
+        var model = tts.RequestTtsModelDirectoryPicker;
+        var directory = tts.RequestTtsVoiceDirectoryPicker;
+        var sample = tts.RequestTtsVoiceSamplePicker;
+        var stt = vm.Stt;
+        var audio = stt?.RequestAudioFilePicker;
+        var clipboard = stt?.RequestCopyToClipboard;
+        _ownsVoiceCallbacks = () => ReferenceEquals(_wiredViewModel, vm)
+            && tts.RequestTtsScriptPicker == script;
+        _releaseVoiceCallbacks = () =>
+        {
+            if (tts.RequestTtsScriptPicker == script) tts.RequestTtsScriptPicker = null;
+            if (tts.RequestTtsPythonPicker == python) tts.RequestTtsPythonPicker = null;
+            if (tts.RequestTtsOutputPicker == output) tts.RequestTtsOutputPicker = null;
+            if (tts.RequestTtsModelDirectoryPicker == model) tts.RequestTtsModelDirectoryPicker = null;
+            if (tts.RequestTtsVoiceDirectoryPicker == directory) tts.RequestTtsVoiceDirectoryPicker = null;
+            if (tts.RequestTtsVoiceSamplePicker == sample) tts.RequestTtsVoiceSamplePicker = null;
+            if (stt is null) return;
+            if (stt.RequestAudioFilePicker == audio) stt.RequestAudioFilePicker = null;
+            if (stt.RequestCopyToClipboard == clipboard) stt.RequestCopyToClipboard = null;
+        };
     }
 
     private void FocusPendingDoctorTarget()
@@ -90,7 +140,7 @@ public partial class ServicesView : UserControl
         var vm = _wiredViewModel;
         var target = vm?.PendingDoctorTarget;
         var server = vm?.SelectedServer;
-        if (target is null || server is null
+        if (vm is null || target is null || server is null
             || !string.Equals(target.Area, "services", StringComparison.OrdinalIgnoreCase)
             || !string.Equals(target.ItemId, server.Id, StringComparison.Ordinal))
             return;
@@ -98,6 +148,10 @@ public partial class ServicesView : UserControl
         ServerList.ScrollIntoView(server);
         Dispatcher.UIThread.Post(() =>
         {
+            if (!ReferenceEquals(_wiredViewModel, vm)
+                || !ReferenceEquals(vm.PendingDoctorTarget, target)
+                || !ReferenceEquals(vm.SelectedServer, server))
+                return;
             var container = ServerList.ContainerFromItem(server);
             if (container is null)
                 return;
@@ -120,8 +174,13 @@ public partial class ServicesView : UserControl
 
     private void WireFilePickers(ServerProcessViewModel srv)
     {
+        var generation = _callbackGeneration;
         srv.RequestFilePicker = async propertyName =>
         {
+            if (generation != _callbackGeneration
+                || !_serverPickers.TryGetValue(srv, out var ownedPicker)
+                || srv.RequestFilePicker != ownedPicker)
+                return;
             var top = TopLevel.GetTopLevel(this);
             if (top is null) return;
 
@@ -146,7 +205,9 @@ public partial class ServicesView : UserControl
             }
 
             var files = await top.StorageProvider.OpenFilePickerAsync(options);
-            if (files.Count == 0) return;
+            if (files.Count == 0 || generation != _callbackGeneration
+                || !_serverPickers.TryGetValue(srv, out var picker)
+                || srv.RequestFilePicker != picker) return;
 
             var path = files[0].Path.LocalPath;
             if (isExe)         srv.ExecutablePath = path;
@@ -154,64 +215,75 @@ public partial class ServicesView : UserControl
             else if (isDraft)  srv.DraftModelPath  = path;
             else               srv.ModelPath       = path;
         };
+        _serverPickers[srv] = srv.RequestFilePicker;
     }
+
+    private bool OwnsVoiceCallbacks(long generation) =>
+        generation == _callbackGeneration && _ownsVoiceCallbacks?.Invoke() == true;
 
     private void WireVoiceFilePickers(TtsSettingsViewModel tts)
     {
+        var generation = _callbackGeneration;
         tts.RequestTtsScriptPicker = async () =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return;
             var files = await PickFileAsync(
                 "Choose xtts_api_server.py",
                 [
                     new FilePickerFileType("Python script") { Patterns = ["*.py"] },
                     new FilePickerFileType("All files") { Patterns = ["*"] }
                 ]);
-            if (files.Count > 0)
+            if (files.Count > 0 && OwnsVoiceCallbacks(generation))
                 tts.TtsScriptPath = files[0].Path.LocalPath;
         };
 
         tts.RequestTtsPythonPicker = async () =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return;
             var files = await PickFileAsync(
                 "Choose XTTS venv Python",
                 [
                     new FilePickerFileType("Python") { Patterns = OperatingSystem.IsWindows() ? ["python.exe"] : ["python"] },
                     new FilePickerFileType("All files") { Patterns = ["*"] }
                 ]);
-            if (files.Count > 0)
+            if (files.Count > 0 && OwnsVoiceCallbacks(generation))
                 tts.TtsPythonPath = files[0].Path.LocalPath;
         };
 
         tts.RequestTtsOutputPicker = async () =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return;
             var folders = await PickFolderAsync("Choose XTTS output folder");
-            if (folders.Count > 0)
+            if (folders.Count > 0 && OwnsVoiceCallbacks(generation))
                 tts.TtsOutputDirectory = folders[0].Path.LocalPath;
         };
 
         tts.RequestTtsModelDirectoryPicker = async () =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return;
             var folders = await PickFolderAsync("Choose XTTS v2 model folder");
-            if (folders.Count > 0)
+            if (folders.Count > 0 && OwnsVoiceCallbacks(generation))
                 tts.TtsModelDirectory = folders[0].Path.LocalPath;
         };
 
         tts.RequestTtsVoiceDirectoryPicker = async () =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return;
             var folders = await PickFolderAsync("Choose XTTS voice sample folder");
-            if (folders.Count > 0)
+            if (folders.Count > 0 && OwnsVoiceCallbacks(generation))
                 tts.TtsVoiceDirectory = folders[0].Path.LocalPath;
         };
 
         tts.RequestTtsVoiceSamplePicker = async () =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return;
             var files = await PickFileAsync(
                 "Import XTTS voice sample",
                 [
                     new FilePickerFileType("Audio sample") { Patterns = ["*.wav", "*.mp3", "*.flac"] },
                     new FilePickerFileType("All files") { Patterns = ["*"] }
                 ]);
-            if (files.Count > 0)
+            if (files.Count > 0 && OwnsVoiceCallbacks(generation))
                 await tts.ImportTtsVoiceSampleAsync(files[0].Path.LocalPath);
         };
     }
@@ -219,7 +291,7 @@ public partial class ServicesView : UserControl
     private async Task<IReadOnlyList<IStorageFolder>> PickFolderAsync(string title)
     {
         var top = TopLevel.GetTopLevel(this);
-        return top is null
+        return top is null || _ownsVoiceCallbacks?.Invoke() != true
             ? []
             : await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
@@ -230,19 +302,22 @@ public partial class ServicesView : UserControl
 
     private void WireSttFilePickers(SttSettingsViewModel stt)
     {
+        var generation = _callbackGeneration;
         stt.RequestAudioFilePicker = async () =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return null;
             var files = await PickFileAsync(
                 "Choose a WAV file to transcribe",
                 [
                     new FilePickerFileType("WAV audio") { Patterns = ["*.wav"] },
                     new FilePickerFileType("All files") { Patterns = ["*"] }
                 ]);
-            return files.Count > 0 ? files[0].Path.LocalPath : null;
+            return files.Count > 0 && OwnsVoiceCallbacks(generation) ? files[0].Path.LocalPath : null;
         };
 
         stt.RequestCopyToClipboard = async text =>
         {
+            if (!OwnsVoiceCallbacks(generation)) return false;
             if (TopLevel.GetTopLevel(this)?.Clipboard is not { } cb)
                 return false;
             try { await cb.SetTextAsync(text); return true; }
@@ -253,7 +328,7 @@ public partial class ServicesView : UserControl
     private async Task<IReadOnlyList<IStorageFile>> PickFileAsync(string title, IReadOnlyList<FilePickerFileType> filters)
     {
         var top = TopLevel.GetTopLevel(this);
-        return top is null
+        return top is null || _ownsVoiceCallbacks?.Invoke() != true
             ? []
             : await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {

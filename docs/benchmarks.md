@@ -20,6 +20,13 @@ deletions, history clears, and normal reloads refresh the report. While a run
 is active, the page header shows an explicit activity indicator and the status
 line reports the current suite, case, phase, and iteration when known.
 
+If the initial load fails, the status shows the error. Leaving Benchmarks and
+returning retries the load, even if suites appeared before a later step failed.
+Overlapping initial requests share one load. A successful load belongs to its
+ViewModel, so recreating the page does not reload completed data unnecessarily;
+switching to a different page context loads that context. Dialogs from an
+obsolete page cannot confirm a history clear after that page is replaced.
+
 ### Benchmark Runs
 
 Runs record the following metrics and metadata:
