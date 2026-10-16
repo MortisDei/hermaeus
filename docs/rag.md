@@ -217,6 +217,28 @@ outcome without holding anything open for the life of the process.
 - When enabled for a dataset, Hermaeus fetches only the HTTP(S) pages explicitly
   listed in the ingest panel.
 - Hermaeus does not crawl links or use a remote scraping service.
+- The existing 2 MiB response limit is enforced while streaming, including
+  responses without a declared length. Oversized responses are refused before
+  the entire body is buffered.
+
+### Ingest resource limits
+
+Local documents are refused above 512 MiB of source bytes, 16 Mi extracted .NET
+characters, or 2,000 PDF pages. These owner-approved limits apply during reads
+and extraction, including source revalidation before publication. Text reads
+preserve standard BOM detection. PDF page markers count towards extracted text.
+
+Each ingest operation also limits candidate chunk text and vector payload to
+256 MiB, including retained chunks and parent chunks. Accounting uses two bytes
+per text character and four per actual embedding element, counted once. A
+refusal, read failure or cancellation preserves the previous published generation.
+Dry runs cannot certify the size of embeddings that have not been generated.
+
+These are payload limits, not a whole-process memory ceiling or a hard parser
+timeout. PdfPig opening/page construction, embedding providers, old-generation
+loading, metadata and object overhead can allocate outside that accounting.
+Chat PDF attachments retain their lower 20 MiB source, 512 KiB extracted UTF-8
+per-file and 1 MiB combined limits; the shared 2,000-page ceiling also applies.
 
 ### PDF Support
 
@@ -362,6 +384,9 @@ size is exact arithmetic over chunk count and embedding dimension rather than a
 sum over strings, so it no longer varies with how long your documents happen to
 be. Each dataset's index size is shown against the budget on its Dataset Manager
 card.
+
+This bounds retained cache payload, not peak process memory: constructing an
+index can temporarily allocate before its cache admission decision.
 
 **Above the budget, a dataset is still queried.** It is scanned from storage
 instead of from memory, which is slower, and the retrieval result's planner

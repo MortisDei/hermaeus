@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Hermaeus.Core.Services;
 using Hermaeus.Rag.Models;
 using Hermaeus.Rag.Storage;
@@ -37,13 +36,21 @@ public sealed class WatchedSourceService
     private static readonly TimeSpan MtimeTolerance = TimeSpan.FromSeconds(1);
     private readonly SqliteRagStore _store;
     private readonly RagPipeline _pipeline;
+    private readonly Func<string, CancellationToken, Task<string>> _sourceHash;
     private readonly HashSet<string> _refreshing = new(StringComparer.Ordinal);
     private readonly object _refreshingLock = new();
 
     public WatchedSourceService(SqliteRagStore store, RagPipeline pipeline)
+        : this(store, pipeline, pipeline.ComputeLocalSourceHashAsync)
+    {
+    }
+
+    internal WatchedSourceService(SqliteRagStore store, RagPipeline pipeline,
+        Func<string, CancellationToken, Task<string>> sourceHash)
     {
         _store = store;
         _pipeline = pipeline;
+        _sourceHash = sourceHash;
     }
 
     /// <summary>Walks every watched root under its globs and classifies drift against
@@ -132,6 +139,10 @@ public sealed class WatchedSourceService
                     else
                         unchanged++;
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     errors.Add($"{file}: {ex.Message}");
@@ -192,30 +203,16 @@ public sealed class WatchedSourceService
         lock (_refreshingLock) return _refreshing.Contains(datasetId);
     }
 
-    private static async Task<bool> IsChangedAsync(
+    private async Task<bool> IsChangedAsync(
         string file, string existingHash, DateTime? existingModifiedUtc, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(existingHash))
-            return !string.Equals(await ComputeSourceHashAsync(file, ct), existingHash, StringComparison.Ordinal);
+            return !string.Equals(await _sourceHash(file, ct), existingHash, StringComparison.Ordinal);
 
         if (existingModifiedUtc is null) return true;
         var mtime = File.GetLastWriteTimeUtc(file);
         return (mtime - existingModifiedUtc.Value).Duration() > MtimeTolerance;
     }
-
-    private static async Task<string> ComputeSourceHashAsync(string file, CancellationToken ct)
-    {
-        if (Path.GetExtension(file).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
-        {
-            var extracted = await PdfTextExtractor.ExtractAsync(file, ct);
-            return extracted.HasText ? ComputeHash(extracted.Text) : string.Empty;
-        }
-
-        return ComputeHash(await File.ReadAllTextAsync(file, ct));
-    }
-
-    private static string ComputeHash(string text) => Convert.ToHexString(
-        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
 
     private static bool IsUnderAnyWatchedRoot(string path, IReadOnlyList<RagWatchedSource> watched) =>
         watched.Any(w =>

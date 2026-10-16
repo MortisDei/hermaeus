@@ -22,9 +22,12 @@ item - they are not moved here.
 
 ## RAG
 
-- **Stronger RAG file-size enforcement.** Oversized local files are
-  currently warned, not refused. Trigger: a reported resource-exhaustion
-  complaint, or before public release.
+- **Hard parser isolation and bounded legacy-generation loading.** R34 adds
+  owner-approved local source, extracted-text, PDF-page and candidate-payload
+  refusal limits, plus streaming enforcement of the existing web response cap.
+  These do not bound PdfPig/provider allocations, parser wall time or eager
+  loading of an existing SQLite generation. Any new isolation boundary requires
+  owner approval. Trigger: before claiming hard process-memory/time containment.
 - **Broader text sanitization / domain allow-listing for web ingest.**
   Current web ingest strips script/style and caps pages; there is no domain
   allow-list. Trigger: if web ingest grows beyond explicit single-page

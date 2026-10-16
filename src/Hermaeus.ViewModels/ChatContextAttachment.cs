@@ -210,7 +210,10 @@ public sealed partial class ChatContextAttachment : ObservableObject
 
             try
             {
-                var pdf = await PdfTextExtractor.ExtractAsync(path, ct);
+                var remainingBytes = Math.Min(MaxFileBytes, MaxTotalBytes - currentTotal);
+                if (remainingBytes <= 0)
+                    return Skipped(path, $"Combined context is over {FormatBytes(MaxTotalBytes)}.");
+                var pdf = await PdfTextExtractor.ExtractAsync(path, MaxPdfFileBytes, (int)remainingBytes, ct);
                 result = pdf.HasText
                     ? FileTextExtractionResult.Ok(pdf.Text)
                     : FileTextExtractionResult.Skip("Could not extract text (likely scanned or uses embedded font encodings).");

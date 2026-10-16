@@ -31,6 +31,7 @@ public sealed class RagPipeline
     private readonly IEmbeddingService _embed;
     private readonly ParagraphChunker  _chunker = new();
     private readonly HttpClient _http;
+    private readonly RagIngestLimits _limits;
 
     private const int EmbedBatchSize = 10;
     private const int DirectoryFileBatchSize = 50;
@@ -54,10 +55,17 @@ public sealed class RagPipeline
     }
 
     public RagPipeline(SqliteRagStore store, IEmbeddingService embed, HttpClient? http)
+        : this(store, embed, http, RagIngestLimits.Default)
     {
+    }
+
+    internal RagPipeline(SqliteRagStore store, IEmbeddingService embed, HttpClient? http, RagIngestLimits limits)
+    {
+        limits.Validate();
         _store = store;
         _embed = embed;
         _http = http ?? _defaultHttp;
+        _limits = limits;
     }
 
     public async Task<IngestReport> IngestDirectoryAsync(
@@ -93,6 +101,7 @@ public sealed class RagPipeline
 
         var existingChunks = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true, ct);
         var existingHashes = await _store.GetSourceHashesAsync(dataset.Id, files, ct);
+        var budget = new RagIngestBudget(_limits.MaxStagingBytes);
 
         var health = new RagIngestHealth { FileCount = files.Count };
         AddChunkSizeGuardWarning(health, dataset.Config);
@@ -211,10 +220,12 @@ public sealed class RagPipeline
                         parent.SourceId = sourceId;
                         parent.SourceRevisionId = revisionId;
                         parent.IsParent = true;
+                        budget.AddText(parent.Content);
                         batchParents.Add(parent);
                         chunk.ParentId = parentId;
                     }
 
+                    budget.AddText(chunk.Content);
                     batchChunks.Add(chunk);
                 }
 
@@ -225,12 +236,15 @@ public sealed class RagPipeline
             if (options.DryRun || batchChunks.Count == 0)
                 continue;
 
-            await EmbedChunksAsync(dataset, batchChunks, progress, ct, batchStepBase + 1, overallTotal, batchLabel);
+            await EmbedChunksAsync(dataset, batchChunks, progress, ct, budget, batchStepBase + 1, overallTotal, batchLabel);
             newChunks.AddRange(batchParents);
             newChunks.AddRange(batchChunks);
         }
 
         AddHealthWarnings(health);
+        var retained = existingChunks.Where(c => !changedSourcePaths.Contains(c.SourcePath)).ToList();
+        foreach (var chunk in retained)
+            budget.AddChunk(chunk);
 
         // ── 2. If dry-run/report-only, skip embedding and storage ─────────
         if (options.DryRun || options.DuplicatePolicy == IngestDuplicatePolicy.ReportOnly)
@@ -242,7 +256,6 @@ public sealed class RagPipeline
 
         progress?.Report(new IngestProgress("Storing", files.Count, files.Count,
             "Publishing complete dataset generation...", overallTotal - 1, overallTotal, "Atomic publication"));
-        var retained = existingChunks.Where(c => !changedSourcePaths.Contains(c.SourcePath)).ToList();
         await PublishSnapshotAsync(dataset, retained.Concat(newChunks).ToList(), sourceDescriptors, sourceRevisions, progress, overallTotal, ct);
         var indexedChunkCount = retained.Concat(newChunks).Count(c => !c.IsParent);
 
@@ -274,10 +287,13 @@ public sealed class RagPipeline
 
         progress?.Report(new IngestProgress("Embedding", 0, chunks.Count, $"Reindexing {chunks.Count} chunk(s)..."));
 
+        var budget = new RagIngestBudget(_limits.MaxStagingBytes);
+        foreach (var chunk in chunks)
+            budget.AddText(chunk.Content);
         var workingChunks = chunks.Select(CloneChunkForWorking).ToList();
         var embeddedChunks = workingChunks.Where(c => !c.IsParent).ToList();
         dataset.Config.EmbeddingDimensions = 0;
-        await EmbedChunksAsync(dataset, embeddedChunks, progress, ct);
+        await EmbedChunksAsync(dataset, embeddedChunks, progress, ct, budget: budget);
         progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats..."));
         ct.ThrowIfCancellationRequested();
         await PublishSnapshotAsync(dataset, workingChunks,
@@ -319,6 +335,7 @@ public sealed class RagPipeline
         var parentChunks = new List<RagChunk>();
         var sourcePaths = new HashSet<string>(PathComparer);
         var health = new RagIngestHealth { FileCount = documents.Count };
+        var budget = new RagIngestBudget(_limits.MaxStagingBytes);
         AddChunkSizeGuardWarning(health, dataset.Config);
         progress?.Report(new IngestProgress("Chunking", 0, documents.Count, $"Chunking {documents.Count} web page(s)"));
 
@@ -342,10 +359,12 @@ public sealed class RagPipeline
                     var parentId = Guid.NewGuid().ToString();
                     var parent = CreateChunk(dataset.Id, doc.Url.Host, doc.Url.ToString(), sourceHash, DateTime.UtcNow, doc.Title, tc, tc.ParentContent, parentId, null);
                     parent.IsParent = true;
+                    budget.AddText(parent.Content);
                     parentChunks.Add(parent);
                     chunk.ParentId = parentId;
                 }
 
+                budget.AddText(chunk.Content);
                 allChunks.Add(chunk);
             }
 
@@ -362,13 +381,16 @@ public sealed class RagPipeline
 
         if (options.DryRun)
         {
+            var existing = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true, ct);
+            foreach (var chunk in existing.Where(c => !sourcePaths.Contains(c.SourcePath)))
+                budget.AddChunk(chunk);
             var report = new IngestReport();
             report.Health = health;
             progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count, $"Dry-run complete. {report.Summary()}"));
             return report;
         }
 
-        await EmbedAndStoreAsync(dataset, allChunks, parentChunks, sourcePaths, progress, ct);
+        await EmbedAndStoreAsync(dataset, allChunks, parentChunks, sourcePaths, budget, progress, ct);
         progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count,
             $"{allChunks.Count} chunks indexed from {documents.Count} web page(s)."));
 
@@ -544,14 +566,31 @@ public sealed class RagPipeline
             throw new InvalidOperationException($"Unsupported content type for {url}: {mediaType}");
         }
 
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        if (bytes.Length > MaxWebPageBytes)
+        if (response.Content.Headers.ContentLength is > MaxWebPageBytes)
             throw new InvalidOperationException($"Web page is too large: {url}");
 
-        var raw = System.Text.Encoding.UTF8.GetString(bytes);
+        await using var body = await response.Content.ReadAsStreamAsync(ct);
+        using var bytes = new MemoryStream();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            // Headers may be absent or inaccurate. Read one extra byte to detect
+            // overflow, without buffering the entire response or silently truncating.
+            var remaining = MaxWebPageBytes - (int)bytes.Length;
+            var read = await body.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, remaining + 1)), ct);
+            if (read == 0)
+                break;
+            if (read > remaining)
+                throw new InvalidOperationException($"Web page is too large: {url}");
+            bytes.Write(buffer, 0, read);
+        }
+
+        var raw = Encoding.UTF8.GetString(bytes.GetBuffer(), 0, (int)bytes.Length);
         var text = mediaType.Contains("html", StringComparison.OrdinalIgnoreCase)
             ? ExtractTextFromHtml(raw)
             : raw.Trim();
+        if (text.Length > _limits.MaxExtractedCharacters)
+            throw new InvalidOperationException($"Extracted web text exceeds the {_limits.MaxExtractedCharacters} character ingest limit: {url}");
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException($"No readable text found at {url}");
 
@@ -572,13 +611,16 @@ public sealed class RagPipeline
         List<RagChunk> allChunks,
         List<RagChunk> parentChunks,
         HashSet<string> changedSourcePaths,
+        RagIngestBudget budget,
         IProgress<IngestProgress>? progress,
         CancellationToken ct)
     {
         var existing = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true, ct);
         AssignLineage(dataset, allChunks, existing, sourceKind: RagSourceKind.WebUrl);
         AssignLineage(dataset, parentChunks, existing, sourceKind: RagSourceKind.WebUrl);
-        await EmbedChunksAsync(dataset, allChunks, progress, ct);
+        foreach (var chunk in existing.Where(c => !changedSourcePaths.Contains(c.SourcePath)))
+            budget.AddChunk(chunk);
+        await EmbedChunksAsync(dataset, allChunks, progress, ct, budget: budget);
         await PublishSnapshotAsync(
             dataset,
             existing.Where(c => !changedSourcePaths.Contains(c.SourcePath)).Concat(parentChunks).Concat(allChunks).ToList(),
@@ -591,6 +633,7 @@ public sealed class RagPipeline
         List<RagChunk> allChunks,
         IProgress<IngestProgress>? progress,
         CancellationToken ct,
+        RagIngestBudget budget,
         int overallDone = 0,
         int overallTotal = 0,
         string overallDetail = "")
@@ -604,6 +647,8 @@ public sealed class RagPipeline
             ct.ThrowIfCancellationRequested();
             var batch = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
             var embeddings = await EmbedBatchWithRetryAsync(batch, dataset.Config, ct);
+            foreach (var vector in embeddings)
+                budget.AddVector(vector);
             if (embeddings.Count > 0)
                 dataset.Config.EmbeddingDimensions = embeddings[0].Length;
 
@@ -631,6 +676,7 @@ public sealed class RagPipeline
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        RagIngestBudget.ValidateCandidate(chunks, _limits.MaxStagingBytes);
         NormalizeWatchedSources(dataset);
         var existing = await _store.GetStoredChunksAsync(dataset.Id, includeEmbeddings: true, ct);
         AssignLineage(dataset, chunks, existing, RagSourceKind.LocalFile);
@@ -782,7 +828,7 @@ public sealed class RagPipeline
     private static bool PathsEqual(string left, string right) =>
         PathComparer.Equals(left, right);
 
-    private static async Task ValidateStagedLocalSourcesAsync(
+    private async Task ValidateStagedLocalSourcesAsync(
         RagDataset dataset, IReadOnlyList<RagChunk> chunks, CancellationToken ct)
     {
         var staged = chunks
@@ -855,34 +901,26 @@ public sealed class RagPipeline
         }
     }
 
-    private static async Task<LocalDocument?> LoadLocalDocumentAsync(string file, RagIngestHealth health, CancellationToken ct)
+    private async Task<LocalDocument?> LoadLocalDocumentAsync(string file, RagIngestHealth health, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var sourcePath = Path.GetFullPath(file);
         var title = Path.GetFileNameWithoutExtension(file);
         var extension = Path.GetExtension(file);
-        string text;
-
-        if (extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
-        {
-            var extracted = await PdfTextExtractor.ExtractAsync(file, ct);
-            if (!extracted.HasText)
-            {
-                health.UnsupportedFileCount++;
-                health.Warnings.Add($"No extractable PDF text: {sourcePath}");
-                return null;
-            }
-
-            text = extracted.Text;
-        }
-        else
-        {
-            text = await File.ReadAllTextAsync(file, ct);
-        }
+        var text = await ReadLocalSourceTextAsync(file, ct);
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            health.EmptyChunkCount++;
-            health.Warnings.Add($"No readable text: {sourcePath}");
+            if (extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                health.UnsupportedFileCount++;
+                health.Warnings.Add($"No extractable PDF text: {sourcePath}");
+            }
+            else
+            {
+                health.EmptyChunkCount++;
+                health.Warnings.Add($"No readable text: {sourcePath}");
+            }
             return null;
         }
 
@@ -893,6 +931,45 @@ public sealed class RagPipeline
             text,
             ComputeHash(text),
             File.GetLastWriteTimeUtc(file));
+    }
+
+    private async Task<string> ReadLocalSourceTextAsync(string file, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (Path.GetExtension(file).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+            return (await PdfTextExtractor.ExtractAsync(file, _limits, null, ct)).Text;
+        using var source = File.OpenRead(file);
+        return await ReadLocalTextAsync(source, Path.GetFullPath(file), _limits, ct);
+    }
+
+    internal async Task<string> ComputeLocalSourceHashAsync(string file, CancellationToken ct)
+    {
+        var text = await ReadLocalSourceTextAsync(file, ct);
+        // Watched scans historically hash untrimmed text, while an empty/scanned
+        // PDF has no source hash. Share input policy without changing that identity.
+        return Path.GetExtension(file).Equals(".pdf", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(text) ? string.Empty : ComputeHash(text);
+    }
+
+    internal static async Task<string> ReadLocalTextAsync(
+        Stream source, string label, RagIngestLimits limits, CancellationToken ct = default)
+    {
+        limits.Validate();
+        using var bounded = new LimitedSourceStream(source, limits.MaxSourceBytes, label, ct, leaveOpen: true);
+        using var reader = new StreamReader(bounded, Encoding.UTF8, detectEncodingFromByteOrderMarks: true,
+            bufferSize: 4096, leaveOpen: true);
+        var text = new StringBuilder();
+        var buffer = new char[4096];
+        while (true)
+        {
+            var remaining = limits.MaxExtractedCharacters - text.Length;
+            var read = await reader.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, (long)remaining + 1)), ct);
+            if (read == 0)
+                return text.ToString();
+            if (read > remaining)
+                throw new InvalidOperationException($"Extracted text exceeds the {limits.MaxExtractedCharacters} character ingest limit: {label}");
+            text.Append(buffer, 0, read);
+        }
     }
 
     private async Task<List<float[]>> EmbedBatchWithRetryAsync(IReadOnlyList<RagChunk> batch, RagDatasetConfig cfg, CancellationToken ct)
