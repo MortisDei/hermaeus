@@ -22,6 +22,11 @@ the build if a package in the shipped dependency closure has no entry here.
 Sections 2 to 7 are maintained by hand; add to them in the same change that
 adds the dependency.
 
+The Windows and Linux packaging scripts copy this inventory and the standalone
+CMU dictionary licence into package `docs/`. Actual archive notice delivery and
+unresolved asset redistribution terms must still be checked before release;
+this inventory is not permission to redistribute an asset.
+
 ---
 
 ## 1. Bundled with Hermaeus
@@ -79,8 +84,8 @@ own `.nuspec`.
 
 Required licence and upstream NOTICE text must travel with redistributions.
 A file present in the NuGet cache is not proof it reaches publish output.
-The packaging scripts do not explicitly copy this full notices file; the
-R34 package audit must verify actual archive delivery and repair missing
+The packaging scripts explicitly copy this inventory; the R34 package audit
+must still verify actual archive delivery and repair missing upstream
 attribution before claiming that gate passed.
 
 ## 2. Native libraries inside those packages

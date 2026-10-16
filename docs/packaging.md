@@ -238,3 +238,10 @@ GitHub Release automatically; nothing about local packaging above changes.
 Packages include the source-available noncommercial license, commercial license
 notice, and third-party notice documents. Uses outside PolyForm Noncommercial's
 permitted purposes require separate written permission; see `COMMERCIAL.md`.
+
+Both packaging scripts copy `THIRD-PARTY-NOTICES.md` and the standalone
+`CMUDICT-LICENSE.txt` into the package's `docs` directory. Release acceptance
+requires inspection of the actual Windows and Linux archives, including all
+required upstream notice texts. Copying the inventory does not resolve missing
+asset redistribution terms or prove complete licence delivery. Unresolved
+artwork/asset licensing remains a release gate.
