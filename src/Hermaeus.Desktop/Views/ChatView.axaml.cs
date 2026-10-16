@@ -7,6 +7,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Hermaeus.Core.Services;
 using Hermaeus.ViewModels;
 
@@ -18,6 +19,9 @@ public partial class ChatView : UserControl
     private EventHandler? _scrollHandler;
     private EventHandler<ScrollChangedEventArgs>? _scrollChangedHandler;
     private Action<string>? _micTranscriptHandler;
+    private Action? _releaseCallbacks;
+    private Func<bool>? _ownsCallbacks;
+    private long _callbackGeneration;
     // r19 6.3: content (action row, sources, memory pills, the incremental
     // MarkdownViewer re-render timer) keeps materializing AFTER the VM's last
     // ScrollToBottom raise, so a single programmatic scroll always lands
@@ -28,7 +32,7 @@ public partial class ChatView : UserControl
 
     private async void OnTelemetryClosed(object? sender, EventArgs e)
     {
-        if (_vm is { } vm)
+        if (_vm is { } vm && _ownsCallbacks?.Invoke() == true)
             await vm.CloseTelemetryCommand.ExecuteAsync(null);
     }
 
@@ -36,7 +40,7 @@ public partial class ChatView : UserControl
     {
         InitializeComponent();
         AttachedToVisualTree += (_, _) => ScheduleInputFocus();
-        DetachedFromVisualTree += OnTelemetryClosed;
+        DetachedFromVisualTree += (_, _) => UnwireViewModel();
 
         // Ctrl+V (or right-click Paste) with an image on the clipboard attaches it the
         // same way a dragged-in or browsed-for image file would, instead of doing
@@ -51,199 +55,234 @@ public partial class ChatView : UserControl
             inputBox.AddHandler(InputElement.KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
         }
 
-        DataContextChanged += (_, _) =>
+        DataContextChanged += (_, _) => { UnwireViewModel(); WireViewModel(); };
+        Loaded += (_, _) => WireViewModel();
+        Unloaded += (_, _) => UnwireViewModel();
+    }
+
+    private void UnwireViewModel()
+    {
+        _callbackGeneration++;
+        if (_vm is { } previous)
         {
-            if (_vm is not null && _scrollHandler is not null)
-                _vm.ScrollToBottom -= _scrollHandler;
-            if (_scrollChangedHandler is not null && this.FindControl<ScrollViewer>("MessagesScroll") is { } previousScroll)
-                previousScroll.ScrollChanged -= _scrollChangedHandler;
-            if (_vm is not null)
-            {
-                _ = _vm.CloseTelemetryCommand.ExecuteAsync(null);
-                _vm.RequestCopyToClipboard = null;
-                _vm.RequestInputFocus = null;
-                _vm.RequestContextFilePicker = null;
-                _vm.RequestConversationExportPath = null;
-                if (_micTranscriptHandler is not null)
-                    _vm.ChatMic.TranscriptReady -= _micTranscriptHandler;
-            }
+            // An obsolete overlapping visual must not stop the active view's telemetry.
+            if (_ownsCallbacks?.Invoke() == true)
+                _ = previous.CloseTelemetryCommand.ExecuteAsync(null);
+            if (_scrollHandler is not null) previous.ScrollToBottom -= _scrollHandler;
+            if (_micTranscriptHandler is not null) previous.ChatMic.TranscriptReady -= _micTranscriptHandler;
+        }
+        if (_scrollChangedHandler is not null && this.FindControl<ScrollViewer>("MessagesScroll") is { } scroll)
+            scroll.ScrollChanged -= _scrollChangedHandler;
+        if (this.FindControl<Controls.MicButton>("ChatMicButton") is { } mic)
+            mic.ViewModel = null;
+        _releaseCallbacks?.Invoke();
+        _releaseCallbacks = null;
+        _ownsCallbacks = null;
+        _vm = null;
+        _scrollHandler = null;
+        _scrollChangedHandler = null;
+        _micTranscriptHandler = null;
+    }
 
-            if (DataContext is not ChatViewModel vm)
-            {
-                _vm = null;
-                _scrollHandler = null;
-                _scrollChangedHandler = null;
-                _micTranscriptHandler = null;
-                return;
-            }
+    private void WireViewModel()
+    {
+        if (!IsLoaded || !this.IsAttachedToVisualTree()
+            || ReferenceEquals(_vm, DataContext) || DataContext is not ChatViewModel vm) return;
+        var generation = _callbackGeneration;
+        _vm = vm;
 
-            _vm = vm;
+        if (this.FindControl<Controls.MicButton>("ChatMicButton") is { } micButton)
+            micButton.ViewModel = vm.ChatMic;
+        _micTranscriptHandler = text => { if (OwnsCallbacks(generation)) InsertDictatedTextAtCursor(text); };
+        vm.ChatMic.TranscriptReady += _micTranscriptHandler;
 
-            if (this.FindControl<Controls.MicButton>("ChatMicButton") is { } micButton)
-                micButton.ViewModel = vm.ChatMic;
-            _micTranscriptHandler = InsertDictatedTextAtCursor;
-            vm.ChatMic.TranscriptReady += _micTranscriptHandler;
-
+        _pinnedToBottom = true;
+        _scrollHandler = (_, _) =>
+        {
+            if (!OwnsCallbacks(generation)) return;
+            // Sending (or resuming) a message re-pins even if the user had
+            // scrolled up to read earlier history.
             _pinnedToBottom = true;
-            _scrollHandler = (_, _) =>
+            Dispatcher.UIThread.Post(() =>
             {
-                // Sending (or resuming) a message re-pins even if the user had
-                // scrolled up to read earlier history.
-                _pinnedToBottom = true;
-                Dispatcher.UIThread.Post(() => SnapToBottomIfPinned(force: true), DispatcherPriority.Background);
-            };
-            vm.ScrollToBottom += _scrollHandler;
+                if (OwnsCallbacks(generation)) SnapToBottomIfPinned(force: true);
+            }, DispatcherPriority.Background);
+        };
+        vm.ScrollToBottom += _scrollHandler;
 
-            if (this.FindControl<ScrollViewer>("MessagesScroll") is { } scroll)
+        if (this.FindControl<ScrollViewer>("MessagesScroll") is { } scroll)
+        {
+            _scrollChangedHandler = OnMessagesScrollChanged;
+            scroll.ScrollChanged += _scrollChangedHandler;
+        }
+
+        vm.RequestCopyToClipboard = async text =>
+        {
+            if (!OwnsCallbacks(generation)) return false;
+            if (TopLevel.GetTopLevel(this)?.Clipboard is not { } cb)
+                return false;
+            try { await cb.SetTextAsync(text); return OwnsCallbacks(generation); }
+            catch { return false; }
+        };
+
+        vm.RequestInputFocus = () => { if (OwnsCallbacks(generation)) ScheduleInputFocus(); };
+
+        // A ContentControl recreates ChatView on panel navigation. On a
+        // cold start its DataContext can arrive before the input is ready
+        // to receive keyboard focus; returning to Chat creates a second
+        // view and happened to hide that race. Schedule focus after the
+        // layout turn that attached this instance instead.
+        ScheduleInputFocus();
+
+        vm.RequestContextFilePicker = async () =>
+        {
+            if (!OwnsCallbacks(generation)) return;
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var textAndCodePatterns = SupportedTextFileTypes.PickerPatterns.ToArray();
+            var documentPatterns = new[] { "*.docx", "*.pdf" };
+            var imagePatterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp" };
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
-                _scrollChangedHandler = OnMessagesScrollChanged;
-                scroll.ScrollChanged += _scrollChangedHandler;
+                Title = "Attach files as chat context",
+                AllowMultiple = true,
+                FileTypeFilter =
+                [
+                    // The OS dialog defaults to whichever filter is listed first, so
+                    // every supported type needs to be in that first entry - otherwise
+                    // e.g. images are invisible until the user manually switches the
+                    // dropdown, which read as "attaching images doesn't work".
+                    new FilePickerFileType("All supported files")
+                    {
+                        Patterns = [.. textAndCodePatterns, .. documentPatterns, .. imagePatterns]
+                    },
+                    new FilePickerFileType("Text and code files") { Patterns = textAndCodePatterns },
+                    new FilePickerFileType("Documents") { Patterns = documentPatterns },
+                    new FilePickerFileType("Images") { Patterns = imagePatterns },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]
+            });
+
+            if (files.Count > 0 && OwnsCallbacks(generation))
+                await vm.AddContextFilesAsync(files.Select(f => f.Path.LocalPath));
+        };
+
+        vm.RequestConversationExportPath = async format =>
+        {
+            if (!OwnsCallbacks(generation)) return null;
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return null;
+
+            var ext = format == ConversationExportFormat.Json ? "json" : "md";
+            var label = format == ConversationExportFormat.Json ? "JSON" : "Markdown";
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = $"Export conversation as {label}",
+                SuggestedFileName = $"hermaeus-conversation.{ext}",
+                FileTypeChoices =
+                [
+                    new FilePickerFileType(label) { Patterns = [$"*.{ext}"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]
+            });
+            return OwnsCallbacks(generation) ? file?.Path.LocalPath : null;
+        };
+
+        // r19 5.4: chat artifacts - open with the OS default handler, reveal in
+        // the file manager, or open the conversation's whole artifacts folder.
+        vm.RequestOpenFile = path =>
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                _ = Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
             }
-
-            vm.RequestCopyToClipboard = async text =>
+            catch (Exception ex)
             {
-                if (TopLevel.GetTopLevel(this)?.Clipboard is not { } cb)
-                    return false;
-                try { await cb.SetTextAsync(text); return true; }
-                catch { return false; }
-            };
+                Console.Error.WriteLine($"Failed to open artifact '{path}': {ex.Message}");
+            }
+        };
 
-            vm.RequestInputFocus = ScheduleInputFocus;
-
-            // A ContentControl recreates ChatView on panel navigation. On a
-            // cold start its DataContext can arrive before the input is ready
-            // to receive keyboard focus; returning to Chat creates a second
-            // view and happened to hide that race. Schedule focus after the
-            // layout turn that attached this instance instead.
-            ScheduleInputFocus();
-
-            vm.RequestContextFilePicker = async () =>
+        vm.RequestRevealInFolder = path =>
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
             {
-                var top = TopLevel.GetTopLevel(this);
-                if (top is null) return;
-
-                var textAndCodePatterns = SupportedTextFileTypes.PickerPatterns.ToArray();
-                var documentPatterns = new[] { "*.docx", "*.pdf" };
-                var imagePatterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp" };
-
-                var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                if (OperatingSystem.IsWindows())
                 {
-                    Title = "Attach files as chat context",
-                    AllowMultiple = true,
-                    FileTypeFilter =
-                    [
-                        // The OS dialog defaults to whichever filter is listed first, so
-                        // every supported type needs to be in that first entry - otherwise
-                        // e.g. images are invisible until the user manually switches the
-                        // dropdown, which read as "attaching images doesn't work".
-                        new FilePickerFileType("All supported files")
-                        {
-                            Patterns = [.. textAndCodePatterns, .. documentPatterns, .. imagePatterns]
-                        },
-                        new FilePickerFileType("Text and code files") { Patterns = textAndCodePatterns },
-                        new FilePickerFileType("Documents") { Patterns = documentPatterns },
-                        new FilePickerFileType("Images") { Patterns = imagePatterns },
-                        new FilePickerFileType("All files") { Patterns = ["*"] }
-                    ]
-                });
-
-                if (files.Count > 0)
-                    await vm.AddContextFilesAsync(files.Select(f => f.Path.LocalPath));
-            };
-
-            vm.RequestConversationExportPath = async format =>
-            {
-                var top = TopLevel.GetTopLevel(this);
-                if (top is null) return null;
-
-                var ext = format == ConversationExportFormat.Json ? "json" : "md";
-                var label = format == ConversationExportFormat.Json ? "JSON" : "Markdown";
-                var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-                {
-                    Title = $"Export conversation as {label}",
-                    SuggestedFileName = $"hermaeus-conversation.{ext}",
-                    FileTypeChoices =
-                    [
-                        new FilePickerFileType(label) { Patterns = [$"*.{ext}"] },
-                        new FilePickerFileType("All files") { Patterns = ["*"] }
-                    ]
-                });
-                return file?.Path.LocalPath;
-            };
-
-            // r19 5.4: chat artifacts - open with the OS default handler, reveal in
-            // the file manager, or open the conversation's whole artifacts folder.
-            vm.RequestOpenFile = path =>
-            {
-                if (string.IsNullOrWhiteSpace(path)) return;
-                try
-                {
-                    _ = Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+                    var psi = new ProcessStartInfo { FileName = "explorer", UseShellExecute = true };
+                    psi.ArgumentList.Add($"/select,{path}");
+                    _ = Process.Start(psi);
                 }
-                catch (Exception ex)
+                else if (OperatingSystem.IsMacOS())
                 {
-                    Console.Error.WriteLine($"Failed to open artifact '{path}': {ex.Message}");
-                }
-            };
-
-            vm.RequestRevealInFolder = path =>
-            {
-                if (string.IsNullOrWhiteSpace(path)) return;
-                try
-                {
-                    if (OperatingSystem.IsWindows())
-                    {
-                        var psi = new ProcessStartInfo { FileName = "explorer", UseShellExecute = true };
-                        psi.ArgumentList.Add($"/select,{path}");
-                        _ = Process.Start(psi);
-                    }
-                    else if (OperatingSystem.IsMacOS())
-                    {
-                        var psi = new ProcessStartInfo { FileName = "open", UseShellExecute = true };
-                        psi.ArgumentList.Add("-R");
-                        psi.ArgumentList.Add(path);
-                        _ = Process.Start(psi);
-                    }
-                    else
-                    {
-                        var psi = new ProcessStartInfo { FileName = "xdg-open", UseShellExecute = true };
-                        psi.ArgumentList.Add(Path.GetDirectoryName(path) ?? path);
-                        _ = Process.Start(psi);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"Failed to reveal artifact '{path}': {ex.Message}");
-                }
-            };
-
-            vm.RequestOpenArtifactsFolder = path =>
-            {
-                if (string.IsNullOrWhiteSpace(path)) return;
-                try
-                {
-                    Directory.CreateDirectory(path);
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = OperatingSystem.IsWindows() ? "explorer" : OperatingSystem.IsMacOS() ? "open" : "xdg-open",
-                        UseShellExecute = true
-                    };
+                    var psi = new ProcessStartInfo { FileName = "open", UseShellExecute = true };
+                    psi.ArgumentList.Add("-R");
                     psi.ArgumentList.Add(path);
                     _ = Process.Start(psi);
                 }
-                catch (Exception ex)
+                else
                 {
-                    Console.Error.WriteLine($"Failed to open artifacts folder '{path}': {ex.Message}");
+                    var psi = new ProcessStartInfo { FileName = "xdg-open", UseShellExecute = true };
+                    psi.ArgumentList.Add(Path.GetDirectoryName(path) ?? path);
+                    _ = Process.Start(psi);
                 }
-            };
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to reveal artifact '{path}': {ex.Message}");
+            }
+        };
+
+        vm.RequestOpenArtifactsFolder = path =>
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                Directory.CreateDirectory(path);
+                var psi = new ProcessStartInfo
+                {
+                    FileName = OperatingSystem.IsWindows() ? "explorer" : OperatingSystem.IsMacOS() ? "open" : "xdg-open",
+                    UseShellExecute = true
+                };
+                psi.ArgumentList.Add(path);
+                _ = Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to open artifacts folder '{path}': {ex.Message}");
+            }
+        };
+        CaptureCallbacks(vm);
+    }
+
+    private bool OwnsCallbacks(long generation) =>
+        generation == _callbackGeneration && _ownsCallbacks?.Invoke() == true;
+
+    private void CaptureCallbacks(ChatViewModel vm)
+    {
+        var copy = vm.RequestCopyToClipboard;
+        var focus = vm.RequestInputFocus;
+        var context = vm.RequestContextFilePicker;
+        var export = vm.RequestConversationExportPath;
+        _ownsCallbacks = () => ReferenceEquals(_vm, vm) && vm.RequestCopyToClipboard == copy;
+        _releaseCallbacks = () =>
+        {
+            if (vm.RequestCopyToClipboard == copy) vm.RequestCopyToClipboard = null;
+            if (vm.RequestInputFocus == focus) vm.RequestInputFocus = null;
+            if (vm.RequestContextFilePicker == context) vm.RequestContextFilePicker = null;
+            if (vm.RequestConversationExportPath == export) vm.RequestConversationExportPath = null;
         };
     }
 
     private void ScheduleInputFocus()
     {
+        var generation = _callbackGeneration;
         Dispatcher.UIThread.Post(() =>
         {
-            if (_vm is not null && DataContext is ChatViewModel
+            if (OwnsCallbacks(generation)
                 && this.FindControl<TextBox>("InputBox") is { IsEnabled: true } input)
                 input.Focus();
         }, DispatcherPriority.Background);
@@ -340,16 +379,19 @@ public partial class ChatView : UserControl
     /// dictated phrase after typed text) don't run together with no separator.</summary>
     private void InsertDictatedTextAtCursor(string text)
     {
+        var generation = _callbackGeneration;
+        var vm = _vm;
         Dispatcher.UIThread.Post(() =>
         {
-            if (_vm is null || this.FindControl<TextBox>("InputBox") is not { } inputBox) return;
+            if (!OwnsCallbacks(generation) || vm is null
+                || this.FindControl<TextBox>("InputBox") is not { } inputBox) return;
 
-            var current = _vm.InputText;
+            var current = vm.InputText;
             var caret = Math.Clamp(inputBox.CaretIndex, 0, current.Length);
             var needsLeadingSpace = caret > 0 && !char.IsWhiteSpace(current[caret - 1]);
             var insertion = needsLeadingSpace ? " " + text : text;
 
-            _vm.InputText = current.Insert(caret, insertion);
+            vm.InputText = current.Insert(caret, insertion);
             inputBox.CaretIndex = caret + insertion.Length;
             inputBox.Focus();
         });
@@ -368,6 +410,9 @@ public partial class ChatView : UserControl
     private async void OnInputPastingFromClipboard(object? sender, RoutedEventArgs e)
     {
         if (_vm is null || sender is not TextBox textBox) return;
+        var vm = _vm;
+        var generation = _callbackGeneration;
+        if (!OwnsCallbacks(generation)) return;
         e.Handled = true;
 
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
@@ -377,12 +422,17 @@ public partial class ChatView : UserControl
         {
             if (await clipboard.TryGetBitmapAsync() is { } bitmap)
             {
+                if (!OwnsCallbacks(generation))
+                {
+                    bitmap.Dispose();
+                    return;
+                }
                 var tempPath = Path.Combine(Path.GetTempPath(), $"hermaeus-paste-{Guid.NewGuid():N}.png");
                 try
                 {
                     using (bitmap)
                         bitmap.Save(tempPath, PngBitmapEncoderOptions.Default);
-                    await _vm.AddContextFilesAsync([tempPath]);
+                    await vm.AddContextFilesAsync([tempPath]);
                 }
                 finally
                 {
@@ -397,7 +447,7 @@ public partial class ChatView : UserControl
         }
 
         var text = await clipboard.TryGetTextAsync();
-        if (!string.IsNullOrEmpty(text))
+        if (!string.IsNullOrEmpty(text) && OwnsCallbacks(generation))
             textBox.SelectedText = text;
     }
 

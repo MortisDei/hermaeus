@@ -6,6 +6,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Hermaeus.ViewModels;
 using System.Globalization;
 
@@ -22,6 +23,9 @@ public partial class RagView : UserControl
     private EventHandler<ScrollChangedEventArgs>? _scrollChangedHandler;
     private ScrollViewer? _contentScroller;
     private bool _pinnedToBottom = true;
+    private Action? _releaseCallbacks;
+    private Func<bool>? _ownsCallbacks;
+    private long _callbackGeneration;
 
     public RagView()
     {
@@ -29,38 +33,52 @@ public partial class RagView : UserControl
         if (this.FindControl<TextBox>("QuestionBox") is { } questionBox)
             questionBox.AddHandler(InputElement.KeyDownEvent, OnQuestionKeyDown, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
+        Loaded += (_, _) => WireViewModel();
+        Unloaded += (_, _) => UnwireViewModel();
+        DetachedFromVisualTree += (_, _) => UnwireViewModel();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        UnwireViewModel();
+        WireViewModel();
+    }
+
+    private void UnwireViewModel()
+    {
+        _callbackGeneration++;
         if (_vm is not null && _scrollHandler is not null)
             _vm.ScrollToBottom -= _scrollHandler;
         if (_contentScroller is not null && _scrollChangedHandler is not null)
             _contentScroller.ScrollChanged -= _scrollChangedHandler;
-        if (_vm is not null)
-        {
-            _vm.RequestCopyToClipboard = null;
-            _vm.RequestDeleteDatasetConfirmation = null;
-            _vm.RequestRemoveMissingSourcesConfirmation = null;
-            _vm.RequestConfirmWatchedRefresh = null;
-            _vm.RequestWatchedFolderPicker = null;
-        }
+        _releaseCallbacks?.Invoke();
+        _releaseCallbacks = null;
+        _ownsCallbacks = null;
 
-        _vm = DataContext as RagViewModel;
+        _vm = null;
         _scrollHandler = null;
         _scrollChangedHandler = null;
         _contentScroller = null;
         _pinnedToBottom = true;
+    }
+
+    private void WireViewModel()
+    {
+        if (!IsLoaded || !this.IsAttachedToVisualTree() || ReferenceEquals(_vm, DataContext)) return;
+        _vm = DataContext as RagViewModel;
         if (_vm is null)
         {
             return;
         }
+        var vm = _vm;
+        var generation = _callbackGeneration;
 
         _scrollHandler = (_, _) =>
         {
+            if (!OwnsCallbacks(generation)) return;
             _pinnedToBottom = true;
             Dispatcher.UIThread.Post(
-                () => SnapToBottomIfPinned(force: true),
+                () => { if (OwnsCallbacks(generation)) SnapToBottomIfPinned(force: true); },
                 DispatcherPriority.Background);
         };
         _vm.ScrollToBottom += _scrollHandler;
@@ -74,35 +92,36 @@ public partial class RagView : UserControl
 
         _vm.RequestCopyToClipboard = async text =>
         {
+            if (!OwnsCallbacks(generation)) return false;
             if (TopLevel.GetTopLevel(this)?.Clipboard is not { } cb)
                 return false;
-            try { await cb.SetTextAsync(text); return true; }
+            try { await cb.SetTextAsync(text); return OwnsCallbacks(generation); }
             catch { return false; }
         };
 
         _vm.RequestDeleteDatasetConfirmation = async item =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return false;
 
             var dialog = new DeleteDatasetDialog(item.Name, item.ChunkCount);
             var result = await dialog.ShowDialog<bool>(owner);
-            return result;
+            return result && OwnsCallbacks(generation);
         };
 
         _vm.RequestRemoveMissingSourcesConfirmation = async item =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return false;
 
             var dialog = new RemoveMissingSourcesDialog(item.Name, item.MissingSourcePaths);
             var result = await dialog.ShowDialog<bool>(owner);
-            return result;
+            return result && OwnsCallbacks(generation);
         };
 
         _vm.RequestConfirmWatchedRefresh = async (item, plan) =>
         {
-            if (TopLevel.GetTopLevel(this) is not Window owner)
+            if (!OwnsCallbacks(generation) || TopLevel.GetTopLevel(this) is not Window owner)
                 return false;
 
             var warning = plan.MissingIsOverHalf(item.SourceCount)
@@ -112,11 +131,12 @@ public partial class RagView : UserControl
                 "Refresh watched sources",
                 $"Ingest {plan.NewFiles.Count} new and {plan.ChangedFiles.Count} changed file(s) into '{item.Name}'? " +
                 $"{plan.MissingFiles.Count} missing file(s) are left untouched - remove them separately with \"Remove missing\" if intended.{warning}");
-            return await dialog.ShowDialog<bool>(owner);
+            return await dialog.ShowDialog<bool>(owner) && OwnsCallbacks(generation);
         };
 
         _vm.RequestWatchedFolderPicker = async () =>
         {
+            if (!OwnsCallbacks(generation)) return null;
             var top = TopLevel.GetTopLevel(this);
             if (top is null) return null;
 
@@ -125,7 +145,29 @@ public partial class RagView : UserControl
                 Title = "Choose folder to watch",
                 AllowMultiple = false
             });
-            return folders.Count > 0 ? folders[0].Path.LocalPath : null;
+            return folders.Count > 0 && OwnsCallbacks(generation) ? folders[0].Path.LocalPath : null;
+        };
+        CaptureCallbacks(vm);
+    }
+
+    private bool OwnsCallbacks(long generation) =>
+        generation == _callbackGeneration && _ownsCallbacks?.Invoke() == true;
+
+    private void CaptureCallbacks(RagViewModel vm)
+    {
+        var copy = vm.RequestCopyToClipboard;
+        var delete = vm.RequestDeleteDatasetConfirmation;
+        var remove = vm.RequestRemoveMissingSourcesConfirmation;
+        var refresh = vm.RequestConfirmWatchedRefresh;
+        var folder = vm.RequestWatchedFolderPicker;
+        _ownsCallbacks = () => ReferenceEquals(_vm, vm) && vm.RequestCopyToClipboard == copy;
+        _releaseCallbacks = () =>
+        {
+            if (vm.RequestCopyToClipboard == copy) vm.RequestCopyToClipboard = null;
+            if (vm.RequestDeleteDatasetConfirmation == delete) vm.RequestDeleteDatasetConfirmation = null;
+            if (vm.RequestRemoveMissingSourcesConfirmation == remove) vm.RequestRemoveMissingSourcesConfirmation = null;
+            if (vm.RequestConfirmWatchedRefresh == refresh) vm.RequestConfirmWatchedRefresh = null;
+            if (vm.RequestWatchedFolderPicker == folder) vm.RequestWatchedFolderPicker = null;
         };
     }
 
