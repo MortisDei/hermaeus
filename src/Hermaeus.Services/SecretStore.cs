@@ -521,6 +521,10 @@ public sealed class SecretStore : ISecretStore
         }
     }
 
+    internal static Task<CommandResult> RunOsSecretCommandAsync(
+        string file, string[] args, string? stdin, CancellationToken ct, TimeSpan? timeoutBudget = null) =>
+        CommandSecretBackend.RunAsync(file, args, stdin, ct, timeoutBudget);
+
     private abstract class CommandSecretBackend : ISecretBackend
     {
         public abstract string Label { get; }
@@ -528,8 +532,10 @@ public sealed class SecretStore : ISecretStore
         public abstract Task<bool> StoreAsync(string name, string secret, CancellationToken ct);
         public abstract Task<string> ResolveAsync(string name, CancellationToken ct);
 
-        protected static async Task<CommandResult> RunAsync(string file, string[] args, string? stdin, CancellationToken ct)
+        internal static async Task<CommandResult> RunAsync(string file, string[] args, string? stdin, CancellationToken ct,
+            TimeSpan? timeoutBudget = null)
         {
+            if (ct.IsCancellationRequested) return new CommandResult(false, false, string.Empty);
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -545,11 +551,19 @@ public sealed class SecretStore : ISecretStore
             foreach (var arg in args)
                 process.StartInfo.ArgumentList.Add(arg);
 
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(timeoutBudget ?? TimeSpan.FromSeconds(8));
+            Task<(string Text, bool Truncated)>? stdout = null;
+            Task? stderr = null;
+            var started = false;
             try
             {
                 if (!process.Start()) return new CommandResult(false, false, string.Empty);
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeout.CancelAfter(TimeSpan.FromSeconds(8));
+                started = true;
+                // Start both drains before writing. A keychain command may
+                // fill stderr before it consumes the supplied secret.
+                stdout = ReadSecretOutputAsync(process.StandardOutput, timeout);
+                stderr = DrainSecretErrorAsync(process.StandardError, timeout);
                 if (stdin is not null)
                 {
                     await process.StandardInput.WriteAsync(stdin.AsMemory(), timeout.Token);
@@ -557,20 +571,88 @@ public sealed class SecretStore : ISecretStore
                     process.StandardInput.Close();
                 }
 
-                var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+                await Task.WhenAll(stdout, stderr);
                 await process.WaitForExitAsync(timeout.Token);
-                return new CommandResult(true, process.ExitCode == 0, output);
+                return stdout.Result.Truncated
+                    ? new CommandResult(true, false, string.Empty)
+                    : new CommandResult(true, process.ExitCode == 0, stdout.Result.Text);
             }
             catch
             {
-                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-                catch { }
+                if (started)
+                    await StopSecretCommandAsync(process, timeout, stdout, stderr);
                 return new CommandResult(false, false, string.Empty);
+            }
+        }
+
+        private static async Task<(string Text, bool Truncated)> ReadSecretOutputAsync(
+            StreamReader reader, CancellationTokenSource cancellation)
+        {
+            const int limit = 64 * 1024;
+            var output = new StringBuilder();
+            var buffer = new char[4096];
+            var truncated = false;
+            try
+            {
+                int count;
+                while ((count = await reader.ReadAsync(buffer.AsMemory(), cancellation.Token)) > 0)
+                {
+                    var keep = Math.Min(count, limit - output.Length);
+                    output.Append(buffer, 0, keep);
+                    truncated |= keep < count;
+                }
+                return (output.ToString(), truncated);
+            }
+            catch
+            {
+                try { cancellation.Cancel(); }
+                catch (ObjectDisposedException) { }
+                throw;
+            }
+        }
+
+        private static async Task DrainSecretErrorAsync(StreamReader reader, CancellationTokenSource cancellation)
+        {
+            var buffer = new char[4096];
+            try
+            {
+                // Error output can contain credentials. Drain it without
+                // retaining it or forwarding it to logs or diagnostics.
+                while (await reader.ReadAsync(buffer.AsMemory(), cancellation.Token) > 0) { }
+            }
+            catch
+            {
+                try { cancellation.Cancel(); }
+                catch (ObjectDisposedException) { }
+                throw;
+            }
+        }
+
+        private static async Task StopSecretCommandAsync(
+            Process process, CancellationTokenSource readers, Task? stdout, Task? stderr)
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
+            {
+                Console.Error.WriteLine($"Secret command tree termination could not be confirmed ({ex.GetType().Name}).");
+            }
+            readers.Cancel();
+            var joined = Task.WhenAll(new[] { stdout, stderr }.OfType<Task>().Append(process.WaitForExitAsync()));
+            try { await joined.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (OperationCanceledException) when (joined.IsCanceled) { }
+            catch (Exception ex) when (ex is TimeoutException or IOException or ObjectDisposedException or DecoderFallbackException
+                or InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
+            {
+                // Only fixed reason/type information is emitted. Never
+                // include exception messages, arguments or captured text.
+                Console.Error.WriteLine($"Secret command root or output cleanup could not be confirmed ({ex.GetType().Name}).");
+                _ = joined.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
         }
     }
 
-    private sealed record CommandResult(bool Started, bool Success, string Output);
+    internal sealed record CommandResult(bool Started, bool Success, string Output);
 
     private sealed class WindowsCredentialBackend : ISecretBackend
     {

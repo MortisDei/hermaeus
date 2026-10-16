@@ -9,6 +9,13 @@ default, and never persist audio beyond the moment they need it.
 
 ## Voice Architecture and Providers
 
+Voice setup/process commands drain stdout and stderr concurrently and retain
+bounded diagnostic tails. A truncated capture is explicitly unsuccessful,
+even with exit code zero, so partial protocol output is not accepted as proof
+of setup or synthesis success. Setup progress delivery and visible log retention
+are also bounded. Cancellation attempts tree termination and separately bounded
+asynchronous cleanup; root exit is not proof of complete descendant containment.
+
 Hermaeus uses a pluggable voice layer managed by `TtsSettingsViewModel`.
 Settings bind through `Tts.*` so provider state stays isolated and easier to
 test.

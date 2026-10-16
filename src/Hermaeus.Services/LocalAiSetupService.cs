@@ -1014,7 +1014,7 @@ for check_name, passed in checks:
         return new LocalAiSetupResult(true, $"Folder ready at {target}", target);
     }
 
-    private static async Task<LocalAiSetupResult> RunProcessAsync(
+    internal static async Task<LocalAiSetupResult> RunProcessAsync(
         string fileName,
         IReadOnlyList<string> args,
         string workingDirectory,
@@ -1023,6 +1023,9 @@ for check_name, passed in checks:
     {
         var log = new StringBuilder();
         log.AppendLine($"Command: {fileName} {string.Join(" ", args.Select(QuoteIfNeeded))}");
+        var truncatedHeader = log.Length > 128 * 1024;
+        if (truncatedHeader) log.Remove(0, log.Length - 128 * 1024);
+        ct.ThrowIfCancellationRequested();
 
         var psi = new ProcessStartInfo
         {
@@ -1036,39 +1039,116 @@ for check_name, passed in checks:
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
-        using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, e) => AppendLine(e.Data, log, progress);
-        process.ErrorDataReceived += (_, e) => AppendLine(e.Data, log, progress);
+        using var process = new Process { StartInfo = psi };
 
         if (!process.Start())
             return new LocalAiSetupResult(false, $"Failed to start {fileName}.");
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        using var readers = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var progressGate = new object();
+        var progressRemaining = 128 * 1024;
+        var progressTruncated = false;
+        void ReportProgress(string fragment)
+        {
+            if (progress is null) return;
+            lock (progressGate)
+            {
+                var count = Math.Min(fragment.Length, progressRemaining);
+                if (count > 0) progress.Report(fragment[..count]);
+                progressRemaining -= count;
+                if (count < fragment.Length && !progressTruncated)
+                {
+                    progressTruncated = true;
+                    progress.Report("[progress output truncated; final diagnostics will be retained]");
+                }
+            }
+        }
+        var stdout = ReadSetupOutputAsync(process.StandardOutput, readers, ReportProgress);
+        var stderr = ReadSetupOutputAsync(process.StandardError, readers, ReportProgress);
         try
         {
-            await process.WaitForExitAsync(ct);
+            await Task.WhenAll(stdout, stderr, process.WaitForExitAsync(readers.Token));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
-            TryKill(process);
+            var cleanup = await StopSetupProcessAsync(process, readers, stdout, stderr);
+            if (cleanup.Length > 0)
+                throw new OperationCanceledException(cleanup, ex, ct);
             throw;
         }
+        catch (Exception ex)
+        {
+            var cleanup = await StopSetupProcessAsync(process, readers, stdout, stderr);
+            log.AppendLine($"Output capture failed ({ex.GetType().Name}). {cleanup}");
+            return new LocalAiSetupResult(false, CompleteSetupLog(log, string.Empty, string.Empty, true).Text);
+        }
 
-        return new LocalAiSetupResult(process.ExitCode == 0, log.ToString());
+        var completed = CompleteSetupLog(log, stdout.Result.Text, stderr.Result.Text,
+            truncatedHeader || stdout.Result.Truncated || stderr.Result.Truncated);
+        return new LocalAiSetupResult(process.ExitCode == 0 && !completed.Truncated, completed.Text);
     }
 
-    private static void TryKill(Process process)
+    private static async Task<(string Text, bool Truncated)> ReadSetupOutputAsync(
+        StreamReader reader, CancellationTokenSource cancellation, Action<string> progress)
     {
+        const int limit = 64 * 1024;
+        var text = new StringBuilder();
+        var buffer = new char[4096];
+        var truncated = false;
         try
         {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
+            int count;
+            while ((count = await reader.ReadAsync(buffer.AsMemory(), cancellation.Token)) > 0)
+            {
+                text.Append(buffer, 0, count);
+                if (text.Length > limit)
+                {
+                    text.Remove(0, text.Length - limit);
+                    truncated = true;
+                }
+                progress(new string(buffer, 0, count));
+            }
+            return (text.ToString(), truncated);
         }
         catch
         {
-            // Best-effort cleanup after cancellation.
+            try { cancellation.Cancel(); }
+            catch (ObjectDisposedException) { }
+            throw;
         }
+    }
+
+    private static (string Text, bool Truncated) CompleteSetupLog(StringBuilder log, string stdout, string stderr, bool truncated)
+    {
+        const int limit = 128 * 1024;
+        const string notice = "[output truncated; final diagnostics retained; protocol incomplete]\n";
+        log.Append(stdout).AppendLine().Append(stderr);
+        truncated |= log.Length > limit;
+        var keep = truncated ? limit - notice.Length : limit;
+        if (log.Length > keep) log.Remove(0, log.Length - keep);
+        if (truncated) log.Insert(0, notice);
+        return (log.ToString(), truncated);
+    }
+
+    private static async Task<string> StopSetupProcessAsync(Process process, CancellationTokenSource readers, Task stdout, Task stderr)
+    {
+        var errors = new List<string>();
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
+        {
+            errors.Add($"Setup process tree termination could not be confirmed ({ex.GetType().Name}).");
+        }
+        readers.Cancel();
+        var joined = Task.WhenAll(stdout, stderr, process.WaitForExitAsync());
+        try { await joined.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (OperationCanceledException) when (joined.IsCanceled) { }
+        catch (Exception ex)
+        {
+            errors.Add($"Setup process root or output cleanup could not be confirmed ({ex.GetType().Name}).");
+            _ = joined.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        return string.Join(" ", errors);
     }
 
     private static void TryDeleteFile(string path)
@@ -1081,14 +1161,6 @@ for check_name, passed in checks:
         catch
         {
         }
-    }
-
-    private static void AppendLine(string? line, StringBuilder log, IProgress<string>? progress)
-    {
-        if (string.IsNullOrWhiteSpace(line)) return;
-        lock (log)
-            log.AppendLine(line);
-        progress?.Report(line);
     }
 
     private static string PythonPathForVenv(string venv) =>

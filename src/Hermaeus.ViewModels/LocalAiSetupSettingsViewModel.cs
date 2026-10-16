@@ -139,9 +139,9 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
         LocalAiSetupLog = $"Approved: {action.Title}{Environment.NewLine}{action.CommandPreviewText}{Environment.NewLine}";
         try
         {
-            var progress = new Progress<string>(line => LocalAiSetupLog += line + Environment.NewLine);
+            var progress = new Progress<string>(line => AppendSetupLog(line + Environment.NewLine));
             var result = await _localAiSetup.RunActionAsync(action, _settings.Settings, allowOverwrite: false, progress: progress);
-            LocalAiSetupLog += result.Log;
+            AppendSetupLog(result.Log);
             if (!result.Success)
             {
                 _toasts.Show("Setup action stopped", result.Log, ToastKind.Warning, 7000);
@@ -163,6 +163,20 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
         {
             LocalAiSetupBusy = false;
         }
+    }
+
+    internal void AppendSetupLog(string text)
+    {
+        const int limit = 128 * 1024;
+        const string notice = "[setup log truncated; final diagnostics retained]\n";
+        var existing = LocalAiSetupLog;
+        if (existing.StartsWith(notice, StringComparison.Ordinal)) existing = existing[notice.Length..];
+        var truncated = existing.Length + text.Length > limit || LocalAiSetupLog.StartsWith(notice, StringComparison.Ordinal);
+        var keep = truncated ? limit - notice.Length : limit;
+        var retainedText = text.Length > keep ? text[^keep..] : text;
+        var remaining = keep - retainedText.Length;
+        LocalAiSetupLog = (truncated ? notice : string.Empty)
+            + (existing.Length > remaining ? existing[^remaining..] : existing) + retainedText;
     }
 
     [RelayCommand]
