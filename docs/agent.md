@@ -643,6 +643,20 @@ the model sees next step that only the first one ran.
   auto-execute for the rest of that task; a different command - even in the
   same family - still requires its own approval, and the memory never
   survives past the task.
+
+  Command capture drains both streams concurrently into bounded tails (128 Ki
+  characters per stream), retaining final diagnostics even for a single giant
+  line. Displayed output is further shortened to fit the tool result. The
+  five-minute command deadline includes waiting for output completion; Git
+  inspection uses three seconds. Cancellation, timeout and capture failure
+  attempt process-tree termination and separately bounded asynchronous cleanup.
+  They remain distinct outcomes, and an observed cleanup exit code does not
+  become a completed command's structured exit code.
+
+  Tree termination is best effort. Waiting for the root process does not prove
+  every descendant exited, and this does not introduce a per-command Windows
+  Job Object or Linux process-group/session containment boundary. Cleanup
+  uncertainty is reported rather than presented as guaranteed termination.
 - MCP tools (Settings > MCP Servers): each configured server's declared
   tools are exposed to the agent as `mcp:{serverId}:{toolName}`. A server can
   optionally be restricted to an explicit allowed-tools list (comma
@@ -955,6 +969,13 @@ What Rewind explicitly does not do:
 - No auto-rewind on task failure. Rewind is always a user action.
 
 ## Workspace Boundary Rules
+
+Owner editor saves use the same in-process per-target command owner as Agent
+apply and Rewind. A save captures its target, content and expected revision
+before waiting; a competing committed revision produces a conflict. Navigation
+does not apply a late save result to another editor, and text changed while a
+save waits remains unsaved. This coordination does not lock out external editors
+or eliminate same-user filesystem replacement races.
 
 All file operations are constrained to the selected workspace root. The workbench
 normalises paths before access and refuses to follow symlinks or relative paths

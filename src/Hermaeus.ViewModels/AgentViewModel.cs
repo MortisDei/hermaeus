@@ -602,6 +602,7 @@ public partial class AgentViewModel : ViewModelBase
     private readonly IWorkspaceActivationService _workspaceActivation;
     private readonly IWorkspaceManifestStore _workspaceManifests;
     private readonly AgentPatchReviewService _patchReview;
+    private readonly IAgentTaskCommandOwner _commandOwner;
     private readonly ISettingsService? _settings;
     private readonly ILessonStore? _lessons;
     private readonly IVoiceOrchestrator? _voice;
@@ -1036,7 +1037,8 @@ public partial class AgentViewModel : ViewModelBase
         _voice = voice;
         _audioFeedback = audioFeedback;
         ScenarioSuite = scenarioSuite;
-        _patchReview = new AgentPatchReviewService(workspaceTools, store, workspaceManifests, commandOwner);
+        _commandOwner = commandOwner ?? new AgentTaskCommandOwner();
+        _patchReview = new AgentPatchReviewService(workspaceTools, store, workspaceManifests, _commandOwner);
         // r12 03-runtime-vm-correctness.md 3.5: defaulting to the whole user
         // profile meant every startup (and every Agent panel navigation)
         // silently enumerated and analyzed it, writing a "Workspace profile"
@@ -2247,12 +2249,18 @@ public partial class AgentViewModel : ViewModelBase
         if (SelectedWorkspaceFile is null || !WorkspaceEditorDirty)
             return;
 
+        var generation = _workspaceFileSelectionGeneration;
+        var relativePath = SelectedWorkspaceFile.RelativePath;
+        var options = BuildOptions();
+        var content = DraftProposedContent ?? string.Empty;
+        var expectedHash = _workspaceFileRevisionHash;
+        var expectedExisted = _workspaceFileRevisionExisted;
         try
         {
-            var relativePath = SelectedWorkspaceFile.RelativePath;
-            var result = await _workspaceTools.SaveOwnerFileAsync(
-                BuildOptions(), relativePath, DraftProposedContent ?? string.Empty,
-                _workspaceFileRevisionHash, _workspaceFileRevisionExisted);
+            var result = await _commandOwner.ExecuteTargetAsync(options.WorkspaceRoot, relativePath,
+                token => _workspaceTools.SaveOwnerFileAsync(options, relativePath, content,
+                    expectedHash, expectedExisted, token));
+            if (generation != _workspaceFileSelectionGeneration) return;
             if (result.Conflict)
             {
                 WorkspaceEditorStatus = "Conflict. Reload before saving.";
@@ -2263,14 +2271,16 @@ public partial class AgentViewModel : ViewModelBase
             WorkspaceFilePreview = result.Content;
             _workspaceFileRevisionHash = result.ContentSha256;
             _workspaceFileRevisionExisted = true;
-            WorkspaceEditorDirty = false;
-            WorkspaceEditorStatus = result.Changed ? "Saved directly by the owner." : "No changes to save.";
+            WorkspaceEditorDirty = !string.Equals(DraftProposedContent, result.Content, StringComparison.Ordinal);
+            WorkspaceEditorStatus = WorkspaceEditorDirty ? "Saved; newer editor changes remain unsaved."
+                : result.Changed ? "Saved directly by the owner." : "No changes to save.";
             StatusMessage = result.Message;
             IsError = false;
             await RefreshWorkspaceFilesAsync();
         }
         catch (Exception ex)
         {
+            if (generation != _workspaceFileSelectionGeneration) return;
             WorkspaceEditorStatus = "Save failed.";
             SetError($"Could not save the workspace file: {ex.Message}");
         }
