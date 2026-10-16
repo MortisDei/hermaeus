@@ -1,8 +1,11 @@
 # 12. Planning validation and release gates
 
-## Planning completion receipt
+## Initial planning completion receipt
 
 Date: 2026-10-16. Planning baseline and branch are in [01](01-current-state-and-evidence.md).
+This receipt describes the original planning commit `01efd40`, before approved
+implementation. Current results and owner decisions are recorded in
+[13](13-execution-and-evidence.md); they do not rewrite this historical receipt.
 This pack creates no R34 executable behaviour, tests, dependency, configuration,
 schema, version, CI policy or repository setting. Current-reference prose
 corrections document existing source; historical R33 packs are preserved.

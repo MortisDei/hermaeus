@@ -9,6 +9,34 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [Unreleased]
+
+### Changed
+
+- Owner workspace saves now share Agent apply/Rewind target coordination,
+  refuse a stale revision after waiting, and preserve newer unsaved editor text.
+- Agent commands retain bounded output tails; Git status retains its bounded
+  beginning to preserve existing ordering. Both
+  distinguish cancellation, timeout and capture failure. Cleanup reports
+  observed process exit separately from unconfirmed descendant containment;
+  approved command recipes are not an operating-system sandbox.
+- RAG enforces the existing 2 MiB web-body limit while reading. Ingestion also
+  limits local source bytes to 512 MiB, extracted content to 16 Mi characters,
+  PDFs to 2,000 pages, and accounted candidate text/vector staging to 256 MiB.
+  Exceeding a limit refuses the candidate rather than publishing truncated
+  content. These budgets do not bound PDF parser memory or execution time.
+- Native pages release only their own callbacks when detached or rebound and
+  reconnect on return. Obsolete views cannot clear replacement callbacks or
+  accept stale confirmation results. Services also releases removed server
+  pickers; Settings stops obsolete appearance previews; Chat avoids duplicated
+  dictation and discards queued input aimed at a replaced page context.
+- Benchmark initial-load failures remain visible and retry on re-entry,
+  including partial failures. Context replacement loads the current page context;
+  overlapping initial loads still share the existing ViewModel operation.
+- Windows and Linux package scripts now deliver the third-party inventory and
+  standalone CMU dictionary licence in `docs/`. Complete notice delivery and
+  unresolved asset redistribution terms remain release gates.
+
 ## [0.41.0-beta] - 2026-10-08
 
 ### Changed

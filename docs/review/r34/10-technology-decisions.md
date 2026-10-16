@@ -50,9 +50,10 @@ already completed. All claimed hardware benefits are Unknown.
 - **S1:** investigate Windows Job Objects and Linux process groups/sessions,
   including start/assignment races, inherited descendants and escape. Tree-kill
   is not guaranteed containment. No new security boundary is approved.
-- **S2:** proposed local/extraction/cumulative budgets remain proposals until
-  representative legitimate workloads are recorded, limits frozen and the owner
-  explicitly approves user-visible changes. Preserve the existing web limit.
+- **S2:** owner-approved ceilings are 512 MiB local source, 16 Mi extracted
+  characters, 2,000 PDF pages and 256 MiB candidate text/vector payload, following
+  legitimate PDF measurements in [13](13-execution-and-evidence.md). Preserve
+  the existing web limit; further user-visible limit changes need approval.
 - **S3/T31:** isolate migration and commit; retain the current persisted format
   until owner approval of exact format, atomic failure/recovery and downgrade
   behaviour. Document technical irreversibility rather than promising rollback.

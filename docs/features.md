@@ -79,8 +79,9 @@ for Knowledge behavior in Chat.
   refused instead of silently becoming CPU.
   Update identity uses the verified upstream b-numbered release tag and
   SHA256-checked archive, with `--version` output captured from both stdout and
-  stderr. The version probe has a bounded 15-second budget and records elapsed
-  time in timeout diagnostics. Help text or a zero exit code alone never proves
+  stderr. The version probe has a 15-second execution deadline, followed by
+  separately bounded asynchronous cleanup, and records elapsed time in timeout
+  diagnostics. Help text or a zero exit code alone never proves
   build identity.
   Known upstream archive wrapper directories are removed at the owned version
   boundary, while flat upstream packages are accepted as well; mixed layouts
@@ -167,6 +168,11 @@ and the [llama.cpp reference](llama-cpp-features.md) for operational details.
 
 - Structure-aware ingest supports Markdown, code, text, and digital PDFs, with
   heading, symbol, page, and log-aware chunk metadata.
+- Ingest refuses local sources above 512 MiB, extracted text above 16 Mi
+  characters, PDFs above 2,000 pages and candidate text/vector payload above
+  256 MiB. The existing 2 MiB web-body cap is enforced during streaming.
+  Refusal preserves the previous generation; these limits do not bound parser
+  memory or wall time. See [Ingest resource limits](rag.md#ingest-resource-limits).
 - Retrieval combines planned query variants, keyword search, embeddings,
   optional ONNX reranking, structural boosts, confidence-aware refusal, and
   budget-aware context packing.
@@ -441,6 +447,11 @@ process-bound telemetry identity separate. A completed run with unverified or
 mismatched evidence remains visible but is excluded from rankings and Insights
 until rerun with verified evidence.
 
+Initial Benchmark load failures remain visible and retry when the page is
+re-entered, including failures after only part of the data loaded. Replacing
+the page context loads that context; overlapping initial requests share the
+same ViewModel load rather than duplicating it.
+
 Benchmark resource readings distinguish process RAM, device totals, and honest
 per-process `Unknown` values. Lab owns controlled configuration experiments;
 Benchmarks own reusable suites and run comparisons. When runtime authority is
@@ -500,6 +511,12 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 
 ## System, Logs, Activity, and Settings
 
+- Native pages reconnect their pickers, confirmations and view subscriptions
+  on return. Detached or replaced pages release only callbacks they still own;
+  they cannot erase a newer page's callbacks or accept obsolete confirmation
+  results. Settings appearance previews follow the active page, and Services
+  releases file pickers for removed server cards. Chat dictation delivers once
+  to the active input without disposing the shared mic when navigating away.
 - A second normal launch exits immediately when the existing per-user file
   lock is held, after requesting restoration of the existing window over the
   same-user, activation-only channel. It does not compose another service

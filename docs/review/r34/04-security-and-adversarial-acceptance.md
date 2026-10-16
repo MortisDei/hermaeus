@@ -66,11 +66,12 @@ Use bounded streams with content-length preflight as an optimisation, never as
 the enforcement boundary. Read at most limit plus one byte; enforce actual
 decoded/extracted output and cumulative work, including absent/false length,
 compressed/chunked responses, file growth after stat and huge PDF text.
-Reuse the existing 2 MiB web limit. For local input, propose turning the current
-50 MiB warning threshold into a pre-read default refusal, with a separately
-bounded decoded/extracted character and PDF-page budget. Freeze those exact
-limits and any explicit override policy in B0/S2 before code; no silent
-truncation, arbitrary default expansion or new settings section.
+Reuse the existing 2 MiB web limit. The owner-approved local policy is 512 MiB
+source bytes, 16 Mi extracted characters, 2,000 PDF pages and 256 MiB candidate
+text/vector payload per operation. Legitimate PDF measurements and approval are
+recorded in [13](13-execution-and-evidence.md); they supersede the initial 50 MiB
+proposal. Further limit changes require owner approval; no silent truncation,
+arbitrary default expansion or new settings section.
 
 PdfPig opens/parses synchronously and checks cancellation between pages
 (`PdfTextExtractor.ExtractAsync`). A cancellation token or `Task.Run` cannot

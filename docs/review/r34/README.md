@@ -27,6 +27,7 @@ all publication. Small verified local implementation commits are authorised; pub
 | [11-dependency-roadmap.md](11-dependency-roadmap.md) | Authoritative implementation packages, dependencies and acceptance |
 | [12-planning-validation-and-release-gates.md](12-planning-validation-and-release-gates.md) | Planning checks, release blockers, conditional/deferred gates |
 | [13-execution-and-evidence.md](13-execution-and-evidence.md) | Actual implementation baseline, results and remaining gates |
+| [14-vault-format-decision.md](14-vault-format-decision.md) | Conditionally approved S3 format/recovery contract; production activation remains gated |
 
 ## Evidence vocabulary
 

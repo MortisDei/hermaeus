@@ -292,6 +292,11 @@ is unchanged. Selecting a different model applies its sampling defaults.
 Editing the draft or context replaces the previous reported count with a
 labelled estimate for the next request.
 
+Changing pages does not cancel an active Chat response. Returning reconnects
+the input, dictation and attachment controls; detached inputs do not receive
+dictation or pending input intended for a previous page context. Use **Stop**
+to cancel generation.
+
 The compact **Quick Chat** surface sends with Enter or Ctrl+Enter; use
 Shift+Enter for a newline. It shows a Processing indicator while the request is
 active.
@@ -346,6 +351,12 @@ while ordinary retrieval uses only the current complete generation. A cancelled
 or failed ingest leaves the prior generation in place. Removing missing sources
 requires separate confirmation and publishes a replacement generation rather
 than deleting live rows mid-ingest.
+
+Ingest refuses documents above 512 MiB of local source bytes, 16 Mi extracted
+characters or 2,000 PDF pages, and candidates above 256 MiB of accounted chunk
+text/vector payload. Web responses retain a 2 MiB limit. A refusal preserves
+the previous generation. These limits do not guarantee a hard parser timeout
+or whole-process memory ceiling; see [RAG limits](rag.md#ingest-resource-limits).
 
 The RAG workspace separates **Ask**, **Manage**, **Sources**, and
 **Diagnostics**. Use **Manage** for persistent dataset administration,
@@ -594,6 +605,10 @@ benchmark evidence disagree. It is review-only: **Dismiss** suppresses that
 identical proposal, and **Open Models** takes you to the model page. It never
 changes the selected model.
 
+If Benchmarks cannot finish its initial load, its status shows the error.
+Leave the page and return to retry, including when some suites or models
+appeared before the failure. Successful initial loads are reused.
+
 Managed server GPU placement is edited as CPU, Auto, All, or Exact. The setting
 is a request, not a claim about effective runtime placement. Auto is available
 only when the selected runtime proves both automatic placement and fit support;
@@ -702,6 +717,11 @@ Do not edit SQLite files while Hermaeus is running. Do not repair missing AI
 assets by copying unverified binaries over a managed installation.
 
 ## Settings, privacy, and backup
+
+Page pickers and confirmations reconnect when you return. A confirmation
+belongs to the page that opened it: if that page is replaced while the dialog
+is open, repeat the action from the current page rather than relying on the
+old confirmation. Settings font and theme previews follow the active page.
 
 Default settings live at `%LOCALAPPDATA%\Hermaeus\settings.json` on Windows and
 `~/.local/share/Hermaeus/settings.json` on Linux. Data Root may point elsewhere.

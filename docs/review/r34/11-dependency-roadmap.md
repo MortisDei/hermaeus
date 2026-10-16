@@ -1,6 +1,6 @@
 # 11. Dependency-ordered implementation roadmap
 
-**Planning only. No package is implemented by this change.** IDs below own
+**Approved roadmap; execution receipts are in [13](13-execution-and-evidence.md).** IDs below own
 implementation scope and prerequisites. Domain documents specify detailed
 contracts and cases; this roadmap resolves scheduling and exit authority.
 
@@ -146,16 +146,15 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
 - **Scope:** streaming web cap, local pre-read/actual-read limits, PDF extracted
   work and cumulative generation limits; same bounded paths for dry-run,
   manual/web/watch/help. No crawler/OCR/general parser rewrite.
-- **Proposed policy for owner review:** retain 2 MiB web body; default 50 MiB
+- **Owner-approved policy:** retain 2 MiB web body; default 512 MiB
   local source bytes, 16 Mi characters extracted per document, 2,000 PDF pages,
   256 MiB cumulative retained text/vector staging budget per operation. Account
   bytes before adding batches. Refuse with a factual report rather than silently
-  truncating. These are proposed safety ceilings, not measured optimal values;
-  S2 must freeze them against representative legitimate text/source/PDF and
-  multi-document workloads, record acceptance/rejection and peak resource evidence,
-  then obtain explicit owner approval before changing any user-visible limit.
-  Enforcing the existing web accepted-size limit while streaming can proceed
-  independently; proposed local/extraction/cumulative limits are not authorised.
+  truncating. The owner supplied three legitimate PDFs and explicitly approved
+  these revised ceilings after measurement; [13](13-execution-and-evidence.md)
+  records the workload and approval. The original 50 MiB proposal is superseded.
+  These are safety ceilings, not optimal values or a hard parser/RSS bound.
+  Further user-visible limit changes require owner approval.
 - **Acceptance:** false/no length, growing file, compressed/chunked body and
   expanded PDF cannot exceed enforced accumulation limits unnoticed; cancel
   disposes streams and leaves old published generation visible. Parser-internal
