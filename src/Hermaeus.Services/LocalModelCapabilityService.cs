@@ -389,7 +389,8 @@ public sealed class LocalModelCapabilityService
     {
         var cached = await TryGetCachedAsync(modelPath, executablePath, ct);
         var gguf = await Task.Run(() => GgufMetadataReader.TryRead(modelPath), ct);
-        var help = await ReadHelpAsync(executablePath, ct);
+        var help = await ReadHelpAsync(executablePath, ct, diagnostic =>
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, diagnostic)));
         if (help is null && string.IsNullOrWhiteSpace(propsJson) && cached is not null)
             return new LocalModelCapabilityProbe(cached, [],
                 new CapabilityCacheWriteResult(CapabilityCachePath, CapabilityCacheWriteState.NotAttempted));
@@ -478,48 +479,116 @@ public sealed class LocalModelCapabilityService
         }
     }
 
-    private static async Task<string?> ReadHelpAsync(string configuredPath, CancellationToken ct)
+    private static async Task<string?> ReadHelpAsync(string configuredPath, CancellationToken ct,
+        Action<string>? cleanupDiagnostic = null)
     {
         var resolution = ExecutableResolver.Resolve(configuredPath, "llama-server");
         if (!resolution.Success || string.IsNullOrWhiteSpace(resolution.Path))
             return null;
 
+        return await RunHelpCommandAsync(resolution.Path, ["--help"], ct, cleanupDiagnostic: cleanupDiagnostic);
+    }
+
+    internal static async Task<string?> RunHelpCommandAsync(string executable, IReadOnlyList<string> arguments,
+        CancellationToken ct, TimeSpan? timeoutBudget = null, Action<string>? cleanupDiagnostic = null)
+    {
+        if (ct.IsCancellationRequested) return null;
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = executable, UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            }
+        };
+        foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(timeoutBudget ?? TimeSpan.FromSeconds(5));
+        Task<(string Text, bool Truncated)>? stdout = null;
+        Task<(string Text, bool Truncated)>? stderr = null;
+        var started = false;
         try
         {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = resolution.Path,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-            process.StartInfo.ArgumentList.Add("--help");
-            if (!process.Start())
-                return null;
-
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(5));
-            try
-            {
-                var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
-                var error = await process.StandardError.ReadToEndAsync(timeout.Token);
-                await process.WaitForExitAsync(timeout.Token);
-                return output + Environment.NewLine + error;
-            }
-            catch (OperationCanceledException)
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                return null;
-            }
+            if (!process.Start()) return null;
+            started = true;
+            stdout = ReadHelpOutputAsync(process.StandardOutput, timeout.Token);
+            stderr = ReadHelpOutputAsync(process.StandardError, timeout.Token);
+            await Task.WhenAll(stdout, stderr);
+            await process.WaitForExitAsync(timeout.Token);
+            // An incomplete help document must not become authoritative
+            // positive/negative runtime capability evidence.
+            return stdout.Result.Truncated || stderr.Result.Truncated ? null
+                : stdout.Result.Text + Environment.NewLine + stderr.Result.Text;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException
+            or System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
         {
             return null;
         }
+        finally
+        {
+            if (started)
+            {
+                timeout.Cancel();
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
+                {
+                    // No help evidence is returned unless the command and
+                    // readers completed. Tree termination remains best effort.
+                    ReportHelpCleanup($"Help probe tree termination could not be confirmed ({ex.GetType().Name}).", cleanupDiagnostic);
+                }
+                var cleanup = Task.WhenAll(new[] { stdout, stderr }.OfType<Task>().Append(process.WaitForExitAsync()));
+                try { await cleanup.WaitAsync(TimeSpan.FromSeconds(2)); }
+                catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or IOException)
+                {
+                    if (ex is not OperationCanceledException || !cleanup.IsCanceled)
+                        ReportHelpCleanup($"Help probe root or output cleanup could not be confirmed ({ex.GetType().Name}).", cleanupDiagnostic);
+                    _ = cleanup.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                }
+            }
+        }
+    }
+
+    private static void ReportHelpCleanup(string diagnostic, Action<string>? report)
+    {
+        try
+        {
+            if (report is not null)
+                report(diagnostic);
+            else
+                Console.Error.WriteLine(diagnostic);
+        }
+        catch (Exception ex)
+        {
+            // A diagnostic owner must not interrupt root/reader cleanup.
+            // Never forward its exception message, which may contain paths.
+            try
+            {
+                Console.Error.WriteLine($"{diagnostic} Help probe diagnostic delivery failed ({ex.GetType().Name}).");
+            }
+            catch (Exception fallbackFailure) when (fallbackFailure is IOException or ObjectDisposedException)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    $"{diagnostic} Help probe diagnostic delivery failed ({fallbackFailure.GetType().Name}).");
+            }
+        }
+    }
+
+    private static async Task<(string Text, bool Truncated)> ReadHelpOutputAsync(StreamReader reader, CancellationToken ct)
+    {
+        const int limit = 128 * 1024;
+        var output = new System.Text.StringBuilder();
+        var buffer = new char[4096];
+        var truncated = false;
+        int count;
+        while ((count = await reader.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            var keep = Math.Min(count, limit - output.Length);
+            output.Append(buffer, 0, keep);
+            truncated |= keep < count;
+        }
+        return (output.ToString(), truncated);
     }
 
     private async Task SaveCacheAsync(

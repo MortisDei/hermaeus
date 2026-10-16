@@ -822,6 +822,7 @@ public sealed partial class DoctorService
         TimeSpan timeoutBudget,
         CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         using var process = new Process
         {
@@ -837,51 +838,80 @@ public sealed partial class DoctorService
         foreach (var argument in arguments)
             process.StartInfo.ArgumentList.Add(argument);
 
+        Task<string>? stdoutTask = null;
+        Task<string>? stderrTask = null;
+        var started = false;
         try
         {
             if (!process.Start())
                 return new LlamaCommandResult(false, null, string.Empty, string.Empty, "The operating system refused to start the executable.", elapsed.ElapsedMilliseconds);
+            started = true;
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(timeoutBudget);
-            var stdoutTask = ReadBoundedAsync(process.StandardOutput, timeout.Token);
-            var stderrTask = ReadBoundedAsync(process.StandardError, timeout.Token);
+            stdoutTask = ReadBoundedAsync(process.StandardOutput, timeout.Token);
+            stderrTask = ReadBoundedAsync(process.StandardError, timeout.Token);
             await Task.WhenAll(stdoutTask, stderrTask);
             await process.WaitForExitAsync(timeout.Token);
             return new LlamaCommandResult(true, process.ExitCode, stdoutTask.Result, stderrTask.Result, string.Empty, elapsed.ElapsedMilliseconds);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
+            var cleanupError = await StopVersionProbeAsync(process, stdoutTask, stderrTask);
+            if (cleanupError.Length > 0)
+                throw new OperationCanceledException($"The executable probe was cancelled. {cleanupError}", ex, ct);
             throw;
         }
         catch (OperationCanceledException)
         {
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-            }
-
+            var cleanupError = await StopVersionProbeAsync(process, stdoutTask, stderrTask);
             return new LlamaCommandResult(true, null, string.Empty, string.Empty,
-                $"The executable probe timed out after {elapsed.ElapsedMilliseconds} ms (budget {timeoutBudget.TotalSeconds:0.###} seconds).",
+                $"The executable probe timed out after {elapsed.ElapsedMilliseconds} ms (budget {timeoutBudget.TotalSeconds:0.###} seconds). {cleanupError}".TrimEnd(),
                 elapsed.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-            }
-
-            return new LlamaCommandResult(false, null, string.Empty, string.Empty, ex.Message, elapsed.ElapsedMilliseconds);
+            var cleanupError = started ? await StopVersionProbeAsync(process, stdoutTask, stderrTask) : string.Empty;
+            return new LlamaCommandResult(false, null, string.Empty, string.Empty,
+                $"{ex.Message} {cleanupError}".TrimEnd(), elapsed.ElapsedMilliseconds);
         }
+    }
+
+    private static async Task<string> StopVersionProbeAsync(Process process, Task? stdout, Task? stderr)
+    {
+        var errors = new List<string>();
+        try
+        {
+            // Tree termination is best effort. Root exit does not establish
+            // that escaped or inaccessible descendants have been stopped.
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
+        {
+            errors.Add($"Probe termination failed: {ex.Message}");
+        }
+
+        using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try { await process.WaitForExitAsync(cleanup.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            errors.Add($"Probe root exit could not be confirmed: {ex.Message}");
+        }
+
+        var readers = new[] { stdout, stderr }.OfType<Task>().ToArray();
+        var joined = Task.WhenAll(readers);
+        try { await joined.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (OperationCanceledException) when (joined.IsCanceled) { }
+        catch (Exception ex) when (ex is TimeoutException or IOException or ObjectDisposedException)
+        {
+            errors.Add($"Probe output cleanup could not be confirmed: {ex.Message}");
+            // Observe a later read failure if an OS pipe does not settle in
+            // the cleanup budget. Process disposal closes our pipe handles.
+            _ = joined.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        return string.Join(" ", errors);
     }
 
     private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken ct)

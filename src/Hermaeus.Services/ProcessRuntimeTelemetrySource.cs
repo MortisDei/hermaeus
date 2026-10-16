@@ -63,10 +63,12 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
                 request, processInstance, RuntimeTelemetryMetric.ProcessGpuMemoryBytes,
                 gpuMemory, gpuMemory.HasValue ? RuntimeTelemetrySourceKind.ProcessCounter : RuntimeTelemetrySourceKind.Unknown,
                 gpuMemory.HasValue ? RuntimeTelemetryTrustState.ProcessScoped : RuntimeTelemetryTrustState.Unknown,
-                observedAt, gpuMemory.HasValue ? gpuMemorySource : "process-gpu-unavailable",
+                observedAt, gpuMemorySource,
                 gpuMemory.HasValue
                     ? $"NVIDIA {gpuMemorySource} process memory for the matching runtime PID."
-                    : "No trustworthy per-process GPU memory counter is available from this source."));
+                    : gpuMemorySource == "process-gpu-cleanup-unconfirmed"
+                        ? "The GPU probe did not produce a trustworthy counter and its root or output cleanup could not be confirmed."
+                        : "No trustworthy per-process GPU memory counter is available from this source."));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
         {
@@ -191,6 +193,16 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         if (executable is null)
             return (null, "process-gpu-unavailable");
 
+        return await RunNvidiaSmiCommandAsync(executable,
+            ["--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
+            processId, TimeSpan.FromSeconds(2), ct);
+    }
+
+    internal static async Task<(long? Bytes, string Source)> RunNvidiaSmiCommandAsync(
+        string executable, IReadOnlyList<string> arguments, int processId,
+        TimeSpan timeoutBudget, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -202,29 +214,94 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
                 CreateNoWindow = true
             }
         };
-        process.StartInfo.ArgumentList.Add("--query-compute-apps=pid,used_memory");
-        process.StartInfo.ArgumentList.Add("--format=csv,noheader,nounits");
+        foreach (var argument in arguments)
+            process.StartInfo.ArgumentList.Add(argument);
+        Task<(string Output, bool Truncated)>? stdout = null;
+        Task? stderr = null;
+        var started = false;
         try
         {
             if (!process.Start()) return (null, "process-gpu-unavailable");
+            started = true;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(2));
-            var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            timeout.CancelAfter(timeoutBudget);
+            stdout = ReadNvidiaOutputAsync(process.StandardOutput, timeout.Token);
+            stderr = DrainNvidiaErrorAsync(process.StandardError, timeout.Token);
+            await Task.WhenAll(stdout, stderr);
             await process.WaitForExitAsync(timeout.Token);
-            return process.ExitCode == 0 && ProcessGpuMemoryParser.TryGetBytes(output, processId, out var bytes)
+            var output = stdout.Result;
+            return process.ExitCode == 0 && !output.Truncated
+                && ProcessGpuMemoryParser.TryGetBytes(output.Output, processId, out var bytes)
                 ? (bytes, "nvidia-smi-process-gpu-memory")
                 : (null, "process-gpu-unavailable");
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
+            var cleanupError = await StopNvidiaCommandAsync(process, stdout, stderr);
+            if (cleanupError.Length > 0)
+                throw new OperationCanceledException($"The GPU probe was cancelled. {cleanupError}", ex, ct);
             throw;
         }
         catch
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch { }
-            return (null, "process-gpu-unavailable");
+            var cleanupError = started ? await StopNvidiaCommandAsync(process, stdout, stderr) : string.Empty;
+            return (null, cleanupError.Length > 0 ? "process-gpu-cleanup-unconfirmed" : "process-gpu-unavailable");
         }
+    }
+
+    private static async Task<(string Output, bool Truncated)> ReadNvidiaOutputAsync(
+        StreamReader reader, CancellationToken ct)
+    {
+        const int maximumCharacters = 64 * 1024;
+        var buffer = new char[2048];
+        var output = new System.Text.StringBuilder();
+        var truncated = false;
+        int count;
+        while ((count = await reader.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            var remaining = maximumCharacters - output.Length;
+            output.Append(buffer, 0, Math.Min(count, remaining));
+            truncated |= count > remaining;
+        }
+        return (output.ToString(), truncated);
+    }
+
+    private static async Task DrainNvidiaErrorAsync(StreamReader reader, CancellationToken ct)
+    {
+        var buffer = new char[2048];
+        while (await reader.ReadAsync(buffer.AsMemory(), ct) > 0) { }
+    }
+
+    private static async Task<string> StopNvidiaCommandAsync(Process process, Task? stdout, Task? stderr)
+    {
+        var errors = new List<string>();
+        try
+        {
+            // Root exit confirms neither escaped descendants nor complete
+            // containment. This is best-effort cleanup of the owned probe.
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
+        {
+            errors.Add($"GPU probe termination failed: {ex.Message}");
+        }
+        using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try { await process.WaitForExitAsync(cleanup.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            errors.Add($"GPU probe root exit could not be confirmed: {ex.Message}");
+        }
+        var joined = Task.WhenAll(new[] { stdout, stderr }.OfType<Task>());
+        try { await joined.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (OperationCanceledException) when (joined.IsCanceled) { }
+        catch (Exception ex) when (ex is TimeoutException or IOException or ObjectDisposedException)
+        {
+            errors.Add($"GPU probe output cleanup could not be confirmed: {ex.Message}");
+            _ = joined.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        return string.Join(" ", errors);
     }
 
     private static IReadOnlyList<RuntimeTelemetrySample> UnknownProcessSamples(

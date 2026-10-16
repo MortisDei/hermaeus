@@ -371,38 +371,76 @@ public sealed class SystemInfoService : ISystemInfoService
         catch { return 0; }
     }
 
-    private static async Task<string> RunCommandAsync(string file, string[] args, CancellationToken ct)
+    internal static async Task<string> RunCommandAsync(string file, string[] args, CancellationToken ct,
+        TimeSpan? timeoutBudget = null)
     {
+        if (ct.IsCancellationRequested) return string.Empty;
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = file,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
+                FileName = file, RedirectStandardOutput = true, RedirectStandardError = true,
+                UseShellExecute = false, CreateNoWindow = true
             }
         };
-        foreach (var arg in args)
-            process.StartInfo.ArgumentList.Add(arg);
-
+        foreach (var arg in args) process.StartInfo.ArgumentList.Add(arg);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(timeoutBudget ?? TimeSpan.FromSeconds(2));
+        Task<(string Text, bool Truncated)>? stdout = null;
+        Task<(string Text, bool Truncated)>? stderr = null;
+        var started = false;
         try
         {
-            if (!process.Start())
-                return string.Empty;
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(2));
-            var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            if (!process.Start()) return string.Empty;
+            started = true;
+            stdout = ReadCommandOutputAsync(process.StandardOutput, timeout.Token);
+            stderr = ReadCommandOutputAsync(process.StandardError, timeout.Token);
+            await Task.WhenAll(stdout, stderr);
             await process.WaitForExitAsync(timeout.Token);
-            return process.ExitCode == 0 ? output : string.Empty;
+            return process.ExitCode == 0 && !stdout.Result.Truncated ? stdout.Result.Text : string.Empty;
         }
-        catch
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException
+            or System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch { }
             return string.Empty;
         }
+        finally
+        {
+            if (started)
+            {
+                timeout.Cancel();
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException)
+                {
+                    Console.Error.WriteLine($"System probe tree termination could not be confirmed ({ex.GetType().Name}).");
+                }
+                var cleanup = Task.WhenAll(new[] { stdout, stderr }.OfType<Task>().Append(process.WaitForExitAsync()));
+                try { await cleanup.WaitAsync(TimeSpan.FromSeconds(2)); }
+                catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or IOException)
+                {
+                    if (ex is not OperationCanceledException || !cleanup.IsCanceled)
+                        Console.Error.WriteLine($"System probe root or output cleanup could not be confirmed ({ex.GetType().Name}).");
+                    _ = cleanup.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                }
+            }
+        }
+    }
+
+    private static async Task<(string Text, bool Truncated)> ReadCommandOutputAsync(StreamReader reader, CancellationToken ct)
+    {
+        const int limit = 64 * 1024;
+        var output = new System.Text.StringBuilder();
+        var buffer = new char[4096];
+        var truncated = false;
+        int count;
+        while ((count = await reader.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            var keep = Math.Min(count, limit - output.Length);
+            output.Append(buffer, 0, keep);
+            truncated |= keep < count;
+        }
+        return (output.ToString(), truncated);
     }
 
     private static string? ReadFirstLine(string path)
