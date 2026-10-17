@@ -152,6 +152,7 @@ function Assert-WindowsPackageLayout([string]$PackagePath) {
         "app/LocalApi/Hermaeus.LocalApi.dll",
         "docs/README.md",
         "docs/user-guide.md",
+        "docs/media-generation.md",
         "docs/LICENSE.md",
         "docs/NOTICE.md",
         "docs/COMMERCIAL.md",
@@ -229,6 +230,7 @@ Copy-Item -Path (Join-Path $publishDir "*") -Destination $appDir -Recurse -Force
 Copy-Item -Path (Join-Path $localApiPublishDir "*") -Destination $localApiDir -Recurse -Force
 Copy-Item (Join-Path $root "README.md") (Join-Path $docDir "README.md") -Force
 Copy-Item (Join-Path $root "docs/user-guide.md") (Join-Path $docDir "user-guide.md") -Force
+Copy-Item (Join-Path $root "docs/media-generation.md") (Join-Path $docDir "media-generation.md") -Force
 Copy-Item (Join-Path $root "LICENSE.md") (Join-Path $docDir "LICENSE.md") -Force
 Copy-Item (Join-Path $root "NOTICE.md") (Join-Path $docDir "NOTICE.md") -Force
 Copy-Item (Join-Path $root "COMMERCIAL.md") (Join-Path $docDir "COMMERCIAL.md") -Force
