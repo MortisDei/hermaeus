@@ -206,8 +206,9 @@ public sealed class FallbackVaultTransactionTests
         await fixture.Transaction().MutateAsync("old", "synthetic-after");
         var candidate = Assert.Single(await fixture.Transaction().DiscoverRecoveryAsync());
         var review = await fixture.Transaction().ReviewRecoveryAsync(candidate.OriginalId);
-        var differentTarget = Path.Combine(fixture.Root, "different.json");
+        var differentTarget = Path.Combine(fixture.Root, "different-root", "secrets.local.json");
         await Assert.ThrowsAsync<IOException>(() => fixture.Transaction(path: differentTarget).RestoreAsync(review));
+        Assert.False(File.Exists(differentTarget));
         var locator = Assert.Single(Directory.GetFiles(fixture.Protected, "*.locator"));
         var contents = await File.ReadAllBytesAsync(locator);
         contents[^2] ^= 1;
@@ -229,7 +230,7 @@ public sealed class FallbackVaultTransactionTests
         Assert.Equal(primary, await File.ReadAllBytesAsync(fixture.Vault));
         Assert.False(File.Exists(Path.Combine(fixture.Protected, "secrets.local.key")));
         // A new target sharing that protected key directory must also preserve the history.
-        var differentTarget = Path.Combine(fixture.Root, "other.json");
+        var differentTarget = Path.Combine(fixture.Root, "other-root", "secrets.local.json");
         await Assert.ThrowsAsync<IOException>(() => fixture.Transaction(path: differentTarget).MutateAsync("new", "synthetic"));
         Assert.False(File.Exists(differentTarget));
     }
@@ -423,6 +424,44 @@ public sealed class FallbackVaultTransactionTests
             fault: phase => { if (phase == "restore-flushed") blocked = true; }).RestoreAsync(review));
         Assert.Equal(current, await File.ReadAllBytesAsync(fixture.Vault));
         Assert.Empty(Directory.GetFiles(fixture.Root, "*.tmp", SearchOption.AllDirectories));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Protected_directory_equal_to_or_beneath_Data_Root_is_refused_before_writes(bool nested)
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("data");
+        var protectedDirectory = nested ? Path.Combine(root, "protected") : root;
+
+        var failure = Assert.Throws<ArgumentException>(() => new FallbackVaultTransaction(
+            Path.Combine(root, "secrets.local.json"), protectedDirectory,
+            static (_, _) => throw new InvalidOperationException("Unexpected legacy decoding.")));
+
+        Assert.Equal("protectedDirectory", failure.ParamName);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public async Task Protected_directory_case_alias_uses_platform_path_identity()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("caseroot");
+        var protectedDirectory = temp.PathFor("CaseRoot");
+        FallbackVaultTransaction Create() => new(Path.Combine(root, "secrets.local.json"), protectedDirectory,
+            static (_, _) => throw new InvalidOperationException("Unexpected legacy decoding."));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Throws<ArgumentException>(Create);
+            Assert.False(Directory.Exists(root));
+        }
+        else
+        {
+            var transaction = Create();
+            await transaction.MutateAsync("name", "synthetic");
+            Assert.Equal("synthetic", await transaction.ResolveAsync("name"));
+        }
     }
 
     private sealed class Fixture : IDisposable

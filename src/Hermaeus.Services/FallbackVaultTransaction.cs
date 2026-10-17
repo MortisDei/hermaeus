@@ -25,6 +25,12 @@ internal sealed class FallbackVaultTransaction
     {
         _vaultPath = Path.GetFullPath(vaultPath);
         _directory = Path.GetFullPath(protectedDirectory);
+        var dataRoot = Path.GetDirectoryName(_vaultPath)
+            ?? throw new ArgumentException("A vault file path is required.", nameof(vaultPath));
+        var rootPrefix = Path.EndsInDirectorySeparator(dataRoot) ? dataRoot : dataRoot + Path.DirectorySeparatorChar;
+        if (string.Equals(_directory, dataRoot, ModelPathSafety.LocalPathComparison)
+            || _directory.StartsWith(rootPrefix, ModelPathSafety.LocalPathComparison))
+            throw new ArgumentException("The protected vault directory must remain outside the Data Root.", nameof(protectedDirectory));
         _legacyDecoder = strictLegacyDecoder;
         _lockTimeout = lockTimeout ?? TimeSpan.FromSeconds(10);
         if (_lockTimeout <= TimeSpan.Zero || _lockTimeout > TimeSpan.FromMinutes(1))
