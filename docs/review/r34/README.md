@@ -31,6 +31,8 @@ all publication. Small verified local implementation commits are authorised; pub
 | [15-native-and-vault-evidence.md](15-native-and-vault-evidence.md) | Windows walkthrough and separately verified inactive S3 implementation |
 | [16-notice-delivery-and-integration.md](16-notice-delivery-and-integration.md) | Actual upstream-text archive delivery and its integration evidence; unresolved legal/native gates remain |
 | [17-backup-credential-artifact-privacy.md](17-backup-credential-artifact-privacy.md) | Later credential artifact, backup path and snapshot privacy repairs and verification |
+| [18-media-generation-plan.md](18-media-generation-plan.md) | Owner-requested media extension, model research, bounded implementation and separate acceptance evidence |
+| [19-local-image-inference-decision.md](19-local-image-inference-decision.md) | Owner-deferred first-party image inference, preserved engine/model research and historical worker proposal |
 
 ## Evidence vocabulary
 
@@ -65,6 +67,10 @@ polish after ownership/framework choices settle. G1 integrates verification and
 owner Windows/Linux acceptance. The exact DAG and owner decision points are
 in [11](11-dependency-roadmap.md); phase numbers are workstreams, not waterfalls.
 
-No new vector database, runtime authority, lifecycle framework, approval system,
-browser frontend, replacement editor, distributed inference or multimodal
-feature expansion is selected.
+The original R34 plan selected no new vector database, runtime authority,
+lifecycle framework, approval system, browser frontend, replacement editor or
+distributed inference. The owner's later Media extension is recorded in
+[18](18-media-generation-plan.md). First-party local image inference has a
+separate dependency decision in [19](19-local-image-inference-decision.md),
+deferred indefinitely by the owner on 2026-10-17. The optional HTTP integrations
+remain; no first-party worker/inference integration is selected.

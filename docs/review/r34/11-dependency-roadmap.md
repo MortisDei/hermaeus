@@ -412,3 +412,18 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
   package, repair and repeat appropriate checks. Keep prior known-good binaries
   and data compatibility, never ship a security regression as a rollback plan.
   **Owner:** residual risks, final scope/version, publication and release actions.
+
+## Owner scope refinement, 2026-10-17
+
+Retain the later optional Media page and its ComfyUI/OpenAI-compatible clients,
+with the bounded validation, cancellation, privacy, preview/export and regression
+work recorded in [18](18-media-generation-plan.md). This does not replace the
+P0/P1 security, correctness, lifecycle, simplification or measured-performance
+packages above.
+
+First-party image inference is **DEFERRED BY OWNER** indefinitely, superseding
+its earlier implementation approval. Preserve the historical investigation in
+[19](19-local-image-inference-decision.md); no native worker, engine integration,
+new runtime authority or persisted model format is selected. Reconsider only
+for a demonstrated requirement existing providers cannot satisfy. This explicit
+deferral requires no implementation for G1 and waives none of its existing gates.

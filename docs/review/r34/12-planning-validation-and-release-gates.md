@@ -99,6 +99,7 @@ browser frontend/replacement editor and automatic routing are rejected for R34.
 | Boro primary-source identity | Unknown | Defer without blocking; no invented product or capability |
 | Minimise-to-tray/disable-reenable and full screen matrix | Partial Windows navigation and owner-assisted clean tray Quit verified in 15; owner deferred COSMIC testing to their Pop!_OS box in 17 | Remaining Windows/COSMIC interactions remain explicit U1/G1 gates; deferred testing is not a pass |
 | Package signing and release/version/settings policy | Owner controlled | No action until separately authorised |
+| First-party image inference engine/model | DEFERRED BY OWNER, 2026-10-17; supersedes earlier implementation approval. Historical research in [19](19-local-image-inference-decision.md) | No native worker/integration added. Stop this work and further downloads; retain optional Media providers. Reconsider only for a demonstrated requirement existing providers cannot satisfy |
 
 ## Final planning check receipt
 
