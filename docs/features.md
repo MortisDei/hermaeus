@@ -549,6 +549,10 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 - Windows and Linux archive documentation includes versioned upstream licence
   and NOTICE texts with source/hash provenance. Native package and asset terms
   with unresolved provenance remain release gates.
+- Data Root backups exclude reserved fallback credential files, atomic-write
+  leftovers, recovery pairs and locks. Restore refuses those reserved targets
+  before publishing files. Backups check source/destination reparse paths and
+  create intermediate SQLite copies beneath private Unix directories.
 - Data Root restore preflights all file entries for safe paths, duplicate
   targets, and bounded per-entry and total uncompressed sizes before writing.
   The archive is expanded beneath a data-root staging directory, with actual

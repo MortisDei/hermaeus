@@ -120,5 +120,6 @@ A final source audit found that the backup filter excludes the primary vault
 and key but omits their atomic-write leftovers and the new recovery filenames.
 Two non-empty `.vault-*.tmp` files from the controlled Linux crash probes remain
 under their synthetic evidence roots. This notice batch does not repair that
-privacy gap; a separate bounded regression/repair follows. No safety or
+privacy gap; the separate bounded regression/repair is recorded in
+[17](17-backup-credential-artifact-privacy.md). No safety or
 activation gate is closed by the notice delivery result.

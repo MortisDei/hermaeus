@@ -29,7 +29,8 @@ all publication. Small verified local implementation commits are authorised; pub
 | [13-execution-and-evidence.md](13-execution-and-evidence.md) | Actual implementation baseline, results and remaining gates |
 | [14-vault-format-decision.md](14-vault-format-decision.md) | Conditionally approved S3 format/recovery contract; production activation remains gated |
 | [15-native-and-vault-evidence.md](15-native-and-vault-evidence.md) | Windows walkthrough and separately verified inactive S3 implementation |
-| [16-notice-delivery-and-integration.md](16-notice-delivery-and-integration.md) | Actual upstream-text archive delivery and final integration evidence; unresolved legal/native gates remain |
+| [16-notice-delivery-and-integration.md](16-notice-delivery-and-integration.md) | Actual upstream-text archive delivery and its integration evidence; unresolved legal/native gates remain |
+| [17-backup-credential-artifact-privacy.md](17-backup-credential-artifact-privacy.md) | Later credential artifact, backup path and snapshot privacy repairs and verification |
 
 ## Evidence vocabulary
 

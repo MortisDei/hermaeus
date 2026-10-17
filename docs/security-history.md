@@ -41,6 +41,17 @@ downgrade, new OS credential backend or production activation is introduced.
 Native/provider acceptance and explicit owner recovery/downgrade acceptance
 remain activation gates. No new sandbox or security framework is adopted.
 
+The follow-on backup audit reproduced credential staging/recovery files entering
+archives, generic restore accepting their targets, and real source/destination
+reparse redirection on Windows and Linux. Exact reserved families are now excluded
+from backup and refused after restore target normalisation. Existing reparse
+checks also guard backup inventory/read/output paths. A native Unix fixture
+reproduced mode 0755 for intermediate SQLite directories; creation now requests
+0700. The inactive vault refuses configured protected-directory overlap before
+creating artifacts. [R34/17](review/r34/17-backup-credential-artifact-privacy.md)
+retains the actual failures, controls, validation and remaining filesystem/native
+limits. No cryptographic format or production activation changed.
+
 ## r33: Archive containment follow-up
 
 Release PR #20's CodeQL scan flagged a restore staging path as a potential

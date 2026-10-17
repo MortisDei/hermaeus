@@ -13,6 +13,10 @@ limit.
 
 ### Changed
 
+- Data Root backups exclude fallback credential staging, recovery and lock
+  artifacts; restore refuses their reserved targets before publication.
+  Backups check source/destination reparse paths and create private Unix SQLite
+  snapshot directories. The inactive v3 vault refuses protected-directory overlap.
 - Windows and Linux packages include versioned upstream licence/NOTICE texts
   and their provenance index. Native SQLite package terms and unresolved asset
   licensing remain release gates.

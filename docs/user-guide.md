@@ -747,7 +747,11 @@ and Privacy Audit before using sensitive material.
 Use Settings' backup flow for Data Root. Back up AI Assets separately only if
 avoiding large re-downloads matters; those files are replaceable, while Data
 Root contains the user-created state that is not. Credentials and fallback
-secret material are not included in Data Root backups. Restore preflights all
+secret material, including reserved temporary/recovery/control files, are not
+included in Data Root backups. A source or destination reparse path refuses the
+backup. Restore refuses reserved credential targets before any files publish;
+use a clean backup rather than generic Data Root restore for credential recovery.
+Restore preflights all
 file entries for safe paths, duplicate targets, and size budgets of 10,000 file
 entries, 128 MiB per entry, and 512 MiB total by default. The archive is first
 expanded beneath a temporary staging root, with actual expanded bytes checked

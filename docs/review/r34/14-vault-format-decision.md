@@ -138,6 +138,10 @@ the existing key and any retained recovery snapshot.
    plaintext secrets, so copying the old JSON directly to a backup is forbidden.
    Put the snapshot only under the existing protected directory, outside Data
    Root; do not include the key or plaintext in it.
+   The inactive transaction now refuses a configured protected directory equal
+   to or beneath Data Root before file creation, using the existing platform
+   path comparison. This does not change key location or add filesystem identity
+   authority. Later backup/privacy evidence is in [17](17-backup-credential-artifact-privacy.md).
 3. The snapshot uses the same `v3:` binary envelope/KDF, fresh salt/nonce and
    AAD `ASCII("Hermaeus.SecretStore\0v3\0snapshot\0") || vaultId[32]`.
    `vaultId` is SHA256 of strict UTF-8 of the fully resolved vault path, with
