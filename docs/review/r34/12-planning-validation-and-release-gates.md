@@ -32,9 +32,13 @@ No app, model, sandbox, inference benchmark or expensive CI workflow was launche
 
 ## Release gates for future R34 implementation
 
-All rows are **Unknown/not executed for R34**. Historical R33 evidence is linked
-for provenance and cannot close these cells. Completion requires named receipts
-with exact commit/package/host/protocol identities and raw evidence locations.
+At planning time all rows were **Unknown/not executed for R34**. This table
+defines the required evidence, not current pass status. Actual R34 implementation,
+automated and package receipts are in [13](13-execution-and-evidence.md),
+[15](15-native-and-vault-evidence.md), [16](16-notice-delivery-and-integration.md)
+and [17](17-backup-credential-artifact-privacy.md). Historical R33 evidence cannot
+close these gates. Completion requires exact commit/package/host/protocol
+identities and raw evidence locations; partial receipts close only their scope.
 
 | Gate | Hard acceptance / evidence | Owner/package |
 | --- | --- | --- |
@@ -86,14 +90,14 @@ browser frontend/replacement editor and automatic routing are rejected for R34.
 | Current installed runtime/assets/hardware and matching R33 performance data | Windows identity and PDF compatibility observations recorded; comparable per-host performance baseline remains open | B1/P1 need controlled same-host measurements. No speed/VRAM win is claimed |
 | Actual child survival after caller cancellation | Reproduced in controlled Windows fixtures, bounded cleanup repaired and regression-tested | See 13; best-effort termination does not guarantee containment or every descendant's exit |
 | View retention, stale callback delivery, same-DC reattach | Reproduced defects repaired, controlled native/weak-reference regressions passed; partial Windows walkthrough in 15 | Complete Windows/COSMIC interaction matrix remains open |
-| Final RID/native loading/licence delivery | Development Windows/Linux RID archives and SQLite identities inspected; 73 retained notice files plus two standalone notices match source in both actual archives | See 15/16; full native workflows, native SQLite package terms, complete embedded attribution and unresolved asset rights remain gates |
+| Final RID/native loading/licence delivery | Development Windows/Linux RID archives and SQLite identities inspected; 73 retained notice files plus two standalone notices match source in both actual archives | See 15-17; full native workflows, native SQLite package terms, complete embedded attribution and unresolved asset rights remain gates |
 | Ingest ceilings/override semantics | Owner-approved 512 MiB source, 16 Mi characters, 2,000 pages, 256 MiB accounted staging payload implemented | Representative supplied PDFs fit. No hard parser timeout or whole-process memory guarantee; later user-visible changes require approval |
 | Vault format and old-build downgrade | Conditional implementation approval, exact contract in 14; inactive implementation and Windows/Linux synthetic evidence in 15 | Production activation requires remaining native/provider evidence and explicit owner recovery/downgrade acceptance |
 | Network aliases/env/preset hard policy | Core `--host` already rejects conflicts; broader audit open | S4 exact runtime/listener proof, owner approves any policy expansion |
 | Sandbox release/backend security guarantee and native Windows parity | Research only | Exact release/OS/backend hostile proof plus owner dependency/security decision; otherwise Defer |
 | Public Moss pet redistribution/licensing | Existing unresolved provenance issue | Owner resolves before any applicable distribution claim; this plan changes no legal model |
 | Boro primary-source identity | Unknown | Defer without blocking; no invented product or capability |
-| Minimise-to-tray/disable-reenable and full screen matrix | Partial Windows navigation and owner-assisted clean tray Quit verified in 15 | Remaining Windows/COSMIC interactions remain explicit U1/G1 gates |
+| Minimise-to-tray/disable-reenable and full screen matrix | Partial Windows navigation and owner-assisted clean tray Quit verified in 15; owner deferred COSMIC testing to their Pop!_OS box in 17 | Remaining Windows/COSMIC interactions remain explicit U1/G1 gates; deferred testing is not a pass |
 | Package signing and release/version/settings policy | Owner controlled | No action until separately authorised |
 
 ## Final planning check receipt
