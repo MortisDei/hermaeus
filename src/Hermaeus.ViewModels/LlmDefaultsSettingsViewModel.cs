@@ -13,6 +13,10 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
 {
     private readonly ISecretStore _secrets;
 
+    [ObservableProperty] private string _comfyUiBaseUrl = "http://127.0.0.1:8188";
+    [ObservableProperty] private string _comfyUiApiKey = string.Empty;
+    [ObservableProperty] private bool _comfyUiEnabled;
+
     [ObservableProperty] private string _llamaCppBaseUrl = "http://localhost:39201";
     [ObservableProperty] private bool _llamaCppEnabled = true;
     [ObservableProperty] private string _openAiBaseUrl = "https://api.openai.com";
@@ -33,9 +37,14 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
 
     public bool HasUnmigratedOpenAiApiKey =>
         !string.IsNullOrWhiteSpace(OpenAiApiKey) && !_secrets.IsReference(OpenAiApiKey);
+    public bool HasUnmigratedComfyUiApiKey =>
+        !string.IsNullOrWhiteSpace(ComfyUiApiKey) && !_secrets.IsReference(ComfyUiApiKey);
 
     public void ReloadFrom(AppSettings settings)
     {
+        ComfyUiBaseUrl = settings.Llm.ComfyUiBaseUrl;
+        ComfyUiApiKey = _secrets.IsReference(settings.Llm.ComfyUiApiKey) ? string.Empty : settings.Llm.ComfyUiApiKey;
+        ComfyUiEnabled = settings.Llm.ComfyUiEnabled;
         LlamaCppBaseUrl = settings.Llm.LlamaCppBaseUrl;
         LlamaCppEnabled = settings.Llm.LlamaCppEnabled;
         OpenAiBaseUrl = settings.Llm.OpenAiBaseUrl;
@@ -55,6 +64,11 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
 
     public async Task ApplyToAsync(AppSettings settings)
     {
+        _ = MediaGenerationService.ValidateEndpoint(ComfyUiBaseUrl);
+        settings.Llm.ComfyUiBaseUrl = ComfyUiBaseUrl;
+        if (!string.IsNullOrWhiteSpace(ComfyUiApiKey))
+            settings.Llm.ComfyUiApiKey = await _secrets.StoreAsync("comfyui-api-key", ComfyUiApiKey.Trim());
+        settings.Llm.ComfyUiEnabled = ComfyUiEnabled;
         settings.Llm.LlamaCppBaseUrl = LlamaCppBaseUrl;
         settings.Llm.LlamaCppEnabled = LlamaCppEnabled;
         settings.Llm.OpenAiBaseUrl = OpenAiBaseUrl;

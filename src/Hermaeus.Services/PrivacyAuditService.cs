@@ -12,6 +12,12 @@ namespace Hermaeus.Services;
 /// </summary>
 public sealed class PrivacyAuditService
 {
+    private static bool IsLoopbackMediaEndpoint(string endpoint)
+    {
+        try { return MediaGenerationService.ValidateEndpoint(endpoint).IsLoopback; }
+        catch (ArgumentException) { return false; }
+    }
+
     private readonly ISettingsService _settings;
     private readonly ISecretStore _secrets;
     private readonly IRuntimeLogService _logs;
@@ -67,6 +73,7 @@ public sealed class PrivacyAuditService
     {
         var settings = _settings.Settings;
         var count = CompositeLlmService.Providers.Count(p => p.IsRemote && IsChatProviderEnabled(p, settings));
+        if (settings.Llm.ComfyUiEnabled && !IsLoopbackMediaEndpoint(settings.Llm.ComfyUiBaseUrl)) count++;
 
         var activeVoiceProvider = VoiceProviderIdentity.TryParse(settings.Tts.VoiceProvider, out var voiceId)
             ? _voiceProviders.GetAvailableProviders().FirstOrDefault(p => p.Id == voiceId)
@@ -100,7 +107,8 @@ public sealed class PrivacyAuditService
             ? _voiceProviders.GetAvailableProviders().FirstOrDefault(p => p.Id == voiceId)
             : null;
         var voiceRemote = activeVoiceProvider?.Capabilities.HasFlag(VoiceCapability.Remote) ?? false;
-        var anyRemote = remoteChatProviders.Count > 0 || voiceRemote;
+        var comfyRemote = settings.Llm.ComfyUiEnabled && !IsLoopbackMediaEndpoint(settings.Llm.ComfyUiBaseUrl);
+        var anyRemote = remoteChatProviders.Count > 0 || voiceRemote || comfyRemote;
 
         // r21 3.4: disclosure describes surface, not the current toggle state
         // (matches the image-attachment entry above it) - it appears whenever
@@ -115,6 +123,7 @@ public sealed class PrivacyAuditService
                 ? string.Join(" ", remoteChatProviders
                     .Select(p => $"{p.DisplayName} chat endpoint configured at {settings.Llm.OpenAiBaseUrl}. Prompts, and any images attached to a chat message, may leave the machine when selected.")
                     .Concat(voiceRemote ? [$"Voice provider {activeVoiceProvider!.Name} sends audio off the machine."] : [])
+                    .Concat(comfyRemote ? ["ComfyUI media generation can send workflows and prompts off this machine."] : [])
                     .Concat(ragInjectionCapable ? ["Chat knowledge context: excerpts from local RAG datasets are included in prompts sent to the remote chat provider."] : []))
                 : "No enabled remote chat or voice provider detected in settings."));
 
@@ -133,6 +142,17 @@ public sealed class PrivacyAuditService
             exposedServers.Count == 0
                 ? "Managed llama-server entries do not include network-facing host flags."
                 : string.Join("; ", exposedServers.Select(s => $"{s.Name} port {s.Port}: {s.ExtraArgs.Trim()}"))));
+
+        var comfyLocal = IsLoopbackMediaEndpoint(settings.Llm.ComfyUiBaseUrl);
+        items.Add(new PrivacyAuditItem(
+            "Media generation",
+            settings.Llm.ComfyUiEnabled && !comfyLocal ? "Remote" : "Explicit action",
+            "Media generation is user initiated. OpenAI-compatible generation uses the configured LLM endpoint and credential. "
+            + (settings.Llm.ComfyUiEnabled
+                ? comfyLocal ? "ComfyUI is configured at a loopback address; workflow nodes can have their own network access. "
+                    : "ComfyUI may send prompts and workflows off this machine; check its configured endpoint. "
+                : "ComfyUI is disabled. ")
+            + "Generated results stay in session memory until explicitly exported. Backend jobs and saved backend files may survive client cancellation."));
 
         var secretBackend = await _secrets.BackendLabelAsync();
         items.Add(new PrivacyAuditItem(

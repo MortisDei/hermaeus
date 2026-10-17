@@ -6,6 +6,11 @@ namespace Hermaeus.Core.Models;
 /// </summary>
 public class LlmSettings
 {
+    /// <summary>User-managed ComfyUI endpoint. Hermaeus does not install or launch it.</summary>
+    public string ComfyUiBaseUrl { get; set; } = "http://127.0.0.1:8188";
+    public bool ComfyUiEnabled { get; set; }
+    public string ComfyUiApiKey { get; set; } = string.Empty;
+
     /// <summary>
     /// URL endpoint for llama.cpp/llama-server.
     /// </summary>

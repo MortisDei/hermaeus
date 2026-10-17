@@ -11,8 +11,18 @@ limit.
 
 ## [Unreleased]
 
+### Added
+
+- Media generation workspace for image, audio and video output through trusted
+  user-managed ComfyUI API workflows and compatible media HTTP endpoints.
+  Includes client cancellation/job identity, bounded output reads, image preview
+  and explicit atomic export. Results are session-only; no engine/model install
+  or local hardware-fit guarantee is included.
+
 ### Changed
 
+- Shared settings validation failures now stay in the save error flow, preserve
+  committed settings and do not display a successful Services save confirmation.
 - Data Root backups exclude fallback credential staging, recovery and lock
   artifacts; restore refuses their reserved targets before publication.
   Backups check source/destination reparse paths and create private Unix SQLite

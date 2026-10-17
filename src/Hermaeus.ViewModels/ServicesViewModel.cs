@@ -2670,11 +2670,14 @@ public partial class ServicesViewModel : ViewModelBase
 
     /// <summary>
     /// r29 doc 01 1.1: set by the DI root to the single settings save flow
-    /// (<see cref="SettingsViewModel.SaveAsync"/>). The Voice and STT cards on
+    /// (<see cref="SettingsViewModel.SaveWithResultAsync"/>). The Voice and STT cards on
     /// this page mutate DI singletons shared with Settings, and only that flow
     /// persists them. Null in tests that do not exercise saving.
     /// </summary>
-    public Func<Task>? SaveAllSettings { get; set; }
+    public Func<Task<bool>>? SaveAllSettings { get; set; }
+
+    /// <summary>Shared provider configuration, persisted only by the existing settings save flow.</summary>
+    public LlmDefaultsSettingsViewModel? MediaSettings { get; set; }
 
     /// <summary>Transient "Saved" confirmation, mirroring the Settings page.</summary>
     [ObservableProperty] private bool _isSaved;
@@ -2684,9 +2687,10 @@ public partial class ServicesViewModel : ViewModelBase
     {
         if (SaveAllSettings is null)
             return;
-        await SaveAllSettings();
-        IsSaved = true;
-        _ = ResetIsSavedAfterDelayAsync();
+        IsSaved = false;
+        IsSaved = await SaveAllSettings();
+        if (IsSaved)
+            _ = ResetIsSavedAfterDelayAsync();
     }
 
     private async Task ResetIsSavedAfterDelayAsync()

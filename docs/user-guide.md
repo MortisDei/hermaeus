@@ -282,6 +282,25 @@ complete, **Remove old llama.cpp versions?** only offers owned, genuinely
 superseded builds. The selected build remains protected, including archives
 whose executable is nested below the b-numbered directory.
 
+## Generate images, audio and video
+
+Open **Media** from the navigation bar. Configure a user-managed ComfyUI server
+on **Services**, or use the existing enabled OpenAI-compatible provider in
+**Settings > LLM**. Select the protocol and media kind, then supply a trusted
+ComfyUI API workflow or the exact compatible generation model ID. Enter the
+prompt and choose **Generate**.
+
+Images can be previewed. Use **Export selected file** to keep any generated
+image, audio or video; unsaved results are session-only. Audio/video are not
+played automatically. **Cancel waiting** stops Hermaeus waiting, but an accepted
+backend job may continue running or charging. Its job ID remains visible.
+
+Generation is bounded to eight files and 128 MiB combined per operation, with
+additional JSON/preview limits. Remote endpoints receive the prompt/workflow.
+Hermaeus does not install a media engine or guarantee a model fits your GPU.
+See [Media generation](media-generation.md) for setup, workflow placeholders,
+supported endpoint protocols, export and privacy details.
+
 ## Chat and context
 
 Choose a model at the top of **Chat**, type a message, and send. Stop cancels an

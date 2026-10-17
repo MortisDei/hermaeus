@@ -292,15 +292,19 @@ public partial class SettingsViewModel : ViewModelBase
     /// a later, unrelated save.
     /// </summary>
     [RelayCommand]
-    public Task SaveAsync() => SaveCoreAsync(showToast: true, CancellationToken.None, allowDataRootMigration: false);
+    public Task SaveAsync() => SaveWithResultAsync();
 
-    private async Task SaveCoreAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration,
+    /// <summary>Returns the shared save outcome so other pages never confirm a failed save.</summary>
+    public Task<bool> SaveWithResultAsync() =>
+        SaveCoreAsync(showToast: true, CancellationToken.None, allowDataRootMigration: false);
+
+    private async Task<bool> SaveCoreAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration,
         bool applyRuntimeState = true, DataMigrationPlan? migrationPlan = null)
     {
         await _saveGate.WaitAsync(ct);
         try
         {
-            await SaveCoreLockedAsync(showToast, ct, allowDataRootMigration, applyRuntimeState, migrationPlan);
+            return await SaveCoreLockedAsync(showToast, ct, allowDataRootMigration, applyRuntimeState, migrationPlan);
         }
         finally
         {
@@ -308,11 +312,11 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
-    private async Task SaveCoreLockedAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration,
+    private async Task<bool> SaveCoreLockedAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration,
         bool applyRuntimeState, DataMigrationPlan? migrationPlan = null)
     {
         var dirtyGroups = CaptureDirtyGroups();
-        if (Llm.HasUnmigratedOpenAiApiKey)
+        if (Llm.HasUnmigratedOpenAiApiKey || Llm.HasUnmigratedComfyUiApiKey)
             dirtyGroups[SettingsGroup.Llm] = 0;
         var candidate = _svc.Settings.Clone();
         var previousDataRoot = _svc.Settings.DataManagement.DataRootDirectory;
@@ -320,40 +324,41 @@ public partial class SettingsViewModel : ViewModelBase
         Data.SettingsError = string.Empty;
         LocalAiSetup.SettingsError = string.Empty;
         Trust.SettingsError = string.Empty;
-
-        if (dirtyGroups.ContainsKey(SettingsGroup.Llm))
-            await Llm.ApplyToAsync(candidate);
-        if (dirtyGroups.ContainsKey(SettingsGroup.Rag))
-            Rag.ApplyTo(candidate);
-        if (allowDataRootMigration || dirtyGroups.ContainsKey(SettingsGroup.Data))
-            Data.ApplyTo(candidate);
-        if (dirtyGroups.ContainsKey(SettingsGroup.Ui))
-            Ui.ApplyTo(candidate);
-        if (dirtyGroups.ContainsKey(SettingsGroup.Memory))
-            Memory.ApplyTo(candidate);
-        if (dirtyGroups.ContainsKey(SettingsGroup.Mcp))
-            Mcp.ApplyTo(candidate);
-        if (dirtyGroups.ContainsKey(SettingsGroup.LocalApi))
-            await LocalApi.ApplyToAsync(candidate);
-        if (dirtyGroups.ContainsKey(SettingsGroup.Tts))
-            ApplyTtsTo(candidate);
-
-        // A data-root edit is a migration request, not an ordinary preference
-        // edit. Autosaves may persist other harmless changes while leaving the
-        // unconfirmed root in the editor, but they must never move workspace
-        // files as a side effect.
-        if (!allowDataRootMigration
-            && !string.Equals(
-                SettingsService.ResolveDataRoot(candidate),
-                SettingsService.ResolveDataRoot(_svc.Settings),
-                ModelPathSafety.LocalPathComparison))
-        {
-            candidate.DataManagement.DataRootDirectory = previousDataRoot;
-        }
+        IsSaved = false;
 
         try
         {
             PersistenceStatus = "Saving";
+            if (dirtyGroups.ContainsKey(SettingsGroup.Llm))
+                await Llm.ApplyToAsync(candidate);
+            if (dirtyGroups.ContainsKey(SettingsGroup.Rag))
+                Rag.ApplyTo(candidate);
+            if (allowDataRootMigration || dirtyGroups.ContainsKey(SettingsGroup.Data))
+                Data.ApplyTo(candidate);
+            if (dirtyGroups.ContainsKey(SettingsGroup.Ui))
+                Ui.ApplyTo(candidate);
+            if (dirtyGroups.ContainsKey(SettingsGroup.Memory))
+                Memory.ApplyTo(candidate);
+            if (dirtyGroups.ContainsKey(SettingsGroup.Mcp))
+                Mcp.ApplyTo(candidate);
+            if (dirtyGroups.ContainsKey(SettingsGroup.LocalApi))
+                await LocalApi.ApplyToAsync(candidate);
+            if (dirtyGroups.ContainsKey(SettingsGroup.Tts))
+                ApplyTtsTo(candidate);
+
+            // A data-root edit is a migration request, not an ordinary preference
+            // edit. Autosaves may persist other harmless changes while leaving the
+            // unconfirmed root in the editor, but they must never move workspace
+            // files as a side effect.
+            if (!allowDataRootMigration
+                && !string.Equals(
+                    SettingsService.ResolveDataRoot(candidate),
+                    SettingsService.ResolveDataRoot(_svc.Settings),
+                    ModelPathSafety.LocalPathComparison))
+            {
+                candidate.DataManagement.DataRootDirectory = previousDataRoot;
+            }
+
             if (allowDataRootMigration)
             {
                 // The running app owns SQLite/WAL/log handles beneath the
@@ -381,7 +386,7 @@ public partial class SettingsViewModel : ViewModelBase
             PersistenceStatus = "Failed";
             if (showToast)
                 _toasts.Show("Settings not saved", ex.Message, ToastKind.Error);
-            return;
+            return false;
         }
 
         PersistenceStatus = allowDataRootMigration ? "Restart required" : "Saved";
@@ -395,6 +400,7 @@ public partial class SettingsViewModel : ViewModelBase
         // r12 01-settings-lifecycle.md 1.7: reset the flag after a short
         // delay without keeping the async command "executing" for it.
         _ = ResetIsSavedAfterDelayAsync();
+        return true;
     }
 
     private void SubscribeToAutoSave(INotifyPropertyChanged source, SettingsGroup group) =>

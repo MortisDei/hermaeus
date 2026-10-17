@@ -13,6 +13,43 @@ namespace Hermaeus.Tests;
 public sealed class ServicesPageSaveTests
 {
     [Fact]
+    public async Task Invalid_media_configuration_reports_failure_without_confirming_or_persisting_then_recovers()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var tts = NewTtsSettingsViewModel(settings);
+        var settingsVm = NewSettingsViewModel(settings, new FakeSecretStore(), tts);
+        var services = NewServicesViewModel(settings, tts);
+        services.SaveAllSettings = settingsVm.SaveWithResultAsync;
+        settingsVm.Llm.ComfyUiBaseUrl = "file:///untrusted";
+
+        await services.SaveSettingsCommand.ExecuteAsync(null);
+
+        Assert.False(services.IsSaved);
+        Assert.Equal("Failed", settingsVm.PersistenceStatus);
+        Assert.NotEmpty(settingsVm.SettingsError);
+        Assert.Equal("http://127.0.0.1:8188", settings.Settings.Llm.ComfyUiBaseUrl);
+        settingsVm.Llm.ComfyUiBaseUrl = "http://127.0.0.1:8189";
+        await services.SaveSettingsCommand.ExecuteAsync(null);
+        Assert.True(services.IsSaved);
+        Assert.Equal("http://127.0.0.1:8189", settings.Settings.Llm.ComfyUiBaseUrl);
+        await settingsVm.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task Failed_shared_save_clears_a_previous_services_confirmation()
+    {
+        using var temp = new TempDir();
+        var vm = NewServicesViewModel(NewSettings(temp));
+        vm.SaveAllSettings = () => Task.FromResult(true);
+        await vm.SaveSettingsCommand.ExecuteAsync(null);
+        Assert.True(vm.IsSaved);
+        vm.SaveAllSettings = () => Task.FromResult(false);
+        await vm.SaveSettingsCommand.ExecuteAsync(null);
+        Assert.False(vm.IsSaved);
+    }
+
+    [Fact]
     public async Task Save_on_services_runs_the_settings_save_flow_once_and_confirms()
     {
         using var temp = new TempDir();
@@ -20,7 +57,7 @@ public sealed class ServicesPageSaveTests
         var vm = NewServicesViewModel(settings);
 
         var calls = 0;
-        vm.SaveAllSettings = () => { calls++; return Task.CompletedTask; };
+        vm.SaveAllSettings = () => { calls++; return Task.FromResult(true); };
 
         await vm.SaveSettingsCommand.ExecuteAsync(null);
 
@@ -54,7 +91,7 @@ public sealed class ServicesPageSaveTests
         var tts = NewTtsSettingsViewModel(settings);
         var settingsVm = NewSettingsViewModel(settings, new FakeSecretStore(), tts);
         var servicesVm = NewServicesViewModel(settings, tts);
-        servicesVm.SaveAllSettings = settingsVm.SaveAsync;
+        servicesVm.SaveAllSettings = settingsVm.SaveWithResultAsync;
 
         servicesVm.Tts.TtsServiceUrl = "http://127.0.0.1:9911";
         servicesVm.Tts.TtsSpeaker = "narrator";

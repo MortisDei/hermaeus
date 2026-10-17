@@ -12,6 +12,16 @@ and `docs/security-roadmap.md` for open hardening work.
 
 ## r34: Bounded ingestion, process cleanup and fallback-vault isolation
 
+The later owner-requested media extension adds explicit ComfyUI and compatible
+media API clients, without installing an engine or widening Agent tools. Results
+remain session-only until explicit export. Per-request secret references,
+redirect/cross-origin refusal, actual output budgets and expanded workflow
+accounting prevent automatic credential forwarding and unchecked accumulation.
+Client cancellation retains backend job identity and never claims server job
+termination. Export path metadata/atomic replacement and bounded image preview
+leave filesystem race and backend custom-node risks explicit. Protocol/native
+control fixtures remain distinct from real model inference and hardware fit.
+
 Controlled fixtures reproduced cancelled command/probe survival, unbounded
 output capture and web ingestion over-read. Process owners now drain bounded
 streams and attempt cancellation cleanup with separately bounded joining;

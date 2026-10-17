@@ -150,6 +150,13 @@
                             </StackPanel>
                         </Button>
 
+                        <Button Classes="icon-btn" Command="{Binding ShowMediaPanelCommand}" Classes.nav-active="{Binding ShowMedia}"
+                                ToolTip.Tip="Media generation - images, audio and video">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <PathIcon Data="M4 4h16v16H4V4zm2 2v12h12V6H6zm1 10l3-4 2 2 2-3 3 5H7z" Width="17" Height="17" />
+                                <TextBlock Text="Media" FontSize="11" VerticalAlignment="Center" IsVisible="{Binding Settings.Ui.ShowNavLabels}" />
+                            </StackPanel>
+                        </Button>
                         <Button Classes="icon-btn" Command="{Binding ShowLabPanelCommand}" Classes.nav-active="{Binding ShowLab}"
                                 ToolTip.Tip="Lab - experiments and evidence">
                             <StackPanel Orientation="Horizontal" Spacing="4">
@@ -294,6 +301,9 @@
                     </DataTemplate>
                     <DataTemplate DataType="vm:LabViewModel">
                         <views:LabView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:MediaGenerationViewModel">
+                        <views:MediaGenerationView />
                     </DataTemplate>
                     <DataTemplate DataType="vm:SystemOverviewViewModel">
                         <views:SystemOverviewView />

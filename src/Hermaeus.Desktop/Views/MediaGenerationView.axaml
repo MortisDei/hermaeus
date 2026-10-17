@@ -1,0 +1,78 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:models="using:Hermaeus.Core.Models"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
+             x:Class="Hermaeus.Desktop.Views.MediaGenerationView"
+             x:DataType="vm:MediaGenerationViewModel">
+    <ScrollViewer Padding="24">
+        <StackPanel Spacing="12" MaxWidth="900">
+            <TextBlock Text="Media generation" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Text="Generate images, audio or video through a configured server. Local workflows need their own installed models. Remote endpoints receive your prompt and may charge for generation."
+                       TextWrapping="Wrap" Opacity="0.65" />
+            <Button Content="Configure providers on Services" Command="{Binding ConfigureServicesCommand}" />
+            <StackPanel Spacing="10" IsEnabled="{Binding !IsBusy}">
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Protocol" />
+                        <ComboBox ItemsSource="{Binding Protocols}" SelectedItem="{Binding Protocol}" HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock Text="Output kind" />
+                        <ComboBox ItemsSource="{Binding Kinds}" SelectedItem="{Binding Kind}" HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                </Grid>
+                <StackPanel Spacing="8" IsVisible="{Binding IsOpenAi}">
+                    <TextBlock Text="Uses the OpenAI-compatible endpoint and credential configured in Settings > LLM. The selected model must implement this media protocol; listing a model does not prove support."
+                               TextWrapping="Wrap" Opacity="0.65" />
+                    <TextBox Text="{Binding Model}" PlaceholderText="Exact generation model ID" />
+                    <TextBox Text="{Binding Size}" IsVisible="{Binding !IsAudio}" PlaceholderText="Optional size, for example 1024x1024; empty uses provider default" />
+                    <StackPanel IsVisible="{Binding IsAudio}" Spacing="4">
+                        <TextBlock Text="Audio voice (audio-output chat completions)" />
+                        <TextBox Text="{Binding Voice}" PlaceholderText="Voice supported by the selected model" />
+                    </StackPanel>
+                    <StackPanel IsVisible="{Binding IsVideo}" Spacing="4">
+                        <TextBlock Text="Video seconds (provider must support the selected value)" />
+                        <NumericUpDown Value="{Binding VideoSeconds}" Minimum="1" Maximum="60" FormatString="0" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Spacing="8" IsVisible="{Binding IsComfy}">
+                    <TextBlock Text="Use a trusted ComfyUI workflow exported in API format. Models and sampling settings come from the workflow. Set each intended prompt input to exactly {{prompt}}. Workflows can execute installed backend nodes; only submit workflows you trust."
+                               TextWrapping="Wrap" Opacity="0.65" />
+                    <Button Content="Load API workflow JSON" Command="{Binding LoadWorkflowCommand}" />
+                    <TextBox Text="{Binding WorkflowJson}" AcceptsReturn="True" TextWrapping="Wrap" Height="160" MaxLength="1048576"
+                             PlaceholderText="Paste a ComfyUI API-format workflow with a {{prompt}} string input" />
+                </StackPanel>
+                <TextBlock Text="Prompt" />
+                <TextBox Text="{Binding Prompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" MaxLength="32768"
+                         PlaceholderText="Describe the image, sound, music or video you want" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Generate" Command="{Binding GenerateCommand}" />
+                <Button Content="Cancel waiting" Command="{Binding CancelCommand}" />
+                <Button Content="Clear results" Command="{Binding ClearCommand}" />
+            </StackPanel>
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="3" />
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding JobId, StringFormat='Backend job: {0}'}" TextWrapping="Wrap" Opacity="0.65" />
+            <TextBlock Text="Cancelling stops this client waiting; accepted server jobs may continue. Up to eight outputs and 128 MiB combined are accepted. Unsaved results are lost on exit."
+                       TextWrapping="Wrap" FontSize="12" Opacity="0.6" />
+            <controls:MossEmptyState IsVisible="{Binding !HasOutputs}" Title="No generated media yet"
+                                     Hint="Choose a configured server, enter your prompt and generate. Export results you want to keep." />
+            <ListBox ItemsSource="{Binding Outputs}" SelectedItem="{Binding SelectedOutput}" IsVisible="{Binding HasOutputs}" MaxHeight="180" IsEnabled="{Binding !IsBusy}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:GeneratedMedia">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="{Binding SuggestedFileName}" />
+                            <TextBlock Text="{Binding MediaType}" Opacity="0.65" />
+                            <TextBlock Text="{Binding Data.Length, StringFormat='{}{0} bytes'}" Opacity="0.65" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <Image x:Name="PreviewImage" MaxHeight="420" Stretch="Uniform" />
+            <TextBlock x:Name="PreviewStatus" TextWrapping="Wrap" Opacity="0.65" />
+            <Button Content="Export selected file" Command="{Binding ExportCommand}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

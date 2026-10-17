@@ -4,8 +4,12 @@ Native Kokoro serializes model loading, inference, asset replacement, and
 disposal through the same model lifetime gate. Async disposal waits for an
 active model operation before freeing its ONNX session.
 
-Text-to-speech (output) and speech-to-text (input) are optional, local-first by
-default, and never persist audio beyond the moment they need it.
+Text-to-speech (output) and speech-to-text (input) are optional and local-first by
+default. Transient microphone/read-aloud audio is separate from explicitly
+requested synthesis exports. The [Media workspace](media-generation.md) can also
+generate session-only audio through a configured workflow or audio-output chat
+API, then export it explicitly. This does not add a voice provider or install
+music/speech models.
 
 ## Voice Architecture and Providers
 

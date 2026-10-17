@@ -6,6 +6,19 @@ subsystem. It is not a changelog, implementation diary, architecture review,
 or roadmap. Release status is recorded in `CHANGELOG.md` and the version is
 defined by `Directory.Build.props`.
 
+## Media generation
+
+- Native Media workspace for explicit image, audio and video generation using
+  user-managed ComfyUI API workflows or compatible image/audio/video HTTP APIs.
+- Per-job status and client cancellation, bounded generated outputs, inert image
+  preview and explicit atomic file export. Results are session-only; accepted
+  backend jobs can outlive client cancellation.
+- Existing provider settings and secret-store references are reused. ComfyUI
+  configuration lives on Services. No engine, custom-node or model installation,
+  automatic paid capability probe or model-name capability assumption.
+- See [Media generation](media-generation.md) for exact protocols, limits and
+  the distinction between implemented clients and unverified real model fit.
+
 ## Chat
 
 - Native markdown chat with virtualized conversations, code blocks, file and

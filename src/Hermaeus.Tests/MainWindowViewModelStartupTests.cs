@@ -25,7 +25,7 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class MainWindowViewModelStartupTests
 {
-    internal sealed record Harness(MainWindowViewModel Main, ModelManagementViewModel Models, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore);
+    internal sealed record Harness(MainWindowViewModel Main, ModelManagementViewModel Models, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore, ICommandRegistry Commands);
 
     internal static async Task<Harness> NewHarnessAsync(
         TempDir temp,
@@ -104,9 +104,29 @@ public sealed class MainWindowViewModelStartupTests
 
         var main = new MainWindowViewModel(
             convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, lab, systemOverview, doctor, memories, logsVm, wizard, projects,
-            commandRegistry, palette, activity, settings, toasts, logs, new ConversationExportService(), recallIndexing);
+            commandRegistry, palette, activity, settings, toasts, logs, new ConversationExportService(),
+            new MediaGenerationViewModel(new MediaGenerationService(secrets), settings), recallIndexing);
 
-        return new Harness(main, models, llm, logs, toasts, convStore);
+        return new Harness(main, models, llm, logs, toasts, convStore, commandRegistry);
+    }
+
+    [Fact]
+    public async Task Media_is_reachable_from_navigation_and_the_shared_command_palette()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        try
+        {
+            var media = Assert.Single(harness.Commands.All, command => command.Id == "nav.media");
+            await media.Execute();
+            Assert.True(harness.Main.ShowMedia);
+            Assert.Same(harness.Main.Media, harness.Main.ActiveViewModel);
+            harness.Main.ActivePanel = "chat";
+            harness.Main.ShowMediaPanelCommand.Execute(null);
+            Assert.True(harness.Main.ShowMedia);
+            Assert.Same(harness.Main.Media, harness.Main.ActiveViewModel);
+        }
+        finally { await harness.Main.ShutdownAsync(); }
     }
 
     [Fact]

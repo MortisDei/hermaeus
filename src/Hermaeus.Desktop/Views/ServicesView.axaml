@@ -802,6 +802,18 @@
                  cards' own. It is still the single existing save flow; there is
                  no second serializer. Both cards save together because they
                  share it, which is why each says so. -->
+            <Border Classes="settings-card" DataContext="{Binding MediaSettings}" x:DataType="vm:LlmDefaultsSettingsViewModel">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Media generation / ComfyUI" FontSize="16" FontWeight="SemiBold" />
+                    <CheckBox Content="Enable this user-managed ComfyUI endpoint" IsChecked="{Binding ComfyUiEnabled}" />
+                    <TextBlock Text="Hermaeus submits trusted API workflows; it does not install models, nodes or a server. Remote endpoints receive workflow and prompt data. OpenAI-compatible media uses the existing endpoint and credential in Settings > LLM."
+                               TextWrapping="Wrap" Opacity="0.65" />
+                    <TextBox Text="{Binding ComfyUiBaseUrl}" PlaceholderText="http://127.0.0.1:8188" ToolTip.Tip="Existing ComfyUI HTTP(S) endpoint, without query, fragment or embedded credentials." />
+                    <TextBox Text="{Binding ComfyUiApiKey}" PasswordChar="*" PlaceholderText="Optional API key; leave empty to retain a stored key"
+                             ToolTip.Tip="Optional bearer credential stored through the existing secret store." />
+                </StackPanel>
+            </Border>
+            <Button Content="Save Config" Command="{Binding SaveSettingsCommand}" ToolTip.Tip="Saves media and other shared settings through the existing settings save flow." />
             <views:ServicesVoiceSectionView DataContext="{Binding Tts}" />
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,-8,0,0">
                 <Button Command="{Binding SaveSettingsCommand}"

@@ -20,6 +20,19 @@ penetration-test report.
 
 ## Security Posture
 
+Media generation uses explicit configured HTTP(S) endpoints and per-request
+secret-store credentials. The client disables redirects, refuses cross-origin
+output URLs and bounds actual response/decoded output bytes, output count,
+workflow size/depth/nodes and expanded workflow request bytes. Returned names
+never become local output paths. Image preview has dimension limits; audio/video
+are not autoplayed or launched. Explicit exports use atomic replacement, Unix
+0600 creation and existing-style reparse metadata checks. These checks are not
+race-free filesystem identity or a backend sandbox. Trusted ComfyUI workflows
+execute that server's installed nodes, which can have independent network/filesystem
+access. Client cancellation can leave a backend job running or charging. Session
+results are not media history or secure memory erasure. See
+[Media generation](media-generation.md) for exact limits and supported protocols.
+
 ### Assets
 
 - Chat history, model profiles, runtime settings, benchmark history, RAG

@@ -36,6 +36,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public ServicesViewModel        Services { get; }
     public BenchmarkViewModel       Benchmarks { get; }
     public LabViewModel             Lab { get; }
+    public MediaGenerationViewModel Media { get; }
     public SystemOverviewViewModel  SystemOverview { get; }
     public DoctorViewModel          Doctor { get; }
     public MemoriesViewModel        Memories { get; }
@@ -72,6 +73,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowServices => ActivePanel == "services";
     public bool ShowBenchmarks => ActivePanel == "benchmarks";
     public bool ShowLab => ActivePanel == "lab";
+    public bool ShowMedia => ActivePanel == "media";
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowMemories => ActivePanel == "memories";
@@ -90,6 +92,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "services" => Services,
         "benchmarks" => Benchmarks,
         "lab"       => Lab,
+        "media"     => Media,
         "system"   => SystemOverview,
         "doctor"   => Doctor,
         "memories" => Memories,
@@ -125,6 +128,7 @@ public partial class MainWindowViewModel : ViewModelBase
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
         ConversationExportService exports,
+        MediaGenerationViewModel media,
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
         LlamaCppService? llamaCpp = null,
         DesktopPetViewModel? pet = null)
@@ -141,6 +145,8 @@ public partial class MainWindowViewModel : ViewModelBase
         Chat.AttachManagedServices(services);
         Benchmarks = benchmarks; Lab = lab; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Projects = projects;
+        Media = media;
+        Media.RequestServices = () => ShowServicesPanel();
         Pet = pet ?? new DesktopPetViewModel();
         Pet.BindSettings(Settings.Ui);
         // r24 doc 01 1.6: switching a project only ever changes what NEW work
@@ -238,7 +244,8 @@ public partial class MainWindowViewModel : ViewModelBase
         // are the same DI singletons Settings edits. Nothing on Services wrote
         // them to disk, so every edit made there was lost on restart. Route its
         // Save through the one existing save flow rather than adding a second.
-        Services.SaveAllSettings = Settings.SaveAsync;
+        Services.SaveAllSettings = Settings.SaveWithResultAsync;
+        Services.MediaSettings = Settings.Llm;
         // Stopped and still-starting managed servers are expected local states.
         // Give the provider the live Services status gate so model refreshes do
         // not turn them into connection warnings. Running, Error, and unmanaged
@@ -311,6 +318,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Nav("nav.services", "Services", "Services", "Ctrl+5", "services");
         Nav("nav.benchmarks", "Benchmarks", "Benchmarks", "", "benchmarks");
         Nav("nav.lab", "Lab", "Lab", "", "lab");
+        Nav("nav.media", "Media generation", "Media", "", "media");
         Nav("nav.system", "System overview", "System", "", "system");
         Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
         Nav("nav.memories", "Memories", "Memory", "", "memories");
@@ -534,6 +542,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _watchedRefreshCts = null;
         await Agent.ShutdownAsync(ct);
         await Lab.ShutdownAsync(ct);
+        await Media.ShutdownAsync(ct);
         await Services.StopAllAsync(ct);
         await AwaitBackgroundTasksAsync(ct);
         _backgroundShutdownCts.Dispose();
@@ -932,6 +941,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand] private void ShowServicesPanel()    { ActivePanel = "services"; Settings.Reload(); }
     [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; RunBackgroundTaskAsync("load benchmarks panel", () => Benchmarks.LoadCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowLabPanel()         { ActivePanel = "lab"; RunBackgroundTaskAsync("load lab evidence", Lab.RefreshAsync); }
+    [RelayCommand] private void ShowMediaPanel()       { ActivePanel = "media"; }
     [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; RunBackgroundTaskAsync("refresh system panel", () => SystemOverview.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowDoctorPanel()
     {
@@ -1031,6 +1041,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowServices));
         OnPropertyChanged(nameof(ShowBenchmarks));
         OnPropertyChanged(nameof(ShowLab));
+        OnPropertyChanged(nameof(ShowMedia));
         OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ShowDoctor));
         OnPropertyChanged(nameof(ShowMemories));
