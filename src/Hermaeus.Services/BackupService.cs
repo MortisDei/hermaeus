@@ -11,6 +11,7 @@ public sealed record BackupRestoreLimits(
 
 public sealed class BackupService
 {
+    private static readonly uint[] ZipCrc32Table = CreateZipCrc32Table();
     private readonly ISettingsService _settings;
 
     public BackupService(ISettingsService settings)
@@ -198,6 +199,7 @@ public sealed class BackupService
                     {
                         var buffer = new byte[64 * 1024];
                         long written = 0;
+                        var crc = uint.MaxValue;
                         while (true)
                         {
                             var read = await input.ReadAsync(buffer.AsMemory(), ct);
@@ -210,11 +212,18 @@ public sealed class BackupService
                                 throw new InvalidDataException($"Backup entry '{item.Entry.FullName}' exceeded the per-file restore limit while extracting.");
                             if (actualTotalUncompressedBytes > limits.MaxTotalUncompressedBytes)
                                 throw new InvalidDataException("Backup exceeded the total uncompressed restore limit while extracting.");
+                            crc = AppendZipCrc32(crc, buffer.AsSpan(0, read));
                             await output.WriteAsync(buffer.AsMemory(0, read), ct);
                         }
 
                         if (written != item.Entry.Length)
                             throw new InvalidDataException($"Backup entry '{item.Entry.FullName}' did not extract to its declared size.");
+                        // The .NET ZIP reader can stop at a forged declared
+                        // length. Equal byte counts alone do not establish
+                        // intact extraction, so verify the ZIP checksum too.
+                        // CRC detects corruption; it does not authenticate an archive.
+                        if ((crc ^ uint.MaxValue) != item.Entry.Crc32)
+                            throw new InvalidDataException($"Backup entry '{item.Entry.FullName}' failed its ZIP checksum.");
                         ct.ThrowIfCancellationRequested();
                         output.Flush(flushToDisk: true);
                     }
@@ -299,6 +308,27 @@ public sealed class BackupService
             try { if (Directory.Exists(backupRoot)) Directory.Delete(backupRoot, recursive: true); }
             catch { }
         }
+    }
+
+    private static uint AppendZipCrc32(uint crc, ReadOnlySpan<byte> bytes)
+    {
+        foreach (var value in bytes)
+            crc = ZipCrc32Table[(byte)(crc ^ value)] ^ (crc >> 8);
+        return crc;
+    }
+
+    private static uint[] CreateZipCrc32Table()
+    {
+        // Reflected CRC-32/ISO-HDLC polynomial required by the ZIP format.
+        var table = new uint[256];
+        for (var index = 0; index < table.Length; index++)
+        {
+            var value = (uint)index;
+            for (var bit = 0; bit < 8; bit++)
+                value = (value & 1) != 0 ? 0xedb88320U ^ (value >> 1) : value >> 1;
+            table[index] = value;
+        }
+        return table;
     }
 
     private static string ResolveRestoreTarget(string root, string entryName)
