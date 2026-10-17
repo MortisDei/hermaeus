@@ -15,6 +15,10 @@ on legitimate workload evidence and owner approval, isolates owner-gated vault
 migration, and permits evidence-backed conditional Retain/Defer dispositions.
 Notice delivery and unresolved asset licensing remain release gates.
 
+Later native walkthrough and S3 implementation receipts continue in
+[15](15-native-and-vault-evidence.md); the first integration counts below remain
+the evidence for its specific local batches.
+
 ## B0 minimum baseline: VERIFIED EXISTING
 
 All commands below ran on the approved Windows host before production repairs:
@@ -178,12 +182,12 @@ only the static implementation class can accidentally select no cases.
 | Cases | Existing evidence and actual remaining limit |
 | --- | --- |
 | A01/A02 | Workspace traversal/ignored-root and archive parent/absolute/drive/UNC/mixed/reparse fixtures exist. They do not prove live ancestor replacement between final validation and filesystem use, or every direct/queued/Rewind symlink combination |
-| A03/A05 | Policy drift, changed prepared target, missing preparation, fingerprints and durable reopen/reconciliation fixtures exist. Seeded recovery state is not physical crash-at-write injection; the complete independent tamper matrix remains open |
+| A03/A05 | Later public approval field/payload tamper cases and actual Windows/Linux killed-worker recovery are in 15. They reproduced and repaired phantom waiting state and parent projection order. Selected process barriers and readback are proved; arbitrary power-loss timing is not |
 | A04 | New controlled editor/Agent race reproduced a bypass. The editor now uses the same existing target owner; late results cannot overwrite another editor or clear newer text. External writers remain outside this in-process coordination |
-| A06/A07 | Command family/model-risk/MCP approval regressions preserve deterministic gates. A controlled approved MSBuild descendant demonstrates transitive code execution; no outside-canary/network-exfiltration acceptance was run |
+| A06/A07 | Command family/model-risk/MCP approval regressions preserve deterministic gates. A controlled approved MSBuild recipe actually read an outside-workspace synthetic canary on Windows/Linux (15). Host recipes remain unsandboxed; no network-exfiltration test or containment claim follows |
 | A10/A11 | Corrupt ownership stays Unknown; fake PID/executable mismatch fixtures refuse termination. These do not prove real PID reuse or final runtime listeners across aliases/environment/presets. Core host conflict checks remain; no expanded launch policy was invented |
-| A14 | Restore declared-size/duplicate/traversal/pre-cancel/reparse and rollback fixtures exist. Actual forged expansion, disk-full interruption and live filesystem swaps remain unverified |
-| A16/A17 | Token rejection/revocation and real Local API child reload, pure redaction and export redaction fixtures exist. Health-prefix/method/route cross-products and persisted synthetic-child-output/export/exception redaction remain incomplete |
+| A14 | Later forged-size/truncated-publication reproduction and streamed CRC repair are in 15, with stored/deflated and independent-vector controls. Platform-hidden expansion, disk-full interruption and live filesystem swaps are outside that proof |
+| A16/A17 | Later production route/token/method/health matrix and actual synthetic-child/exception-derived diagnostics persistence and copy checks are in 15. Outer uncaught exceptions, arbitrary task-content redaction and a complete malicious-description matrix are not claimed |
 | A20 | Sandbox integration remains Defer. No adapter or second approval authority was added, and no sandbox containment pass is claimed |
 | L2 | Existing coordinator caches shutdown, reverses owners, records incomplete asynchronous deadlines and observes abandoned task faults. A synchronously blocking owner before its first await is outside that deadline proof. Actual active-runtime drain, tray/restart and Linux desktop shutdown remain native acceptance gates |
 
@@ -216,13 +220,14 @@ remain release gates; the two verified notices do not close those obligations.
   2,920,917 bytes. There are no tracked PDFs. These legitimate workloads do not
   validate 50 MiB local/16 Mi-character/2,000-page/256 MiB staging proposals.
   The later owner PDF workload and approval above supersede the pending decision;
-  implementation and verification of approved ceilings remain in progress.
-- **S3:** conditionally approved for isolated implementation and tests. Before
-  implementation, specify exact strict-UTF8/UInt32LE name AAD and validated
-  protected recovery discovery after Data Root relocation. See
-  [14](14-vault-format-decision.md). Production activation remains gated on
-  cross-process/native/recovery evidence and explicit owner acceptance; current
-  production format remains active meanwhile.
+  the approved ceilings are implemented and covered by the integration receipts
+  above. Further changes still require owner approval.
+- **S3:** conditionally approved contract includes exact strict-UTF8/UInt32LE
+  name AAD and validated protected recovery discovery after Data Root relocation.
+  See [14](14-vault-format-decision.md) and later implementation/process evidence
+  in [15](15-native-and-vault-evidence.md). Production activation remains gated
+  on required native/provider workflows and explicit owner acceptance of recovery
+  and downgrade; public construction retains the existing format.
 - **S1 ownership:** the shared Services Windows job is post-start, process-wide
   and unsuitable for per-command cancellation. Linux has no current group/
   session launcher. Best-effort tree termination is not containment, and waiting

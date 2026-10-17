@@ -337,6 +337,10 @@ calibrated source relevance rather than its tiny RRF ordering score. See the
   `Interrupted` with a reason when no execution owner is present. Child plan
   entries are reconciled to the same state, and the task requires an explicit
   Continue action before it can run again.
+- Startup also reconciles an approved mutation's Pending receipt when its saved
+  task still says `WaitingForUser`. It removes the obsolete approval, settles
+  interrupted child plans before projecting parent decisions, and keeps a
+  healthy sibling's question available. Recovery never replays the file write.
 - Workspace policy narrows paths and read budgets. Lessons inform the model
   but never widen authority. Native tool calling and constrained JSON planner
   output are alternate transport paths through the same gate.
@@ -545,7 +549,9 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 - Data Root restore preflights all file entries for safe paths, duplicate
   targets, and bounded per-entry and total uncompressed sizes before writing.
   The archive is expanded beneath a data-root staging directory, with actual
-  expanded bytes checked while copying. Commit moves are rollback-safe, and
+  expanded bytes checked while copying and each staged member's ZIP checksum
+  verified before publication. Checksums detect inconsistency, not authenticity.
+  Commit moves are rollback-safe, and
   existing files are preserved if a late commit step fails.
 - Settings-triggered restart drains the shared application owners before it
   starts the replacement. The replacement uses a bounded internal lock
@@ -584,6 +590,11 @@ shell strings, secrets are stored through secret-store references, downloads
 are hash-verified when trusted hashes exist, and user-state writes use atomic
 replacement. Backup, restore, path, symlink, redaction, and approval controls
 are documented in the [current security review](security-review.md).
+
+Unreadable fallback credentials block writes rather than silently creating a
+replacement key. The authenticated v3 vault implementation remains inactive;
+production fallback writes still use the existing format until explicit owner
+acceptance of migration, recovery and downgrade behaviour.
 
 Open hardening items live in the [security roadmap](security-roadmap.md). The
 [security history](security-history.md) is historical and does not override the

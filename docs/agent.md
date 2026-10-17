@@ -20,7 +20,12 @@ explicit user approval before it executes.
   when no execution owner exists after startup, the task and any active child
   plan entry become `Interrupted` with a concrete recovery reason. Continuing
   an interrupted task is explicit; deletion still refuses genuinely `Running`
-  tasks. Initialization then reconciles JSON task files back into the index.
+  tasks. An approved mutation can also persist its Pending execution receipt
+  while the task is still `WaitingForUser`. Startup reconciles that receipt by
+  readback, marks the disappeared execution `Interrupted`, and clears its stale
+  decision without replaying the write. Child plan recovery settles before
+  parent interaction projection; a healthy sibling's question remains active.
+  Initialization then reconciles JSON task files back into the index.
 - Validates task IDs with a short alphanumeric, dash, and underscore allowlist
   before resolving task directories.
 - Shows a review queue of tasks that need a decision right now: those

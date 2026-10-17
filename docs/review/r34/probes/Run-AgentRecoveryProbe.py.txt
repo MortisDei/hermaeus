@@ -1,0 +1,49 @@
+import json
+import os
+from pathlib import Path
+import select
+import subprocess
+import sys
+import tempfile
+import uuid
+
+probe = str(Path(sys.argv[1]).resolve())
+failed = False
+for expected in ("Unknown", "Applied", "Conflict"):
+    root = Path(tempfile.gettempdir()) / "hermaeus-r34-a05" / ("case-final-" + expected + "-" + uuid.uuid4().hex)
+    mode = "before" if expected == "Unknown" else "after"
+    worker = subprocess.Popen(["dotnet", probe, "worker", mode, str(root)],
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True)
+    try:
+        readable, _, _ = select.select([worker.stdout], [], [], 15)
+        if not readable:
+            raise RuntimeError("Owned Agent probe did not reach its bounded barrier")
+        ready_line = worker.stdout.readline(65536)
+        ready = json.loads(ready_line)
+        if ready.get("stage") != "READY" or ready.get("pid") != worker.pid or worker.poll() is not None:
+            raise RuntimeError("Agent probe barrier did not match the owned worker")
+        (root / "ready.json").write_text(ready_line)
+        print(ready_line, end="", flush=True)
+        worker.kill()
+        worker.wait(timeout=10)
+        if expected == "Conflict":
+            (root / "workspace" / "notes.md").write_text("synthetic-neither")
+        recovery = subprocess.run(["dotnet", probe, "recover", expected, str(root)],
+                                  capture_output=True, text=True, timeout=30)
+        (root / "recovery.json").write_text(recovery.stdout)
+        print(recovery.stdout, end="", flush=True)
+        failed |= recovery.returncode != 0 or bool(recovery.stderr)
+        worker_errors = worker.stderr.read()
+        if worker_errors:
+            (root / "worker-stderr.txt").write_text(worker_errors)
+            failed = True
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+            worker.wait(timeout=10)
+        worker.stdin.close()
+        worker.stdout.close()
+        worker.stderr.close()
+print(json.dumps({"caseName": "agent-process-recovery", "allPassed": not failed, "cases": 3}), flush=True)
+sys.exit(1 if failed else 0)

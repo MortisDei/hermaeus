@@ -1,0 +1,266 @@
+using System.Collections;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.Loader;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Hermaeus.Services;
+
+internal static class Program
+{
+    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
+    private const string Before = "synthetic-before";
+    private const string After = "synthetic-after";
+    private static readonly Type TransactionType = typeof(SecretStore).Assembly.GetType("Hermaeus.Services.FallbackVaultTransaction", true)!;
+    private static readonly Func<string, byte[], string> Legacy = typeof(SecretStore)
+        .GetMethod("DecodeLegacyValue", BindingFlags.NonPublic | BindingFlags.Static)!
+        .CreateDelegate<Func<string, byte[], string>>();
+
+    public static async Task<int> Main(string[] args)
+    {
+        Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", "1");
+        try
+        {
+            if (args.Length == 0) throw new ArgumentException();
+            if (args[0] == "worker") { await WorkerAsync(args); return 0; }
+            if (args.Length != 3 || args[0] != "parent") throw new ArgumentException();
+            var root = Path.Combine(Path.GetFullPath(args[1]), "vault-probe-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var oldApp = Path.GetFullPath(args[2]);
+            var lockExclusion = await WritersAsync(Path.Combine(root, "writers"), oldApp);
+            var beforeCommit = await CrashAsync(Path.Combine(root, "before"), oldApp, false);
+            var afterCommit = await CrashAsync(Path.Combine(root, "after"), oldApp, true);
+            var keyOnly = await KeyCrashAsync(Path.Combine(root, "key"));
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                caseName = "vault-process-probe", lockExclusion, crashBeforeCommit = beforeCommit,
+                crashAfterCommitAndOldReaderRecovery = afterCommit, keyOnlyCrashFailsClosed = keyOnly,
+                os = RuntimeInformation.OSDescription, runtime = RuntimeInformation.FrameworkDescription,
+                allPassed = lockExclusion && beforeCommit && afterCommit && keyOnly
+            }));
+            return lockExclusion && beforeCommit && afterCommit && keyOnly ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            // Never emit paths, exception messages, inner exceptions, keys or secret values.
+            Console.Error.WriteLine("PROBE_FAILED:" + ex.GetType().Name);
+            return 1;
+        }
+    }
+
+    private static string Vault(string root) => Path.Combine(root, "data", "secrets.local.json");
+    private static string Protected(string root) => Path.Combine(root, "protected");
+
+    private static object Transaction(string root, Action<string>? fault = null) => Activator.CreateInstance(
+        TransactionType, BindingFlags.Instance | BindingFlags.NonPublic, null,
+        [Vault(root), Protected(root), Legacy, TimeSpan.FromSeconds(8), fault, null, null], null)!;
+
+    private static async Task<object?> CallAsync(object transaction, string method, params object?[] args)
+    {
+        var info = TransactionType.GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var task = (Task)info.Invoke(transaction, args)!;
+        await task.WaitAsync(Bound);
+        return task.GetType().GetProperty("Result")?.GetValue(task);
+    }
+
+    private static Task<object?> MutateAsync(object transaction, string name, string? value) =>
+        CallAsync(transaction, "MutateAsync", name, value, CancellationToken.None);
+    private static async Task<string?> ResolveAsync(object transaction, string name) =>
+        (string?)await CallAsync(transaction, "ResolveAsync", name, CancellationToken.None);
+
+    private static async Task WorkerAsync(string[] args)
+    {
+        if (args.Length != 4) throw new ArgumentException();
+        var root = args[1];
+        var phase = args[2];
+        var name = args[3];
+        if (phase == "contend")
+        {
+            try
+            {
+                using var unexpected = new FileStream(Path.Combine(Protected(root), "secrets.local.lock"),
+                    FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                throw new InvalidOperationException();
+            }
+            catch (IOException)
+            {
+                Console.WriteLine("CONTENDED");
+                Console.Out.Flush();
+            }
+        }
+        Action<string>? fault = phase == "contend" ? null : at =>
+        {
+            if (at != phase) return;
+            Console.WriteLine("READY");
+            Console.Out.Flush();
+            if (Console.In.ReadLine() != "RELEASE") throw new InvalidOperationException();
+        };
+        await MutateAsync(Transaction(root, fault), name, After);
+        Console.WriteLine("DONE");
+        Console.Out.Flush();
+    }
+
+    private static async Task<bool> WritersAsync(string root, string oldApp)
+    {
+        using var old = await OldVault.CreateAsync(oldApp, root);
+        using var first = StartWorker(root, "primary-flushed", "first");
+        await first.ExpectAsync("READY");
+        using var second = StartWorker(root, "contend", "second");
+        await second.ExpectAsync("CONTENDED");
+        if (second.Process.HasExited) throw new InvalidOperationException();
+        await first.ReleaseAsync();
+        await first.ExpectAsync("DONE");
+        await second.ExpectAsync("DONE");
+        await first.FinishAsync();
+        await second.FinishAsync();
+        var fresh = Transaction(root);
+        return await ResolveAsync(fresh, "old") == Before
+            && await ResolveAsync(fresh, "first") == After && await ResolveAsync(fresh, "second") == After;
+    }
+
+    private static async Task<bool> CrashAsync(string root, string oldApp, bool afterCommit)
+    {
+        using var old = await OldVault.CreateAsync(oldApp, root);
+        var original = await File.ReadAllBytesAsync(Vault(root));
+        using (var child = StartWorker(root, afterCommit ? "primary-replaced" : "primary-flushed", "old"))
+        {
+            await child.ExpectAsync("READY");
+            await child.KillOwnedAsync();
+        }
+        var fresh = Transaction(root);
+        if (!afterCommit)
+        {
+            if (!(await File.ReadAllBytesAsync(Vault(root))).AsSpan().SequenceEqual(original)
+                || await old.ResolveAsync("old") != Before || await ResolveAsync(fresh, "old") != Before)
+                return false;
+            await MutateAsync(fresh, "old", After);
+            return await ResolveAsync(Transaction(root), "old") == After;
+        }
+        if (await ResolveAsync(fresh, "old") != After) return false;
+        var candidates = (IEnumerable)(await CallAsync(fresh, "DiscoverRecoveryAsync", CancellationToken.None))!;
+        var list = candidates.Cast<object>().ToArray();
+        if (list.Length != 1 || !(bool)list[0].GetType().GetProperty("Available")!.GetValue(list[0])!) return false;
+        var id = (string)list[0].GetType().GetProperty("OriginalId")!.GetValue(list[0])!;
+        var review = await CallAsync(fresh, "ReviewRecoveryAsync", id, CancellationToken.None);
+        await CallAsync(fresh, "RestoreAsync", review, CancellationToken.None);
+        return (await File.ReadAllBytesAsync(Vault(root))).AsSpan().SequenceEqual(original)
+            && await old.ResolveAsync("old") == Before && await ResolveAsync(Transaction(root), "old") == Before;
+    }
+
+    private static async Task<bool> KeyCrashAsync(string root)
+    {
+        using (var child = StartWorker(root, "key-replaced", "new"))
+        {
+            await child.ExpectAsync("READY");
+            await child.KillOwnedAsync();
+        }
+        var keyPath = Path.Combine(Protected(root), "secrets.local.key");
+        var originalDigest = SHA256.HashData(await File.ReadAllBytesAsync(keyPath));
+        var refused = false;
+        try { await MutateAsync(Transaction(root), "new", After); }
+        catch (IOException) { refused = true; }
+        var retainedDigest = SHA256.HashData(await File.ReadAllBytesAsync(keyPath));
+        return refused && !File.Exists(Vault(root))
+            && CryptographicOperations.FixedTimeEquals(originalDigest, retainedDigest);
+    }
+
+    private static Child StartWorker(string root, string phase, string name)
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = Environment.ProcessPath!, UseShellExecute = false, RedirectStandardInput = true,
+            RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+        };
+        // Framework-dependent console probe is launched as `dotnet Probe.dll`.
+        info.ArgumentList.Add(Assembly.GetEntryAssembly()!.Location);
+        foreach (var value in new[] { "worker", root, phase, name }) info.ArgumentList.Add(value);
+        return new Child(Process.Start(info) ?? throw new InvalidOperationException());
+    }
+
+    private sealed class Child : IDisposable
+    {
+        internal Process Process { get; }
+        private readonly Task<string> _stderr;
+        internal Child(Process process) { Process = process; _stderr = process.StandardError.ReadToEndAsync(); }
+        internal async Task ExpectAsync(string expected)
+        {
+            if (await Process.StandardOutput.ReadLineAsync().WaitAsync(Bound) != expected) throw new InvalidOperationException();
+        }
+        internal async Task ReleaseAsync()
+        {
+            await Process.StandardInput.WriteLineAsync("RELEASE");
+            await Process.StandardInput.FlushAsync();
+        }
+        internal async Task FinishAsync()
+        {
+            await Process.WaitForExitAsync().WaitAsync(Bound);
+            if (Process.ExitCode != 0 || (await _stderr.WaitAsync(Bound)).Length != 0) throw new InvalidOperationException();
+        }
+        internal async Task KillOwnedAsync()
+        {
+            if (!Process.HasExited) Process.Kill(entireProcessTree: true);
+            await Process.WaitForExitAsync().WaitAsync(Bound);
+            await _stderr.WaitAsync(Bound);
+        }
+        public void Dispose()
+        {
+            // Only this probe's exact child handle is eligible for cleanup.
+            try { if (!Process.HasExited) { Process.Kill(entireProcessTree: true); Process.WaitForExit(10_000); } }
+            finally { Process.Dispose(); }
+        }
+    }
+
+    private sealed class OldVault : IDisposable
+    {
+        private readonly OldContext _context;
+        private readonly object _store;
+        private readonly MethodInfo _resolve;
+        private OldVault(OldContext context, object store, MethodInfo resolve)
+        { _context = context; _store = store; _resolve = resolve; }
+        internal static async Task<OldVault> CreateAsync(string oldApp, string root)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Vault(root))!);
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(Protected(root));
+            else Directory.CreateDirectory(Protected(root), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var context = new OldContext(oldApp);
+            var assembly = context.LoadFromAssemblyPath(Path.Combine(oldApp, "Hermaeus.Services.dll"));
+            var settingsType = assembly.GetType("Hermaeus.Services.SettingsService", true)!;
+            var settings = Activator.CreateInstance(settingsType, Path.Combine(root, "isolated-settings.json"))!;
+            var app = settingsType.GetProperty("Settings")!.GetValue(settings)!;
+            var data = app.GetType().GetProperty("DataManagement")!.GetValue(app)!;
+            data.GetType().GetProperty("DataRootDirectory")!.SetValue(data, Path.GetDirectoryName(Vault(root))!);
+            var type = assembly.GetType("Hermaeus.Services.SecretStore", true)!;
+            var constructor = type.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+                .Single(c => c.GetParameters().Length == 3);
+            var store = constructor.Invoke([settings, null, Protected(root)]);
+            var storeMethod = type.GetMethod("StoreAsync")!;
+            var task = (Task<string>)storeMethod.Invoke(store, ["old", Before, CancellationToken.None])!;
+            if (await task.WaitAsync(Bound) != "secret:old") throw new InvalidOperationException();
+            var result = new OldVault(context, store, type.GetMethod("ResolveAsync")!);
+            if (await result.ResolveAsync("old") != Before) throw new InvalidOperationException();
+            return result;
+        }
+        internal async Task<string> ResolveAsync(string name) => await ((Task<string>)_resolve.Invoke(
+            _store, ["secret:" + name, CancellationToken.None])!).WaitAsync(Bound);
+        public void Dispose() => _context.Unload();
+    }
+
+    private sealed class OldContext : AssemblyLoadContext
+    {
+        private readonly AssemblyDependencyResolver _resolver;
+        private readonly string _directory;
+        internal OldContext(string directory) : base(isCollectible: true)
+        { _directory = directory; _resolver = new AssemblyDependencyResolver(Path.Combine(directory, "Hermaeus.Desktop.dll")); }
+        protected override Assembly? Load(AssemblyName name)
+        {
+            if (name.Name?.StartsWith("Hermaeus.", StringComparison.Ordinal) == true)
+            {
+                var path = Path.Combine(_directory, name.Name + ".dll");
+                if (File.Exists(path)) return LoadFromAssemblyPath(path);
+            }
+            var resolved = _resolver.ResolveAssemblyToPath(name);
+            return resolved is null ? null : LoadFromAssemblyPath(resolved);
+        }
+    }
+}

@@ -388,8 +388,11 @@ lifecycle/font/tooltip decisions. Phase numbers do not create six waterfalls.
   Retain/Defer closes conditional D1/D2/D3/P2/P3 packages for G1 without
   unnecessary implementation; record rationale, exact evidence and the claims
   consequently unavailable. Mandatory safety/native/licensing gates cannot be
-  waived by using that disposition. Unapproved S3 format work remains an explicit
-  owner decision with the existing format retained, never silently implemented.
+  waived by using that disposition. The corrected S3 contract now has conditional
+  implementation approval; public activation still retains the existing format
+  pending the separately required native evidence and explicit owner acceptance
+  of recovery/downgrade. See [14](14-vault-format-decision.md) and
+  [15](15-native-and-vault-evidence.md).
 - **Scope:** [12](12-planning-validation-and-release-gates.md) release matrix,
   authoritative docs, package/native/licence verification and owner handover.
   No push/PR/merge/tag/release/repository setting or CI-policy action by default.

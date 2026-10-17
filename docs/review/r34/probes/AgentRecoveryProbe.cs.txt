@@ -1,0 +1,249 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Loader;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Hermaeus.Agent.Models;
+using Hermaeus.Agent.Services;
+using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
+using Hermaeus.Services;
+
+internal static class Program
+{
+    public static async Task<int> Main(string[] args)
+    {
+        var binaries = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "binary-directory.txt")).Trim();
+        AssemblyLoadContext.Default.Resolving += (context, name) =>
+        {
+            var file = Path.Combine(binaries, name.Name + ".dll");
+            return File.Exists(file) ? context.LoadFromAssemblyPath(file) : null;
+        };
+        AssemblyLoadContext.Default.ResolvingUnmanagedDll += (_, name) =>
+        {
+            if (name is not ("e_sqlite3" or "e_sqlite3.dll" or "libe_sqlite3.so")) return IntPtr.Zero;
+            var platform = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsLinux() ? "linux" : string.Empty;
+            if (platform.Length == 0) return IntPtr.Zero;
+            var rid = platform + "-" + RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+            var fileName = OperatingSystem.IsWindows() ? "e_sqlite3.dll" : "libe_sqlite3.so";
+            var file = Path.Combine(binaries, "runtimes", rid, "native", fileName);
+            return File.Exists(file) ? NativeLibrary.Load(file) : IntPtr.Zero;
+        };
+        try { return await RunAsync(args); }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(JsonSerializer.Serialize(new { stage = "PROBE_ERROR", type = exception.GetType().Name, exception.Message }));
+            return 1;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Task<int> RunAsync(string[] args) => Probe.RunAsync(args);
+}
+
+internal static class Probe
+{
+    private const string TaskId = "a05-process-death";
+    private const string Before = "synthetic-before";
+    private const string After = "synthetic-after";
+
+    public static Task<int> RunAsync(string[] args)
+    {
+        if (args.Length != 3) throw new ArgumentException("Use worker before|after CASE_ROOT, or recover Applied|Unknown|Conflict CASE_ROOT.");
+        var root = Path.GetFullPath(args[2]);
+        var allowed = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "hermaeus-r34-a05"))
+            .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!root.StartsWith(allowed, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new InvalidOperationException("Probe case roots must be inside the dedicated TEMP verification directory.");
+        return args[0] switch
+        {
+            "worker" when args[1] is "before" or "after" => RunWorkerAsync(root, args[1]),
+            "recover" when Enum.TryParse<AgentMutationOutcome>(args[1], out var outcome) => RunRecoveryAsync(root, outcome),
+            _ => throw new ArgumentException("Unknown probe operation or outcome.")
+        };
+    }
+
+    private static SettingsService Settings(string root)
+    {
+        var settings = new SettingsService(Path.Combine(root, "settings", "settings.json"));
+        settings.Settings.DataManagement.DataRootDirectory = Path.Combine(root, "data");
+        return settings;
+    }
+
+    private static async Task<int> RunWorkerAsync(string root, string mode)
+    {
+        if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any())
+            throw new InvalidOperationException("A worker requires a new empty case root; existing evidence is preserved.");
+        Directory.CreateDirectory(root);
+        var workspace = Path.Combine(root, "workspace");
+        Directory.CreateDirectory(workspace);
+        var target = Path.Combine(workspace, "notes.md");
+        await File.WriteAllTextAsync(target, Before);
+        var store = new FileAgentTaskStateStore(Settings(root));
+        await store.InitializeAsync();
+        var tools = new AgentWorkspaceTools();
+        var options = new AgentWorkspaceOptions(workspace);
+        var preparation = await AgentMutationPreparation.PrepareAsync("edit_file", new()
+        {
+            ["relative_path"] = "notes.md", ["old_string"] = Before, ["new_string"] = After
+        }, options, null, tools);
+        Require(preparation.IsValid, preparation.Error);
+        var pending = preparation.Pending!;
+        var fingerprint = AgentApprovalFingerprint.Resolve(pending);
+        await store.SaveAsync(new AgentTaskState
+        {
+            TaskId = TaskId,
+            Goal = "Synthetic A05 exact prepared edit",
+            WorkspaceRoot = workspace,
+            Status = AgentTaskStatus.WaitingForUser,
+            PendingToolAction = pending
+        });
+
+        async Task Barrier()
+        {
+            var durable = await store.LoadAsync(TaskId) ?? throw new InvalidOperationException("The pending task was not persisted.");
+            var receipt = durable.MutationReceipts.Single();
+            Require(receipt.Outcome == AgentMutationOutcome.Pending && receipt.FinishedAt == default && receipt.ApprovalRecorded,
+                "Readiness requires an actually persisted approved Pending receipt.");
+            Require(durable.PendingToolAction is not null && AgentApprovalFingerprint.Resolve(durable.PendingToolAction) == fingerprint,
+                "The durable proposal changed before the process-death barrier.");
+            var content = await File.ReadAllTextAsync(target);
+            Require(content == (mode == "after" ? After : Before), "The actual target did not match the requested write boundary.");
+            var stateFile = Path.Combine(store.GetTaskDirectory(TaskId), "task_state.json");
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                stage = "READY", pid = Environment.ProcessId, mode,
+                taskId = TaskId, taskStatus = durable.Status.ToString(),
+                receipt.ReceiptId, receipt.ProposalId, receipt.ProposalRevision,
+                receiptOutcome = receipt.Outcome.ToString(),
+                targetFileBytesSha256 = Hash(await File.ReadAllBytesAsync(target)),
+                durableStateSha256 = Hash(await File.ReadAllBytesAsync(stateFile)),
+                assemblies = AssemblyHashes()
+            }));
+            await Console.Out.FlushAsync();
+            // The parent owns the exact Process handle and kills it here.
+            // EOF/input is a failed probe, never permission to finish the call.
+            await Console.In.ReadLineAsync();
+            throw new InvalidOperationException("The owner must terminate the worker at READY; stdin continuation is forbidden.");
+        }
+
+        var executor = new BarrierExecutor(new AgentToolExecutor(tools), mode == "after", Barrier);
+        var agent = new AgentService(store, new UnusedContext(), new AgentSafetyGate(), executor, new UnusedLlm(), workspaceTools: tools);
+        await agent.AppendApprovalAsync(TaskId, "synthetic-owner-approval", true, fingerprint, options);
+        throw new InvalidOperationException("The worker unexpectedly completed the approval.");
+    }
+
+    private static async Task<int> RunRecoveryAsync(string root, AgentMutationOutcome expected)
+    {
+        var settings = Settings(root);
+        var workspace = Path.Combine(root, "workspace");
+        var target = Path.Combine(workspace, "notes.md");
+        var contentBefore = await File.ReadAllTextAsync(target);
+        var fileBytesBefore = await File.ReadAllBytesAsync(target);
+        var rawStore = new FileAgentTaskStateStore(settings);
+        var raw = await rawStore.LoadAsync(TaskId) ?? throw new InvalidOperationException("There is no durable worker task.");
+        Require(raw.MutationReceipts.Count == 1 && raw.MutationReceipts[0].Outcome == AgentMutationOutcome.Pending,
+            "Recovery requires an interrupted real Pending receipt, not a fabricated terminal receipt.");
+        Require(raw.PendingToolAction is not null, "The worker did not leave its actual pending proposal.");
+        var fingerprint = AgentApprovalFingerprint.Resolve(raw.PendingToolAction!);
+        var originalReceiptId = raw.MutationReceipts[0].ReceiptId;
+        var errors = new List<string>();
+        var observations = new List<object>();
+        for (var iteration = 1; iteration <= 2; iteration++)
+        {
+            var store = new FileAgentTaskStateStore(settings);
+            await store.InitializeAsync();
+            var recovered = await store.LoadAsync(TaskId) ?? throw new InvalidOperationException("Recovery lost its task.");
+            var receipt = recovered.MutationReceipts.Single();
+            if (receipt.ReceiptId != originalReceiptId) errors.Add($"Reopen {iteration}: receipt identity changed.");
+            if (receipt.Outcome != expected) errors.Add($"Reopen {iteration}: expected {expected}, observed {receipt.Outcome}.");
+            if (receipt.Verified != (expected == AgentMutationOutcome.Applied)) errors.Add($"Reopen {iteration}: incorrect verification state.");
+            if (receipt.EvidenceId != "startup-recovery:" + receipt.ReceiptId) errors.Add($"Reopen {iteration}: missing recovery evidence.");
+            if (recovered.Status != AgentTaskStatus.Interrupted) errors.Add($"Reopen {iteration}: expected Interrupted, observed {recovered.Status}.");
+            if (recovered.PendingToolAction is not null) errors.Add($"Reopen {iteration}: stale approval authority remains.");
+            if (await File.ReadAllTextAsync(target) != contentBefore) errors.Add($"Reopen {iteration}: startup replayed or rewrote the target.");
+            if (!(await File.ReadAllBytesAsync(target)).AsSpan().SequenceEqual(fileBytesBefore))
+                errors.Add($"Reopen {iteration}: startup changed the target file bytes.");
+
+            bool? staleApprovalApplied = null;
+            if (recovered.PendingToolAction is null)
+            {
+                var tools = new AgentWorkspaceTools();
+                var agent = new AgentService(store, new UnusedContext(), new AgentSafetyGate(), new AgentToolExecutor(tools),
+                    new UnusedLlm(), workspaceTools: tools);
+                var stale = await agent.AppendApprovalAsync(TaskId, "stale-pre-death-approval", true, fingerprint, new AgentWorkspaceOptions(workspace));
+                staleApprovalApplied = stale.Applied;
+                if (stale.Applied) errors.Add($"Reopen {iteration}: stale pre-death approval executed.");
+                var afterRefusal = (await store.LoadAsync(TaskId))!;
+                if (afterRefusal.ApprovalHistory.Count != raw.ApprovalHistory.Count || afterRefusal.MutationReceipts.Count != 1)
+                    errors.Add($"Reopen {iteration}: refusing stale approval changed durable approval/receipt history.");
+                if (await File.ReadAllTextAsync(target) != contentBefore) errors.Add($"Reopen {iteration}: stale approval changed the target.");
+                if (!(await File.ReadAllBytesAsync(target)).AsSpan().SequenceEqual(fileBytesBefore))
+                    errors.Add($"Reopen {iteration}: stale approval changed the target file bytes.");
+            }
+
+            observations.Add(new
+            {
+                iteration, taskStatus = recovered.Status.ToString(), receiptOutcome = receipt.Outcome.ToString(),
+                receipt.Verified, receipt.Changed, receipt.EvidenceId,
+                pendingAction = recovered.PendingToolAction is not null,
+                staleApprovalApplied, targetFileBytesSha256 = Hash(await File.ReadAllBytesAsync(target))
+            });
+        }
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "RECOVERY", expected = expected.ToString(), passed = errors.Count == 0,
+            taskStatusAtDeath = raw.Status.ToString(), targetFileBytesSha256Before = Hash(fileBytesBefore),
+            targetDecodedContentSha256Before = Hash(System.Text.Encoding.UTF8.GetBytes(contentBefore)),
+            observations, errors, assemblies = AssemblyHashes()
+        }));
+        return errors.Count == 0 ? 0 : 1;
+    }
+
+    private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
+    private static object[] AssemblyHashes() => new[]
+    {
+        typeof(AgentService).Assembly, typeof(SettingsService).Assembly, typeof(AppSettings).Assembly
+    }.Select(assembly => (object)new { name = assembly.GetName().Name, sha256 = Hash(File.ReadAllBytes(assembly.Location)) }).ToArray();
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private sealed class BarrierExecutor(IAgentToolExecutor inner, bool after, Func<Task> barrier) : IAgentToolExecutor
+    {
+        public bool CanExecute(string toolName) => inner.CanExecute(toolName);
+        public Task<AgentToolResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments,
+            AgentWorkspaceOptions options, CancellationToken ct = default, string? operationId = null) =>
+            throw new InvalidOperationException("The unprepared execution seam must not be used by this probe.");
+
+        public async Task<AgentToolResult> ExecuteApprovedPreparedMutationAsync(AgentPendingToolAction pending,
+            string approvalFingerprint, AgentWorkspaceOptions options, CancellationToken ct = default, string? operationId = null)
+        {
+            if (!after) await barrier();
+            var result = await inner.ExecuteApprovedPreparedMutationAsync(pending, approvalFingerprint, options, ct, operationId);
+            Require(result.NormalizedOutcome.Outcome == NormalizedOutcome.Succeeded, "The actual prepared mutation did not succeed.");
+            if (after) await barrier();
+            return result;
+        }
+    }
+
+    private sealed class UnusedContext : IAgentContextBuilder
+    {
+        public Task<AgentContextPack> BuildAsync(AgentTaskState state, AgentWorkspaceOptions options, CancellationToken ct = default) =>
+            throw new InvalidOperationException("No planner/context call is permitted in this approval/recovery probe.");
+    }
+
+    private sealed class UnusedLlm : ILlmService
+    {
+        public string ProviderName => "Unused external verification guard";
+        public bool IsConfigured => false;
+        public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+            throw new InvalidOperationException("No model listing is permitted in this approval/recovery probe.");
+        public IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(string modelId, IReadOnlyList<ChatMessage> messages,
+            LlmChatOptions? options = null, CancellationToken ct = default) =>
+            throw new InvalidOperationException("No inference is permitted in this approval/recovery probe.");
+    }
+}

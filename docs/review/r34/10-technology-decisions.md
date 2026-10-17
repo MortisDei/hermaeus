@@ -54,9 +54,12 @@ already completed. All claimed hardware benefits are Unknown.
   characters, 2,000 PDF pages and 256 MiB candidate text/vector payload, following
   legitimate PDF measurements in [13](13-execution-and-evidence.md). Preserve
   the existing web limit; further user-visible limit changes need approval.
-- **S3/T31:** isolate migration and commit; retain the current persisted format
-  until owner approval of exact format, atomic failure/recovery and downgrade
-  behaviour. Document technical irreversibility rather than promising rollback.
+- **S3/T31:** the corrected exact contract in [14](14-vault-format-decision.md)
+  has conditional implementation approval. Isolate migration and its commits;
+  retain the public persisted format until required native/provider evidence
+  and explicit owner recovery/downgrade acceptance permit activation. Evidence
+  in [15](15-native-and-vault-evidence.md) records technical reversibility and
+  limits without promising lossless rollback.
 - **G1:** conditional choices can close by evidence-backed Retain/Defer without
   implementing an unnecessary change. Required safety, native acceptance,
   packaging notice delivery and unresolved asset licensing remain release gates.

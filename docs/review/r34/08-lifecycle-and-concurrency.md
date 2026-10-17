@@ -1,5 +1,11 @@
 # 08. Lifecycle and concurrency
 
+The source observations and line references below describe the released planning
+baseline. Later reproductions, bounded repairs and native walkthrough evidence
+are in [13](13-execution-and-evidence.md) and
+[15](15-native-and-vault-evidence.md). The baseline hypotheses are not the current
+repair status or proof of an unbounded memory leak.
+
 ## What source proves
 
 **RF:** MainWindowViewModel holds persistent feature VMs and selects one through

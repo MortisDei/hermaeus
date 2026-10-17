@@ -28,6 +28,7 @@ all publication. Small verified local implementation commits are authorised; pub
 | [12-planning-validation-and-release-gates.md](12-planning-validation-and-release-gates.md) | Planning checks, release blockers, conditional/deferred gates |
 | [13-execution-and-evidence.md](13-execution-and-evidence.md) | Actual implementation baseline, results and remaining gates |
 | [14-vault-format-decision.md](14-vault-format-decision.md) | Conditionally approved S3 format/recovery contract; production activation remains gated |
+| [15-native-and-vault-evidence.md](15-native-and-vault-evidence.md) | Windows walkthrough and separately verified inactive S3 implementation |
 
 ## Evidence vocabulary
 
@@ -45,7 +46,9 @@ Reuse R33's vocabulary:
 - **U, Unknown:** missing/unavailable evidence, never Passed, zero or supported.
 
 Retain R33 closure labels (`VERIFIED EXISTING`, `OWNER PASS`,
-`NEEDS OWNER VALIDATION`, `UNRESOLVED`). No R34 repair is labelled `FIXED` here.
+`NEEDS OWNER VALIDATION`, `UNRESOLVED`). Execution receipts use `FIXED` only
+for exercised defects with source and automated evidence, never whole-round
+or release acceptance.
 Technology dispositions are Retain, Simplify, Replace, Defer or Reject; a
 conditional Replace decision requires its stated evidence before deletion.
 

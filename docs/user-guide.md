@@ -411,6 +411,12 @@ scope and proposed actions, and approve gated operations explicitly. Task state
 and patch queues remain inspectable. Workspace authority does not carry into
 another workspace or into ordinary Chat.
 
+If startup finds an approved file operation interrupted before its final receipt,
+it checks the actual file, records the observed outcome and marks the disappeared
+execution **Interrupted**. It clears the old approval without replaying the write.
+Review the receipt before choosing **Continue**. A healthy sibling's pending
+question remains available on the parent run.
+
 The Agent workbench keeps the job flow in **Run**, **Changes**, **Workspace**,
 and **History**. A decision strip remains visible above the tabs when the Agent
 needs an answer or approval. Run shows plain-language lifecycle state and next
@@ -741,7 +747,10 @@ secret material are not included in Data Root backups. Restore preflights all
 file entries for safe paths, duplicate targets, and size budgets of 10,000 file
 entries, 128 MiB per entry, and 512 MiB total by default. The archive is first
 expanded beneath a temporary staging root, with actual expanded bytes checked
-while copying. Commit moves are rollback-safe and existing files still require
+while copying, and each staged member's ZIP checksum is verified before any
+restore files publish. A failed size or checksum check refuses the restore and
+preserves existing files. Checksums do not establish that an archive is trusted.
+Commit moves are rollback-safe and existing files still require
 the explicit overwrite choice. Re-enter credentials after restoring on another
 machine.
 

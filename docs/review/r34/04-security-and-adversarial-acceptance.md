@@ -83,6 +83,11 @@ dry-run, manual/watch/web/Help paths and pre-publication source revalidation.
 
 ## S3 fallback vault migration contract
 
+The initial requirements below are refined by the conditionally approved exact
+contract in [14](14-vault-format-decision.md). Its implementation and synthetic
+evidence are in [15](15-native-and-vault-evidence.md); public activation remains
+disabled pending explicit owner acceptance.
+
 Use .NET `AesGcm` where supported, a new version prefix distinct from `v2:`,
 fresh nonces and an explicit format/algorithm identity authenticated with the
 payload. Preserve the existing OS secret stores and protected key location.
@@ -122,7 +127,9 @@ workspace command recipes as OS-contained while research remains deferred.
 
 ## Adversarial acceptance matrix
 
-These are **required future cases, all unexecuted/Unknown in R34**. Extend
+These are the required acceptance cases. Actual bounded results and remaining
+limits are mapped in [13](13-execution-and-evidence.md) and
+[15](15-native-and-vault-evidence.md); this table is not itself a pass receipt. Extend
 existing `AgentCommandRiskClassificationTests`, `WorkspaceCommandFamilyCoverageTests`,
 `AgentPatchReviewServiceTests`, `AgentLifecycleRecoveryTests`, `ServiceTests`,
 `BackupRestoreSafetyTests`, `BackupMigrationTests`, `RagTests`, `LocalApiTests`

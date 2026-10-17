@@ -13,6 +13,16 @@ limit.
 
 ### Changed
 
+- Agent startup reconciles interrupted approved mutations even when the saved
+  task was still waiting for approval. It clears obsolete decisions, updates
+  interrupted child plans and preserves healthy sibling questions without
+  replaying writes.
+- Backup restore checks each staged member's ZIP checksum before publication,
+  refusing corrupt or inconsistently declared data while preserving existing files.
+- Fallback credential reads and writes refuse unreadable encrypted values,
+  recognised inactive formats and missing keys without silently creating a
+  replacement key. The authenticated v3 implementation remains inactive pending
+  recovery/downgrade acceptance; production construction still writes v2.
 - Owner workspace saves now share Agent apply/Rewind target coordination,
   refuse a stale revision after waiting, and preserve newer unsaved editor text.
 - Agent commands retain bounded output tails; Git status retains its bounded

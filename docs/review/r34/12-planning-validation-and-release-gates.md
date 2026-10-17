@@ -83,17 +83,17 @@ browser frontend/replacement editor and automatic routing are rejected for R34.
 
 | Gap/decision | Status now | Resolution / consequence |
 | --- | --- | --- |
-| Current installed runtime/assets/hardware and matching R33 performance data | Unknown | B0/P1 capture per host. Cannot claim speed/VRAM wins before then |
-| Actual child survival after caller cancellation | Unknown; source cleanup omission verified | S1 controlled native reproduction; no orphan claim from source alone |
-| View retention, stale callback delivery, same-DC reattach | Hypotheses with exact source patterns | L1 native control/weak-reference tests, then owner workflows |
-| Final RID/native loading/licence delivery | Unknown; source notice-copy gap observed | B0/G1 inspect archive contents/modules; no full supply-chain clearance from NuGet audit |
-| Ingest ceilings/override semantics | Proposed defaults in S2 | Owner accepts/revises before landing behaviour; parser-internal isolation decision explicit |
-| Vault format and old-build downgrade | Proposed S3 contract | Owner reviews migration/persistence impact before landing |
+| Current installed runtime/assets/hardware and matching R33 performance data | Windows identity and PDF compatibility observations recorded; comparable per-host performance baseline remains open | B1/P1 need controlled same-host measurements. No speed/VRAM win is claimed |
+| Actual child survival after caller cancellation | Reproduced in controlled Windows fixtures, bounded cleanup repaired and regression-tested | See 13; best-effort termination does not guarantee containment or every descendant's exit |
+| View retention, stale callback delivery, same-DC reattach | Reproduced defects repaired, controlled native/weak-reference regressions passed; partial Windows walkthrough in 15 | Complete Windows/COSMIC interaction matrix remains open |
+| Final RID/native loading/licence delivery | Development Windows/Linux archives and SQLite identities inspected; notice-copy repair verified | See 13/15; final integrated archives, complete upstream texts and unresolved asset terms remain gates |
+| Ingest ceilings/override semantics | Owner-approved 512 MiB source, 16 Mi characters, 2,000 pages, 256 MiB accounted staging payload implemented | Representative supplied PDFs fit. No hard parser timeout or whole-process memory guarantee; later user-visible changes require approval |
+| Vault format and old-build downgrade | Conditional implementation approval, exact contract in 14; inactive implementation and Windows/Linux synthetic evidence in 15 | Production activation requires remaining native/provider evidence and explicit owner recovery/downgrade acceptance |
 | Network aliases/env/preset hard policy | Core `--host` already rejects conflicts; broader audit open | S4 exact runtime/listener proof, owner approves any policy expansion |
 | Sandbox release/backend security guarantee and native Windows parity | Research only | Exact release/OS/backend hostile proof plus owner dependency/security decision; otherwise Defer |
 | Public Moss pet redistribution/licensing | Existing unresolved provenance issue | Owner resolves before any applicable distribution claim; this plan changes no legal model |
 | Boro primary-source identity | Unknown | Defer without blocking; no invented product or capability |
-| Minimise-to-tray/disable-reenable and full screen matrix | Historical gaps, no R34 pass | U1/G1 explicit Windows/COSMIC interaction receipts |
+| Minimise-to-tray/disable-reenable and full screen matrix | Partial Windows navigation and owner-assisted clean tray Quit verified in 15 | Remaining Windows/COSMIC interactions remain explicit U1/G1 gates |
 | Package signing and release/version/settings policy | Owner controlled | No action until separately authorised |
 
 ## Final planning check receipt

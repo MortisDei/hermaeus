@@ -9,6 +9,11 @@ gradient/card overhaul or animated novelty is selected.
 
 ## Visual evidence actually inspected
 
+The later Windows candidate walkthrough in
+[15](15-native-and-vault-evidence.md) adds actual private pixels and interactions
+for Chat, Services, Benchmarks, RAG and Settings. It neither replaces public
+screenshots nor closes the full Windows/COSMIC matrix below.
+
 **VE, planning:** opened and visually inspected all four tracked images:
 `docs/images/chat.png`, `models.png`, `doctor.png`, `onboarding.png`.
 Their latest Git change is `56849c9`, 2026-08-23. These are historical screenshots,

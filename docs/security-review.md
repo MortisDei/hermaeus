@@ -104,7 +104,7 @@ penetration-test report.
 | Single desktop owner and activation | An exclusive per-user file lock prevents concurrent desktop composition against the shared data root. A second ordinary launch requests restoration through a same-user named pipe and exits. Both pipe ends use `PipeOptions.CurrentUserOnly`; requests and acknowledgements are one fixed byte with bounded waits. The receiver accepts no arguments, paths, settings, secrets or execution commands. Explicit restart handoff retains its bounded lock retry; package integration does not issue activation requests. | A process running as the same OS user can request window restoration. This grants no data access or Agent approval authority. An unavailable activation channel leaves the exclusive lock enforced. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. Linux tar metadata is normalized to numeric root ownership and removes group/other write bits, so local builder identities and permissive source-tree modes are not published. | Archives are unsigned; users must verify checksums from a trusted channel. |
 | Update check | Doctor makes anonymous, unauthenticated GETs to GitHub's releases API for `MortisDei/hermaeus` and `ggml-org/llama.cpp` to compare the newest published tag against the running/installed version. No request body, no telemetry, no identifying data beyond standard HTTP/TLS metadata. The Hermaeus check uses the release-list endpoint so prereleases are considered, sends an explicit User-Agent and GitHub media type, and distinguishes network timeout, repository 404, rate limiting, GitHub rejection, and invalid response data in the Doctor result. Neither check ever downloads or applies anything; each one's only action opens the corresponding releases page in the default browser for the user to install manually. Both results are cached in memory for one hour (`DoctorService.GetCachedGitHubReleaseAsync`) rather than re-fetched on every scan. | This is an automatic outbound network call with no per-scan opt-out toggle. The hourly cache exists for reliability (GitHub's 60 requests/hour anonymous rate limit was exhausted in practice by repeated scans, which then made a genuine llama.cpp update attempt fail with a 403), not for privacy, so it does not reduce what GitHub can observe (an install exists and checked in) below one request per hour per check while the app is in use. |
-| Local API host | `Hermaeus.LocalApi` is off by default; `LocalApiProcessManager` only launches the child process when a user explicitly enables it in Settings and at least one named token exists, and the host itself independently refuses to serve if launched directly with the setting off. It binds `127.0.0.1` only, never `0.0.0.0`. Each configured caller gets its own named token; every request must present a matching `X-Hermaeus-Token` header, and the host fails closed (503) when no token exists, rather than allowing unauthenticated access. A token can be revoked individually without affecting the others. The surface is deliberately minimal: chat completion (buffered or SSE-streamed), embeddings, memory query, RAG query, and a read-only models list, no Agent execution, benchmark, or settings endpoints. R31's additive per-token Agent scope defaults disabled, and the v1 policy grants no approval authority. Agent routes remain unmapped because Desktop and Local API do not share one serialized task-mutation owner; capabilities reports the reason. Every live call is logged to the shared trace store (`TraceKind.LocalApi`) keyed by the verified token name that authenticated it, and authentication also retains the immutable token id for future ownership checks. Privacy Audit's "Local API activity" item shows which per-app tokens have been calling in, and how often. | Any other local process on a shared machine that learns a token can call the existing non-Agent API for as long as that token stays valid. Revocation removes the live token reference immediately but leaves its now-unreachable secret value in the configured secret backend. The `X-Hermaeus-Client` header remains an unverified display hint, not an access-control guarantee. The Agent contracts are inert until a single owner and Desktop scope editor ship. |
+| Local API host | `Hermaeus.LocalApi` is off by default; `LocalApiProcessManager` only launches the child process when a user explicitly enables it in Settings and at least one named token exists, and the host itself independently refuses to serve if launched directly with the setting off. It binds `127.0.0.1` only, never `0.0.0.0`. Each configured caller gets its own named token; every request must present a matching `X-Hermaeus-Token` header, and the host fails closed (503) when no token exists, rather than allowing unauthenticated access. A token can be revoked individually without affecting the others. The surface is deliberately minimal: chat completion (buffered or SSE-streamed), embeddings, memory query, RAG query, and a read-only models list, no Agent execution, benchmark, or settings endpoints. R31's additive per-token Agent scope defaults disabled, and the v1 policy grants no approval authority. Agent routes remain unmapped because Desktop and Local API do not share one serialized task-mutation owner; capabilities reports the reason. Every authenticated endpoint call is logged to the shared trace store (`TraceKind.LocalApi`) keyed by the verified token name that authenticated it, and authentication also retains the immutable token id for future ownership checks. Privacy Audit's "Local API activity" item shows which per-app tokens have been calling in, and how often. | Any other local process on a shared machine that learns a token can call the existing non-Agent API for as long as that token stays valid. Revocation removes the live token reference immediately but leaves its now-unreachable secret value in the configured secret backend. The `X-Hermaeus-Client` header remains an unverified display hint, not an access-control guarantee. The Agent contracts are inert until a single owner and Desktop scope editor ship. |
 
 ### R33 bounded lifecycle and evidence clarifications
 
@@ -161,6 +161,16 @@ their response prose claims success.
 
 ## Threat Scenarios
 
+R34 implements an authenticated fallback-vault transaction behind an internal
+verification-only opt-in. Production activation remains disabled. Default
+construction still writes v2, but refuses recognised inactive/unknown formats
+and unreadable encrypted entries, and cannot manufacture a replacement key
+while resolving or mutating them. The specified format and explicit recovery
+contract are in [the owner decision](review/r34/14-vault-format-decision.md);
+[execution evidence](review/r34/15-native-and-vault-evidence.md) separates tests
+from outstanding activation and native gates. This does not turn current
+production CBC into authenticated encryption.
+
 ### API Key Exposure
 
 Attack path: an API key is saved in settings, appears in logs, or is included in
@@ -203,6 +213,13 @@ Required follow-up: see `docs/security-roadmap.md` ("Optional blocking
 policy for network-affecting `llama-server` flags").
 
 ### Unsafe Restore Or Migration
+
+Restore verifies each staged ZIP member's streamed CRC32 before publishing any
+restored files, alongside declared-size, actual-byte and containment checks.
+This rejects inconsistent lengths/checksums that could otherwise publish a
+truncated member when the platform ZIP reader stops at its declared length.
+CRC32 detects inconsistency; it does not authenticate the archive or establish
+that mutually consistent malicious metadata is trustworthy.
 
 Attack path: a backup archive writes outside the data root or migration
 overwrites an existing database.

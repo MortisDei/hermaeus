@@ -1,0 +1,43 @@
+param([Parameter(Mandatory)][string]$ProbeDll)
+$ErrorActionPreference = 'Stop'
+$anyFailure = $false
+foreach ($expected in @('Unknown', 'Applied', 'Conflict')) {
+    $caseRoot = Join-Path $env:TEMP ('hermaeus-r34-a05\case-final-' + $expected + '-' + [guid]::NewGuid().ToString('N'))
+    $start = [Diagnostics.ProcessStartInfo]::new((Get-Command dotnet).Source)
+    $start.UseShellExecute = $false
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $mode = if ($expected -eq 'Unknown') { 'before' } else { 'after' }
+    foreach ($argument in @($ProbeDll, 'worker', $mode, $caseRoot)) { $start.ArgumentList.Add($argument) }
+    $worker = [Diagnostics.Process]::Start($start)
+    try {
+        $errors = $worker.StandardError.ReadToEndAsync()
+        $readyTask = $worker.StandardOutput.ReadLineAsync()
+        if (-not $readyTask.Wait(15000)) { throw 'Owned Agent probe did not reach its bounded barrier.' }
+        $readyLine = $readyTask.Result
+        $ready = $readyLine | ConvertFrom-Json
+        if ($ready.stage -ne 'READY' -or $ready.pid -ne $worker.Id -or $worker.HasExited) {
+            throw 'Agent probe barrier did not match the owned worker.'
+        }
+        $readyLine | Set-Content -LiteralPath (Join-Path $caseRoot 'ready.json')
+        Write-Output $readyLine
+        $worker.Kill()
+        if (-not $worker.WaitForExit(10000)) { throw 'Owned Agent probe did not exit.' }
+        if ($expected -eq 'Conflict') {
+            [IO.File]::WriteAllText((Join-Path $caseRoot 'workspace\notes.md'), 'synthetic-neither')
+        }
+        & dotnet $ProbeDll recover $expected $caseRoot | Tee-Object -FilePath (Join-Path $caseRoot 'recovery.json')
+        if ($LASTEXITCODE -ne 0) { $anyFailure = $true }
+        $workerErrors = $errors.GetAwaiter().GetResult()
+        if ($workerErrors.Length -gt 0) {
+            $workerErrors | Set-Content -LiteralPath (Join-Path $caseRoot 'worker-stderr.txt')
+            $anyFailure = $true
+        }
+    }
+    finally {
+        if (-not $worker.HasExited) { $worker.Kill(); [void]$worker.WaitForExit(10000) }
+        $worker.Dispose()
+    }
+}
+if ($anyFailure) { exit 1 }

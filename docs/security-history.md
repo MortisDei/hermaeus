@@ -10,6 +10,37 @@ statement of a *current* control, that control has been copied into
 See `docs/security-review.md` for current controls and the threat model,
 and `docs/security-roadmap.md` for open hardening work.
 
+## r34: Bounded ingestion, process cleanup and fallback-vault isolation
+
+Controlled fixtures reproduced cancelled command/probe survival, unbounded
+output capture and web ingestion over-read. Process owners now drain bounded
+streams and attempt cancellation cleanup with separately bounded joining;
+observed root exit never claims descendant containment. Ingestion checks the
+owner-approved source/page/text/accounted-payload budgets before publication.
+PDF parser work and whole-process memory remain outside those budget guarantees.
+
+Owner workspace saves now coordinate with the existing Agent target owner,
+preserving revision/preimage conflicts and newer editor text. Actual worker-death
+tests also exposed correct file readback with a phantom waiting task state.
+Startup now reconciles approved Pending receipts from waiting tasks, propagates
+child interruption before projecting parent decisions and retains healthy sibling
+questions. It never replays the interrupted write or inherits its old approval.
+A forged ZIP
+declared length also reproduced successful but truncated restore publication.
+Restore now verifies each staged member's streamed CRC32 alongside byte budgets
+and declared length before commit. CRC is consistency detection, not archive
+authentication or protection against mutually consistent malicious metadata.
+
+The conditionally approved v3 fallback-vault implementation is isolated behind
+an internal test constructor. Public construction retains v2 while refusing
+recognised inactive formats and unsafe key replacement. Exact format, recovery
+locator, cooperating-writer and downgrade contracts and evidence are in
+[R34/14](review/r34/14-vault-format-decision.md) and
+[R34/15](review/r34/15-native-and-vault-evidence.md). No automatic restore,
+downgrade, new OS credential backend or production activation is introduced.
+Native/provider acceptance and explicit owner recovery/downgrade acceptance
+remain activation gates. No new sandbox or security framework is adopted.
+
 ## r33: Archive containment follow-up
 
 Release PR #20's CodeQL scan flagged a restore staging path as a potential

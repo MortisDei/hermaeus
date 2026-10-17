@@ -1,8 +1,11 @@
 # 07. Performance baselines and measurement
 
-**Status:** protocol only. No R34 performance numbers have been collected.
+**Status:** comparison protocol, not a completed per-host performance baseline.
+The PDF compatibility observations in [13](13-execution-and-evidence.md) and
+package/native identity receipts in [15](15-native-and-vault-evidence.md) do not
+establish repeatable optimisation gains.
 Historical R33 Speed Check numbers are workload-specific, not baselines for
-startup, Recall or another GPU. B0 must capture an R33 control on each actual
+startup, Recall or another GPU. B1 must capture an R33 control on each actual
 host before changed implementations can claim improvement.
 
 ## Host matrix and fingerprints
