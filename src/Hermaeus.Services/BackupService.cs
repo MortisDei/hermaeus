@@ -21,23 +21,26 @@ public sealed class BackupService
 
     public async Task<BackupResult> BackupAsync(string targetDirectory, CancellationToken ct = default)
     {
-        var root = SettingsService.ResolveDataRoot(_settings.Settings);
+        var root = Path.GetFullPath(SettingsService.ResolveDataRoot(_settings.Settings));
         if (!Directory.Exists(root))
             throw new DirectoryNotFoundException(root);
 
+        EnsureNoReparsePoints(root);
+        targetDirectory = Path.GetFullPath(targetDirectory);
+        EnsureNoReparsePoints(targetDirectory);
         Directory.CreateDirectory(targetDirectory);
+        EnsureNoReparsePoints(targetDirectory);
         var path = Path.Combine(targetDirectory, $"hermaeus-backup-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip");
         // Same manifest data-root migration moves (r11 3.1): everything under
         // the root except the fallback secrets vault, which is excluded from
         // backups by design (security-posture skill).
         var files = DataRootManifest.EnumerateAll(root)
-            .Where(f =>
+            .Select(file =>
             {
-                var name = Path.GetFileName(f.SourcePath);
-                return !name.Equals("secrets.local.json", StringComparison.OrdinalIgnoreCase)
-                    && !name.Equals("secrets.local.key", StringComparison.OrdinalIgnoreCase)
-                    && !IsRebuildableArtwork(f.RelativePath);
+                EnsureNoReparsePoints(file.SourcePath);
+                return file;
             })
+            .Where(f => !IsFallbackSecretArtifact(f.SourcePath) && !IsRebuildableArtwork(f.RelativePath))
             // WAL/rollback-journal sidecars describe a database file that is
             // about to be replaced by a consistent snapshot (below); zipping
             // them independently would describe a different, pre-snapshot
@@ -45,14 +48,17 @@ public sealed class BackupService
             .Where(f => !IsSqliteSidecarFile(f.SourcePath))
             .ToList();
 
-        var snapshotDir = Path.Combine(Path.GetTempPath(), $"hermaeus-backup-snapshot-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(snapshotDir);
+        var snapshotDir = CreateSnapshotDirectory();
         try
         {
+            EnsureNoReparsePoints(path);
             using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
             foreach (var file in files)
             {
                 ct.ThrowIfCancellationRequested();
+                // Repeat at the read site, including the SQLite snapshot path.
+                // Metadata checks do not claim atomic filesystem ownership.
+                EnsureNoReparsePoints(file.SourcePath);
 
                 if (!IsSqliteDatabaseFile(file.SourcePath))
                 {
@@ -79,6 +85,14 @@ public sealed class BackupService
         return new BackupResult(path, files.Count);
     }
 
+    internal static string CreateSnapshotDirectory()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"hermaeus-backup-snapshot-{Guid.NewGuid():N}");
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(path);
+        else Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
+    }
+
     private static bool IsSqliteDatabaseFile(string path) =>
         path.EndsWith(".db", StringComparison.OrdinalIgnoreCase);
 
@@ -92,6 +106,30 @@ public sealed class BackupService
         path.EndsWith("-wal", StringComparison.OrdinalIgnoreCase)
         || path.EndsWith("-shm", StringComparison.OrdinalIgnoreCase)
         || path.EndsWith("-journal", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFallbackSecretArtifact(string path)
+    {
+        var name = Path.GetFileName(path);
+        return name.Equals("secrets.local.json", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("secrets.local.key", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("secrets.local.lock", StringComparison.OrdinalIgnoreCase)
+            || MatchesSecretArtifactName(name, "secrets.local.json.", ".tmp", 32)
+            || MatchesSecretArtifactName(name, "secrets.local.key.", ".tmp", 32)
+            || MatchesSecretArtifactName(name, ".vault-", ".tmp", 32)
+            || MatchesSecretArtifactName(name, "", ".pre-v3.snapshot", 64)
+            || MatchesSecretArtifactName(name, "", ".pre-v3.locator", 64);
+    }
+
+    private static bool MatchesSecretArtifactName(string name, string prefix, string suffix, int tokenLength)
+    {
+        if (name.Length != prefix.Length + tokenLength + suffix.Length
+            || !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || !name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            return false;
+        foreach (var character in name.AsSpan(prefix.Length, tokenLength))
+            if (!char.IsAsciiHexDigit(character)) return false;
+        return true;
+    }
 
     private static async Task SnapshotSqliteDatabaseAsync(string sourcePath, string destinationPath, CancellationToken ct)
     {
@@ -152,6 +190,11 @@ public sealed class BackupService
             totalUncompressedBytes += entry.Length;
 
             var target = ResolveRestoreTarget(root, entry.FullName);
+            // Classify the normalised target, so separators and dot segments
+            // cannot disguise an excluded credential artifact. Credential
+            // recovery has its own explicit review protocol, not ZIP restore.
+            if (IsFallbackSecretArtifact(target))
+                throw new InvalidDataException("Backup restore refuses fallback credential artifacts.");
             if (!targets.Add(target))
                 throw new InvalidDataException($"Backup contains duplicate file entries for '{entry.FullName}'.");
             if ((File.Exists(target) || Directory.Exists(target)) && !allowOverwrite)
@@ -371,7 +414,7 @@ public sealed class BackupService
         {
             if (TryGetAttributes(current.FullName, out var attributes)
                 && (attributes & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidOperationException("Backup restore refuses reparse-point paths.");
+                throw new InvalidOperationException("Backup operations refuse reparse-point paths.");
 
             current = current.Parent;
         }

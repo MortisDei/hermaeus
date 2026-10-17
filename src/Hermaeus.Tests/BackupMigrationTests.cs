@@ -750,7 +750,7 @@ namespace Hermaeus.Tests
                 "a reparse-point directory must not redirect restore output outside the root");
         }
 
-        private static void CreateDirectoryReparsePoint(string link, string target)
+        internal static void CreateDirectoryReparsePoint(string link, string target)
         {
             if (!OperatingSystem.IsWindows())
             {
@@ -768,7 +768,10 @@ namespace Hermaeus.Tests
             };
             startInfo.ArgumentList.Add("/d");
             startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add($"mklink /J {link} {target}");
+            startInfo.ArgumentList.Add("mklink");
+            startInfo.ArgumentList.Add("/J");
+            startInfo.ArgumentList.Add(link);
+            startInfo.ArgumentList.Add(target);
 
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Could not create the reparse-point test fixture.");
