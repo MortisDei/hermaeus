@@ -14,7 +14,10 @@ public sealed class SecretStore : ISecretStore
     private readonly ISecretBackend _osBackend;
     private readonly IRuntimeLogService? _log;
     private readonly string _fallbackKeyDirectory;
+    private readonly bool _authenticatedFallback;
     private const string Prefix = "secret:";
+    private static StringComparison LocalPathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
     private const string EncryptedPrefix = "v2:";
     private const int SaltBytes = 16;
     private const int AesIvBytes = 16;
@@ -26,6 +29,12 @@ public sealed class SecretStore : ISecretStore
     }
 
     internal SecretStore(ISettingsService settings, IRuntimeLogService? log, string? fallbackKeyDirectory)
+        : this(settings, log, fallbackKeyDirectory, false)
+    {
+    }
+
+    // Isolated verification seam. No production setting or environment flag activates v3.
+    internal SecretStore(ISettingsService settings, IRuntimeLogService? log, string? fallbackKeyDirectory, bool authenticatedFallback)
     {
         _settings = settings;
         _osBackend = CreateOsBackend();
@@ -33,7 +42,8 @@ public sealed class SecretStore : ISecretStore
         _fallbackKeyDirectory = string.IsNullOrWhiteSpace(fallbackKeyDirectory)
             ? ResolveFallbackKeyDirectory()
             : Path.GetFullPath(fallbackKeyDirectory);
-        TryMigrateLegacyKey();
+        _authenticatedFallback = authenticatedFallback;
+        if (!authenticatedFallback) TryMigrateLegacyKey();
     }
 
     public bool IsReference(string value) => value.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase);
@@ -50,7 +60,13 @@ public sealed class SecretStore : ISecretStore
             return $"{Prefix}{name}";
         }
 
+        if (_authenticatedFallback)
+        {
+            await CreateAuthenticatedTransaction().MutateAsync(name, secret, ct);
+            return $"{Prefix}{name}";
+        }
         var all = await LoadAsync(ct);
+        ValidateLegacyMutation(all);
         all[name] = EncryptSecret(secret);
         var path = PathForStore();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -70,6 +86,15 @@ public sealed class SecretStore : ISecretStore
                 return secret;
         }
 
+        if (_authenticatedFallback)
+        {
+            try { return await CreateAuthenticatedTransaction().ResolveAsync(key, ct) ?? string.Empty; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or JsonException or FormatException or ArgumentException)
+            {
+                LogUnavailableSecret();
+                return string.Empty;
+            }
+        }
         var all = await LoadAsync(ct);
         if (!all.TryGetValue(key, out var encrypted)) return string.Empty;
         return DecryptSecret(encrypted);
@@ -83,9 +108,15 @@ public sealed class SecretStore : ISecretStore
 
     private async Task RemoveLocalAsync(string name, CancellationToken ct)
     {
+        if (_authenticatedFallback)
+        {
+            await CreateAuthenticatedTransaction().MutateAsync(name, null, ct);
+            return;
+        }
         var path = PathForStore();
         if (!File.Exists(path)) return;
         var all = await LoadAsync(ct);
+        ValidateLegacyMutation(all);
         if (!all.Remove(name)) return;
         if (all.Count == 0)
         {
@@ -109,6 +140,37 @@ public sealed class SecretStore : ISecretStore
     {
         var root = SettingsService.ResolveDataRoot(_settings.Settings);
         return Path.Combine(root, "secrets.local.json");
+    }
+
+    private FallbackVaultTransaction CreateAuthenticatedTransaction()
+    {
+        var capturedRoot = Path.GetFullPath(SettingsService.ResolveDataRoot(_settings.Settings));
+        void ValidateOperation()
+        {
+            var data = _settings.Settings.DataManagement;
+            if (!string.IsNullOrWhiteSpace(data.PendingDataRootDirectory)
+                || !string.IsNullOrWhiteSpace(data.PendingDataRootMigrationPlan)
+                || !string.Equals(capturedRoot, Path.GetFullPath(SettingsService.ResolveDataRoot(_settings.Settings)),
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                throw new IOException("The local vault is unavailable during a Data Root transition.");
+        }
+        ValidateOperation();
+        return new FallbackVaultTransaction(Path.Combine(capturedRoot, "secrets.local.json"), _fallbackKeyDirectory,
+            DecodeLegacyValue, legacyKeyPath: Path.Combine(capturedRoot, "secrets.local.key"), validateOperation: ValidateOperation);
+    }
+
+    private void ValidateLegacyMutation(Dictionary<string, string> values)
+    {
+        if (values.Values.Any(value => FallbackVaultCodec.Classify(value) is FallbackVaultFormat.V3 or FallbackVaultFormat.UnsupportedVersion))
+            throw new CryptographicException("The local vault requires an explicitly accepted format activation.");
+        byte[] key = [];
+        try
+        {
+            if (values.Values.Any(value => FallbackVaultCodec.Classify(value) == FallbackVaultFormat.LegacyV2))
+                key = ReadLocalKeyMaterial(KeyPath());
+            foreach (var value in values.Values) _ = DecodeLegacyValue(value, key);
+        }
+        finally { CryptographicOperations.ZeroMemory(key); }
     }
 
     private static ISecretBackend CreateOsBackend()
@@ -213,9 +275,10 @@ public sealed class SecretStore : ISecretStore
         }
 
         var legacyPath = LegacyKeyPath();
-        if (!string.Equals(path, legacyPath, StringComparison.OrdinalIgnoreCase) && File.Exists(legacyPath))
+        if (!string.Equals(path, legacyPath, LocalPathComparison) && File.Exists(legacyPath))
         {
             var legacy = ReadLocalKeyMaterial(legacyPath);
+            ValidateLegacyVaultForRelocation(legacy);
             WriteLocalKeyMaterial(path, legacy);
             RemoveLegacyKeyAfterMigration(path);
             return legacy;
@@ -230,14 +293,24 @@ public sealed class SecretStore : ISecretStore
     {
         var path = KeyPath();
         var legacyPath = LegacyKeyPath();
-        if (string.Equals(path, legacyPath, StringComparison.OrdinalIgnoreCase)
+        if (string.Equals(path, legacyPath, LocalPathComparison)
             || !File.Exists(legacyPath))
             return;
 
+        byte[] legacy = [];
+        byte[] current = [];
         try
         {
+            legacy = ReadLocalKeyMaterial(legacyPath);
+            ValidateLegacyVaultForRelocation(legacy);
             if (!File.Exists(path))
-                WriteLocalKeyMaterial(path, ReadLocalKeyMaterial(legacyPath));
+                WriteLocalKeyMaterial(path, legacy);
+            else
+            {
+                current = ReadLocalKeyMaterial(path);
+                if (!CryptographicOperations.FixedTimeEquals(current, legacy))
+                    throw new CryptographicException("The fallback key relocation requires explicit investigation.");
+            }
             RemoveLegacyKeyAfterMigration(path);
         }
         catch
@@ -248,6 +321,35 @@ public sealed class SecretStore : ISecretStore
                 RuntimeLogCategory.Service,
                 "The legacy fallback secret key could not be migrated out of the data root. Fallback credentials may need to be re-entered."));
         }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(legacy);
+            CryptographicOperations.ZeroMemory(current);
+        }
+    }
+
+    private void ValidateLegacyVaultForRelocation(byte[] candidateKey)
+    {
+        var vault = PathForStore();
+        if (!File.Exists(vault)) return;
+        var json = File.ReadAllBytes(vault);
+        try
+        {
+            _ = new UTF8Encoding(false, true).GetCharCount(json);
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new CryptographicException("The fallback vault cannot validate key relocation.");
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                FallbackVaultCodec.ValidateNormalizedName(property.Name);
+                if (!names.Add(property.Name) || property.Value.ValueKind != JsonValueKind.String)
+                    throw new CryptographicException("The fallback vault cannot validate key relocation.");
+                // Explicit legacy dispatch refuses v3/unsupported versions before any copy or deletion.
+                _ = DecodeLegacyValue(property.Value.GetString()!, candidateKey);
+            }
+        }
+        finally { CryptographicOperations.ZeroMemory(json); }
     }
 
     private static byte[] ReadLocalKeyMaterial(string path)
@@ -283,11 +385,25 @@ public sealed class SecretStore : ISecretStore
     private void RemoveLegacyKeyAfterMigration(string protectedPath)
     {
         var legacyPath = LegacyKeyPath();
-        if (string.Equals(protectedPath, legacyPath, StringComparison.OrdinalIgnoreCase)
+        if (string.Equals(protectedPath, legacyPath, LocalPathComparison)
             || !File.Exists(legacyPath))
             return;
 
-        TryDelete(legacyPath);
+        byte[] current = [];
+        byte[] legacy = [];
+        try
+        {
+            current = ReadLocalKeyMaterial(protectedPath);
+            legacy = ReadLocalKeyMaterial(legacyPath);
+            // GetOrCreateLocalKeyMaterial also reaches this cleanup path on ordinary v2 writes.
+            if (CryptographicOperations.FixedTimeEquals(current, legacy)) TryDelete(legacyPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or CryptographicException) { }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(current);
+            CryptographicOperations.ZeroMemory(legacy);
+        }
         if (File.Exists(legacyPath))
         {
             _log?.Add(new RuntimeLogEntry(
@@ -323,53 +439,38 @@ public sealed class SecretStore : ISecretStore
 
     private string DecryptSecret(string encrypted)
     {
+        byte[] key = [];
         try
         {
-            if (!encrypted.StartsWith(EncryptedPrefix, StringComparison.OrdinalIgnoreCase))
-                throw new CryptographicException("Legacy secret format.");
-
-            encrypted = encrypted[EncryptedPrefix.Length..];
-            var encryptedBytes = Convert.FromBase64String(encrypted);
-            var plainBytes = DecryptWithAes(encryptedBytes);
-
-            // r24: AES-CBC has no built-in integrity check, so a decrypt under the
-            // wrong key (a replaced/corrupt secrets.local.key) does not reliably
-            // throw - PKCS7 padding validation alone has roughly a 1-in-256 chance
-            // of coincidentally passing on random garbage. The lenient
-            // Encoding.UTF8.GetString below used to let that garbage through as a
-            // "successfully decrypted" (but wrong) string instead of falling through
-            // to the failure path, which is what made the equivalent test flake
-            // intermittently. Strict decoding closes the gap: real structured UTF8
-            // (any actual stored secret) always round-trips; random post-decrypt
-            // garbage overwhelmingly fails UTF8's structural byte-sequence rules.
-            var strictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-            return strictUtf8.GetString(plainBytes);
+            var format = FallbackVaultCodec.Classify(encrypted);
+            if (format is FallbackVaultFormat.V3 or FallbackVaultFormat.UnsupportedVersion)
+                throw new CryptographicException("The local vault format is unavailable.");
+            // Resolving an existing credential must never manufacture a replacement key.
+            if (format == FallbackVaultFormat.LegacyV2) key = ReadLocalKeyMaterial(KeyPath());
+            return DecodeLegacyValue(encrypted, key);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or FormatException or ArgumentException)
         {
-            // Fallback to unencrypted Base64 if decryption fails
-            try
-            {
-                var bytes = Convert.FromBase64String(encrypted);
-                var decoder = Encoding.UTF8.Clone() as Encoding;
-                decoder!.DecoderFallback = DecoderFallback.ExceptionFallback;
-                return decoder.GetString(bytes);
-            }
-            catch
-            {
-                // Both the encrypted and legacy-plaintext decode paths failed:
-                // most likely a corrupt/replaced secrets.local.key. Silently
-                // returning empty here used to surface only as a downstream
-                // provider auth failure with no diagnostic trail
-                // (docs/review/01-code-audit.md P3-7).
-                _log?.Add(new RuntimeLogEntry(
-                    DateTime.UtcNow,
-                    RuntimeLogLevel.Warning,
-                    RuntimeLogCategory.Service,
-                    "A stored secret could not be decrypted (the local secret key file may be corrupt or the payload is invalid). The provider using it will behave as if no credential is configured."));
-                return string.Empty;
-            }
+            LogUnavailableSecret();
+            return string.Empty;
         }
+        finally { CryptographicOperations.ZeroMemory(key); }
+    }
+
+    private void LogUnavailableSecret() => _log?.Add(new RuntimeLogEntry(
+        DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+        "A stored secret could not be decrypted (the local secret key file may be corrupt or the payload is invalid). The provider using it will behave as if no credential is configured."));
+
+    private static string DecodeLegacyValue(string value, byte[] key)
+    {
+        var format = FallbackVaultCodec.Classify(value);
+        byte[] plaintext;
+        if (format == FallbackVaultFormat.LegacyPlaintext) plaintext = Convert.FromBase64String(value);
+        else if (format == FallbackVaultFormat.LegacyV2 && key.Length == 32)
+            plaintext = DecryptWithAes(Convert.FromBase64String(value[EncryptedPrefix.Length..]), key);
+        else throw new CryptographicException("The local vault value is unavailable.");
+        try { return new UTF8Encoding(false, true).GetString(plaintext); }
+        finally { CryptographicOperations.ZeroMemory(plaintext); }
     }
 
     private byte[] EncryptWithAes(byte[] plaintext)
@@ -395,16 +496,17 @@ public sealed class SecretStore : ISecretStore
         return ms.ToArray();
     }
 
-    private byte[] DecryptWithAes(byte[] ciphertext)
+    private static byte[] DecryptWithAes(byte[] ciphertext, byte[] keyMaterial)
     {
-        var keyMaterial = GetOrCreateLocalKeyMaterial();
         if (ciphertext.Length >= SaltBytes + AesIvBytes + 1)
         {
             try
             {
                 var salt = new byte[SaltBytes];
                 Array.Copy(ciphertext, 0, salt, 0, salt.Length);
-                return DecryptPayload(ciphertext, SaltBytes, DeriveKey(keyMaterial, salt));
+                var plain = DecryptPayload(ciphertext, SaltBytes, DeriveKey(keyMaterial, salt));
+                try { _ = new UTF8Encoding(false, true).GetCharCount(plain); return plain; }
+                catch (DecoderFallbackException) { CryptographicOperations.ZeroMemory(plain); throw; }
             }
             catch (CryptographicException)
             {
@@ -421,24 +523,28 @@ public sealed class SecretStore : ISecretStore
 
     private static byte[] DecryptPayload(byte[] ciphertext, int offset, byte[] key)
     {
-        using var aes = Aes.Create();
-        aes.KeySize = 256;
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
+        try
+        {
+            using var aes = Aes.Create();
+            aes.KeySize = 256;
+            aes.Mode = CipherMode.CBC;
+            aes.Padding = PaddingMode.PKCS7;
 
-        var iv = new byte[AesIvBytes];
-        if (ciphertext.Length < offset + iv.Length)
-            throw new CryptographicException("Invalid local secret payload.");
+            var iv = new byte[AesIvBytes];
+            if (ciphertext.Length < offset + iv.Length)
+                throw new CryptographicException("Invalid local secret payload.");
 
-        Array.Copy(ciphertext, offset, iv, 0, iv.Length);
-        aes.IV = iv;
+            Array.Copy(ciphertext, offset, iv, 0, iv.Length);
+            aes.IV = iv;
 
-        using var decryptor = aes.CreateDecryptor(key, aes.IV);
-        using var ms = new MemoryStream(ciphertext, offset + iv.Length, ciphertext.Length - offset - iv.Length);
-        using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
-        using var resultMs = new MemoryStream();
-        cs.CopyTo(resultMs);
-        return resultMs.ToArray();
+            using var decryptor = aes.CreateDecryptor(key, aes.IV);
+            using var ms = new MemoryStream(ciphertext, offset + iv.Length, ciphertext.Length - offset - iv.Length);
+            using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
+            using var resultMs = new MemoryStream();
+            cs.CopyTo(resultMs);
+            return resultMs.ToArray();
+        }
+        finally { CryptographicOperations.ZeroMemory(key); }
     }
 
     private static byte[] DeriveKey(byte[] keyMaterial, byte[] salt)
