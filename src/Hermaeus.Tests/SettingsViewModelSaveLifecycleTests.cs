@@ -330,17 +330,31 @@ public sealed class SettingsViewModelSaveLifecycleTests
     public async Task Trust_rescan_never_mutates_the_live_settings_object()
     {
         using var temp = new TempDir();
-        var settings = NewSettings(temp);
-        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
-
+        var fixture = NewControlledFixture(temp);
+        var vm = fixture.Vm;
         vm.Tts.TtsPythonPath = temp.PathFor("edited-but-unsaved-python.exe");
-        var before = settings.Settings.Tts.PythonPath;
+        var pending = await fixture.Delay.WaitForCallAsync(0).WaitAsync(TimeSpan.FromSeconds(3));
+        var live = fixture.Settings.Settings;
+        var before = live.Tts.PythonPath;
+        try
+        {
+            // Keep the independent autosave pending for this scan-only claim.
+            // A real scan may legitimately take longer than its 600 ms delay.
+            await vm.Trust.RescanTrustCommand.ExecuteAsync(null);
 
-        await vm.Trust.RescanTrustCommand.ExecuteAsync(null);
-
-        Assert.Equal(before, settings.Settings.Tts.PythonPath);
-        Assert.NotEqual(vm.Tts.TtsPythonPath, settings.Settings.Tts.PythonPath);
+            Assert.Same(live, fixture.Settings.Settings);
+            Assert.Equal(before, fixture.Settings.Settings.Tts.PythonPath);
+            Assert.NotEqual(vm.Tts.TtsPythonPath, fixture.Settings.Settings.Tts.PythonPath);
+            Assert.Equal(0, fixture.Settings.SaveCount);
+        }
+        finally
+        {
+            vm.Reload();
+            fixture.Delay.Complete(pending);
+            await fixture.Completed.WaitForCountAsync(1);
+            vm.Shutdown();
+        }
+        Assert.Equal(0, fixture.Settings.SaveCount);
     }
 
     [Fact]
