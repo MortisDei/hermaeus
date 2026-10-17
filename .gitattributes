@@ -1,0 +1,3 @@
+# Preserve upstream legal text bytes, including original whitespace, for hashes.
+# Reformatting legal notices would destroy the documented byte provenance.
+docs/third-party/** -text -whitespace
