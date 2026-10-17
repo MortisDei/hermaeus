@@ -456,27 +456,32 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 stateChanged = true;
             }
 
-            if (entry.State.SubTaskPlan.Count > 0)
-            {
-                foreach (var spec in entry.State.SubTaskPlan)
-                {
-                    if (spec.Status != AgentSubTaskStatus.Running || string.IsNullOrWhiteSpace(spec.TaskId))
-                        continue;
-
-                    var child = states.TryGetValue(spec.TaskId, out var childEntry) ? childEntry.State : null;
-                    if (child is null || child.Status != AgentTaskStatus.Interrupted)
-                        continue;
-
-                    spec.Status = AgentSubTaskStatus.Interrupted;
-                    spec.ResultSummary = child.InterruptionReason;
-                    stateChanged = true;
-                }
-            }
-
             var receiptRecovery = await ReconcileIncompleteReceiptsAsync(entry.State, ct);
             stateChanged |= receiptRecovery;
 
             if (stateChanged)
+                changed.Add(entry);
+        }
+
+        // A receipt can newly interrupt a waiting child. Settle every task
+        // first, then project child status, independently of directory order.
+        foreach (var entry in states.Values)
+        {
+            var stateChanged = false;
+            foreach (var spec in entry.State.SubTaskPlan)
+            {
+                if (spec.Status != AgentSubTaskStatus.Running || string.IsNullOrWhiteSpace(spec.TaskId))
+                    continue;
+
+                var child = states.TryGetValue(spec.TaskId, out var childEntry) ? childEntry.State : null;
+                if (child is null || child.Status != AgentTaskStatus.Interrupted)
+                    continue;
+
+                spec.Status = AgentSubTaskStatus.Interrupted;
+                spec.ResultSummary = child.InterruptionReason;
+                stateChanged = true;
+            }
+            if (stateChanged && !changed.Any(existing => string.Equals(existing.State.TaskId, entry.State.TaskId, StringComparison.Ordinal)))
                 changed.Add(entry);
         }
 
@@ -587,7 +592,11 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         {
             var incomplete = state.MutationReceipts.Any(receipt =>
                 receipt.Outcome == AgentMutationOutcome.Pending && receipt.FinishedAt == default);
-            if (!incomplete && state.Status == AgentTaskStatus.Running)
+            // Approval execution persists its Pending receipt while the task
+            // can still be WaitingForUser. Once that execution disappears,
+            // clearing the action alone would leave a phantom review state.
+            // Deliberate terminal and blocked owner states stay intact.
+            if (!incomplete && state.Status is AgentTaskStatus.Running or AgentTaskStatus.WaitingForUser)
                 MarkInterrupted(state,
                     "The previous Agent execution was interrupted; its prepared mutation receipt was reconciled without replay.");
             else if (!incomplete && state.PendingToolAction is not null)
@@ -692,6 +701,11 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
             if (!string.IsNullOrWhiteSpace(parent.ParentTaskId))
                 continue;
 
+            var interruptedMirror = parent.PendingOwnerInteractionTaskId.Length > 0
+                && states.TryGetValue(parent.PendingOwnerInteractionTaskId, out var mirroredChild)
+                && mirroredChild.State.Status == AgentTaskStatus.Interrupted
+                && string.Equals(mirroredChild.State.ParentTaskId, parent.TaskId, StringComparison.Ordinal)
+                && parent.SubTaskPlan.Any(spec => string.Equals(spec.TaskId, mirroredChild.State.TaskId, StringComparison.Ordinal));
             var desired = new List<AgentOwnerInteraction>();
             if (parent.SubTaskPlan.Count > 0)
             {
@@ -783,7 +797,13 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 parent.PendingOwnerInteractionId = string.Empty;
                 parent.PendingToolAction = null;
                 parent.LastUserMessage = string.Empty;
-                if (parent.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running)
+                if (interruptedMirror && parent.Status == AgentTaskStatus.WaitingForUser)
+                {
+                    MarkInterrupted(parent,
+                        "The sub-task behind the pending owner interaction was interrupted; continue explicitly to resume the parent.");
+                    mirrorChanged = true;
+                }
+                else if (parent.SubTaskPlan.Any(spec => spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running)
                     && (parent.Status is AgentTaskStatus.WaitingForUser or AgentTaskStatus.Blocked))
                 {
                     parent.Status = AgentTaskStatus.Running;
