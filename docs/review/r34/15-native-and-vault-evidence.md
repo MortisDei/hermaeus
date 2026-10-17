@@ -349,7 +349,11 @@ transaction/recovery `8da8a37`, SecretStore integration and key identity
 boundary coverage `0de3e0c`. The integrated verification above covers their
 combined tree. None activates v3 or closes the outstanding release gates.
 
-## Remaining notice delivery work
+## Notice delivery audit before the follow-on repair
+
+The later implementation and actual Windows/Linux archive checks are in
+[16](16-notice-delivery-and-integration.md). The audit below records why that
+work was feasible; native-package and asset clearance remain separate gates.
 
 A read-only cache audit found 44 packages in the Desktop/Local API union and
 33 available upstream licence/NOTICE texts across 18 packages. None had a

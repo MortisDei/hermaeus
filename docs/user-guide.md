@@ -3,6 +3,10 @@
 This guide is for the release archive. You do not need the source tree or an
 IDE to use Hermaeus.
 
+The package's `docs/` directory contains Hermaeus's licence and third-party
+notices. Full retained upstream texts and their source index are under
+`docs/third-party/`.
+
 ## Launching the Linux archive
 
 Double-click `Hermaeus` in the extracted directory to launch it without a

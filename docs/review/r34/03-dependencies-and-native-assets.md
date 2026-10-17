@@ -1,5 +1,10 @@
 # 03. Dependencies and native assets
 
+The inventory below is planning-baseline evidence. Later actual upstream-text
+delivery, native SQLite declaration uncertainty and Windows/Linux archive checks
+are recorded in [16](16-notice-delivery-and-integration.md); unresolved asset
+and native-package terms remain release gates.
+
 ## Inventory method and evidence limits
 
 **RF/VE, 2026-10-16:** enumerated all 13 tracked `.csproj` files with

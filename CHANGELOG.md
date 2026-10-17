@@ -13,6 +13,9 @@ limit.
 
 ### Changed
 
+- Windows and Linux packages include versioned upstream licence/NOTICE texts
+  and their provenance index. Native SQLite package terms and unresolved asset
+  licensing remain release gates.
 - Agent startup reconciles interrupted approved mutations even when the saved
   task was still waiting for approval. It clears obsolete decisions, updates
   interrupted child plans and preserves healthy sibling questions without

@@ -239,9 +239,14 @@ Packages include the source-available noncommercial license, commercial license
 notice, and third-party notice documents. Uses outside PolyForm Noncommercial's
 permitted purposes require separate written permission; see `COMMERCIAL.md`.
 
-Both packaging scripts copy `THIRD-PARTY-NOTICES.md` and the standalone
-`CMUDICT-LICENSE.txt` into the package's `docs` directory. Release acceptance
-requires inspection of the actual Windows and Linux archives, including all
-required upstream notice texts. Copying the inventory does not resolve missing
-asset redistribution terms or prove complete licence delivery. Unresolved
-artwork/asset licensing remains a release gate.
+Both packaging scripts copy `THIRD-PARTY-NOTICES.md`, the standalone
+`CMUDICT-LICENSE.txt` and versioned `third-party/` texts into the package's
+`docs` directory. The [provenance index](third-party/README.md) records original
+source URLs and hashes. Git preserves these upstream text bytes unchanged.
+The notice guard checks version-matched retained evidence alongside the resolved
+Desktop/Local API package union; it does not establish legal clearance.
+
+Release acceptance requires inspecting actual Windows and Linux archives,
+including required upstream attribution. Native SQLite 3.50.3 has an explicit
+unresolved package-terms note rather than an inferred licence. Missing asset
+redistribution terms and unresolved artwork licensing remain release gates.

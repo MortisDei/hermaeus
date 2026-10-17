@@ -208,9 +208,11 @@ Generated candidate artefacts are retained under ignored
 this is an unreleased development build, not a new version or published release.
 The existing R33 package paths were preserved/restored; their archive remains
 SHA256 `2d4858e7f9e3f297285b194d3cacc7ec2cf79d64dcc12a7280d143f24cd28476`.
-No installation, shortcut registration or publication was performed. Full
-upstream licence text delivery, Linux archive proof and unresolved asset terms
-remain release gates; the two verified notices do not close those obligations.
+No installation, shortcut registration or publication was performed. Later
+Windows/Linux archive checks and available upstream-text delivery are in
+[16](16-notice-delivery-and-integration.md). Native package terms, complete
+embedded attribution and unresolved asset rights remain release gates; these
+two originally verified notices alone did not close those obligations.
 
 ## Explicit pending decisions and limits
 
@@ -233,5 +235,6 @@ remain release gates; the two verified notices do not close those obligations.
   session launcher. Best-effort tree termination is not containment, and waiting
   for a root process is not proof every descendant exited. Native launch design
   changes need explicit review before a new boundary is introduced.
-- **B1/G1:** both target-host baselines/native workflows, actual RID archives,
-  delivered notices and unresolved asset redistribution terms remain open.
+- **B1/G1:** target-host performance baselines/native workflows and unresolved
+  native-package/asset redistribution terms remain open. Later actual RID
+  archive and available notice-delivery checks are recorded in 16.

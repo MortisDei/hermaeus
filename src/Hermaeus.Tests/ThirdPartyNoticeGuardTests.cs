@@ -73,6 +73,26 @@ public sealed class ThirdPartyNoticeGuardTests
             "These packages ship inside Hermaeus and are not named in THIRD-PARTY-NOTICES.md. "
             + "Add them to section 1 with their licence and copyright, taken from the package's own .nuspec: "
             + string.Join(", ", missing));
+
+        // Guard version-matched evidence and actual retained files, not legal
+        // clearance. The one unresolved native package remains a release gate.
+        var evidenceRoot = Path.Combine(RepoRoot, "docs", "third-party");
+        var evidence = File.ReadAllText(Path.Combine(evidenceRoot, "README.md"));
+        foreach (var package in packages)
+        {
+            Assert.Contains($"{package.Name}/{package.Version}", evidence, StringComparison.OrdinalIgnoreCase);
+            var directory = Path.Combine(evidenceRoot, package.Name, package.Version);
+            Assert.True(Directory.Exists(directory), $"Missing versioned notice evidence for {package.Name}/{package.Version}.");
+            if (package.Name == "SQLitePCLRaw.lib.e_sqlite3" && package.Version == "3.50.3")
+            {
+                Assert.Contains("Unresolved release gate", File.ReadAllText(Path.Combine(directory, "README.md")), StringComparison.Ordinal);
+                continue;
+            }
+            Assert.True(Directory.EnumerateFiles(directory).Any(path =>
+                Path.GetFileName(path).StartsWith("LICEN", StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileName(path).Equals("COPYING", StringComparison.OrdinalIgnoreCase)),
+                $"Missing upstream licence text for {package.Name}/{package.Version}.");
+        }
     }
 
     [Fact]

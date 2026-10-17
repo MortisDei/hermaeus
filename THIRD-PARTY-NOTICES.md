@@ -22,10 +22,11 @@ the build if a package in the shipped dependency closure has no entry here.
 Sections 2 to 7 are maintained by hand; add to them in the same change that
 adds the dependency.
 
-The Windows and Linux packaging scripts copy this inventory and the standalone
-CMU dictionary licence into package `docs/`. Actual archive notice delivery and
-unresolved asset redistribution terms must still be checked before release;
-this inventory is not permission to redistribute an asset.
+The Windows and Linux packaging scripts copy this inventory, the standalone
+CMU dictionary licence and versioned upstream texts into package `docs/`.
+[The source/hash index](docs/third-party/README.md) identifies the retained texts.
+Actual archive delivery and unresolved native-package/asset redistribution terms
+remain release gates; this inventory is not permission to redistribute an asset.
 
 ---
 
@@ -72,7 +73,7 @@ own `.nuspec`.
 | SQLitePCLRaw.bundle_e_sqlite3 | 3.0.0 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
 | SQLitePCLRaw.config.e_sqlite3 | 3.0.0 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
 | SQLitePCLRaw.core | 3.0.0 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
-| SQLitePCLRaw.lib.e_sqlite3 | 3.50.3 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
+| SQLitePCLRaw.lib.e_sqlite3 | 3.50.3 | No licence declaration in this nupkg; clarification remains a release gate | Copyright 2014-2025 SourceGear, LLC |
 | SQLitePCLRaw.provider.e_sqlite3 | 3.0.0 | Apache-2.0 | Copyright 2014-2025 SourceGear, LLC |
 | SkiaSharp | 3.119.4 | MIT | (c) Microsoft Corporation |
 | SkiaSharp.NativeAssets.Linux | 3.119.4 | MIT | (c) Microsoft Corporation |
@@ -84,9 +85,9 @@ own `.nuspec`.
 
 Required licence and upstream NOTICE text must travel with redistributions.
 A file present in the NuGet cache is not proof it reaches publish output.
-The packaging scripts explicitly copy this inventory; the R34 package audit
-must still verify actual archive delivery and repair missing upstream
-attribution before claiming that gate passed.
+The packaging scripts copy the versioned texts and provenance index from
+`docs/third-party/`. Verify their actual archive delivery before claiming that
+gate passed. The unresolved native SQLite package note is not licence clearance.
 
 ## 2. Native libraries inside those packages
 
@@ -121,8 +122,9 @@ package is MIT; the typeface is licensed separately under the SIL
 Open Font License 1.1, which permits bundling and redistribution with software
 and requires that the font not be sold on its own.
 
-Copyright (c) 2016 The Inter Project Authors.
-Licence: https://openfontlicense.org
+The embedded regular font identifies version 3.019 and git-0a5106e0b. Its matching
+upstream licence states Copyright (c) 2016-2020 The Inter Project Authors.
+Full text: `docs/third-party/Avalonia.Fonts.Inter/12.1.3/Inter-LICENSE.txt`.
 Source: https://github.com/rsms/inter
 
 ## 4. Downloaded on your machine, at your request

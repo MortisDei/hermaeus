@@ -157,6 +157,7 @@ function Assert-WindowsPackageLayout([string]$PackagePath) {
         "docs/COMMERCIAL.md",
         "docs/THIRD-PARTY-NOTICES.md",
         "docs/CMUDICT-LICENSE.txt",
+        "docs/third-party/README.md",
         "icons/hermaeus.ico",
         "icons/hermaeus-app.png",
         "icons/hermaeus-tray.png",
@@ -233,6 +234,7 @@ Copy-Item (Join-Path $root "NOTICE.md") (Join-Path $docDir "NOTICE.md") -Force
 Copy-Item (Join-Path $root "COMMERCIAL.md") (Join-Path $docDir "COMMERCIAL.md") -Force
 Copy-Item (Join-Path $root "THIRD-PARTY-NOTICES.md") (Join-Path $docDir "THIRD-PARTY-NOTICES.md") -Force
 Copy-Item (Join-Path $root "src/Hermaeus.Voice/Assets/CMUDICT-LICENSE.txt") (Join-Path $docDir "CMUDICT-LICENSE.txt") -Force
+Copy-Item -LiteralPath (Join-Path $root "docs/third-party") -Destination (Join-Path $docDir "third-party") -Recurse -Force
 Get-ChildItem (Join-Path $root "docs") -Filter "hermaeus-branding.*" -File -ErrorAction SilentlyContinue |
     Copy-Item -Destination $docDir -Force
 Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus.ico") (Join-Path $iconDir "hermaeus.ico") -Force

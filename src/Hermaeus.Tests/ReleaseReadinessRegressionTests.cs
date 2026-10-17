@@ -156,6 +156,8 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Contains("Assert-RuntimeRestoreTarget $localApiProject $Runtime", buildScript, StringComparison.Ordinal);
         Assert.Contains("Build-NativeLauncher $Runtime $launcherPath", buildScript, StringComparison.Ordinal);
         Assert.Contains("Assert-WindowsPackageLayout $packageDir", buildScript, StringComparison.Ordinal);
+        Assert.Contains("\"docs/third-party/README.md\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Copy-Item -LiteralPath (Join-Path $root \"docs/third-party\")", buildScript, StringComparison.Ordinal);
         Assert.Contains("\"app/Hermaeus.Desktop.exe\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("\"app/LocalApi/Hermaeus.LocalApi.exe\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("\"icons/hermaeus.ico\"", buildScript, StringComparison.Ordinal);

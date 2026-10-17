@@ -546,6 +546,9 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 - Activity records observed outcomes for operations such as model downloads,
   server lifecycle, ingest, backups, restores, memory sweeps, and voice.
   Artifact-specific rows open their artifact; rows without one stay inert.
+- Windows and Linux archive documentation includes versioned upstream licence
+  and NOTICE texts with source/hash provenance. Native package and asset terms
+  with unresolved provenance remain release gates.
 - Data Root restore preflights all file entries for safe paths, duplicate
   targets, and bounded per-entry and total uncompressed sizes before writing.
   The archive is expanded beneath a data-root staging directory, with actual
