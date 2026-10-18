@@ -234,7 +234,7 @@
                                 <!-- ── Error banner ──────────────────────── -->
                                 <Border IsVisible="{Binding IsError}"
                                         CornerRadius="6" Padding="10,6"
-                                        Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                                        Background="{DynamicResource SystemRegionBrush}"
                                         BorderBrush="{DynamicResource SystemFillColorCriticalBrush}"
                                         BorderThickness="1">
                                     <StackPanel Orientation="Horizontal" Spacing="8">

@@ -35,6 +35,7 @@ all publication. Small verified local implementation commits are authorised; pub
 | [19-local-image-inference-decision.md](19-local-image-inference-decision.md) | Owner-deferred first-party image inference, preserved engine/model research and historical worker proposal |
 | [20-targeted-review-followup.md](20-targeted-review-followup.md) | Independent-review hypotheses, reproduced export cleanup defect, endpoint/process regressions and inactive-vault verification |
 | [21-independent-branch-audit.md](21-independent-branch-audit.md) | Full 30-commit review, ranked findings, bounded repairs, fresh verification and remaining release gates |
+| [22-crash-diagnostics-and-windows-acceptance.md](22-crash-diagnostics-and-windows-acceptance.md) | A06 dump-capture validation, repeated Linux suites, partial Windows acceptance and native surface repair |
 
 ## Evidence vocabulary
 

@@ -14,6 +14,12 @@ The later Windows candidate walkthrough in
 for Chat, Services, Benchmarks, RAG and Settings. It neither replaces public
 screenshots nor closes the full Windows/COSMIC matrix below.
 
+The subsequent exact-package walkthrough, observed transparent palette,
+bounded surface correction and remaining native gates are recorded in
+[22](22-crash-diagnostics-and-windows-acceptance.md). The owner resumed after
+stopping Computer Use; the corrected dark palette was pixel-verified and
+Tab/Enter navigation exercised. The complete platform/theme matrix remains open.
+
 **VE, planning:** opened and visually inspected all four tracked images:
 `docs/images/chat.png`, `models.png`, `doctor.png`, `onboarding.png`.
 Their latest Git change is `56849c9`, 2026-08-23. These are historical screenshots,

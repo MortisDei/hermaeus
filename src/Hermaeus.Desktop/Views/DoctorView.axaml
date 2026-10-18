@@ -109,7 +109,7 @@
 
         <!-- Reranker install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingReranker}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SystemRegionBrush}" Padding="20" CornerRadius="8"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Installing Reranker" FontSize="16" FontWeight="SemiBold" />
@@ -124,7 +124,7 @@
         </Grid>
         <!-- Kokoro (native) install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingNativeKokoro}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SystemRegionBrush}" Padding="20" CornerRadius="8"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Installing Kokoro (native)" FontSize="16" FontWeight="SemiBold" />
@@ -139,7 +139,7 @@
         </Grid>
         <!-- llama.cpp install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingLlamaServer}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SystemRegionBrush}" Padding="20" CornerRadius="8"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Updating llama.cpp" FontSize="16" FontWeight="SemiBold" />
@@ -154,7 +154,7 @@
         </Grid>
         <!-- Embedding model install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingEmbeddingModel}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SystemRegionBrush}" Padding="20" CornerRadius="8"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Installing Embedding Model" FontSize="16" FontWeight="SemiBold" />

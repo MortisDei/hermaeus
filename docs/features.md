@@ -271,6 +271,9 @@ See the [RAG reference](rag.md).
 
 ## Recall
 
+The command palette uses an opaque surface in light and dark themes so the
+underlying page does not show through its results.
+
 Recall is one local search index over conversations, Agent tasks, Memories, and
 RAG chunks. Its command-palette search is distinct from RAG retrieval and
 Memory injection. Recall indexing is visible and clearable, and optional Chat

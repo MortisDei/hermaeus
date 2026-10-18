@@ -276,6 +276,10 @@ Non-blocking for R34, corrected here.
 
 ### A06. Linux full-suite native abort remains unexplained
 
+Later dump-capture validation, repeated suites and partial Windows acceptance
+are recorded in [22](22-crash-diagnostics-and-windows-acceptance.md).
+They do not establish A06's root cause or close its release blocker.
+
 **Location:** the actual Linux test-host process; a responsible source line has
 not been established. [AvaloniaTestHost.cs:39](../../../src/Hermaeus.Tests/AvaloniaTestHost.cs#L39)
 is the native-control bootstrap under test, not a proven corrupting call.

@@ -21,6 +21,8 @@ limit.
 
 ### Changed
 
+- Recall palette, setup and Doctor overlays, and Services error banners use an
+  opaque Fluent surface in light and dark themes instead of an unresolved brush.
 - Failed Data Root restore rollback retains remaining original files for manual
   recovery and reports both publication and rollback failures.
 - Media shutdown stops waiting for file pickers; replaced views relinquish

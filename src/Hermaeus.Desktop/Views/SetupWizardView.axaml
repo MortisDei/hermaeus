@@ -8,7 +8,7 @@
              x:DataType="vm:SetupWizardViewModel">
 
     <Border Padding="24"
-            Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
+            Background="{DynamicResource SystemRegionBrush}">
         <StackPanel MaxWidth="760" Spacing="16">
             <StackPanel Spacing="6">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">

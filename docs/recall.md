@@ -19,6 +19,8 @@ size reporting. See [Settings > Memory](features.md) for the Recall card.
    never on the send path.
 2. Press **Ctrl+K** to open the command palette. An empty query shows app
    commands grouped by area; typing searches Recall and commands together.
+   Its opaque surface separates the results from the underlying page in both
+   light and dark themes.
 3. Selecting a Recall hit navigates straight to it - the conversation, the
    task, the memory, or the RAG dataset it came from.
 4. Exclude a specific conversation from Recall from the conversation list's
