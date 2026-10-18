@@ -13,10 +13,14 @@ public sealed class BackupService
 {
     private static readonly uint[] ZipCrc32Table = CreateZipCrc32Table();
     private readonly ISettingsService _settings;
+    private readonly Action<string, string> _restoreMove;
 
-    public BackupService(ISettingsService settings)
+    public BackupService(ISettingsService settings) : this(settings, File.Move) { }
+
+    internal BackupService(ISettingsService settings, Action<string, string> restoreMove)
     {
         _settings = settings;
+        _restoreMove = restoreMove;
     }
 
     public async Task<BackupResult> BackupAsync(string targetDirectory, CancellationToken ct = default)
@@ -210,6 +214,7 @@ public sealed class BackupService
         var stagingRoot = Path.Combine(root, $".hermaeus-restore-{Guid.NewGuid():N}");
         var backupRoot = Path.Combine(root, $".hermaeus-restore-backup-{Guid.NewGuid():N}");
         var committed = new List<(string Target, string? Backup)>();
+        var preserveRecovery = false;
         long actualTotalUncompressedBytes = 0;
         Directory.CreateDirectory(stagingRoot);
         EnsureNoReparsePoints(stagingRoot);
@@ -305,7 +310,7 @@ public sealed class BackupService
                             throw new InvalidOperationException("Backup rollback directory could not be resolved.");
                         Directory.CreateDirectory(backupDirectory);
                         EnsureNoReparsePoints(backup);
-                        File.Move(target, backup);
+                        _restoreMove(target, backup);
                     }
 
                     committed.Add((target, backup));
@@ -316,30 +321,40 @@ public sealed class BackupService
                         throw new InvalidOperationException("Restore target directory could not be resolved.");
                     Directory.CreateDirectory(targetDirectory);
                     EnsureNoReparsePoints(target);
-                    File.Move(staged, target);
+                    _restoreMove(staged, target);
                 }
             }
-            catch
+            catch (Exception commitFailure)
             {
+                var rollbackFailures = new List<Exception>();
                 for (var index = committed.Count - 1; index >= 0; index--)
                 {
                     var item = committed[index];
                     try
                     {
+                        EnsureNoReparsePoints(item.Target);
+                        if (item.Backup is not null) EnsureNoReparsePoints(item.Backup);
                         if (File.Exists(item.Target))
                             File.Delete(item.Target);
                         if (item.Backup is not null && File.Exists(item.Backup))
                         {
                             Directory.CreateDirectory(Path.GetDirectoryName(item.Target)!);
-                            File.Move(item.Backup, item.Target);
+                            EnsureNoReparsePoints(item.Target);
+                            _restoreMove(item.Backup, item.Target);
                         }
                     }
-                    catch
+                    catch (Exception rollbackFailure)
                     {
-                        // Preserve the original commit exception. The backup
-                        // directory remains inspectable if rollback itself is
-                        // denied by the host filesystem.
+                        rollbackFailures.Add(rollbackFailure);
                     }
+                }
+                if (rollbackFailures.Count > 0)
+                {
+                    // Do not destroy the only remaining originals after a
+                    // failed rollback. Report both causes and their location.
+                    preserveRecovery = true;
+                    throw new AggregateException($"Restore failed and rollback was incomplete. Retained recovery files: {backupRoot}",
+                        new[] { commitFailure }.Concat(rollbackFailures));
                 }
                 throw;
             }
@@ -348,7 +363,7 @@ public sealed class BackupService
         {
             try { if (Directory.Exists(stagingRoot)) Directory.Delete(stagingRoot, recursive: true); }
             catch { }
-            try { if (Directory.Exists(backupRoot)) Directory.Delete(backupRoot, recursive: true); }
+            try { if (!preserveRecovery && Directory.Exists(backupRoot)) Directory.Delete(backupRoot, recursive: true); }
             catch { }
         }
     }

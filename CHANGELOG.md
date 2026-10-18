@@ -21,6 +21,12 @@ limit.
 
 ### Changed
 
+- Failed Data Root restore rollback retains remaining original files for manual
+  recovery and reports both publication and rollback failures.
+- Media shutdown stops waiting for file pickers; replaced views relinquish
+  picker results and new preview decoding.
+- Media export preserves both the original failure and a staging-file deletion
+  failure instead of allowing cleanup to hide the original cause.
 - Shared settings validation failures now stay in the save error flow, preserve
   committed settings and do not display a successful Services save confirmation.
 - Data Root backups exclude fallback credential staging, recovery and lock

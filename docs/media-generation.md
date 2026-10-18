@@ -94,12 +94,19 @@ followed, and credentials are per-request rather than shared default headers.
   references; it is not secure memory erasure. Results and prompts are not added
   to conversation history, Agent state, activity traces or a new media database.
   A previous successful result remains available when a later generation fails.
+- Shutdown cancels the client's wait for workflow/export pickers and ignores
+  late selections. Native dialog dismissal remains the platform owner's job.
+  Only the current view owns picker results and decodes new image previews.
 - Export requires an explicit local file selection with the matching extension.
   It writes a sibling staging file and atomically replaces the selected target.
   Unix creation requests mode 0600; Windows uses normal directory ACL inheritance.
   Reparse ancestors are refused. These metadata checks do not guarantee atomic
   filesystem identity against hostile live swaps. Nothing is autoplayed or
   automatically launched by exporting it.
+  If export and staging-file deletion both fail, both causes are preserved as
+  an export failure. A deletion failure can leave the private staging file in
+  the selected directory; it is not reported as a successful export or clean
+  cancellation.
 
 Privacy Audit discloses the media surface and counts enabled non-loopback or
 invalid ComfyUI endpoint configuration conservatively as outbound. Prompts,

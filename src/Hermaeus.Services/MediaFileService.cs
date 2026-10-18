@@ -23,7 +23,12 @@ public static class MediaFileService
         return new System.Text.UTF8Encoding(false, true).GetString(output.ToArray()).TrimStart('\uFEFF');
     }
 
-    public static async Task SaveAsync(string path, GeneratedMedia media, CancellationToken ct = default)
+    public static Task SaveAsync(string path, GeneratedMedia media, CancellationToken ct = default) =>
+        SaveAsync(path, media, File.Delete, ct);
+
+    // Isolated fault-injection seam for deletion failures after a real export failure.
+    internal static async Task SaveAsync(string path, GeneratedMedia media,
+        Action<string> deleteStaging, CancellationToken ct = default)
     {
         path = Path.GetFullPath(path);
         if (!string.Equals(Path.GetExtension(path), Path.GetExtension(media.SuggestedFileName), StringComparison.OrdinalIgnoreCase))
@@ -34,6 +39,7 @@ public static class MediaFileService
         var directory = Path.GetDirectoryName(path)!;
         if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("Choose an existing export directory.");
         var temp = Path.Combine(directory, ".hermaeus-media-" + Guid.NewGuid().ToString("N") + ".tmp");
+        Exception? exportFailure = null;
         try
         {
             ValidatePath(temp);
@@ -53,11 +59,24 @@ public static class MediaFileService
             ValidatePath(temp);
             File.Move(temp, path, overwrite: true);
         }
+        catch (Exception ex)
+        {
+            exportFailure = ex;
+            throw;
+        }
         finally
         {
             // Only our exact staging path is eligible for cleanup. Do not hide
             // a failed cleanup as a successful export.
-            if (File.Exists(temp)) File.Delete(temp);
+            try
+            {
+                if (File.Exists(temp)) deleteStaging(temp);
+            }
+            catch (Exception cleanupFailure) when (exportFailure is not null)
+            {
+                throw new AggregateException("Media export failed and its staging file could not be removed.",
+                    exportFailure, cleanupFailure);
+            }
         }
     }
 

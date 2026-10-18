@@ -112,7 +112,7 @@ public sealed partial class MediaGenerationViewModel : ViewModelBase
         IsBusy = true;
         try
         {
-            var path = await picker(file);
+            var path = await picker(file).WaitAsync(operation.Token);
             if (path is null || _shutdown) return;
             await MediaFileService.SaveAsync(path, file, operation.Token);
             Status = "Media exported. Open it explicitly in your preferred viewer or player.";
@@ -132,7 +132,7 @@ public sealed partial class MediaGenerationViewModel : ViewModelBase
         IsBusy = true;
         try
         {
-            var value = await picker(operation.Token);
+            var value = await picker(operation.Token).WaitAsync(operation.Token);
             if (value is not null && !_shutdown) WorkflowJson = value;
         }
         catch (Exception) { Status = "Could not load the workflow. Choose an API-format JSON file no larger than 1 MiB."; }

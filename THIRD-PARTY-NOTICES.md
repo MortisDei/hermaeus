@@ -24,7 +24,8 @@ adds the dependency.
 
 The Windows and Linux packaging scripts copy this inventory, the standalone
 CMU dictionary licence and versioned upstream texts into package `docs/`.
-[The source/hash index](docs/third-party/README.md) identifies the retained texts.
+The source/hash index is `docs/third-party/README.md` in the source tree and
+`third-party/README.md` relative to this file in an archive's documentation folder.
 Actual archive delivery and unresolved native-package/asset redistribution terms
 remain release gates; this inventory is not permission to redistribute an asset.
 

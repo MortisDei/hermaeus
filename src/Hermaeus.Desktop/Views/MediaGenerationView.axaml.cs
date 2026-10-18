@@ -12,6 +12,7 @@ public partial class MediaGenerationView : UserControl
 {
     private MediaGenerationViewModel? _vm;
     private Action? _releaseCallbacks;
+    private Func<bool>? _ownsCallbacks;
     private long _version;
     private Bitmap? _preview;
 
@@ -24,7 +25,8 @@ public partial class MediaGenerationView : UserControl
     }
 
     private bool Owns(MediaGenerationViewModel vm, long version) =>
-        IsLoaded && version == _version && ReferenceEquals(_vm, vm) && ReferenceEquals(DataContext, vm);
+        IsLoaded && version == _version && ReferenceEquals(_vm, vm) && ReferenceEquals(DataContext, vm)
+        && _ownsCallbacks?.Invoke() == true;
 
     private void Wire()
     {
@@ -58,6 +60,7 @@ public partial class MediaGenerationView : UserControl
         };
         vm.RequestExportPath = save;
         vm.RequestWorkflow = load;
+        _ownsCallbacks = () => vm.RequestExportPath == save && vm.RequestWorkflow == load;
         vm.PropertyChanged += OnPropertyChanged;
         _releaseCallbacks = () =>
         {
@@ -79,7 +82,7 @@ public partial class MediaGenerationView : UserControl
         _preview?.Dispose();
         _preview = null;
         PreviewStatus.Text = string.Empty;
-        if (_vm?.SelectedOutput is not { } media) return;
+        if (_ownsCallbacks?.Invoke() != true || _vm?.SelectedOutput is not { } media) return;
         if (!media.MediaType.StartsWith("image/", StringComparison.Ordinal))
         { PreviewStatus.Text = "Export this file to open it in your preferred audio or video player."; return; }
         try
@@ -105,6 +108,7 @@ public partial class MediaGenerationView : UserControl
         ++_version;
         _releaseCallbacks?.Invoke();
         _releaseCallbacks = null;
+        _ownsCallbacks = null;
         _vm = null;
         PreviewImage.Source = null;
         _preview?.Dispose();

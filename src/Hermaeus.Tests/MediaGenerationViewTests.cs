@@ -13,6 +13,29 @@ namespace Hermaeus.Tests;
 public sealed class MediaGenerationViewTests(AvaloniaTestHost avalonia)
 {
     [Fact]
+    public Task Only_the_current_media_view_decodes_a_new_preview() => avalonia.RunAsync(async () =>
+    {
+        using var temp = new TempDir();
+        var vm = new MediaGenerationViewModel(new NeverGenerate(), NewSettings(temp));
+        var obsolete = new MediaGenerationView { DataContext = vm };
+        var firstWindow = Show(obsolete);
+        await Drain();
+        var active = new MediaGenerationView { DataContext = vm };
+        var secondWindow = Show(active);
+        try
+        {
+            await Drain();
+            using var bitmap = new SkiaSharp.SKBitmap(2, 2);
+            using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+            using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+            vm.SelectedOutput = new GeneratedMedia("generated.png", "image/png", data.ToArray());
+            Assert.Null(obsolete.FindControl<Image>("PreviewImage")!.Source);
+            Assert.NotNull(active.FindControl<Image>("PreviewImage")!.Source);
+        }
+        finally { firstWindow.Close(); secondWindow.Close(); await vm.ShutdownAsync(); }
+    });
+
+    [Fact]
     public Task Recreated_view_keeps_new_callbacks_and_same_context_reattaches() => avalonia.RunAsync(async () =>
     {
         using var temp = new TempDir();

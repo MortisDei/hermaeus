@@ -12,6 +12,13 @@ and `docs/security-roadmap.md` for open hardening work.
 
 ## r34: Bounded ingestion, process cleanup and fallback-vault isolation
 
+The independent branch audit reproduced loss of retained originals when restore
+publication and rollback both fail. Restore now preserves remaining recovery
+files, reports both failure causes, and repeats path checks during rollback.
+This is a repair to an inherited defect, not a new authenticated-backup or
+atomic-filesystem-identity guarantee. Controlled Windows filesystem failures
+and injected move failures exercise the recovery boundary.
+
 The later owner-requested media extension adds explicit ComfyUI and compatible
 media API clients, without installing an engine or widening Agent tools. Results
 remain session-only until explicit export. Per-request secret references,
@@ -21,6 +28,12 @@ Client cancellation retains backend job identity and never claims server job
 termination. Export path metadata/atomic replacement and bounded image preview
 leave filesystem race and backend custom-node risks explicit. Protocol/native
 control fixtures remain distinct from real model inference and hardware fit.
+
+A targeted follow-up reproduced staging-file deletion masking an earlier media
+export or cancellation exception, including a real Windows read-only file
+deletion failure. Export now preserves both causes as failure. Atomic publication,
+private staging creation and existing path checks remain unchanged; cleanup still
+targets only the exact staging path and is not a guaranteed erasure mechanism.
 
 Controlled fixtures reproduced cancelled command/probe survival, unbounded
 output capture and web ingestion over-read. Process owners now drain bounded

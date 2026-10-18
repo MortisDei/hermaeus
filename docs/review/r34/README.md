@@ -33,6 +33,8 @@ all publication. Small verified local implementation commits are authorised; pub
 | [17-backup-credential-artifact-privacy.md](17-backup-credential-artifact-privacy.md) | Later credential artifact, backup path and snapshot privacy repairs and verification |
 | [18-media-generation-plan.md](18-media-generation-plan.md) | Owner-requested media extension, model research, bounded implementation and separate acceptance evidence |
 | [19-local-image-inference-decision.md](19-local-image-inference-decision.md) | Owner-deferred first-party image inference, preserved engine/model research and historical worker proposal |
+| [20-targeted-review-followup.md](20-targeted-review-followup.md) | Independent-review hypotheses, reproduced export cleanup defect, endpoint/process regressions and inactive-vault verification |
+| [21-independent-branch-audit.md](21-independent-branch-audit.md) | Full 30-commit review, ranked findings, bounded repairs, fresh verification and remaining release gates |
 
 ## Evidence vocabulary
 

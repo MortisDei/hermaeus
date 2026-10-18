@@ -777,9 +777,12 @@ expanded beneath a temporary staging root, with actual expanded bytes checked
 while copying, and each staged member's ZIP checksum is verified before any
 restore files publish. A failed size or checksum check refuses the restore and
 preserves existing files. Checksums do not establish that an archive is trusted.
-Commit moves are rollback-safe and existing files still require
-the explicit overwrite choice. Re-enter credentials after restoring on another
-machine.
+A late commit failure attempts rollback. If that also fails, the error identifies
+a retained `.hermaeus-restore-backup-*` directory containing remaining originals.
+Stop using the affected Data Root and recover those files before retrying;
+the Data Root may contain a mixture of restored and original files. Existing files
+still require the explicit overwrite choice. Re-enter credentials after restoring
+on another machine.
 
 ### Optional ChatGPT Pet companion
 

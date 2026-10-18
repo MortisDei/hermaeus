@@ -17,6 +17,47 @@ public sealed class MediaGenerationServiceTests
         { Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json") };
     private static HttpResponseMessage Binary(byte[] value) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(value) };
 
+    [Theory]
+    [InlineData("", "v1/")]
+    [InlineData("/", "v1/")]
+    [InlineData("/v1", "v1/")]
+    [InlineData("/v1/", "v1/")]
+    [InlineData("/gateway", "gateway/v1/")]
+    [InlineData("/gateway/", "gateway/v1/")]
+    [InlineData("/gateway/v1", "gateway/v1/")]
+    [InlineData("/gateway/v1/", "gateway/v1/")]
+    public async Task OpenAI_routes_preserve_normalised_path_prefixes_for_all_media_kinds(string suffix, string expectedPrefix)
+    {
+        foreach (var kind in Enum.GetValues<MediaKind>())
+        {
+            var calls = 0;
+            using var handler = new Handler((request, _) =>
+            {
+                calls++;
+                var route = kind switch
+                {
+                    MediaKind.Image => "images/generations",
+                    MediaKind.Audio => "chat/completions",
+                    _ => calls == 1 ? "videos" : "videos/prefix_job/content"
+                };
+                Assert.Equal("https://media.example.test/" + expectedPrefix + route, request.RequestUri!.AbsoluteUri);
+                Assert.Equal(calls == 1 ? HttpMethod.Post : HttpMethod.Get, request.Method);
+                return Task.FromResult(kind switch
+                {
+                    MediaKind.Image => Json(new { data = new[] { new { b64_json = Convert.ToBase64String(Png) } } }),
+                    MediaKind.Audio => Json(new { choices = new[] { new { message = new { audio = new { data = Convert.ToBase64String("RIFF0000WAVEsynthetic"u8.ToArray()) } } } } }),
+                    _ => calls == 1 ? Json(new { id = "prefix_job", status = "completed" })
+                        : Binary(new byte[] { 0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109 })
+                });
+            });
+            using var http = new HttpClient(handler);
+            var result = await new MediaGenerationService(new Secrets(), http).GenerateAsync(Request(kind) with
+                { Endpoint = "https://media.example.test" + suffix });
+            Assert.Single(result.Files);
+            Assert.Equal(kind == MediaKind.Video ? 2 : 1, calls);
+        }
+    }
+
     [Fact]
     public async Task Image_request_preserves_versioned_base_and_per_request_auth_and_returns_exact_bytes()
     {

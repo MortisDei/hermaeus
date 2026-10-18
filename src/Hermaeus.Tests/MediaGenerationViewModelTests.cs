@@ -9,6 +9,38 @@ namespace Hermaeus.Tests;
 
 public sealed class MediaGenerationViewModelTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Shutdown_does_not_wait_for_a_native_picker_or_apply_its_late_result(bool export)
+    {
+        using var temp = new TempDir();
+        var vm = new MediaGenerationViewModel(new ControlledService(), NewSettings(temp));
+        var picker = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var path = temp.PathFor("late.wav");
+        vm.SelectedOutput = new GeneratedMedia("generated.wav", "audio/wav", "RIFF0000WAVE"u8.ToArray());
+        vm.RequestExportPath = _ => picker.Task;
+        vm.RequestWorkflow = _ => picker.Task;
+        var operation = export ? vm.ExportCommand.ExecuteAsync(null) : vm.LoadWorkflowCommand.ExecuteAsync(null);
+        var shutdown = vm.ShutdownAsync();
+        try
+        {
+            await shutdown.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(vm.IsBusy);
+            Assert.False(vm.GenerateCommand.CanExecute(null));
+            picker.SetResult(export ? path : "late workflow");
+        }
+        finally
+        {
+            picker.TrySetResult(null);
+            await operation;
+            await shutdown;
+        }
+        Assert.False(File.Exists(path));
+        Assert.Empty(vm.WorkflowJson);
+        Assert.Null(vm.SelectedOutput);
+    }
+
     [Fact]
     public async Task Disabled_provider_is_not_called()
     {

@@ -20,6 +20,12 @@ penetration-test report.
 
 ## Security Posture
 
+Data Root restore attempts rollback after publication failure. An incomplete
+rollback reports both causes and retains remaining originals at the reported
+recovery directory. The Data Root is then potentially mixed, not unchanged.
+Rollback repeats reparse checks before deletion and replacement; metadata checks
+still do not provide atomic filesystem identity against hostile live swaps.
+
 Media generation uses explicit configured HTTP(S) endpoints and per-request
 secret-store credentials. The client disables redirects, refuses cross-origin
 output URLs and bounds actual response/decoded output bytes, output count,
@@ -32,6 +38,9 @@ execute that server's installed nodes, which can have independent network/filesy
 access. Client cancellation can leave a backend job running or charging. Session
 results are not media history or secure memory erasure. See
 [Media generation](media-generation.md) for exact limits and supported protocols.
+If export and staging cleanup both throw, both failures are retained; deletion
+failure can leave a private staging file and never establishes successful export
+or clean cancellation.
 
 ### Assets
 

@@ -13,6 +13,10 @@ defined by `Directory.Build.props`.
 - Per-job status and client cancellation, bounded generated outputs, inert image
   preview and explicit atomic file export. Results are session-only; accepted
   backend jobs can outlive client cancellation.
+- If export and staging cleanup both fail, both diagnostic causes are retained
+  and the operation reports failure.
+- Shutdown stops waiting for workflow/export pickers and ignores late selections.
+  Replaced Media views cannot consume picker results or decode new previews.
 - Existing provider settings and secret-store references are reused. ComfyUI
   configuration lives on Services. No engine, custom-node or model installation,
   automatic paid capability probe or model-name capability assumption.
@@ -571,8 +575,9 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   The archive is expanded beneath a data-root staging directory, with actual
   expanded bytes checked while copying and each staged member's ZIP checksum
   verified before publication. Checksums detect inconsistency, not authenticity.
-  Commit moves are rollback-safe, and
-  existing files are preserved if a late commit step fails.
+  A late commit failure attempts rollback. If rollback also fails, restore reports
+  both failures and retains remaining originals under the reported recovery
+  directory for manual recovery; it does not claim the Data Root is unchanged.
 - Settings-triggered restart drains the shared application owners before it
   starts the replacement. The replacement uses a bounded internal lock
   handoff. An ordinary second launch requests restoration of the existing

@@ -49,6 +49,73 @@ public sealed class AgentCommandProcessTests
     }
 
     [WindowsOnlyFact]
+    public async Task Exited_root_with_live_pipe_inheriting_child_reports_unverified_cleanup_not_containment()
+    {
+        var pipeName = $"hermaeus-exited-root-{Guid.NewGuid():N}";
+        await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.In, 1,
+            PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        var childScript = $$"""
+            $pipe = [System.IO.Pipes.NamedPipeClientStream]::new('.', '{{pipeName}}', [System.IO.Pipes.PipeDirection]::Out)
+            $pipe.Connect(10000)
+            $writer = [System.IO.StreamWriter]::new($pipe)
+            $writer.WriteLine($PID)
+            $writer.WriteLine($env:HERMAEUS_FIXTURE_PARENT_PID)
+            $writer.Flush()
+            $writer.Dispose()
+            [System.Threading.Thread]::Sleep([System.Threading.Timeout]::Infinite)
+            """;
+        var powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell", "v1.0", "powershell.exe");
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(childScript));
+        var start = Script($"$env:HERMAEUS_FIXTURE_PARENT_PID=$PID; "
+            + $"$child = Start-Process -FilePath '{powershell.Replace("'", "''")}' -NoNewWindow -PassThru "
+            + $"-ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand','{encoded}'); exit 0", "");
+        using var cancellation = new CancellationTokenSource();
+        var run = AgentProcessCapture.RunAsync(start, TimeSpan.FromSeconds(30), cancellation.Token);
+        Process? descendant = null;
+        try
+        {
+            using var startup = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await pipe.WaitForConnectionAsync(startup.Token);
+            using var reader = new StreamReader(pipe, leaveOpen: true);
+            var childPid = int.Parse(Assert.IsType<string>(await reader.ReadLineAsync(startup.Token)),
+                System.Globalization.CultureInfo.InvariantCulture);
+            descendant = Process.GetProcessById(childPid);
+            var rootPid = int.Parse(Assert.IsType<string>(await reader.ReadLineAsync(startup.Token)),
+                System.Globalization.CultureInfo.InvariantCulture);
+            Process? root = null;
+            try { root = Process.GetProcessById(rootPid); }
+            catch (ArgumentException) { /* The controlled root has already exited. */ }
+            if (root is not null)
+                using (root) await root.WaitForExitAsync(startup.Token);
+            Assert.False(descendant.HasExited);
+            Assert.False(run.IsCompleted); // The live child's inherited pipes still prevent drain.
+
+            cancellation.Cancel();
+            var result = await run.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(AgentToolOutcomeSignal.Cancelled, result.Signal);
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("Root had already exited; descendant ownership is unverified.", result.CleanupDetail);
+            Assert.DoesNotContain("Tree termination requested", result.CleanupDetail);
+            Assert.False(descendant.HasExited);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (descendant is not null)
+            {
+                try
+                {
+                    if (!descendant.HasExited) descendant.Kill(entireProcessTree: true);
+                    await descendant.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                finally { descendant.Dispose(); }
+            }
+            await run.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [WindowsOnlyFact]
     public async Task A_failed_output_decoder_terminates_the_writer_and_reports_failure()
     {
         var start = Script("[Console]::OpenStandardOutput().WriteByte(255); [System.Threading.Thread]::Sleep([System.Threading.Timeout]::Infinite)", "");

@@ -91,6 +91,11 @@ the container. A cancelled or externally terminated test host therefore leaves
 at most one bounded run container, and the next test process reclaims stale
 Hermaeus test containers older than one hour. Do not create ad hoc top-level
 `/tmp/hermaeus-*` roots for routine verification.
+The isolated fallback-vault transaction fixture currently has its own temporary
+root and normal-disposal cleanup. Moving it under the shared process container
+is tracked as test-infrastructure follow-up I04 in the
+[R34 independent audit](review/r34/21-independent-branch-audit.md); its current
+cleanup is not an abrupt-test-host-exit guarantee.
 
 Shell verification drivers use `scripts/verification-scratch.sh` for the same
 ownership boundary. It creates a unique namespace-scoped child below

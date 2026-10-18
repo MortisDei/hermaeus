@@ -8,6 +8,93 @@ namespace Hermaeus.Tests;
 
 public sealed class BackupRestoreExpansionTests
 {
+    [WindowsOnlyFact]
+    public async Task Real_readonly_rollback_failure_retains_both_original_files()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        var first = Path.GetFullPath(temp.PathFor("data/first.txt"));
+        var second = Path.GetFullPath(temp.PathFor("data/second.txt"));
+        Directory.CreateDirectory(Path.GetDirectoryName(first)!);
+        await File.WriteAllTextAsync(first, "owner first");
+        await File.WriteAllTextAsync(second, "owner second");
+        var archivePath = temp.PathFor("readonly-rollback.zip");
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            WriteEntry(archive, "first.txt", "replacement first");
+            WriteEntry(archive, "second.txt", "replacement second");
+        }
+        var service = new BackupService(settings, (source, target) =>
+        {
+            var publishing = source.Contains(".hermaeus-restore-", StringComparison.Ordinal)
+                && !source.Contains(".hermaeus-restore-backup-", StringComparison.Ordinal);
+            if (publishing && target == second) Directory.CreateDirectory(target);
+            File.Move(source, target);
+            if (publishing && target == first) File.SetAttributes(target, FileAttributes.ReadOnly);
+        });
+        try
+        {
+            var error = await Assert.ThrowsAsync<AggregateException>(() => service.RestoreAsync(archivePath, allowOverwrite: true));
+            Assert.Contains(error.InnerExceptions, exception => exception is UnauthorizedAccessException);
+            var recovery = Assert.Single(Directory.GetDirectories(temp.PathFor("data"), ".hermaeus-restore-backup-*"));
+            Assert.Equal("owner first", await File.ReadAllTextAsync(Path.Combine(recovery, "first.txt")));
+            Assert.Equal("owner second", await File.ReadAllTextAsync(Path.Combine(recovery, "second.txt")));
+            Assert.Contains(recovery, error.Message);
+        }
+        finally { if (File.Exists(first)) File.SetAttributes(first, FileAttributes.Normal); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failed_restore_preserves_originals_when_rollback_cannot_complete(bool failRollback)
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        var first = Path.GetFullPath(temp.PathFor("data/first.txt"));
+        var second = Path.GetFullPath(temp.PathFor("data/second.txt"));
+        Directory.CreateDirectory(Path.GetDirectoryName(first)!);
+        await File.WriteAllTextAsync(first, "owner first");
+        await File.WriteAllTextAsync(second, "owner second");
+        var archivePath = temp.PathFor("rollback.zip");
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            WriteEntry(archive, "first.txt", "replacement first");
+            WriteEntry(archive, "second.txt", "replacement second");
+        }
+        var publicationError = new IOException("Controlled publication failure");
+        var rollbackError = new IOException("Controlled rollback failure");
+        var service = new BackupService(settings, (source, target) =>
+        {
+            if (source.Contains(".hermaeus-restore-", StringComparison.Ordinal)
+                && !source.Contains(".hermaeus-restore-backup-", StringComparison.Ordinal)
+                && target == second) throw publicationError;
+            if (failRollback && source.Contains(".hermaeus-restore-backup-", StringComparison.Ordinal)
+                && target == first) throw rollbackError;
+            File.Move(source, target);
+        });
+
+        var error = await Record.ExceptionAsync(() => service.RestoreAsync(archivePath, allowOverwrite: true));
+        if (failRollback)
+        {
+            var recovery = Assert.Single(Directory.GetDirectories(temp.PathFor("data"), ".hermaeus-restore-backup-*"));
+            Assert.Equal("owner first", await File.ReadAllTextAsync(Path.Combine(recovery, "first.txt")));
+            var aggregate = Assert.IsType<AggregateException>(error);
+            Assert.Same(publicationError, aggregate.InnerExceptions[0]);
+            Assert.Contains(rollbackError, aggregate.InnerExceptions);
+            Assert.Contains(recovery, aggregate.Message);
+        }
+        else
+        {
+            Assert.Same(publicationError, error);
+            Assert.Equal("owner first", await File.ReadAllTextAsync(first));
+            Assert.Empty(Directory.GetDirectories(temp.PathFor("data")));
+        }
+        Assert.Equal("owner second", await File.ReadAllTextAsync(second));
+        Assert.DoesNotContain(Directory.GetDirectories(temp.PathFor("data"), ".hermaeus-restore-*"),
+            path => !Path.GetFileName(path).StartsWith(".hermaeus-restore-backup-", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("entry-budget", 1, 128, 32768)]
     [InlineData("total-budget", 1, 16384, 128)]
